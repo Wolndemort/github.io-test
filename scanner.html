@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>QR Scanner</title>
+    <!-- Подключаем библиотеку Telegram и сканер -->
+    <script src="https://telegram.org"></script>
+    <script src="https://unpkg.com"></script>
+    <style>
+        body { background: #1c1c1c; color: white; text-align: center; font-family: sans-serif; }
+        #reader { width: 100%; max-width: 400px; margin: 20px auto; border-radius: 15px; overflow: hidden; }
+        .btn { padding: 15px 25px; background: #248bcf; color: white; border: none; border-radius: 8px; font-size: 16px; }
+    </style>
+</head>
+<body>
+    <h3>СКАНИРОВАНИЕ ПРОПУСКА</h3>
+    <div id="reader"></div>
+    <p id="status">Наведите камеру на QR-код</p>
+
+    <script>
+        const tg = window.Telegram.WebApp;
+        tg.expand(); 
+
+        function onScanSuccess(decodedText) {
+            tg.sendData(decodedText); 
+            tg.close(); //
+        }
+
+        function onScanFailure(error) {
+           ь
+        }
+
+        let html5QrcodeScanner = new Html5QrcodeScanner(
+            "reader", { fps: 10, qrbox: {width: 250, height: 250} }
+        );
+        html5QrcodeScanner.render(onScanSuccess, onScanFailure);
+    </script>
+</body>
+</html>
