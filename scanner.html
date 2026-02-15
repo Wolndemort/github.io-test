@@ -10,7 +10,6 @@
     <style>
         body { background: #1c1c1c; color: white; text-align: center; font-family: sans-serif; margin: 0; padding: 20px; }
         #reader { width: 100%; max-width: 400px; margin: 20px auto; border-radius: 15px; overflow: hidden; background: #000; }
-        #status { font-size: 18px; color: #aaa; }
     </style>
 </head>
 <body>
@@ -20,28 +19,22 @@
 
     <script>
         const tg = window.Telegram.WebApp;
-        tg.expand(); 
+        tg.expand();
 
         function onScanSuccess(decodedText) {
-            // Отправляем данные боту и закрываем окно
-            tg.sendData(decodedText); 
-            tg.close(); 
+            tg.sendData(decodedText);
+            setTimeout(() => { tg.close(); }, 100);
         }
 
-        function onScanFailure(error) {
-            // Ошибки сканирования (фокус и т.д.) просто игнорируем
-        }
+        // Конфигурация для мгновенного запуска
+        const html5QrCode = new Html5Qrcode("reader");
+        const config = { fps: 10, qrbox: { width: 250, height: 250 } };
 
-        // Инициализация сканера
-        let html5QrcodeScanner = new Html5QrcodeScanner(
-            "reader", 
-            { 
-                fps: 10, 
-                qrbox: {width: 250, height: 250},
-                videoConstraints: { facingMode: "environment" } // Принудительно задняя камера
-            }
-        );
-        html5QrcodeScanner.render(onScanSuccess, onScanFailure);
+        // Запуск камеры (environment - задняя камера)
+        html5QrCode.start({ facingMode: "environment" }, config, onScanSuccess)
+            .catch(err => {
+                document.getElementById('status').innerText = "Ошибка камеры: " + err;
+            });
     </script>
 </body>
 </html>
