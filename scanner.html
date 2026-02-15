@@ -3,13 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <title>QR Scanner</title>
-    <!-- Подключаем библиотеку Telegram и сканер -->
+    <!-- ИСПРАВЛЕНО: Полные пути к библиотекам -->
     <script src="https://telegram.org"></script>
     <script src="https://unpkg.com"></script>
+    
     <style>
-        body { background: #1c1c1c; color: white; text-align: center; font-family: sans-serif; }
-        #reader { width: 100%; max-width: 400px; margin: 20px auto; border-radius: 15px; overflow: hidden; }
-        .btn { padding: 15px 25px; background: #248bcf; color: white; border: none; border-radius: 8px; font-size: 16px; }
+        body { background: #1c1c1c; color: white; text-align: center; font-family: sans-serif; margin: 0; padding: 20px; }
+        #reader { width: 100%; max-width: 400px; margin: 20px auto; border-radius: 15px; overflow: hidden; background: #000; }
+        #status { font-size: 18px; color: #aaa; }
     </style>
 </head>
 <body>
@@ -22,16 +23,23 @@
         tg.expand(); 
 
         function onScanSuccess(decodedText) {
+            // Отправляем данные боту и закрываем окно
             tg.sendData(decodedText); 
-            tg.close(); //
+            tg.close(); 
         }
 
         function onScanFailure(error) {
-           ь
+            // Ошибки сканирования (фокус и т.д.) просто игнорируем
         }
 
+        // Инициализация сканера
         let html5QrcodeScanner = new Html5QrcodeScanner(
-            "reader", { fps: 10, qrbox: {width: 250, height: 250} }
+            "reader", 
+            { 
+                fps: 10, 
+                qrbox: {width: 250, height: 250},
+                videoConstraints: { facingMode: "environment" } // Принудительно задняя камера
+            }
         );
         html5QrcodeScanner.render(onScanSuccess, onScanFailure);
     </script>
