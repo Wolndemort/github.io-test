@@ -1,6 +1,15 @@
 #секреты
 .env
+*.db
+database.db
 
+*.csv
+*.xlsx
+users_data_raw.csv
+users_report.xlsx
+
+# Логи
+*.log
 #виртуальное окружение
 venv/
 .venv/
