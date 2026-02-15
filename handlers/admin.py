@@ -12,6 +12,8 @@ import pandas as pd
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import FSInputFile
+from datetime import datetime, timedelta
+
 
 router = Router()
 
@@ -243,3 +245,37 @@ async def export_database(callback: types.CallbackQuery):
         await callback.message.answer(f"❌ Ошибка выгрузки CSV: {e}")
         if os.path.exists(file_path):
             os.remove(file_path)
+
+
+@router.callback_query(F.data == 'freeze_sub')
+async def freeze_handler(callback: types.CallbackQuery):
+    user_id = callback.from_user.id
+
+    with sqlite3.connect(db_file) as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT expire_date , can_freeze FROM users WHERE user_id = ?", (user_id,))
+        res = cur.fetchone()
+
+        if not res or res[1] == 0:
+            return await callback.answer("🚫 Заморозка недоступна или уже использована!", show_alert=True)
+
+        expire_date_str = res[0]
+
+        current_expire = datetime.strptime(expire_date_str, '%Y-%m-%d %H:%M:%S')
+        new_expire = current_expire + timedelta(days=5)
+        new_expire_str = new_expire.strftime('%Y-%m-%d %H:%M:%S')
+
+        cur.execute("UPDATE users SET expire_date = ?, can_freeze = 0 WHERE user_id = ?",
+                    (new_expire_str, user_id))
+        conn.commit()
+
+    await callback.message.answer(
+        f"❄️ <b>Абонемент заморожен на 5 дней!</b>\n\n"
+        f"Новая дата окончания: <code>{new_expire_str}</code>\n"
+        f"Функция станет доступна снова после следующей оплаты.",
+        parse_mode='HTML'
+    )
+    await callback.answer()
+
+
+

@@ -11,6 +11,7 @@ def get_profile_keyboard():
     builder.row(types.InlineKeyboardButton(text='Проверить статус абонемента', callback_data='profile'))
     builder.row(types.InlineKeyboardButton(text='Купить абонемент  💳', callback_data='buy'))
     builder.row(types.InlineKeyboardButton(text='НАЧАЛО ◀️🔙', callback_data='begin'))
+    builder.row(types.InlineKeyboardButton(text='Заморозить абонемент', callback_data='freeze_sub'))
 
     return builder.as_markup()
 

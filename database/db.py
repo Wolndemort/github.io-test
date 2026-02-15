@@ -74,7 +74,9 @@ def add_abon(user_id):
         cur.execute("""
             INSERT INTO users (user_id, expire_date)
             VALUES(?, ?)
-            ON CONFLICT(user_id) DO UPDATE SET expire_date = excluded.expire_date
+            ON CONFLICT(user_id) DO UPDATE SET expire_date = excluded.expire_date,
+            can_freeze = 1,
+            is_frozen = 0
         """, (user_id, expire_new_str))
         conn.commit()
 
