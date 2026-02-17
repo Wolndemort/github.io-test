@@ -40,7 +40,7 @@ async def admin_panel(message: types.Message):
     await message.answer(
         text,
         parse_mode="HTML",
-        reply_markup=get_scanner_keyboard()  # Сначала выкатываем сканер
+        reply_markup=get_scanner_keyboard()
     )
     await message.answer(
         "Управление функциями:",
@@ -230,7 +230,7 @@ async def got_payments(message: types.Message):
     )
 
 
-@router.callback_query(F.data == 'admin_broadcast', F.from_user.id == ADMIN_IDS)
+@router.callback_query(F.data == 'admin_broadcast', F.from_user.id.in_(ADMIN_IDS))
 async def start_broadcast(callback: types.CallbackQuery, state: FSMContext):
     await callback.message.answer(
         "📝 <b>Отправьте сообщение для рассылки:</b>\n\nЯ перешлю его всем пользователям (можно с фото/видео).",
@@ -239,21 +239,26 @@ async def start_broadcast(callback: types.CallbackQuery, state: FSMContext):
     await callback.answer()
 
 
-@router.message(AdminStates.waiting_for_broadcast_text, F.from_user.id == ADMIN_IDS)
+@router.message(AdminStates.waiting_for_broadcast_text, F.from_user.id.in_(ADMIN_IDS))
 async def perform_broadcast(message: types.Message, state: FSMContext):
     with sqlite3.connect(db_file) as conn:
         cur = conn.cursor()
         users = cur.execute('SELECT user_id FROM users').fetchall()
-
+    if not users:
+        await message.answer("База данных пуста!")
+        await state.clear()
+        return
     count = 0
     await message.answer(f"🚀 Рассылка началась (всего: {len(users)} чел.)...")
 
     for user_data in users:
+        user_id = user_data[0]
         try:
-            await message.copy_to(chat_id=user_data[0])
+            await message.send_copy(chat_id=user_id)
             count += 1
             await asyncio.sleep(0.05)
-        except Exception:
+        except Exception as e:
+            print(f"Ошибка отправки пользователю {user_id}: {e}")
             continue
 
     await message.answer(f"✅ <b>Рассылка завершена!</b>\nДоставлено: <code>{count}</code> пользователям.",
@@ -261,7 +266,7 @@ async def perform_broadcast(message: types.Message, state: FSMContext):
     await state.clear()
 
 
-@router.callback_query(F.data == 'export_db', F.from_user.id == ADMIN_IDS)
+@router.callback_query(F.data == 'export_db', F.from_user.id.in_(ADMIN_IDS))
 async def export_database(callback: types.CallbackQuery):
     await callback.answer("⏳ Генерирую таблицу для пандас...")
 

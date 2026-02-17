@@ -33,9 +33,9 @@ async def main():
     scheduler.add_job(check_abon_mailing, 'cron', hour=10, minute=0, args=(bot,))
     scheduler.start()
     dp = Dispatcher()
-    dp.include_router(admin.router)
     dp.include_router(start.router)
     dp.include_router(buttons.router)
+    dp.include_router(admin.router)
     print("🚀 Бот успешно запущен и готов к работе!")
     try:
         await dp.start_polling(bot)
@@ -47,3 +47,6 @@ if __name__ == '__main__':
         asyncio.run(main())
     except KeyboardInterrupt:
         print("⭕ Бот остановлен пользователем")
+
+
+#вернулся в мастерс после кьюар кода , нужно упаковатьв докер , исправить отправку рассылки и выгрузки файл ,

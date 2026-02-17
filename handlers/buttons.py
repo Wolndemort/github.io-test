@@ -19,6 +19,7 @@ def get_profile_keyboard():
 
 def get_main_menu_keyboard():
     builder = InlineKeyboardBuilder()
+    builder.button(text='Персональные тренировки', callback_data='personal_trainig')
     builder.button(text='BJJ', callback_data='bjj')
     builder.button(text='GRAPPLING KIDS', callback_data='kids')
     builder.button(text="Абонементы", web_app=WebAppInfo(url='https://wolndemort.github.io'))
@@ -27,8 +28,8 @@ def get_main_menu_keyboard():
     builder.row(types.InlineKeyboardButton(text='Проверить статус абонемента', callback_data='check_status_now'))
     builder.row(types.InlineKeyboardButton(text='👤 МОЙ ПРОФИЛЬ / ЗАМОРОЗКА', callback_data='profile'))
     builder.adjust(2)
-
     return builder.as_markup()
+
 
 
 def get_bjj_keyboard():
