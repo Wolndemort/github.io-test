@@ -1,11 +1,11 @@
 import asyncio
-from database.db import get_all_users_count, get_active_subs_count
+from database.db import get_all_users_count, get_active_subs_count, Session, User, engine, get_daily_stats
 from config import ADMIN_IDS
+from sqlalchemy import select
 from handlers.buttons import get_bjj_keyboard, get_kids_keyboard, get_main_menu_keyboard, admin_keyboard, \
     get_scanner_keyboard, get_profile_keyboard
 from database.db import has_subscription, add_abon
 from aiogram.filters import Command
-from config import db_file
 import os
 import pandas as pd
 from aiogram.fsm.context import FSMContext
@@ -17,7 +17,6 @@ from io import BytesIO
 from aiogram.types import BufferedInputFile
 from aiogram import Router, F, types
 from datetime import datetime
-import sqlite3
 
 
 router = Router()
@@ -60,36 +59,28 @@ async def process_begin(callback: types.CallbackQuery):
 @router.callback_query(F.data == 'check_status_now')
 async def show_profile(callback: types.CallbackQuery):
     user_id = callback.from_user.id
-    results = has_subscription(user_id)
-    is_active, expire_date = results
+    is_active, expire_date = has_subscription(user_id)
     text = "🔍 <b>Информация не найдена.</b>\nПожалуйста, обратитесь к администратору или купите абонемент."
     if is_active is True:
         date_str = expire_date.strftime('%d.%m.%Y %H:%M')
         text = (f"✅ <b>Ваш абонемент активен!</b>\n"
                 f"📅 Истекает: <code>{date_str}</code>\n"
                 f"Вам придет уведомление за 3 дня! 🥊")
-
     elif is_active is False:
-        if expire_date:
-            date_str = expire_date.strftime('%d.%m.%Y %H:%M')
-            text = f"❌ <b>Ваш абонемент истек!</b>\n📅 Срок закончился: <code>{date_str}" \
-                   f"</code>\nПродлите его в разделе «Абонементы»."
-        else:
-            text = "❌ <b>Ваш абонемент истек.</b>\nПродлите его в разделе «Абонементы»."
-
+        date_str = expire_date.strftime('%d.%m.%Y %H:%M') if expire_date else "неизвестно"
+        text = (f"❌ <b>Ваш абонемент истек!</b>\n"
+                f"📅 Срок закончился: <code>{date_str}</code>\n"
+                f"Продлите его в разделе «Абонементы».")
     elif is_active is None:
         text = "💎 <b>У вас нет активного абонемента.</b>\nВы можете приобрести его в главном меню."
-
     try:
         await callback.message.edit_text(
             text=text,
             reply_markup=get_profile_keyboard(),
             parse_mode="HTML"
         )
-    except Exception as e:
-        print(f"Ошибка вывода статуса: {e}")
-        await callback.answer("Данные обновлены!")
-
+    except Exception:
+        await callback.answer("Данные актуальны")
     await callback.answer()
 
 
@@ -206,7 +197,9 @@ async def got_payments(message: types.Message):
     payload = payment_info.invoice_payload
     sport_name = payload.split('_')[1].upper()
 
-    new_date = add_abon(user_id)
+    # ВЫЗОВ НАШЕЙ ОБНОВЛЕННОЙ ФУНКЦИИ
+    # Она сама сделает session.get, прибавит время и сделает commit()
+    new_date_str = add_abon(user_id)
 
     admin_id = 1271717628
     admin_text = (
@@ -216,17 +209,16 @@ async def got_payments(message: types.Message):
         f"🥋 Секция: <b>{sport_name}</b>\n"
         f"💰 Сумма: {payment_info.total_amount} Stars (XTR)"
     )
+
     try:
-        # Отправляем админу (используем message.bot, чтобы не импортировать бота)
         await message.bot.send_message(admin_id, admin_text, parse_mode="HTML")
     except Exception as e:
         print(f"Ошибка уведомления админа: {e}")
-
     await message.answer(
         f"🎉 <b>Оплата прошла успешно!</b>\n"
-        f"Ваш абонемент на <b>{sport_name}</b> продлен до: <code>{new_date}</code>",
+        f"Ваш абонемент на <b>{sport_name}</b> продлен до: <code>{new_date_str}</code>",
         parse_mode="HTML",
-        reply_markup=get_main_menu_keyboard()  # Даем меню, чтобы он мог проверить статус
+        reply_markup=get_main_menu_keyboard()
     )
 
 
@@ -241,178 +233,162 @@ async def start_broadcast(callback: types.CallbackQuery, state: FSMContext):
 
 @router.message(AdminStates.waiting_for_broadcast_text, F.from_user.id.in_(ADMIN_IDS))
 async def perform_broadcast(message: types.Message, state: FSMContext):
-    with sqlite3.connect(db_file) as conn:
-        cur = conn.cursor()
-        users = cur.execute('SELECT user_id FROM users').fetchall()
-    if not users:
+    with Session() as session:
+        users_ids = session.scalars(select(User.user_id)).all()
+    if not users_ids:
         await message.answer("База данных пуста!")
         await state.clear()
         return
-    count = 0
-    await message.answer(f"🚀 Рассылка началась (всего: {len(users)} чел.)...")
 
-    for user_data in users:
-        user_id = user_data[0]
+    count = 0
+    total = len(users_ids)
+    await message.answer(f"🚀 Рассылка началась (всего: {total} чел.)...")
+
+    for user_id in users_ids:
         try:
             await message.send_copy(chat_id=user_id)
             count += 1
             await asyncio.sleep(0.05)
         except Exception as e:
             print(f"Ошибка отправки пользователю {user_id}: {e}")
-            continue
-
-    await message.answer(f"✅ <b>Рассылка завершена!</b>\nДоставлено: <code>{count}</code> пользователям.",
-                         parse_mode="HTML")
+    await message.answer(
+        f"✅ <b>Рассылка завершена!</b>\n"
+        f"Доставлено: <code>{count}</code> из <code>{total}</code>.",
+        parse_mode="HTML"
+    )
     await state.clear()
 
 
 @router.callback_query(F.data == 'export_db', F.from_user.id.in_(ADMIN_IDS))
 async def export_database(callback: types.CallbackQuery):
-    await callback.answer("⏳ Генерирую таблицу для пандас...")
-
+    await callback.answer("⏳ Генерирую таблицу для pandas...")
     file_path = "users_data_raw.csv"
-
     try:
-        with sqlite3.connect(db_file) as conn:
-            df = pd.read_sql_query("SELECT * FROM users", conn)
-            df.to_csv(file_path, index=False, encoding='utf-8')
+        df = pd.read_sql_table('users', engine)
 
+        df.to_csv(file_path, index=False, encoding='utf-8-sig')
         csv_file = FSInputFile(file_path)
-        await callback.message.answer_document(
-            csv_file,
-            caption="📊 <b>Raw Data Export</b>\nФайл готов для обработки в Pandas."
-        )
-        os.remove(file_path)
+        await callback.message.answer_document(csv_file,
+                                               caption="📊 <b>Raw Data Export</b>\nФайл готов для обработки в Pandas.")
+        if os.path.exists(file_path):
+            os.remove(file_path)
     except Exception as e:
         await callback.message.answer(f"❌ Ошибка выгрузки CSV: {e}")
         if os.path.exists(file_path):
             os.remove(file_path)
 
 
-@router.callback_query(F.data == 'freeze_sub')
+@router.callback_query(F.data == 'daily_report', F.from_user.id.in_(ADMIN_IDS))
+async def show_daily_report(callback: types.CallbackQuery):
+    visits, active = get_daily_stats()
+    report_text = (
+        f"📊 <b>ОТЧЕТ ЗА СЕГОДНЯ</b> ({datetime.now().strftime('%d.%m.%Y')})\n\n"
+        f"👤 <b>Посещений:</b> <code>{visits}</code>\n"
+        f"💎 <b>Всего активных карт:</b> <code>{active}</code>\n\n"
+    )
+    try:
+        await callback.message.edit_text(
+            text=report_text,
+            reply_markup=admin_keyboard(),
+            parse_mode="HTML")
+    except Exception as e:
+        await callback.answer("Данные актуальны")
+
+
+@router.callback_query(F.data == "freeze_sub")
 async def freeze_handler(callback: types.CallbackQuery):
     user_id = callback.from_user.id
-    with sqlite3.connect(db_file) as conn:
-        cur = conn.cursor()
-        cur.execute("SELECT expire_date, can_freeze FROM users WHERE user_id = ?", (user_id,))
-        res = cur.fetchone()
-
-        if not res or res[0] is None:
+    with Session()as session:
+        user = session.get(User, user_id)
+        now = datetime.now()
+        if not user or not user.expire_date:
             return await callback.answer("🚫 У вас нет активного абонемента!", show_alert=True)
 
-        expire_date_str, can_freeze = res
-        if can_freeze == 0:
-            return await callback.answer("🚫 Заморозка уже была использована в этом периоде!", show_alert=True)
+        if user.can_freeze == 0:
+            return await callback.answer("🚫 Заморозка уже была использована!", show_alert=True)
+        if user.expire_date < now:
+            return await callback.answer("❌ Нельзя заморозить просроченный абонемент!", show_alert=True)
 
-        try:
-            current_expire = datetime.strptime(expire_date_str, '%Y-%m-%d %H:%M:%S')
-            if current_expire < datetime.now():
-                return await callback.answer("❌ Нельзя заморозить просроченный абонемент!", show_alert=True)
+        user.expire_date += timedelta(days=5)
+        user.can_freeze = 0
 
-            new_expire = current_expire + timedelta(days=5)
-            new_expire_str = new_expire.strftime('%Y-%m-%d %H:%M:%S')
-            cur.execute("UPDATE users SET expire_date = ?, can_freeze = 0 WHERE user_id = ?",
-                        (new_expire_str, user_id))
-            conn.commit()
-            await callback.message.edit_text(
-                f"❄️ <b>Абонемент заморожен на 5 дней!</b>\n\n"
-                f"📅 Новая дата окончания: <code>{new_expire.strftime('%d.%m.%Y %H:%M')}</code>\n\n"
-                f"<i>Заморозка станет доступна снова при покупке нового абонемента.</i>",
-                reply_markup=get_profile_keyboard(),  # Возвращаем кнопки управления
-                parse_mode='HTML'
-            )
-        except (ValueError, TypeError) as e:
-            print(f"Ошибка даты при заморозке: {e}")
-            await callback.answer("⚠️ Ошибка формата даты в базе.", show_alert=True)
-
-    await callback.answer()
+        new_date_str = user.expire_date.strftime('%d.%m.%Y %H:%M')
+        session.commit()
+    try:
+        await callback.message.edit_text(
+            f"❄️ <b>Абонемент заморожен на 5 дней!</b>\n\n"
+            f"📅 Новая дата окончания: <code>{new_date_str}</code>\n\n"
+            f"<i>Заморозка станет доступна снова при покупке нового абонемента.</i>",
+            reply_markup=get_profile_keyboard(),
+            parse_mode='HTML'
+        )
+    except Exception:
+        await callback.answer("Данные обновлены!", show_alert=True)
 
 
 @router.callback_query(F.data == 'show_qr')
 async def send_user_qr(callback: types.CallbackQuery):
     user_id = callback.from_user.id
-    qr_img = qrcode.make(f"user:{user_id}")
+    time_salt = datetime.now().strftime('%Y-%m-%d-%H')
+    qr_data = f'user:{user_id}:{time_salt}'
+    qr_img = qrcode.make(qr_data)
     buffer = BytesIO()
     qr_img.save(buffer, format='PNG')
     buffer.seek(0)
-
     photo = BufferedInputFile(buffer.getvalue(), filename=f"qr_{user_id}.png")
     await callback.message.answer_photo(
         photo=photo,
-        caption="🎟 **Ваш персональный пропуск**\n\nПокажите этот код камере на входе. "
+        caption="🎟 **Ваш динамический пропуск**\n\nПокажите этот код камере на входе. "
                 "Система автоматически проверит абонемент и спишет занятие."
     )
     await callback.answer()
 
 
-
-
-@router.message(F.content_type == types.ContentType.WEB_APP_DATA)
+@router.message(F.web_app_data)
 async def parse_qr_scan(message: types.Message):
     raw_data = message.web_app_data.data
-    scanned_id = raw_data.replace("user:", "").strip()
-    print(f"📥 Данные сканера: {raw_data} | ID: {scanned_id}")
-    with sqlite3.connect(db_file) as conn:
-        cur = conn.cursor()
-
-        cur.execute(
-            "SELECT full_name, expire_date, is_frozen, balance_lessons, last_visit FROM users WHERE user_id = ?",
-            (scanned_id,)
-        )
-        user = cur.fetchone()
+    try:
+        raw_id = raw_data.replace('user:', "").split(':')[0].strip()
+        scanned_id = int(raw_id)
+    except (ValueError, IndexError):
+        return await message.answer("❌ Ошибка: QR-код содержит неверный ID")
+    now = datetime.now()
+    with Session() as session:
+        user = session.get(User, scanned_id)
         if not user:
             return await message.answer("❌ Пользователь не найден в базе!")
+        if user.last_visit:
+            if (now - user.last_visit).total_seconds() < 300:
+                return await message.answer(
+                    f"⚠️ {user.full_name} уже отмечен!\nПовторный вход через 5 минут."
+                )
+        if not user.expire_date:
+            return await message.answer(f"❓ У {user.full_name} нет активного абонемента.")
 
-        name, expire_str, is_frozen, lessons, last_visit = user
-        lessons = lessons or 0  # Если в базе None, делаем 0
-
-        if last_visit:
-            try:
-                lv_dt = datetime.strptime(last_visit, '%Y-%m-%d %H:%M:%S')
-                if (datetime.now() - lv_dt).total_seconds() < 300:
-                    return await message.answer(f"⚠️ {name} уже отмечен!\nПовторный вход возможен через 5 минут.")
-            except Exception:
-                pass
-
-        if not expire_str:
-            return await message.answer(f"❓ У пользователя {name} нет активного абонемента.")
-
-        try:
-            expire_date = datetime.strptime(expire_str, '%Y-%m-%d %H:%M:%S')
-        except ValueError:
-            return await message.answer(f"⚠️ Ошибка формата даты в базе у {name}")
-
-        if expire_date < datetime.now():
+        if user.expire_date < now:
             return await message.answer(
-                f"🔴 ДОСТУП ЗАПРЕЩЕН\n👤 {name}\n❌ Срок истек: {expire_date.strftime('%d.%m.%Y')}"
+                f"🔴 ДОСТУП ЗАПРЕЩЕН\n👤 {user.full_name}\n"
+                f"❌ Срок истек: {user.expire_date.strftime('%d.%m.%Y')}"
             )
-
-        if is_frozen == 1:
-            cur.execute("UPDATE users SET is_frozen = 0 WHERE user_id = ?", (scanned_id,))
-            await message.answer(f"❄️ Абонемент {name} автоматически разморожен.")
-
-        new_balance = lessons + 1
-        current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-
-        cur.execute(
-            "UPDATE users SET balance_lessons = ?, last_visit = ? WHERE user_id = ?",
-            (new_balance, current_time, scanned_id)
-        )
-        conn.commit()
-
+        if user.is_frozen == 1:
+            user.is_frozen = 0
+            await message.answer(f"❄️ Абонемент {user.full_name} автоматически разморожен.")
+        user.balance_lessons += 1
+        user.last_visit = now
+        current_lessons = user.balance_lessons
         response_text = (
             f"🟢 <b>ПРОХОДИТЕ</b>\n"
-            f"👤 {name}\n"
-            f"✅ Годен до: {expire_date.strftime('%d.%m.%Y')}\n"
-            f"📈 Посещений за период: {new_balance}"
+            f"👤 {user.full_name}\n"
+            f"✅ Действует до : {user.expire_date.strftime('%d.%m.%Y')}\n"
+            f"📈 Посещений за период: {current_lessons}"
         )
-
-        await message.answer(response_text, parse_mode="HTML")
-
-        try:
-            await message.bot.send_message(
-                scanned_id,
-                f"🔔 Вход зафиксирован. Приятной тренировки!\n📈 Ваше посещение №{new_balance}"
-            )
-        except Exception as e:
-            print(f"Не удалось отправить уведомление пользователю {scanned_id}: {e}")
+        session.commit()
+    await message.answer(response_text, parse_mode="HTML")
+    try:
+        await message.bot.send_message(
+            scanned_id,
+            f"🔔 Вход зафиксирован. Приятной тренировки!\n"
+            f"📈 Ваше посещение №{current_lessons}"
+        )
+    except Exception as e:
+        print(f"Не удалось отправить уведомление пользователю {scanned_id}: {e}")

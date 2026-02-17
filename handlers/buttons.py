@@ -31,7 +31,6 @@ def get_main_menu_keyboard():
     return builder.as_markup()
 
 
-
 def get_bjj_keyboard():
     builder = InlineKeyboardBuilder()
     builder.row(
@@ -58,6 +57,7 @@ def get_kids_keyboard():
 
 def admin_keyboard():
     builder = InlineKeyboardBuilder()
+    builder.row(types.InlineKeyboardButton(text= '📊 Отчет за сегодня', callback_data='daily_report'))
     builder.row(types.InlineKeyboardButton(text="📢 Сделать рассылку", callback_data="admin_broadcast"))
     builder.row(types.InlineKeyboardButton(text="📊 Выгрузить базу (Excel)", callback_data="export_db"))
     return builder.as_markup()
