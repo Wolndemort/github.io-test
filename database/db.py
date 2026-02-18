@@ -5,7 +5,7 @@ from config import db_file
 from datetime import datetime, timedelta
 
 
-engine = create_engine(f"sqlite:///{db_file}", echo=False)
+engine = create_engine(db_file, echo=False)
 Session = sessionmaker(bind=engine)
 
 
@@ -89,13 +89,13 @@ def get_all_users_count():
 
 
 def get_active_subs_count():
-    with Session()as session:
+    with Session() as session:
         return session.scalar(
             select(func.count(User.user_id)).where(User.expire_date > datetime.now()))
 
 
 def get_daily_stats():
-    with Session()as session:
+    with Session() as session:
         #посещения
         today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
         stmt_visit = select(func.count(User.user_id)).where(User.last_visit >= today_start)

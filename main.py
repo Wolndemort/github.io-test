@@ -26,6 +26,7 @@ async def check_abon_mailing(bot: Bot):
         except Exception as e:
             print(f"Ошибка отправки пользователю {user}: {e}")
 
+
 async def send_daily_report_to_admins(bot: Bot):
     visits, active = get_daily_stats()
     report_text = (
@@ -65,4 +66,3 @@ if __name__ == '__main__':
         print("⭕ Бот остановлен пользователем")
 
 
- #вернулся в мастерс после кьюар кода , нужно упаковатьв докер , исправить отправку рассылки и выгрузки файл ,
