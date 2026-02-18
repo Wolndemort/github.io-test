@@ -23,3 +23,4 @@ RUN mkdir -p database logs
 CMD ["python", "main.py"]
 
 
+
