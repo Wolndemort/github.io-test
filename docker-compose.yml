@@ -4,12 +4,15 @@ services:
   gym_bot:
     build: .
     container_name: gym_manager_app
+    environment:
+      - TZ=Europe/Moscow
     restart: always
     command: watchmedo auto-restart --recursive --pattern="*.py" --directory="." python main.py
 
     volumes:
       - .:/app
       - ./database:/app/database
+      - ./logs:/app/logs
 
     env_file:
       - .env

@@ -1,4 +1,6 @@
-import logging
+import sys
+from loguru import logger
+from middlewares.logging_middleware import LoggingMiddleware
 import asyncio
 from datetime import datetime
 from config import ADMIN_IDS
@@ -10,8 +12,15 @@ from handlers.buttons import get_profile_keyboard
 from config import BOT_TOKEN
 
 
+logger.remove()
+logger.add(sys.stderr, level='INFO')
+logger.add('logs/bot_log.log', rotation='1 MB', retention='10 days', compression="zip", enqueue=True)
+
+
+
 async def check_abon_mailing(bot: Bot):
     users = get_expire_users()
+    logger.info(f"Начинаю рассылку для {len(users)} пользователей")
     for user in users:
         try:
             user_id = user.user_id
@@ -22,13 +31,19 @@ async def check_abon_mailing(bot: Bot):
                 parse_mode="HTML",
                 reply_markup=get_profile_keyboard()
             )
-            await asyncio.sleep(0.05)
+            logger.info(f"Сообщение успешно отправлено: ID {user_id}")
+            await asyncio.sleep(0.33)
         except Exception as e:
-            print(f"Ошибка отправки пользователю {user}: {e}")
+            logger.error(f"Ошибка при отправке пользователю {user}: {e}")
 
 
 async def send_daily_report_to_admins(bot: Bot):
-    visits, active = get_daily_stats()
+    try:
+        visits, active = get_daily_stats()
+        logger.info(f"Сбор статистики завершен:{visits} визитов, {active} активных")
+    except Exception as e:
+        logger.critical(f"Критическая ошибка при получении статистики из БД: {e}")
+        return
     report_text = (
          f"🌙 <b>ВЕЧЕРНИЙ ОТЧЕТ</b> ({datetime.now().strftime('%d.%m.%Y')})\n\n"
          f"👤 <b>Посещений за день:</b> <code>{visits}</code>\n"
@@ -37,23 +52,26 @@ async def send_daily_report_to_admins(bot: Bot):
     for admin_id in ADMIN_IDS:
         try:
             await bot.send_message(admin_id, report_text, parse_mode="HTML")
-        except Exception:
-            pass
+            logger.info(f"Отчет успешно отправлен админу {admin_id}")
+        except Exception as e:
+            logger.error(f"Не удалось отправить отчет админу {admin_id}: {e}")
+
 
 
 async def main():
-    logging.basicConfig(level=logging.INFO)
+    logger.info("Инициализация базы данных...")
     init_db()
     bot = Bot(token=BOT_TOKEN)
+    dp = Dispatcher()
+    dp.message.outer_middleware(LoggingMiddleware())
     scheduler = AsyncIOScheduler()
     scheduler.add_job(check_abon_mailing, 'cron', hour=10, minute=0, args=(bot,))
     scheduler.add_job(send_daily_report_to_admins, 'cron', hour=22, minute=0, args=(bot,))
     scheduler.start()
-    dp = Dispatcher()
     dp.include_router(start.router)
     dp.include_router(buttons.router)
     dp.include_router(admin.router)
-    print("🚀 Бот успешно запущен и готов к работе!")
+    logger.success("🚀 Бот успешно запущен и готов к работе!")
     try:
         await dp.start_polling(bot)
     finally:
@@ -63,6 +81,6 @@ if __name__ == '__main__':
         # Запускаем асинхронную функцию main
         asyncio.run(main())
     except KeyboardInterrupt:
-        print("⭕ Бот остановлен пользователем")
+        logger.warning("⭕ Бот остановлен пользователем")
 
 
