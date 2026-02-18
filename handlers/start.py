@@ -17,7 +17,6 @@ async def start_handler(message: types.Message, state: FSMContext):
     first_name = message.from_user.first_name
     logger.info(f"🚀 Команда /start от {full_name} (ID: {user_id})")
 
-
     try:
         with Session() as session:
             user = session.get(User, user_id)

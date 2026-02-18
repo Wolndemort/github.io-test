@@ -126,13 +126,18 @@ def get_all_users_count():
 
 
 def get_active_subs_count():
+    now = datetime.now()
     try:
         with Session() as session:
-            count = session.scalar(select(func.count(User.user_id)))
-            logger.debug(f"📊 Запрос общего кол-ва пользователей. Результат: {count}")
+            stmt = select(func.count(User.user_id)).where(
+                User.expire_date.is_not(None),
+                User.expire_date >= now
+            )
+            count = session.scalar(stmt) or 0
+            logger.debug(f"📊 Запрос активных абонементов. Результат: {count}")
             return count
     except Exception as e:
-        logger.error(f"❌ Ошибка при подсчете пользователей в БД: {e}")
+        logger.error(f"❌ Ошибка при подсчете активных абонементов: {e}")
         return 0
 
 

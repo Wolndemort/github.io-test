@@ -17,7 +17,6 @@ logger.add(sys.stderr, level='INFO')
 logger.add('logs/bot_log.log', rotation='1 MB', retention='10 days', compression="zip", enqueue=True)
 
 
-
 async def check_abon_mailing(bot: Bot):
     users = get_expire_users()
     logger.info(f"Начинаю рассылку для {len(users)} пользователей")
@@ -57,7 +56,6 @@ async def send_daily_report_to_admins(bot: Bot):
             logger.error(f"Не удалось отправить отчет админу {admin_id}: {e}")
 
 
-
 async def main():
     logger.info("Инициализация базы данных...")
     init_db()
@@ -84,3 +82,9 @@ if __name__ == '__main__':
         logger.warning("⭕ Бот остановлен пользователем")
 
 
+
+
+# СРОЧНО ДОБАВИТЬ ДЛЯ АДМИНА ВОЗМОЖНОСТЬ ОФОРМЛЯТЬ АБОНЕМЕНТЫ ВРУЧНУЮ И ОТМЕЧАТЬ ПОСЕЩЕНИЯ !
+# остановился на валидации оплаты , так как начал менять логику бд для оплаты без р\с
+
+# в отчет выгружать купленные абонементы обязательно!

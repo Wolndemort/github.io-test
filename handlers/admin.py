@@ -1,6 +1,6 @@
 import asyncio
 from database.db import get_all_users_count, get_active_subs_count, Session, User, engine, get_daily_stats
-from config import ADMIN_IDS
+from config import ADMIN_IDS, secret_key
 from sqlalchemy import select
 from handlers.buttons import get_bjj_keyboard, get_kids_keyboard, get_main_menu_keyboard, admin_keyboard, \
     get_scanner_keyboard, get_profile_keyboard
@@ -18,7 +18,18 @@ from aiogram.types import BufferedInputFile
 from aiogram import Router, F, types
 from datetime import datetime
 from loguru import logger
+import hashlib
+import hmac
 
+
+def generate_signature(user_id, time_salt):
+    msg = f"{user_id}:{time_salt}".encode()
+    signature = hmac.new(
+        secret_key.encode(),
+        msg,
+        hashlib.sha256
+    ).hexdigest()
+    return signature[:10]
 
 
 router = Router()
@@ -441,7 +452,8 @@ async def send_user_qr(callback: types.CallbackQuery):
     logger.debug(f"🎟 Запрос QR-пропуска: {user_name} (ID: {user_id})")
     try:
         time_salt = datetime.now().strftime('%Y-%m-%d-%H')
-        qr_data = f'user:{user_id}:{time_salt}'
+        signature = generate_signature(user_id, time_salt)
+        qr_data = f'user:{user_id}:{time_salt}:{signature}'
         qr_img = qrcode.make(qr_data)
         buffer = BytesIO()
         qr_img.save(buffer, format='PNG')
@@ -464,12 +476,31 @@ async def parse_qr_scan(message: types.Message):
     raw_data = message.web_app_data.data
     logger.info(f"🔍 Сканер (Admin ID: {message.from_user.id}) считал данные: {raw_data}")
     try:
-        raw_id = raw_data.replace('user:', "").split(':')[0].strip()
-        scanned_id = int(raw_id)
-    except (ValueError, IndexError):
-        logger.error(f"❌ Критическая ошибка парсинга QR: {raw_data}")
-        return await message.answer("❌ Ошибка: QR-код содержит неверный ID")
+        parts = raw_data.split(':')
+        if len(parts) != 4 or parts[0] != 'user':
+            return await message.answer("❌ Ошибка: Неверный формат QR-кода")
+        _, scanned_id_str, time_salt, signature = parts
+        scanned_id = int(scanned_id_str)
+        expected_sig = generate_signature(scanned_id, time_salt)
+        if not hmac.compare_digest(signature, expected_sig):
+            logger.warning(f"🚨 Попытка взлома! Поддельный QR: {raw_data}")
+            return await message.answer("🚨 ВНИМАНИЕ: QR-код подделан или изменен!")
+
+    except Exception as e:
+        logger.error(f"❌ Ошибка валидации данных: {e}")
+        return await message.answer("❌ Ошибка при чтении данных кода")
     now = datetime.now()
+    current_salt = now.strftime('%Y-%m-%d-%H')
+    previous_hour_salt = (now - timedelta(hours=1)).strftime('%Y-%m-%d-%H')
+    if time_salt != current_salt and time_salt != previous_hour_salt:
+        logger.info(f"⌛ Истекший QR: {scanned_id} (код за {time_salt})")
+        return await message.answer(
+            "⌛ Срок действия QR истек.\n"
+            "Пожалуйста, обновите пропуск в боте."
+        )
+    if time_salt == previous_hour_salt and now.minute > 5:
+        logger.warning(f"🚫 Слишком старый QR (прошлый час): {scanned_id}")
+        return await message.answer("⌛ Этот код слишком старый. Обновите его.")
     with Session() as session:
         user = session.get(User, scanned_id)
         if not user:
