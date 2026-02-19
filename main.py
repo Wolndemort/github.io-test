@@ -7,9 +7,10 @@ from config import ADMIN_IDS
 from aiogram import Bot, Dispatcher
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from handlers import start, admin, buttons
-from database.db import init_db, get_expire_users, get_daily_stats
+from database.db import init_db, get_daily_stats, get_expire_students
 from handlers.buttons import get_profile_keyboard
 from config import BOT_TOKEN
+from aiogram.fsm.storage.memory import MemoryStorage
 
 
 logger.remove()
@@ -18,22 +19,32 @@ logger.add('logs/bot_log.log', rotation='1 MB', retention='10 days', compression
 
 
 async def check_abon_mailing(bot: Bot):
-    users = get_expire_users()
-    logger.info(f"Начинаю рассылку для {len(users)} пользователей")
-    for user in users:
+    students = get_expire_students()
+    logger.info(f"Начинаю рассылку для {len(students)} атлетов")
+
+    for s in students:
         try:
-            user_id = user.user_id
-            user_name = user.full_name if user.full_name else "Атлет"
+            # Текст уведомления с именем ребенка (s.name)
+            text = (
+                f"⚠️ <b>Внимание!</b>\n\n"
+                f"У атлета <b>{s.name}</b> скоро истекает абонемент.\n"
+                f"Дата окончания: <code>{s.expire_date.strftime('%d.%m.%Y')}</code>\n\n"
+                f"Не забудьте продлить его в меню абонементов! 🥊"
+            )
+
+
             await bot.send_message(
-                user_id,
-                f'⚠️ Внимание {user_name}! Ваш абонемент скоро истекает. Не забудьте продлить его! 🥊',
+                chat_id=s.parent_id,
+                text=text,
                 parse_mode="HTML",
                 reply_markup=get_profile_keyboard()
             )
-            logger.info(f"Сообщение успешно отправлено: ID {user_id}")
+
+            logger.info(f"✅ Уведомление отправлено родителю {s.parent_id} за атлета {s.name}")
             await asyncio.sleep(0.33)
+
         except Exception as e:
-            logger.error(f"Ошибка при отправке пользователю {user}: {e}")
+            logger.error(f"❌ Ошибка отправки уведомления для студента {s.id}: {e}")
 
 
 async def send_daily_report_to_admins(bot: Bot):
@@ -60,7 +71,7 @@ async def main():
     logger.info("Инициализация базы данных...")
     init_db()
     bot = Bot(token=BOT_TOKEN)
-    dp = Dispatcher()
+    dp = Dispatcher(storage=MemoryStorage())
     dp.message.outer_middleware(LoggingMiddleware())
     scheduler = AsyncIOScheduler()
     scheduler.add_job(check_abon_mailing, 'cron', hour=10, minute=0, args=(bot,))

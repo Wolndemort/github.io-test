@@ -1,6 +1,6 @@
-from typing import Optional
-from sqlalchemy.orm import Mapped, DeclarativeBase, mapped_column, sessionmaker
-from sqlalchemy import BigInteger, DateTime, String, func, create_engine, select
+from typing import Optional, List
+from sqlalchemy.orm import Mapped, DeclarativeBase, mapped_column, sessionmaker, relationship
+from sqlalchemy import BigInteger, DateTime, String, func, create_engine, select, Integer, ForeignKey
 from config import db_file
 from datetime import datetime, timedelta
 from loguru import logger
@@ -19,11 +19,20 @@ class User(Base):
 
     user_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     full_name: Mapped[Optional[str]] = mapped_column(String)
+    students: Mapped[List["Student"]] = relationship(back_populates='parent')
+
+
+class Student(Base):
+    __tablename__ = 'students'
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    parent_id: Mapped[int] = mapped_column(ForeignKey('users.user_id'))
+    name: Mapped[str] = mapped_column(String)
     expire_date: Mapped[Optional[datetime]] = mapped_column(DateTime)
     can_freeze: Mapped[int] = mapped_column(default=1)
     is_frozen: Mapped[int] = mapped_column(default=0)
     balance_lessons: Mapped[int] = mapped_column(default=0)
     last_visit: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    parent: Mapped["User"] = relationship(back_populates="students")
 
 
 def init_db():
@@ -36,22 +45,36 @@ def init_db():
         raise e
 
 
-def get_expire_users():
-    today = datetime.now()
-    three_days_limit = today + timedelta(days=3)
-    logger.debug(f"Поиск абонементов, истекающих с {today.strftime('%d.%m')} по {three_days_limit.strftime('%d.%m')}")
+def get_student_list(parent_id: int):
+    with Session() as session:
+        return session.query(Student).filter(Student.parent_id == parent_id).all()
+
+
+def get_all_subscriptions(user_id: int):
     try:
         with Session() as session:
-            stmt = select(User).where(
-                User.expire_date <= three_days_limit,
-                User.expire_date >= today
-        )
-            users = session.scalars(stmt).all()
-            if users:
-                logger.info(f"🔎 Найдено {len(users)} пользователей для уведомления о продлении")
+            return session.query(Student).filter(Student.parent_id == user_id).all()
+    except Exception as e:
+        logger.error(f"❌ Ошибка получения подписок для {user_id}: {e}")
+        return []
+
+
+def get_expire_students():
+    today = datetime.now()
+    three_days_limit = today + timedelta(days=3)
+    logger.debug(f"🔎 Поиск атлетов, истекающих с {today.strftime('%d.%m')} по {three_days_limit.strftime('%d.%m')}")
+    try:
+        with Session() as session:
+            stmt = select(Student).where(
+                Student.expire_date <= three_days_limit,
+                Student.expire_date >= today
+            )
+            students = session.scalars(stmt).all()
+            if students:
+                logger.info(f"✅ Найдено {len(students)} атлетов для уведомления родителей")
             else:
-                logger.debug("Рассылка пуста: подходящих пользователей не найдено")
-            return users
+                logger.debug("Рассылка пуста: истекающих абонементов не найдено")
+            return students
     except Exception as e:
         logger.error(f"❌ Ошибка при запросе истекающих абонементов в БД: {e}")
         return []
@@ -60,109 +83,92 @@ def get_expire_users():
 def has_subscription(user_id: int):
     try:
         with Session() as session:
-            user = session.get(User, user_id)
-            if not user:
-                logger.debug(f"Проверка подписки: Пользователь {user_id} не найден в БД")
-                return None, None
-            if not user.expire_date:
-                logger.debug(f"Проверка подписки: У пользователя {user_id} отсутствует дата (нет абонемента)")
-                return False, None
+            stmt = select(Student).where(Student.parent_id == user_id)
+            students = session.scalars(stmt).all()
 
-            is_active = user.expire_date > datetime.now()
-            status = "АКТИВЕН" if is_active else "ИСТЕК"
-            logger.debug(f"Проверка подписки: ID {user_id} | Статус: {status} | До: {user.expire_date.strftime('%d.%m.%Y %H:%M')}")
-            return is_active, user.expire_date
+            if not students:
+                logger.debug(f"Проверка подписки: У родителя {user_id} нет зарегистрированных детей")
+                return None, None
+
+            now = datetime.now()
+            active_students = [s for s in students if s.expire_date and s.expire_date > now]
+
+            if active_students:
+                latest_expire = max(s.expire_date for s in active_students)
+                logger.debug(f"Проверка подписки: У ID {user_id} есть активные атлеты. Макс. дата: {latest_expire}")
+                return True, latest_expire
+            latest_expired = max((s.expire_date for s in students if s.expire_date), default=None)
+            logger.debug(f"Проверка подписки: У ID {user_id} все абонементы истекли.")
+            return False, latest_expired
+
     except Exception as e:
         logger.error(f"❌ Ошибка при проверке подписки для ID {user_id}: {e}")
         return None, None
 
 
-def add_abon(user_id: int, full_name: str = None):
+def add_abon(student_id: int):
     try:
         with Session() as session:
-            user = session.get(User, user_id)
+            student = session.get(Student, student_id)
+            if not student:
+                logger.error(f"❌ Студент с ID {student_id} не найден в базе")
+                return None
             now = datetime.now()
-            is_new_user = False
-            if not user:
-                logger.info(f"🆕 Регистрация нового пользователя: ID {user_id} ({full_name or 'Атлет'})")
-                user = User(user_id=user_id, full_name=full_name)
-                session.add(user)
-                current_expire_val = None
-                is_new_user = True
-            else:
-                if full_name:
-                    user.full_name = full_name
-                current_expire_val: datetime | None = user.expire_date
-                logger.info(f"🔄 Продление абонемента для ID {user_id}. Текущая дата: {current_expire_val}")
-            if current_expire_val:
-                start_date = max(now, current_expire_val)
+            current_expire_val = student.expire_date
+            logger.error(f"🔄 Продление абонемента для студента {student.name} (ID: {student_id}).")
+            if current_expire_val and current_expire_val > now:
+                start_date = current_expire_val
                 logger.debug(f"Абонемент еще активен, добавляем 30 дней к {start_date}")
             else:
                 start_date = now
                 logger.debug(f"Абонемент истек или новый, отсчет от сегодня: {start_date}")
             new_expire = start_date + timedelta(days=30)
-            user.expire_date = new_expire
-            user.can_freeze = 1
-            user.is_frozen = 0
-
+            student.expire_date = new_expire
+            student.can_freeze = 1
+            student.is_frozen = 0
             session.commit()
-            log_msg = "Создан" if is_new_user else "Продлен"
-            logger.success(f"✅ {log_msg} абонемент для {user_id} до {new_expire.strftime('%d.%m.%Y %H:%M')}")
-            return new_expire.strftime('%Y-%m-%d %H:%M:%S')
+            logger.success(f"✅ Продлен абонемент для {student.name} до {new_expire.strftime('%d.%m.%Y %H:%M')}")
+            return new_expire.strftime('%d.%m.%Y'), student.parent_id
     except Exception as e:
-        logger.error(f"❌ Ошибка при добавлении абонемента для ID {user_id}: {e}")
+        logger.error(f"❌ Ошибка при продлении для студента {student_id}: {e}")
         return None
-
-
-def get_all_users_count():
-    try:
-        with Session() as session:
-            count = session.scalar(select(func.count(User.user_id))) or 0
-            logger.debug(f"📊 Запрос общего кол-ва пользователей в БД. Результат: {count}")
-            return count
-    except Exception as e:
-        logger.error(f"❌ Ошибка при подсчете всех пользователей: {e}")
-        return 0
-
-
-def get_active_subs_count():
-    now = datetime.now()
-    try:
-        with Session() as session:
-            stmt = select(func.count(User.user_id)).where(
-                User.expire_date.is_not(None),
-                User.expire_date >= now
-            )
-            count = session.scalar(stmt) or 0
-            logger.debug(f"📊 Запрос активных абонементов. Результат: {count}")
-            return count
-    except Exception as e:
-        logger.error(f"❌ Ошибка при подсчете активных абонементов: {e}")
-        return 0
 
 
 def get_daily_stats():
     now = datetime.now()
-    today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+
     try:
         with Session() as session:
-            logger.debug(f"📊 Сбор дневной статистики за {today_start.strftime('%d.%m.%Y')}")
-            #посещения
-            stmt_visit = select(func.count(User.user_id)).where(User.last_visit >= today_start)
+            logger.debug(f"📊 Сбор статистики по СТУДЕНТАМ за {today_start.strftime('%d.%m.%Y')}")
+            stmt_visit = select(func.count(Student.id)).where(Student.last_visit >= today_start)
             visits_count = session.scalar(stmt_visit) or 0
-
-            # Абонементы
-            stmt_active = select(func.count(User.user_id)).where(User.expire_date >= now)
+            stmt_active = select(func.count(Student.id)).where(Student.expire_date >= now)
             active_count = session.scalar(stmt_active) or 0
-
-            logger.info(f"📈 Статистика собрана: Посещений: {visits_count} | Активных: {active_count}")
+            logger.info(f"📈 Статистика: Посещений сегодня: {visits_count} | Активных абонементов: {active_count}")
             return visits_count, active_count
+
     except Exception as e:
         logger.error(f"❌ Ошибка при сборе дневной статистики: {e}")
         return 0, 0
 
 
+def get_all_users_count():
+    try:
+        with Session() as session:
+            # Считаем всех уникальных родителей в таблице User
+            return session.query(func.count(User.user_id)).scalar() or 0
+    except Exception as e:
+        logger.error(f" Ошибка счета юзеров: {e}")
+        return 0
 
 
-
-
+def get_active_subs_count():
+    try:
+        with Session() as session:
+            now = datetime.now()
+            # Считаем АТЛЕТОВ, у которых дата окончания в будущем
+            return session.query(func.count(Student.id)).filter(Student.expire_date > now).scalar() or 0
+    except Exception as e:
+        logger.error(f" Ошибка счета активных подписок: {e}")
+        return 0

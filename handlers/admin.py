@@ -1,25 +1,28 @@
 import asyncio
-from database.db import get_all_users_count, get_active_subs_count, Session, User, engine, get_daily_stats
+import qrcode
+from aiogram.utils.keyboard import InlineKeyboardBuilder
+import io
+from database.db import get_all_users_count, get_active_subs_count, Session, User, engine, get_daily_stats, \
+    get_student_list, get_all_subscriptions, Student
 from config import ADMIN_IDS, secret_key
 from sqlalchemy import select
 from handlers.buttons import get_bjj_keyboard, get_kids_keyboard, get_main_menu_keyboard, admin_keyboard, \
-    get_scanner_keyboard, get_profile_keyboard
-from database.db import has_subscription, add_abon
+    get_scanner_keyboard, get_profile_keyboard, discipline
+from database.db import add_abon
 from aiogram.filters import Command
 import os
 import pandas as pd
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import FSInputFile
+from aiogram.types import FSInputFile, InlineKeyboardButton, BufferedInputFile
 from datetime import timedelta
-import qrcode
-from io import BytesIO
-from aiogram.types import BufferedInputFile
 from aiogram import Router, F, types
 from datetime import datetime
 from loguru import logger
 import hashlib
 import hmac
+
+from handlers.states import PaymentStates, RegistrationStates
 
 
 def generate_signature(user_id, time_salt):
@@ -68,9 +71,12 @@ async def admin_panel(message: types.Message):
 
 
 @router.callback_query(F.data == 'begin')
-async def process_begin(callback: types.CallbackQuery):
+async def go_to_begin(callback: types.CallbackQuery, state: FSMContext):
+    await state.clear()
+    user_name = callback.from_user.first_name
     await callback.message.edit_text(
-        text='Вы вернулись в главное меню.Какой у вас вопрос?',
+        f"<b>С возвращением, {user_name}!</b>\n\nЧем я могу вам помочь сегодня?",
+        parse_mode="HTML",
         reply_markup=get_main_menu_keyboard()
     )
     await callback.answer()
@@ -79,46 +85,67 @@ async def process_begin(callback: types.CallbackQuery):
 @router.callback_query(F.data == 'check_status_now')
 async def show_profile(callback: types.CallbackQuery):
     user_id = callback.from_user.id
-    user_name = callback.from_user.full_name
-    logger.debug(f"🔍 Юзер {user_name} (ID: {user_id}) нажал 'Проверить статус'")
+    logger.debug(f"🔍 Проверка статуса для ID: {user_id}")
+    students = get_all_subscriptions(user_id)
+    now = datetime.now()
+
+    if not students:
+        text = "💎 <b>У вас нет зарегистрированных атлетов.</b>\nДобавьте профиль в личном кабинете."
+    else:
+        text = "📋 <b>Статус ваших абонементов:</b>\n\n"
+        for s in students:
+            if not s.expire_date:
+                status = "❌ <b>Не куплен</b>"
+            elif s.is_frozen:
+                status = "❄️ <b>ЗАМОРОЖЕН</b>"
+            elif s.expire_date > now:
+                status = f"✅ <b>Активен</b> до <code>{s.expire_date.strftime('%d.%m.%Y')}</code>"
+            else:
+                status = f"🔴 <b>ИСТЕК</b> (<code>{s.expire_date.strftime('%d.%m.%Y')}</code>)"
+            text += f"👤 {s.name}: {status}\n"
     try:
-        is_active, expire_date = has_subscription(user_id)
-        logger.debug(f"📊 Результат для {user_id}: active={is_active}, date={expire_date}")
-        text = "🔍 <b>Информация не найдена.</b>\nПожалуйста, обратитесь к администратору или купите абонемент."
-        if is_active is True:
-            date_str = expire_date.strftime('%d.%m.%Y %H:%M')
-            text = (f"✅ <b>Ваш абонемент активен!</b>\n"
-                    f"📅 Истекает: <code>{date_str}</code>\n"
-                    f"Вам придет уведомление за 3 дня! 🥊")
-        elif is_active is False:
-            date_str = expire_date.strftime('%d.%m.%Y %H:%M') if expire_date else "неизвестно"
-            text = (f"❌ <b>Ваш абонемент истек!</b>\n"
-                    f"📅 Срок закончился: <code>{date_str}</code>\n"
-                    f"Продлите его в разделе «Абонементы».")
-        elif is_active is None:
-            text = "💎 <b>У вас нет активного абонемента.</b>\nВы можете приобрести его в главном меню."
         await callback.message.edit_text(
             text=text,
             reply_markup=get_profile_keyboard(),
             parse_mode="HTML"
-            )
+        )
     except Exception as e:
         if "message is not modified" in str(e):
-            logger.debug(f"ℹ️ Сообщение для {user_id} не изменилось (данные те же)")
             await callback.answer("Данные актуальны")
         else:
-            logger.error(f"❌ Ошибка в show_profile для {user_id}: {e}")
-            await callback.answer()
+            logger.error(f"❌ Ошибка в show_profile: {e}")
+            await callback.answer("Ошибка связи с базой")
 
 
 @router.callback_query(F.data == 'profile')
 async def open_profile_menu(callback: types.CallbackQuery):
+    user_id = callback.from_user.id
+    now = datetime.now()
+    with Session() as session:
+        students = session.query(Student).filter(Student.parent_id == user_id).all()
+    if not students:
+        status_text = "⚠️ <b>У вас еще нет зарегистрированных атлетов.</b>\n" \
+                      "Добавьте себя или ребенка, чтобы пользоваться функциями клуба."
+    else:
+        status_text = "🆔 <b>Ваши профили:</b>\n"
+        for s in students:
+            if not s.expire_date:
+                status = "❌ Нет абонемента"
+            elif s.expire_date < now:
+                status = f"🔴 Истек ({s.expire_date.strftime('%d.%m')})"
+            elif s.is_frozen:
+                status = "❄️ ЗАМОРОЖЕН"
+            else:
+                status = f"✅ Активен до {s.expire_date.strftime('%d.%m')}"
+
+            status_text += f"\n• <b>{s.name}</b>: {status}"
     await callback.message.edit_text(
-        "👤 <b>Личный кабинет</b>\n\nЗдесь вы можете проверить свой абонемент,"
-        " получить QR-код для входа или оформить заморозку.",
+        f"👤 <b>Личный кабинет</b>\n\n{status_text}\n\n"
+        "<i>Используйте кнопки ниже для управления абонементами:</i>",
         reply_markup=get_profile_keyboard(),
         parse_mode="HTML"
     )
+    await callback.answer()
 
 
 @router.callback_query(F. data == 'bjj')
@@ -148,7 +175,7 @@ async def bjj_price(callback: types.CallbackQuery):
     logger.info(f"💰 Юзер {user.full_name} (ID: {user.id}) открыл прайс-лист BJJ")
     text = (
         "💰 <b>Стоимость абонементов BJJ:</b>\n\n"
-        "• Первая тренировка бесплатно— 700₽\n"
+        "• Первая тренировка бесплатно\n"
         "• Разовая тренировка — 700₽\n"
         "• Месяц (24 занятия) — 5000₽\n"
         "• Безлимит на год — 55 000₽"
@@ -186,7 +213,7 @@ async def kids_price(callback: types.CallbackQuery):
     text = (
         "💰 <b>Стоимость детского абонемента:</b>\n\n"
         "• Пробная тренировка — БЕСПЛАТНО\n"
-        "• Месяц занятий — 5000₽\n"
+        "• Месяц занятий — 4000₽\n"
     )
     try:
         await callback.message.edit_text(
@@ -196,7 +223,7 @@ async def kids_price(callback: types.CallbackQuery):
         )
     except Exception as e:
         if "message is not modified" not in str(e):
-            logger.error(f"❌ Ошибка при показе прайса BJJ для {user.id}: {e}")
+            logger.error(f"❌ Ошибка при показе прайса KIDS для {user.id}: {e}")
 
     await callback.answer()
 
@@ -212,95 +239,122 @@ async def kids_schedule(callback: types.CallbackQuery):
     await callback.answer()
 
 
+@router.callback_query(F.data == 'choose_section')
+async def show_sections(callback: types.CallbackQuery):
+    await callback.message.edit_text(
+        "<b>Выберите направление тренировок:</b>",
+        reply_markup=discipline(),
+        parse_mode="HTML"
+    )
+
+
 @router.callback_query(F.data.startswith('buy_'))
-async def buy_handler(callback: types.CallbackQuery):
+async def buy_handler(callback: types.CallbackQuery, state: FSMContext):
     user = callback.from_user
-    # Разрезаем 'buy_mma' -> получаем 'mma'
     sport_type = callback.data.split('_')[1]
-    logger.info(f"💳 Попытка покупки: {user.full_name} (ID: {user.id}) -> Направление: {sport_type.upper()}")
-    prices_map = {
-        "mma": 1,
-        "bjj": 1,
-        "kids": 1
-    }
-
-    amount = prices_map.get(sport_type, 1)
-    try:
-        await callback.message.answer_invoice(
-            title=f"Абонемент: {sport_type.upper()} 🥊",
-            description=f"Доступ к тренировкам {sport_type.upper()} на 30 дней",
-            payload=f"pay_{sport_type}",  # Этот текст придет к нам после оплаты
-            provider_token="",
-            currency="XTR",
-            prices=[types.LabeledPrice(label="Абонемент 30 дней", amount=amount)],
-            start_parameter="gym_sub")
-
-        logger.debug(f"📜 Инвойс на {amount} XTR отправлен пользователю {user.id}")
-    except Exception as e:
-        # ЛОГ: Ошибка (например, неверный токен или валюта)
-        logger.error(f"❌ Ошибка формирования инвойса для {user.id}: {e}")
-        await callback.answer("Произошла ошибка при создании счета. Попробуйте позже.")
+    students = get_student_list(user.id)
+    if not students:
+        await callback.answer("Сначала добавьте атлета в профиле!", show_alert=True)
+    await state.update_data(sport_type=sport_type)
+    builder = InlineKeyboardBuilder()
+    for s in students:
+        builder.row(InlineKeyboardButton(
+            text=f"🥋 {s.name}",
+            callback_data=f"student_pay_{s.id}")
+        )
+    await callback.message.edit_text(
+        f"Вы выбрали направление: **{sport_type.upper()}**\n"
+        "Теперь выберите, за кого вносится оплата:",
+        reply_markup=builder.as_markup(),
+        parse_mode="Markdown"
+    )
     await callback.answer()
 
 
-@router.pre_checkout_query()
-async def process_pre_checkout(pre_checkout_query: types.PreCheckoutQuery):
-    logger.info(f"💳 PreCheckout от {pre_checkout_query.from_user.id} на сумму {pre_checkout_query.total_amount}")
-    await pre_checkout_query.answer(ok=True)
+@router.callback_query(F.data.startswith('student_pay_'))
+async def request_receipt(callback: types.CallbackQuery, state: FSMContext):
+    student_id = int(callback.data.split('_')[2])
+    await state.update_data(chosen_student_id=student_id)
+    await state.set_state(PaymentStates.waiting_for_receipt)
+    await callback.message.edit_text(
+        "💳 **Реквизиты для перевода:**\n\n"
+        "Сумма: 5000₽/4000\n"
+        "СПБ: `+79606666165` (Адам.О)\n"
+        "Банк: Тинькофф\n\n"
+        "⚠️ **Важно:** После оплаты пришлите **скриншот чека** ответным сообщением в этот чат.",
+        parse_mode="Markdown")
+    await callback.answer()
 
 
-@router.message(F.successful_payment)
-async def got_payments(message: types.Message):
-    user_id = message.from_user.id
-    user_name = message.from_user.full_name
-    payment_info = message.successful_payment
-    payload = payment_info.invoice_payload
-    sport_name = payload.split('_')[1].upper()
-    logger.success(
-        f"💰 ОПЛАТА ПОЛУЧЕНА: {user_name} (ID: {user_id}) | Сумма: {payment_info.total_amount} Stars | Секция: "
-        f"{sport_name}")
-    try:
-        new_date_str = add_abon(user_id, full_name=user_name)
-        if not new_date_str:
-            logger.critical(f"🆘 ОШИБКА БД ПОСЛЕ ОПЛАТЫ: Юзер {user_id} заплатил, но add_abon вернул None!")
-            await message.answer(
-                "⚠️ Оплата прошла успешно, но возник сбой при активации. Мы уже знаем об этом и скоро всё исправим!")
-        else:
-            logger.info(f"✅ Абонемент для {user_id} подтвержден до {new_date_str}")
-        admin_id = 1271717628
-        admin_text = (
-            f"🔔 <b>Новая оплата!</b>\n\n"
-            f"👤 Клиент: {message.from_user.full_name}\n"
-            f"🆔 ID: <code>{user_id}</code>\n"
-            f"🥋 Секция: <b>{sport_name}</b>\n"
-            f"💰 Сумма: {payment_info.total_amount} Stars (XTR)"
+@router.message(PaymentStates.waiting_for_receipt, F.photo)
+async def handle_receipt_submission(message: types.Message, state: FSMContext):
+    data = await state.get_data()
+    student_id = data.get("chosen_student_id")
+    sport_type = data.get("sport_type", "не указан")
+    with Session() as session:
+        student = session.get(Student, student_id)
+        student_name = student.name if student else "Неизвестный"
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(text="✅ Оформить", callback_data=f"adm_confirm_{student_id}"),
+        InlineKeyboardButton(text="❌ Отклонить", callback_data=f"adm_decline_{message.from_user.id}"))
+    await message.bot.send_photo(
+        chat_id=ADMIN_IDS[0],
+        photo=message.photo[-1].file_id,
+        caption=(
+            f"<b>💰 Новая оплата!</b>\n"
+            f"👤 Отправитель: @{message.from_user.username or 'без юзернейма'}\n"
+            f"🥋 За кого: {student_name} (ID: {student_id})\n"
+            f"🥊 Направление: {sport_type.upper()}"
+        ),
+        reply_markup=builder.as_markup(),
+        parse_mode="HTML"
+    )
+    await state.clear()
+    await message.answer("✅ Чек отправлен тренеру на проверку. Я пришлю уведомление, когда абонемент будет продлен.")
+
+
+@router.callback_query(F.data.startswith("adm_confirm_"))
+async def admin_confirm_pay(callback: types.CallbackQuery):
+    student_id = int(callback.data.split("_")[-1])
+    result = add_abon(student_id)
+    if result:
+        new_expire, parent_id = result
+        await callback.message.edit_caption(
+            caption=callback.message.caption + f"<b>\n\n✅ ОФОРМЛЕНО до {new_expire}</b>",
+            parse_mode="HTML"
         )
-
         try:
-            await message.bot.send_message(admin_id, admin_text, parse_mode="HTML")
-            logger.debug(f"📲 Уведомление об оплате отправлено админу {admin_id}")
+            await callback.bot.send_message(
+                chat_id=parent_id,
+                text=f"<b>💳 Ваша оплата подтверждена!\nАбонемент продлен до: {new_expire}</b>",
+                parse_mode="HTML"
+            )
         except Exception as e:
-            logger.error(f"❌ Не удалось уведомить админа {admin_id}: {e}")
-
-        await message.answer(
-            f"🎉 <b>Оплата прошла успешно!</b>\n"
-            f"Ваш абонемент на <b>{sport_name}</b> продлен до: <code>{new_date_str}</code>",
-            parse_mode="HTML",
-            reply_markup=get_main_menu_keyboard()
-        )
-    except Exception as e:
-        logger.error(f"💥 Глобальная ошибка в successful_payment для {user_id}: {e}")
+            logger.error(f"Не удалось отправить уведомление пользователю {parent_id}: {e}")
+    else:
+        await callback.answer("Ошибка: студент не найден в базе", show_alert=True)
 
 
-@router.callback_query(F.data == 'admin_broadcast', F.from_user.id.in_(ADMIN_IDS))
-async def start_broadcast(callback: types.CallbackQuery, state: FSMContext):
-    admin = callback.from_user
-    logger.warning(f"📢 Админ {admin.full_name} (ID: {admin.id}) открыл меню рассылки")
-    await callback.message.answer(
-        "📝 <b>Отправьте сообщение для рассылки:</b>\n\nЯ перешлю его всем пользователям (можно с фото/видео).",
-        parse_mode="HTML")
-    await state.set_state(AdminStates.waiting_for_broadcast_text)
-    await callback.answer()
+@router.callback_query(F.data.startswith("adm_decline_"))
+async def admin_decline_pay(callback: types.CallbackQuery):
+    user_id = int(callback.data.split("_")[-1])
+
+    await callback.message.edit_caption(caption=callback.message.caption + "<b>\n\n❌ ОТКЛОНЕНО</b>")
+    await callback.bot.send_message(
+        chat_id=user_id,
+        text="❌ Ваш чек отклонен. Пожалуйста, проверьте данные или свяжитесь с тренером."
+    )
+
+
+@router.message(Command("admin"), F.from_user.id.in_(ADMIN_IDS))
+async def admin_panel(message: types.Message):
+    await message.answer(
+        "🛠 <b>Панель администратора клуба</b>\n\n"
+        "Выберите действие для управления базой атлетов и рассылок:",
+        reply_markup=admin_keyboard(),
+        parse_mode="HTML"
+    )
 
 
 @router.message(AdminStates.waiting_for_broadcast_text, F.from_user.id.in_(ADMIN_IDS))
@@ -336,42 +390,49 @@ async def perform_broadcast(message: types.Message, state: FSMContext):
             else:
                 logger.error(f"❌ Ошибка отправки пользователю {user_id}: {e}")
 
-        logger.success(f"🏁 Рассылка завершена! Успешно: {count_success}, Блоков: {count_blocked} из {total}")
+    logger.success(f"🏁 Рассылка завершена! Успешно: {count_success}, Блоков: {count_blocked} из {total}")
 
-        await message.answer(
-            f"✅ <b>Рассылка завершена!</b>\n"
-            f"📩 Доставлено: <code>{count_success}</code>\n"
-            f"🚫 Заблокировали бота: <code>{count_blocked}</code>\n"
-            f"📊 Всего в базе: <code>{total}</code>",
-            parse_mode="HTML"
+    await message.answer(
+        f"✅ <b>Рассылка завершена!</b>\n"
+        f"📩 Доставлено: <code>{count_success}</code>\n"
+        f"🚫 Заблокировали бота: <code>{count_blocked}</code>\n"
+        f"📊 Всего в базе: <code>{total}</code>",
+        parse_mode="HTML"
         )
-        await state.clear()
+    await state.clear()
 
 
 @router.callback_query(F.data == 'export_db', F.from_user.id.in_(ADMIN_IDS))
 async def export_database(callback: types.CallbackQuery):
     admin = callback.from_user
-    logger.warning(f"📥 Админ {admin.full_name} (ID: {admin.id}) запросил экспорт всей базы в CSV!")
-    await callback.answer("⏳ Генерирую таблицу для pandas...")
-    file_path = "users_data_raw.csv"
+    file_path = "club_database_full.csv"
+    await callback.answer("⏳ Собираю данные из всех таблиц...")
     try:
-        df = pd.read_sql_table('users', engine)
-        df.to_csv(file_path, index=False, encoding='utf-8-sig')
-        logger.debug(f"Файл {file_path} успешно сформирован (строк: {len(df)})")
+        df_parents = pd.read_sql_table('users', engine)
+        df_students = pd.read_sql_table('students', engine)
+        df_full = pd.merge(
+            df_students,
+            df_parents[['user_id', 'full_name']],
+            left_on='parent_id',
+            right_on='user_id',
+            how='left',
+            suffixes=('_child', '_parent')
+        )
+        df_full.to_csv(file_path, index=False, encoding='utf-8-sig')
         csv_file = FSInputFile(file_path)
-        await callback.message.answer_document(csv_file,
-                                               caption="📊 <b>Raw Data Export</b>\nФайл готов для обработки в Pandas.")
-        logger.success(f"✅ База данных отправлена админу {admin.id}")
-        if os.path.exists(file_path):
-            os.remove(file_path)
-
+        await callback.message.answer_document(
+            csv_file,
+            caption=f"📊 <b>Полная выгрузка базы</b>\n"
+                    f"Всего атлетов: {len(df_students)}\n"
+                    f"Всего родителей: {len(df_parents)}"
+        )
+        logger.success(f"✅ Полная база отправлена админу {admin.id}")
     except Exception as e:
-        logger.error(f"❌ Ошибка выгрузки CSV для админа {admin.id}: {e}")
-        await callback.message.answer(f"❌ Ошибка выгрузки CSV: {e}")
+        logger.error(f"❌ Ошибка экспорта: {e}")
+        await callback.message.answer(f"❌ Ошибка выгрузки: {e}")
     finally:
         if os.path.exists(file_path):
             os.remove(file_path)
-            logger.debug(f"Временный файл {file_path} удален")
 
 
 @router.callback_query(F.data == 'daily_report', F.from_user.id.in_(ADMIN_IDS))
@@ -402,146 +463,148 @@ async def show_daily_report(callback: types.CallbackQuery):
 
 
 @router.callback_query(F.data == "freeze_sub")
-async def freeze_handler(callback: types.CallbackQuery):
+async def choose_student_for_freeze(callback: types.CallbackQuery):
     user_id = callback.from_user.id
-    user_name = callback.from_user.full_name
-    logger.info(f"❄️ Запрос заморозки: {user_name} (ID: {user_id})")
-    try:
-        with Session()as session:
-            user = session.get(User, user_id)
-            now = datetime.now()
-            if not user or not user.expire_date:
-                logger.debug(f"🚫 Отказ заморозки {user_id}: нет абонемента")
-                return await callback.answer("🚫 У вас нет активного абонемента!", show_alert=True)
-            if user.can_freeze == 0:
-                logger.debug(f"🚫 Отказ заморозки {user_id}: лимит исчерпан")
-                return await callback.answer("🚫 Заморозка уже была использована!", show_alert=True)
-            if user.expire_date < now:
-                logger.debug(f"🚫 Отказ заморозки {user_id}: абонемент просрочен")
-                return await callback.answer("❌ Нельзя заморозить просроченный абонемент!", show_alert=True)
-
-            old_date = user.expire_date
-            user.expire_date += timedelta(days=5)
-            user.can_freeze = 0
-
-            new_date_str = user.expire_date.strftime('%d.%m.%Y %H:%M')
-            session.commit()
-            logger.success(f"✅ УСПЕХ: {user_id} заморожен. Было: {old_date.strftime('%d.%m')} -> Стало: {new_date_str}")
-
-        await callback.message.edit_text(
-            f"❄️ <b>Абонемент заморожен на 5 дней!</b>\n\n"
-            f"📅 Новая дата окончания: <code>{new_date_str}</code>\n\n"
-            f"<i>Заморозка станет доступна снова при покупке нового абонемента.</i>",
-            reply_markup=get_profile_keyboard(),
-            parse_mode='HTML'
-            )
-    except Exception as e:
-        if "message is not modified" in str(e):
-            await callback.answer("Данные обновлены!", show_alert=True)
-        else:
-            logger.error(f"❌ Ошибка при заморозке для {user_id}: {e}")
-            await callback.answer("Произошла ошибка при связи с базой данных", show_alert=True)
-
-        await callback.answer()
+    students = get_student_list(user_id)  # Твоя функция получения списка
+    if not students:
+        return await callback.answer("У вас нет зарегистрированных атлетов!", show_alert=True)
+    builder = InlineKeyboardBuilder()
+    for s in students:
+        if s.expire_date and s.expire_date > datetime.now():
+            builder.row(InlineKeyboardButton(text=f"❄️ {s.name}", callback_data=f"confirm_freeze_{s.id}"))
+    if not builder.as_markup().inline_keyboard:
+        return await callback.answer("Нет активных абонементов для заморозки!", show_alert=True)
+    builder.row(InlineKeyboardButton(text="⬅️ Назад", callback_data="my_profile"))
+    await callback.message.edit_text("Выберите атлета для заморозки (на 5 дней):", reply_markup=builder.as_markup())
 
 
 @router.callback_query(F.data == 'show_qr')
-async def send_user_qr(callback: types.CallbackQuery):
+async def choose_student_for_qr(callback: types.CallbackQuery):
     user_id = callback.from_user.id
-    user_name = callback.from_user.full_name
-    logger.debug(f"🎟 Запрос QR-пропуска: {user_name} (ID: {user_id})")
-    try:
-        time_salt = datetime.now().strftime('%Y-%m-%d-%H')
-        signature = generate_signature(user_id, time_salt)
-        qr_data = f'user:{user_id}:{time_salt}:{signature}'
-        qr_img = qrcode.make(qr_data)
-        buffer = BytesIO()
-        qr_img.save(buffer, format='PNG')
-        buffer.seek(0)
-        photo = BufferedInputFile(buffer.getvalue(), filename=f"qr_{user_id}.png")
-        await callback.message.answer_photo(
-            photo=photo,
-            caption="🎟 **Ваш динамический пропуск**\n\nПокажите этот код камере на входе. "
-                    "Система автоматически проверит абонемент и спишет занятие."
-        )
-        logger.success(f"✅ QR-код успешно отправлен: {user_id} (salt: {time_salt})")
-        await callback.answer()
-    except Exception as e:
-        logger.error(f"❌ Ошибка генерации QR для {user_id}: {e}")
-        await callback.answer("Ошибка при создании QR-кода. Попробуйте позже.", show_alert=True)
+    students = get_student_list(user_id)
+
+    if not students:
+        return await callback.answer("У вас нет зарегистрированных атлетов!", show_alert=True)
+
+    builder = InlineKeyboardBuilder()
+    for s in students:
+        builder.row(InlineKeyboardButton(text=f"🪪 {s.name}", callback_data=f"gen_qr_{s.id}"))
+
+    await callback.message.edit_text("Выберите, чей QR-код сформировать:", reply_markup=builder.as_markup())
+    await callback.answer()
 
 
 @router.message(F.web_app_data)
 async def parse_qr_scan(message: types.Message):
     raw_data = message.web_app_data.data
-    logger.info(f"🔍 Сканер (Admin ID: {message.from_user.id}) считал данные: {raw_data}")
+    logger.info(f"🔍 Сканер (Admin: {message.from_user.id}) считал: {raw_data}")
     try:
         parts = raw_data.split(':')
-        if len(parts) != 4 or parts[0] != 'user':
-            return await message.answer("❌ Ошибка: Неверный формат QR-кода")
+        if len(parts) != 4 or parts[0] != 'student':
+            return await message.answer("❌ Ошибка: Неверный формат QR (ожидался профиль атлета)")
+
         _, scanned_id_str, time_salt, signature = parts
-        scanned_id = int(scanned_id_str)
+        scanned_id = int(scanned_id_str)  # Это ID из таблицы students
         expected_sig = generate_signature(scanned_id, time_salt)
         if not hmac.compare_digest(signature, expected_sig):
-            logger.warning(f"🚨 Попытка взлома! Поддельный QR: {raw_data}")
-            return await message.answer("🚨 ВНИМАНИЕ: QR-код подделан или изменен!")
-
-    except Exception as e:
-        logger.error(f"❌ Ошибка валидации данных: {e}")
-        return await message.answer("❌ Ошибка при чтении данных кода")
-    now = datetime.now()
-    current_salt = now.strftime('%Y-%m-%d-%H')
-    previous_hour_salt = (now - timedelta(hours=1)).strftime('%Y-%m-%d-%H')
-    if time_salt != current_salt and time_salt != previous_hour_salt:
-        logger.info(f"⌛ Истекший QR: {scanned_id} (код за {time_salt})")
-        return await message.answer(
-            "⌛ Срок действия QR истек.\n"
-            "Пожалуйста, обновите пропуск в боте."
-        )
-    if time_salt == previous_hour_salt and now.minute > 5:
-        logger.warning(f"🚫 Слишком старый QR (прошлый час): {scanned_id}")
-        return await message.answer("⌛ Этот код слишком старый. Обновите его.")
-    with Session() as session:
-        user = session.get(User, scanned_id)
-        if not user:
-            logger.warning(f"🚫 Вход отклонен: Пользователь ID {scanned_id} не найден")
-            return await message.answer("❌ Пользователь не найден в базе!")
-        if user.last_visit:
-            logger.debug(f"⏳ Повторный вход (анти-флуд): {user.full_name} (ID: {scanned_id})")
-            if (now - user.last_visit).total_seconds() < 300:
+            logger.warning(f"🚨 Поддельный QR студента: {scanned_id}")
+            return await message.answer("🚨 ВНИМАНИЕ: QR-код подделан!")
+        now = datetime.now()
+        current_salt = now.strftime('%Y-%m-%d-%H')
+        previous_hour_salt = (now - timedelta(hours=1)).strftime('%Y-%m-%d-%H')
+        if time_salt != current_salt and time_salt != previous_hour_salt:
+            return await message.answer("⌛ Срок действия QR истек. Обновите его в боте.")
+        with Session() as session:
+            student = session.get(Student, scanned_id)
+            if not student:
+                return await message.answer("❌ Атлет не найден в базе!")
+            if student.last_visit and (now - student.last_visit).total_seconds() < 300:
+                return await message.answer(f"⚠️ {student.name} уже отмечен! Повтор через 5 мин.")
+            if not student.expire_date or student.expire_date < now:
                 return await message.answer(
-                    f"⚠️ {user.full_name} уже отмечен!\nПовторный вход через 5 минут."
+                    f"🔴 ДОСТУП ЗАПРЕЩЕН\n👤 {student.name}\n"
+                    f"❌ Истек: {student.expire_date.strftime('%d.%m.%Y') if student.expire_date else 'Нет данных'}"
                 )
-        if not user.expire_date:
-            logger.warning(f"🚫 Вход отклонен: У {user.full_name} ({scanned_id}) нет абонемента")
-            return await message.answer(f"❓ У {user.full_name} нет активного абонемента.")
-
-        if user.expire_date < now:
-            logger.warning(f"🔴 ДОСТУП ЗАПРЕЩЕН: {user.full_name} (истек {user.expire_date.strftime('%d.%m')})")
-            return await message.answer(
-                f"🔴 ДОСТУП ЗАПРЕЩЕН\n👤 {user.full_name}\n"
-                f"❌ Срок истек: {user.expire_date.strftime('%d.%m.%Y')}"
+            if student.is_frozen == 1:
+                student.is_frozen = 0
+                student.can_freeze = 0  # Например, нельзя морозить сразу после разморозки
+                await message.answer(f"❄️ Абонемент {student.name} разморожен!")
+            student.balance_lessons += 1
+            student.last_visit = now
+            current_lessons = student.balance_lessons
+            response_text = (
+                f"🟢 <b>ПРОХОДИТЕ</b>\n"
+                f"👤 Атлет: <b>{student.name}</b>\n"
+                f"✅ До: {student.expire_date.strftime('%d.%m.%Y')}\n"
+                f"📈 Посещение №{current_lessons}"
             )
-        if user.is_frozen == 1:
-            user.is_frozen = 0
-            logger.info(f"🧊 Авто-разморозка при входе: {user.full_name}")
-            await message.answer(f"❄️ Абонемент {user.full_name} автоматически разморожен.")
-        user.balance_lessons += 1
-        user.last_visit = now
-        current_lessons = user.balance_lessons
-        logger.success(f"🔓 ДОСТУП РАЗРЕШЕН: {user.full_name} (ID: {scanned_id}). Посещение №{current_lessons}")
-        response_text = (
-            f"🟢 <b>ПРОХОДИТЕ</b>\n"
-            f"👤 {user.full_name}\n"
-            f"✅ Действует до : {user.expire_date.strftime('%d.%m.%Y')}\n"
-            f"📈 Посещений за период: {current_lessons}"
-        )
-        session.commit()
-    await message.answer(response_text, parse_mode="HTML")
-    try:
-        await message.bot.send_message(
-            scanned_id,
-            f"🔔 Вход зафиксирован. Приятной тренировки!\n📈 Ваше посещение №{current_lessons}"
-        )
+            parent_to_notify = student.parent_id
+            session.commit()
+        await message.answer(response_text, parse_mode="HTML")
+        try:
+            await message.bot.send_message(
+                parent_to_notify,
+                f"🔔 Вход зафиксирован: <b>{student.name}</b>\nПриятной тренировки! 💪"
+            )
+        except Exception:
+            pass
     except Exception as e:
-        logger.error(f"✉️ Не удалось отправить уведомление пользователю {scanned_id}: {e}")
+        logger.error(f"❌ Ошибка сканера: {e}")
+        await message.answer("❌ Ошибка при чтении данных")
+
+
+@router.callback_query(F.data.startswith("gen_qr_"))
+async def handle_gen_qr(callback: types.CallbackQuery):
+    student_id = int(callback.data.split("_")[-1])
+    now = datetime.now()
+    time_salt = now.strftime('%Y-%m-%d-%H')
+    signature = generate_signature(student_id, time_salt)
+
+    qr_data = f"student:{student_id}:{time_salt}:{signature}"
+    qr = qrcode.QRCode(version=1, box_size=10, border=5)
+    qr.add_data(qr_data)
+    qr.make(fit=True)
+    img = qr.make_image(fill_color="black", back_color="white")
+    io_bytes = io.BytesIO()
+    img.save(io_bytes, format='PNG')
+    io_bytes.seek(0)
+    photo = BufferedInputFile(io_bytes.getvalue(), filename=f"qr_{student_id}.png")
+    await callback.message.answer_photo(
+        photo=photo,
+        caption=f"🎫 QR-код для входа.\nДействует 1 час, затем нужно обновить."
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "add_athlete")
+async def start_add_athlete(callback: types.CallbackQuery, state: FSMContext):
+    await callback.message.answer("Введите Имя и Фамилию атлета (себя или ребенка):")
+    await state.set_state(RegistrationStates.waiting_for_name)
+    await callback.answer()
+
+
+@router.message(RegistrationStates.waiting_for_name)
+async def process_athlete_name(message: types.Message, state: FSMContext):
+    name = message.text
+    user_id = message.from_user.id
+    try:
+        with Session() as session:
+            new_student = Student(
+                parent_id=user_id,
+                name=name,
+                expire_date=None,
+                balance_lessons=0
+            )
+            session.add(new_student)
+            session.commit()
+        logger.success(f"👤 Добавлен новый атлет: {name} для родителя {user_id}")
+        await message.answer(
+            f"✅ Атлет <b>{name}</b> успешно зарегистрирован!\n\n"
+            "Теперь вы можете купить абонемент или сформировать QR-пропуск в меню.",
+            parse_mode="HTML",
+            reply_markup=get_main_menu_keyboard()
+        )
+        await state.clear()
+    except Exception as e:
+        logger.error(f"❌ Ошибка при добавлении атлета: {e}")
+        await message.answer("Произошла ошибка. Попробуйте позже.")

@@ -1,4 +1,4 @@
-from aiogram import Router, types, F
+from aiogram import Router, types
 from aiogram.filters import Command
 from handlers.buttons import get_main_menu_keyboard
 from database.db import Session, User
