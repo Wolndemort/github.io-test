@@ -52,6 +52,9 @@ def admin_keyboard():
     builder.row(types.InlineKeyboardButton(text='📢 Рассылка всем', callback_data='admin_broadcast'))
     builder.row(types.InlineKeyboardButton(text='📥 Выгрузка БД (CSV)', callback_data='export_db'))
     builder.row(types.InlineKeyboardButton(text='🔙 Назад', callback_data='begin'))
+    builder.row(types.InlineKeyboardButton(text="🆕 Добавить нового (вручную)", callback_data="admin_add_manual"))
+    builder.row(types.InlineKeyboardButton(text="💵 Принять наличку", callback_data="admin_cash_list"))
+
     return builder.as_markup()
 
 

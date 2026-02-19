@@ -8,6 +8,7 @@ from config import ADMIN_IDS, secret_key
 from sqlalchemy import select
 from handlers.buttons import get_bjj_keyboard, get_kids_keyboard, get_main_menu_keyboard, admin_keyboard, \
     get_scanner_keyboard, get_profile_keyboard, discipline
+from handlers.states import AdminManualAdd
 from database.db import add_abon
 from aiogram.filters import Command
 import os
@@ -465,7 +466,7 @@ async def show_daily_report(callback: types.CallbackQuery):
 @router.callback_query(F.data == "freeze_sub")
 async def choose_student_for_freeze(callback: types.CallbackQuery):
     user_id = callback.from_user.id
-    students = get_student_list(user_id)  # Твоя функция получения списка
+    students = get_student_list(user_id)
     if not students:
         return await callback.answer("У вас нет зарегистрированных атлетов!", show_alert=True)
     builder = InlineKeyboardBuilder()
@@ -608,3 +609,119 @@ async def process_athlete_name(message: types.Message, state: FSMContext):
     except Exception as e:
         logger.error(f"❌ Ошибка при добавлении атлета: {e}")
         await message.answer("Произошла ошибка. Попробуйте позже.")
+
+
+
+
+@router.callback_query(F.data == 'admin_add_manual')
+async def manual_add_start(callback: types.CallbackQuery, state: FSMContext):
+    await callback.message.answer("📝 Введите Имя и Фамилию нового атлета:")
+    await state.set_state(AdminManualAdd.waiting_for_name)
+    await callback.answer()
+
+
+@router.message(AdminManualAdd.waiting_for_name)
+async def manual_add_process_name(message: types.Message, state: FSMContext):
+    student_name = message.text
+    with Session() as session:
+
+        new_student = Student(
+            name=student_name,
+            parent_id=0,
+            expire_date=None,
+            balance_lessons=0
+        )
+        session.add(new_student)
+        session.commit()
+        student_id = new_student.id
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text="💵 Оплатил наличными", callback_data=f"confirm_cash_{student_id}"))
+    builder.row(InlineKeyboardButton(text="🏠 В меню", callback_data="admin_main"))
+
+    await message.answer(
+        f"✅ Атлет <b>{student_name}</b> (ID: {student_id}) добавлен в базу!\n\n"
+        f"Хотите сразу активировать абонемент?",
+        reply_markup=builder.as_markup(),
+        parse_mode="HTML"
+    )
+    await state.clear()
+
+
+@router.callback_query(F.data == "admin_cash_list")
+async def show_all_students_for_cash(callback: types.CallbackQuery):
+    with Session() as session:
+        students = session.query(Student).all()
+
+    if not students:
+        return await callback.answer("В базе пока пусто", show_alert=True)
+
+    builder = InlineKeyboardBuilder()
+    for s in students:
+        builder.row(InlineKeyboardButton(text=f"👤 {s.name}", callback_data=f"cash_pay_{s.id}"))
+
+    builder.row(InlineKeyboardButton(text="⬅️ Назад", callback_data="admin_main"))
+
+    await callback.message.edit_text("Выберите атлета для оплаты наличными:", reply_markup=builder.as_markup())
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("cash_pay_"))
+async def process_cash_payment(callback: types.CallbackQuery):
+    student_id = int(callback.data.split("_")[-1])
+    result = add_abon(student_id)
+
+    if result:
+        new_expire, parent_id = result
+        await callback.message.edit_text(
+            f"✅ <b>Оплата наличными принята!</b>\n"
+            f"Абонемент атлета продлен до: <b>{new_expire}</b>",
+            parse_mode="HTML"
+        )
+        if parent_id and parent_id != 0:
+            try:
+                await callback.bot.send_message(
+                    chat_id=parent_id,
+                    text=f"💵 <b>Ваша оплата (наличными) подтверждена!</b>\n"
+                         f"Абонемент продлен до: <b>{new_expire}</b>. Спасибо!",
+                    parse_mode="HTML"
+                )
+            except Exception as e:
+                logger.error(f"Не удалось отправить уведомление: {e}")
+    else:
+        await callback.answer("Ошибка: студент не найден", show_alert=True)
+
+
+@router.callback_query(F.data == "admin_cash_search")
+async def cash_search_start(callback: types.CallbackQuery, state: FSMContext):
+    await callback.message.answer("🔍 Введите имя или фамилию для поиска:")
+    await state.set_state(AdminManualAdd.waiting_for_search)
+    await callback.answer()
+
+
+# 1. Начинаем поиск
+@router.callback_query(F.data == "admin_cash_search")
+async def cash_search_start(callback: types.CallbackQuery, state: FSMContext):
+    await callback.message.answer("🔍 Введите имя или фамилию для поиска:")
+    await state.set_state(AdminManualAdd.waiting_for_search)
+    await callback.answer()
+
+
+@router.message(AdminManualAdd.waiting_for_search)
+async def cash_search_results(message: types.Message, state: FSMContext):
+    search_query = f"%{message.text}%"
+    with Session() as session:
+        results = session.query(Student).filter(Student.name.like(search_query)).all()
+    if not results:
+        return await message.answer(
+            "❌ Никого не нашел. Попробуйте ввести имя точнее или напишите 'отмена'.",
+            reply_markup=InlineKeyboardBuilder().row(
+                InlineKeyboardButton(text="❌ Отмена", callback_data="admin_main")
+            ).as_markup()
+        )
+    builder = InlineKeyboardBuilder()
+    for s in results:
+        builder.row(InlineKeyboardButton(text=f"👤 {s.name}", callback_data=f"cash_pay_{s.id}"))
+    builder.row(InlineKeyboardButton(text="⬅️ В админку", callback_data="admin_main"))
+
+    await message.answer(f"🔍 Найдено атлетов: {len(results)}", reply_markup=builder.as_markup())
+    await state.clear()
