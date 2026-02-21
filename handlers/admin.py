@@ -22,8 +22,6 @@ from datetime import datetime
 from loguru import logger
 import hashlib
 import hmac
-
-
 from handlers.states import PaymentStates, RegistrationStates
 
 
@@ -45,8 +43,15 @@ class AdminStates(StatesGroup):
 
 
 @router.message(Command('admin'), F.from_user.id.in_(ADMIN_IDS))
-async def admin_panel(message: types.Message):
-    admin = message.from_user
+@router.callback_query(F.data == "admin", F.from_user.id.in_(ADMIN_IDS))
+async def admin_panel(event: types.Message | types.CallbackQuery):
+    if isinstance(event, types.CallbackQuery):
+        message = event.message
+        await event.answer()
+        await message.delete()
+    else:
+        message = event
+    admin = event.from_user
     logger.info(f"🔑 Админ {admin.full_name} (ID: {admin.id}) открыл панель управления")
     try:
         all_users = await get_all_users_count()
@@ -84,72 +89,46 @@ async def go_to_begin(callback: types.CallbackQuery, state: FSMContext):
     await callback.answer()
 
 
-@router.callback_query(F.data == 'check_status_now')
-async def show_profile(callback: types.CallbackQuery):
+@router.callback_query(F.data.in_(['profile', 'check_status_now']))
+async def universal_profile_handler(callback: types.CallbackQuery):
     user_id = callback.from_user.id
-    logger.debug(f"🔍 Проверка статуса для ID: {user_id}")
-    students = await get_all_subscriptions(user_id)
     now = datetime.now()
-
-    if not students:
-        text = "💎 <b>У вас нет зарегистрированных атлетов.</b>\nДобавьте профиль в личном кабинете."
-    else:
-        text = "📋 <b>Статус ваших абонементов:</b>\n\n"
-        for s in students:
-            if not s.expire_date:
-                status = "❌ <b>Не куплен</b>"
-            elif s.is_frozen:
-                status = "❄️ <b>ЗАМОРОЖЕН</b>"
-            elif s.expire_date > now:
-                status = f"✅ <b>Активен</b> до <code>{s.expire_date.strftime('%d.%m.%Y')}</code>"
-            else:
-                status = f"🔴 <b>ИСТЕК</b> (<code>{s.expire_date.strftime('%d.%m.%Y')}</code>)"
-            text += f"👤 {s.name}: {status}\n"
+    logger.debug(f"🔍 Запрос профиля/статуса для ID: {user_id} (кнопка: {callback.data})")
     try:
+        students = await get_all_subscriptions(user_id)
+        if not students:
+            status_text = ("⚠️ <b>У вас еще нет зарегистрированных атлетов.</b>\n"
+                           "Добавьте профиль в личном кабинете, чтобы пользоваться функциями клуба.")
+        else:
+            status_text = "🆔 <b>Ваши профили:</b>\n"
+            for s in students:
+                if not s.expire_date:
+                    status = "❌ <b>Не куплен</b>"
+                elif s.is_frozen:
+                    status = "❄️ <b>ЗАМОРОЖЕН</b>"
+                elif s.expire_date > now:
+                    status = f"✅ <b>Активен</b> до <code>{s.expire_date.strftime('%d.%m.%Y')}</code>"
+                else:
+                    status = f"🔴 <b>ИСТЕК</b> (<code>{s.expire_date.strftime('%d.%m.%Y')}</code>)"
+                status_text += f"\n• <b>{s.name}</b>: {status}"
         await callback.message.edit_text(
-            text=text,
+            text=f"👤 <b>Личный кабинет</b>\n\n{status_text}\n\n"
+                 "<i>Используйте кнопки ниже для управления:</i>",
             reply_markup=get_profile_keyboard(),
             parse_mode="HTML"
         )
+        logger.debug(f"✅ Профиль ID {user_id} успешно отображен")
+
     except Exception as e:
         if "message is not modified" in str(e):
             await callback.answer("Данные актуальны")
+            logger.debug(f"ℹ️ Профиль ID {user_id} не изменился")
         else:
-            logger.error(f"❌ Ошибка в show_profile: {e}")
-            await callback.answer("Ошибка связи с базой")
+            logger.error(f"❌ Ошибка в профиле для ID {user_id}: {e}", exc_info=True)
+            await callback.answer("Ошибка связи с базой данных")
 
-
-@router.callback_query(F.data == 'profile')
-async def open_profile_menu(callback: types.CallbackQuery):
-    user_id = callback.from_user.id
-    now = datetime.now()
-    async with AsyncSessionLocal() as session:
-        stmt = session(Student).where(Student.parent_id == user_id)
-        result = await session.execute(stmt)
-        students = result.scalars().all()
-    if not students:
-        status_text = "⚠️ <b>У вас еще нет зарегистрированных атлетов.</b>\n" \
-                      "Добавьте себя или ребенка, чтобы пользоваться функциями клуба."
-    else:
-        status_text = "🆔 <b>Ваши профили:</b>\n"
-        for s in students:
-            if not s.expire_date:
-                status = "❌ Нет абонемента"
-            elif s.expire_date < now:
-                status = f"🔴 Истек ({s.expire_date.strftime('%d.%m')})"
-            elif s.is_frozen:
-                status = "❄️ ЗАМОРОЖЕН"
-            else:
-                status = f"✅ Активен до {s.expire_date.strftime('%d.%m')}"
-
-            status_text += f"\n• <b>{s.name}</b>: {status}"
-    await callback.message.edit_text(
-        f"👤 <b>Личный кабинет</b>\n\n{status_text}\n\n"
-        "<i>Используйте кнопки ниже для управления абонементами:</i>",
-        reply_markup=get_profile_keyboard(),
-        parse_mode="HTML"
-    )
-    await callback.answer()
+    finally:
+        await callback.answer()
 
 
 @router.callback_query(F. data == 'bjj')
@@ -165,7 +144,7 @@ async def bjj_info(callback: types.CallbackQuery):
 @router.callback_query(F.data == 'kids')
 async def kids_menu(callback: types.CallbackQuery):
     await callback.message.edit_text(
-        text='🤼‍♂️ <b>GRAPPLING KIDS (Детская борьба)</b>\n'
+        text='🤼‍♂️ <b>Джиу-джитсу дети (Детская борьба)</b>\n'
              '\nСекция для детей от 4 лет. Развиваем силу, гибкость и дисциплину!',
         parse_mode='HTML',
         reply_markup=get_kids_keyboard()
@@ -178,7 +157,7 @@ async def bjj_price(callback: types.CallbackQuery):
     user = callback.from_user
     logger.info(f"💰 Юзер {user.full_name} (ID: {user.id}) открыл прайс-лист BJJ")
     text = (
-        "💰 <b>Стоимость абонементов BJJ:</b>\n\n"
+        "💰 <b>Стоимость абонементов Джиу-джитсу:</b>\n\n"
         "• Первая тренировка бесплатно\n"
         "• Разовая тренировка — 700₽\n"
         "• Месяц (24 занятия) — 5000₽\n"
@@ -200,11 +179,12 @@ async def bjj_price(callback: types.CallbackQuery):
 @router.callback_query(F.data == 'schedule_bjj')
 async def bjj_schedule(callback: types.CallbackQuery):
     text = (
-        "🗓 <b>Расписание BJJ:</b>\n\n"
-        "• Вторник: 20:00\n"
-        "• Вторник: 20:00\n"
-        "• Четверг: 20:00\n"
-        "• Суббота: 12:00"
+        "🗓 <b>Расписание Джиу-джитсу(GI-в кимоно/noGI-без кимоно):</b>\n\n"
+        "• Понедельник GI: 20:00\n"
+        "• Вторник noGI: 20:00\n"
+        "• Среда GI: 20:00\n"
+        "• Четверг noGI: 20:00\n"
+        "• Пятница noGI(День борьбы): 20:00\n"
     )
     await callback.message.edit_text(text=text, parse_mode='HTML', reply_markup=get_bjj_keyboard())
     await callback.answer()
@@ -235,7 +215,7 @@ async def kids_price(callback: types.CallbackQuery):
 @router.callback_query(F.data == 'schedule_kids')
 async def kids_schedule(callback: types.CallbackQuery):
     text = (
-        "🗓 <b>Расписание GRAPPLING KIDS:</b>\n\n"
+        "🗓 <b>Расписание Джиу-Джитсу дети:\n\n</b>"
         "• Вторник: 17:00\n"
         "• Четверг: 17:00\n"
     )
@@ -267,12 +247,12 @@ async def buy_handler(callback: types.CallbackQuery, state: FSMContext):
             text=f"🥋 {s.name}",
             callback_data=f"student_pay_{s.id}")
         )
-    builder.row(InlineKeyboardButton(text="⬅️ Назад", callback_data="profile"))
+    builder.row(InlineKeyboardButton(text="⬅️ Назад", callback_data="begin"))
     await callback.message.edit_text(
-        f"Вы выбрали направление: **{sport_type.upper()}**\n"
+        f"Вы выбрали направление: <b>{sport_type.upper()}\n</b>"
         "Теперь выберите, за кого вносится оплата:",
         reply_markup=builder.as_markup(),
-        parse_mode="Markdown"
+        parse_mode="HTML"
     )
     await callback.answer()
 
@@ -283,12 +263,12 @@ async def request_receipt(callback: types.CallbackQuery, state: FSMContext):
     await state.update_data(chosen_student_id=student_id)
     await state.set_state(PaymentStates.waiting_for_receipt)
     await callback.message.edit_text(
-        "💳 **Реквизиты для перевода:**\n\n"
+        "💳 <b>Реквизиты для перевода:\n\n</b>"
         "Сумма: 5000₽/4000\n"
         "СПБ: `+79606666165` (Адам.О)\n"
         "Банк: Тинькофф\n\n"
-        "⚠️ **Важно:** После оплаты пришлите **скриншот чека** ответным сообщением в этот чат.",
-        parse_mode="Markdown")
+        "⚠️<b> Важно: После оплаты пришлите **скриншот чека** ответным сообщением в этот чат.</b>",
+        parse_mode="HTML")
     await callback.answer()
 
 
@@ -362,10 +342,10 @@ async def admin_panel(message: types.Message):
     )
 
 
-@router.message(F.text == "📢 Рассылка", F.from_user.id.in_(ADMIN_IDS))
-async def start_broadcast(message: types.Message, state: FSMContext):
+@router.callback_query(F.data == "admin_broadcast", F.from_user.id.in_(ADMIN_IDS))
+async def start_broadcast(callback: types.CallbackQuery, state: FSMContext):
     await state.set_state(AdminStates.waiting_for_broadcast_text)
-    await message.answer("Введите текст или отправьте фото/видео для рассылки всем пользователям:")
+    await callback.message.answer("Введите текст или отправьте фото/видео для рассылки всем пользователям:")
 
 
 @router.message(AdminStates.waiting_for_broadcast_text, F.from_user.id.in_(ADMIN_IDS))
@@ -374,7 +354,8 @@ async def perform_broadcast(message: types.Message, state: FSMContext):
     logger.warning(f"📢 Админ {admin.full_name} (ID: {admin.id}) запустил массовую рассылку!")
     try:
         async with AsyncSessionLocal() as session:
-            users_ids = await session.scalars(select(User.user_id)).all()
+            result = await session.execute(select(User.user_id))
+            users_ids = result.scalars().all()
     except Exception as e:
         logger.error(f"❌ Ошибка БД при получении списка ID для рассылки: {e}")
         return await message.answer("Ошибка доступа к базе данных.")
@@ -388,7 +369,7 @@ async def perform_broadcast(message: types.Message, state: FSMContext):
     await message.answer(f"🚀 Рассылка началась (всего: {total} чел.)...")
     for user_id in users_ids:
         try:
-            await message.send_copy(chat_id=user_id)
+            await message.copy_to(chat_id=user_id, reply_markup=None)
             count_success += 1
             await asyncio.sleep(0.05)
         except Exception as e:
@@ -414,12 +395,10 @@ async def export_database(callback: types.CallbackQuery):
     await callback.answer("⏳ Собираю данные из Postgres...")
     try:
         async with AsyncSessionLocal() as session:
-            users_stmt = select(User)
-            students_stmt = select(Student)
-            users_res = await session.execute(users_stmt)
-            students_res = await session.execute(students_stmt)
+            users_res = await session.execute(select(User))
+            students_res = await session.execute(select(Student))
             users_data = [
-                {"user_id": u.user_id, "parent_name": u.full_name}
+                {"parent_id": u.user_id, "parent_name": u.full_name}
                 for u in users_res.scalars().all()
             ]
             students_data = [
@@ -436,9 +415,9 @@ async def export_database(callback: types.CallbackQuery):
         df_parents = pd.DataFrame(users_data)
         df_students = pd.DataFrame(students_data)
         if not df_students.empty and not df_parents.empty:
-            df_full = pd.merge(df_students, df_parents, on='user_id', how='left')
+            df_full = pd.merge(df_students, df_parents, on='parent_id', how='left')
         else:
-            df_full = df_students  # Если одна из таблиц пуста
+            df_full = df_students
         df_full.to_csv(file_path, index=False, encoding='utf-8-sig')
         await callback.message.answer_document(
             FSInputFile(file_path),
@@ -521,7 +500,7 @@ async def parse_qr_scan(message: types.Message):
             return await message.answer("❌ Ошибка: Неверный формат QR (ожидался профиль атлета)")
 
         _, scanned_id_str, time_salt, signature = parts
-        scanned_id = int(scanned_id_str)  # Это ID из таблицы students
+        scanned_id = int(scanned_id_str)
         expected_sig = generate_signature(scanned_id, time_salt)
         if not hmac.compare_digest(signature, expected_sig):
             logger.warning(f"🚨 Поддельный QR студента: {scanned_id}")
@@ -544,7 +523,7 @@ async def parse_qr_scan(message: types.Message):
                 )
             if student.is_frozen == 1:
                 student.is_frozen = 0
-                student.can_freeze = 0  # Например, нельзя морозить сразу после разморозки
+                student.can_freeze = 0
                 await message.answer(f"❄️ Абонемент {student.name} разморожен!")
             student.balance_lessons += 1
             student.last_visit = now
@@ -669,7 +648,7 @@ async def show_all_students_for_cash(callback: types.CallbackQuery):
     builder = InlineKeyboardBuilder()
     for s in students:
         builder.row(InlineKeyboardButton(text=f"👤 {s.name}", callback_data=f"cash_pay_{s.id}"))
-    builder.row(InlineKeyboardButton(text="⬅️ Назад", callback_data="admin_main"))
+    builder.row(InlineKeyboardButton(text="⬅️ Назад", callback_data="admin"))
     await callback.message.edit_text("Выберите атлета для оплаты наличными:", reply_markup=builder.as_markup())
     await callback.answer()
 

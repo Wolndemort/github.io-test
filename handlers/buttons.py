@@ -25,7 +25,6 @@ def get_main_menu_keyboard():
     builder.button(text="Абонементы", web_app=WebAppInfo(url='https://wolndemort.github.io'))
     builder.button(text="Контакты", callback_data='contact')
     builder.button(text='Открыть сайт', url="https://aemaykop.ru")
-    builder.row(types.InlineKeyboardButton(text='Проверить статус абонемента', callback_data='check_status_now'))
     builder.row(types.InlineKeyboardButton(text='👤 МОЙ ПРОФИЛЬ ', callback_data='profile'))
     builder.adjust(2)
     return builder.as_markup()
@@ -33,15 +32,20 @@ def get_main_menu_keyboard():
 
 def get_bjj_keyboard():
     builder = InlineKeyboardBuilder()
-    builder.row(types.InlineKeyboardButton(text='💳 Купить абонемент (5000₽)', callback_data='buy_bjj'))
-    builder.row(types.InlineKeyboardButton(text='🔙 Назад к секциям', callback_data='choose_section'))
+    builder.row(types.InlineKeyboardButton(text='Информация по ценам на абонемент по Джиу-Джитсу',
+                                           callback_data='price_bjj'))
+    builder.row(types.InlineKeyboardButton(text='Расписание Джиу-Джитсу', callback_data='schedule_bjj'))
+    builder.row(types.InlineKeyboardButton(text='💳 Купить абонемент ', callback_data='buy_bjj'))
+    builder.row(types.InlineKeyboardButton(text='🔙 Назад', callback_data='begin'))
     return builder.as_markup()
 
 
 def get_kids_keyboard():
     builder = InlineKeyboardBuilder()
-    builder.row(types.InlineKeyboardButton(text='💳 Купить за 4000₽', callback_data='buy_kids'))
-    builder.row(types.InlineKeyboardButton(text='🔙 Назад к секциям', callback_data='choose_section'))
+    builder.row(types.InlineKeyboardButton(text='Информация по ценам на десткий абонемент', callback_data='price_kids'))
+    builder.row(types.InlineKeyboardButton(text='Расписание Джиу-джитсу для детей', callback_data='schedule_kids'))
+    builder.row(types.InlineKeyboardButton(text='💳 Купить абонемент', callback_data='buy_kids'))
+    builder.row(types.InlineKeyboardButton(text='🔙 Назад ', callback_data='begin'))
     return builder.as_markup()
 
 
@@ -69,8 +73,7 @@ def get_scanner_keyboard():
 
 def discipline():
     builder = InlineKeyboardBuilder()
-    builder.row(types.InlineKeyboardButton(text='ММА 🥊', callback_data='buy_mma'))
-    builder.row(types.InlineKeyboardButton(text='БЖЖ 🥋', callback_data='buy_bjj'))
-    builder.row(types.InlineKeyboardButton(text='ДЕТИ (Kids) 👶', callback_data='buy_kids'))
-    builder.row(types.InlineKeyboardButton(text='⬅️ Назад в профиль', callback_data='profile'))
+    builder.row(types.InlineKeyboardButton(text='Взрослые BJJ 🥋', callback_data='buy_bjj'))
+    builder.row(types.InlineKeyboardButton(text='ДЕТИ (Kids) BJJ👶', callback_data='buy_kids'))
+    builder.row(types.InlineKeyboardButton(text='⬅️ В главное меню', callback_data='begin'))
     return builder.as_markup()

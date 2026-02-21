@@ -1,15 +1,16 @@
 from typing import Optional, List
 from sqlalchemy.orm import Mapped, DeclarativeBase, mapped_column, relationship
-from sqlalchemy import BigInteger, DateTime, String, func,select, Integer, ForeignKey, text
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+from sqlalchemy import BigInteger, DateTime, String, func,select, Integer, ForeignKey
+from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 from config import db_file
 from datetime import datetime, timedelta
 from loguru import logger
-
+import asyncio
 
 
 engine = create_async_engine(db_file, echo=False)
 AsyncSessionLocal = async_sessionmaker(bind=engine, expire_on_commit=False)
+
 
 class Base(DeclarativeBase):
     pass
@@ -179,3 +180,14 @@ async def get_active_subs_count():
     except Exception as e:
         logger.error(f" Ошибка счета активных подписок: {e}")
         return 0
+
+
+async def create_db_backup():
+    backup_path = f"backup_{datetime.now().strftime('%Y-%m-%d')}.sql"
+    command = f"pg_dump -h db -p 5432 -U postgres crm_db > {backup_path}"
+    process = await asyncio.create_subprocess_shell(
+        command,
+        env={"PGPASSWORD": "lordwolndemort0195"}  # Чтобы не спрашивал пароль
+    )
+    await process.wait()
+    return backup_path

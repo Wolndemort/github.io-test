@@ -19,7 +19,7 @@ services:
     depends_on:
       - db  # Бот не запустится, пока не поднимется база
     env_file:
-      - .en
+      - .env
     environment:
       DB_FILE: "postgresql+asyncpg://postgres:lordwolndemort0195@db:5432/crm_db"
     volumes:

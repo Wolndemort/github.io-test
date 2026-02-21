@@ -7,5 +7,3 @@ BOT_TOKEN = os.getenv('BOT_TOKEN')
 admin_id_str = os.getenv('ADMIN_IDS', '')
 ADMIN_IDS = [int(i.strip()) for i in admin_id_str.split(',') if i.strip()]
 secret_key = os.getenv('SECRET_KEY')
-
-
