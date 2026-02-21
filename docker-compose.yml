@@ -7,7 +7,7 @@ services:
     restart: always
     environment:
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: lordwolndemort0195
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
       POSTGRES_DB: crm_db
     volumes:
       - pg_data:/var/lib/postgresql/data
@@ -17,14 +17,30 @@ services:
     container_name: gym_bot
     restart: always
     depends_on:
-      - db  # Бот не запустится, пока не поднимется база
+      - db
     env_file:
       - .env
     environment:
-      DB_FILE: "postgresql+asyncpg://postgres:lordwolndemort0195@db:5432/crm_db"
+      DB_FILE: "postgresql+asyncpg://postgres:${DB_PASSWORD}@db:5432/crm_db"
     volumes:
       - .:/app
       - ./logs:/app/logs
+
+  gym-api:
+    build: .
+    container_name: gym_crm_api
+    restart: always
+    command: uvicorn main:app --host 0.0.0.0 --port 8000
+    depends_on:
+      - db
+    env_file:
+      - .env
+    environment:
+      DB_FILE: "postgresql+asyncpg://postgres:${DB_PASSWORD}@db:5432/crm_db"
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app
 
 volumes:
   pg_data:

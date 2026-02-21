@@ -1,24 +1,69 @@
+import asyncio
 import os
 import sys
-
-from aiogram.types import FSInputFile
-from loguru import logger
-from middlewares.logging_middleware import LoggingMiddleware
-import asyncio
 from datetime import datetime
-from config import ADMIN_IDS
-from aiogram import Bot, Dispatcher
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from handlers import start, admin, buttons
-from database.db import init_db, get_daily_stats, get_expire_students, create_db_backup
-from handlers.buttons import get_profile_keyboard
-from config import BOT_TOKEN
-from aiogram.fsm.storage.memory import MemoryStorage
 
+from aiogram import Bot, Dispatcher
+from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.types import FSInputFile
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from fastapi import FastAPI, Depends, HTTPException
+from loguru import logger
+from pydantic import BaseModel
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
+from handlers.sqladmin import setup_admin
+
+from config import ADMIN_IDS
+from config import BOT_TOKEN
+from database.db import User, Student, engine
+from database.db import get_session
+from database.db import init_db, get_daily_stats, get_expire_students, create_db_backup
+from handlers import start, admin, buttons
+from handlers.buttons import get_profile_keyboard
+from middlewares.logging_middleware import LoggingMiddleware
 
 logger.remove()
 logger.add(sys.stderr, level='INFO')
 logger.add('logs/bot_log.log', rotation='1 MB', retention='10 days', compression="zip", enqueue=True)
+
+
+app = FastAPI(title="GymManagement API")
+setup_admin(app, engine)
+
+
+class StudentCreate(BaseModel):
+    name: str
+    parent_id: int
+
+
+@app.post("/students")
+async def create_student(data: StudentCreate, session: AsyncSession = Depends(get_session)):
+    new_student = Student(name=data.name, parent_id=data.parent_id)
+    session.add(new_student)
+    await session.commit()
+    return {"status": "success", "student": new_student.name}
+
+
+@app.get("/users", response_model=None)
+async def get_all_users(session: AsyncSession = Depends(get_session)):
+    query = select(User).options(selectinload(User.students))
+    result = await session.execute(query)
+    users = result.scalars().all()
+    return users
+
+
+@app.get("/students/{student_id}")
+async def get_student_info(student_id: int, session: AsyncSession = Depends(get_session)):
+    """Получить детальную информацию по конкретному ученику"""
+    query = select(Student).where(Student.id == student_id)
+    result = await session.execute(query)
+    student = result.scalar_one_or_none()
+
+    if not student:
+        raise HTTPException(status_code=404, detail="Student not found")
+    return student
 
 
 async def send_backup_to_admin(bot: Bot):

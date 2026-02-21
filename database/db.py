@@ -1,7 +1,7 @@
 from typing import Optional, List
 from sqlalchemy.orm import Mapped, DeclarativeBase, mapped_column, relationship
 from sqlalchemy import BigInteger, DateTime, String, func,select, Integer, ForeignKey
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from config import db_file
 from datetime import datetime, timedelta
 from loguru import logger
@@ -191,3 +191,8 @@ async def create_db_backup():
     )
     await process.wait()
     return backup_path
+
+
+async def get_session() -> AsyncSession:
+    async with AsyncSessionLocal() as session:
+        yield session
