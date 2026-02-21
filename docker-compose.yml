@@ -1,18 +1,30 @@
 version: '3.8'
 
 services:
-  gym_bot:
-    build: .
-    container_name: gym_manager_app
-    environment:
-      - TZ=Europe/Moscow
+  db:
+    image: postgres:15-alpine
+    container_name: gym_db
     restart: always
-    command: watchmedo auto-restart --recursive --pattern="*.py" --directory="." python main.py
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: lordwolndemort0195
+      POSTGRES_DB: crm_db
+    volumes:
+      - pg_data:/var/lib/postgresql/data
 
+  bot:
+    build: .
+    container_name: gym_bot
+    restart: always
+    depends_on:
+      - db  # Бот не запустится, пока не поднимется база
+    env_file:
+      - .en
+    environment:
+      DB_FILE: "postgresql+asyncpg://postgres:lordwolndemort0195@db:5432/crm_db"
     volumes:
       - .:/app
-      - ./database:/app/database
       - ./logs:/app/logs
 
-    env_file:
-      - .env
+volumes:
+  pg_data:

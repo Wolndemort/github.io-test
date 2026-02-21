@@ -19,7 +19,7 @@ logger.add('logs/bot_log.log', rotation='1 MB', retention='10 days', compression
 
 
 async def check_abon_mailing(bot: Bot):
-    students = get_expire_students()
+    students = await get_expire_students()
     logger.info(f"Начинаю рассылку для {len(students)} атлетов")
 
     for s in students:
@@ -31,8 +31,6 @@ async def check_abon_mailing(bot: Bot):
                 f"Дата окончания: <code>{s.expire_date.strftime('%d.%m.%Y')}</code>\n\n"
                 f"Не забудьте продлить его в меню абонементов! 🥊"
             )
-
-
             await bot.send_message(
                 chat_id=s.parent_id,
                 text=text,
@@ -49,7 +47,7 @@ async def check_abon_mailing(bot: Bot):
 
 async def send_daily_report_to_admins(bot: Bot):
     try:
-        visits, active = get_daily_stats()
+        visits, active = await get_daily_stats()
         logger.info(f"Сбор статистики завершен:{visits} визитов, {active} активных")
     except Exception as e:
         logger.critical(f"Критическая ошибка при получении статистики из БД: {e}")
@@ -69,7 +67,7 @@ async def send_daily_report_to_admins(bot: Bot):
 
 async def main():
     logger.info("Инициализация базы данных...")
-    init_db()
+    await init_db()
     bot = Bot(token=BOT_TOKEN)
     dp = Dispatcher(storage=MemoryStorage())
     dp.message.outer_middleware(LoggingMiddleware())
@@ -87,7 +85,6 @@ async def main():
         await bot.session.close()
 if __name__ == '__main__':
     try:
-        # Запускаем асинхронную функцию main
         asyncio.run(main())
     except KeyboardInterrupt:
         logger.warning("⭕ Бот остановлен пользователем")
@@ -95,8 +92,15 @@ if __name__ == '__main__':
 
 
 
-# СРОЧНО ДОБАВИТЬ ДЛЯ АДМИНА ВОЗМОЖНОСТЬ ОФОРМЛЯТЬ АБОНЕМЕНТЫ ВРУЧНУЮ И ОТМЕЧАТЬ ПОСЕЩЕНИЯ !
-# остановился на валидации оплаты , так как начал менять логику бд для оплаты без р\с
 
 # в отчет выгружать купленные абонементы обязательно!
-# все затестил , в панели админа нужно сделать возможность добавлять абонемент ребенку или взрослому вручную при оплате наликом
+#замок и двери есть инфа в скринах
+
+# добавить логирования к последним блокам оплата налом и регестрация
+# проверить приветсвенную выгрузку данных в панеле админа
+# поиск работает в нижнем регистре
+
+#добавить трансляицю всем у кого есть абонемент но не было зафиксированно посещение и отправлять уведомление
+#Главное переход на постгрейт  алембик обязательно
+# упаковка под саас , бэкапы!! docker exec my_postgres pg_dump -U postgres postgres > backup_$(date +%Y-%m-%d).sql
+# Поскольку база в Docker, бэкап делается одной командой в терминале (можно засунуть в планировщик на сервере):
