@@ -2,68 +2,28 @@ import asyncio
 import os
 import sys
 from datetime import datetime
-
 from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import FSInputFile
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI
 from loguru import logger
-from pydantic import BaseModel
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
-from handlers.sqladmin import setup_admin
-
+from admin_module.sqladmin import setup_admin
 from config import ADMIN_IDS
 from config import BOT_TOKEN
-from database.db import User, Student, engine
-from database.db import get_session
-from database.db import init_db, get_daily_stats, get_expire_students, create_db_backup
+from database.db import init_db, get_daily_stats, get_expire_students, create_db_backup, engine
 from handlers import start, admin, buttons
 from handlers.buttons import get_profile_keyboard
 from middlewares.logging_middleware import LoggingMiddleware
+from admin_module.api import router
+
 
 logger.remove()
 logger.add(sys.stderr, level='INFO')
 logger.add('logs/bot_log.log', rotation='1 MB', retention='10 days', compression="zip", enqueue=True)
-
-
-app = FastAPI(title="GymManagement API")
+app = FastAPI()
+app.include_router(router)
 setup_admin(app, engine)
-
-
-class StudentCreate(BaseModel):
-    name: str
-    parent_id: int
-
-
-@app.post("/students")
-async def create_student(data: StudentCreate, session: AsyncSession = Depends(get_session)):
-    new_student = Student(name=data.name, parent_id=data.parent_id)
-    session.add(new_student)
-    await session.commit()
-    return {"status": "success", "student": new_student.name}
-
-
-@app.get("/users", response_model=None)
-async def get_all_users(session: AsyncSession = Depends(get_session)):
-    query = select(User).options(selectinload(User.students))
-    result = await session.execute(query)
-    users = result.scalars().all()
-    return users
-
-
-@app.get("/students/{student_id}")
-async def get_student_info(student_id: int, session: AsyncSession = Depends(get_session)):
-    """Получить детальную информацию по конкретному ученику"""
-    query = select(Student).where(Student.id == student_id)
-    result = await session.execute(query)
-    student = result.scalar_one_or_none()
-
-    if not student:
-        raise HTTPException(status_code=404, detail="Student not found")
-    return student
 
 
 async def send_backup_to_admin(bot: Bot):
@@ -162,8 +122,7 @@ if __name__ == '__main__':
 # добавить логирования к последним блокам оплата налом и регестрация
 
 #добавить трансляицю всем у кого есть абонемент но не было зафиксированно посещение и отправлять уведомление
-# упаковка под саас , бэкапы!! docker exec my_postgres pg_dump -U postgres postgres > backup_$(date +%Y-%m-%d).sql
-# Поскольку база в Docker, бэкап делается одной командой в терминале (можно засунуть в планировщик на сервере):
+# упаковка под саас
 
 #Reddis для отработки флуда
 #добавить выручку за день и месяц , сделать уведомление тем кто не посещает ,

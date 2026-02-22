@@ -2,7 +2,6 @@ from aiogram import Router, types
 from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
 from aiogram.types import WebAppInfo, KeyboardButton
 
-
 router = Router()
 
 
@@ -22,7 +21,6 @@ def get_main_menu_keyboard():
     builder.button(text='Персональные тренировки', callback_data='personal_trainig')
     builder.button(text='BJJ', callback_data='bjj')
     builder.button(text='GRAPPLING KIDS', callback_data='kids')
-    builder.button(text="Абонементы", web_app=WebAppInfo(url='https://wolndemort.github.io'))
     builder.button(text="Контакты", callback_data='contact')
     builder.button(text='Открыть сайт', url="https://aemaykop.ru")
     builder.row(types.InlineKeyboardButton(text='👤 МОЙ ПРОФИЛЬ ', callback_data='profile'))
@@ -58,6 +56,13 @@ def admin_keyboard():
     builder.row(types.InlineKeyboardButton(text="🆕 Добавить нового (вручную)", callback_data="admin_add_manual"))
     builder.row(types.InlineKeyboardButton(text="💵 Принять наличку", callback_data="admin_cash_list"))
     builder.row(types.InlineKeyboardButton(text="📝 Отметить посещение", callback_data="admin_manual_visit"))
+    builder.button(text="Таблица для админа",
+                   web_app=WebAppInfo(url='https://518c7250-6314-4f7a-8d21-d28071f7def2-e1.tunnel4.com/admin'))
+    builder.button(text="Отчет Pandas",
+                   web_app=WebAppInfo(url='https://518c7250-6314-4f7a-8d21-d28071f7def2-e1.tunnel4.com/stats/revenue'))
+    builder.button(text="Выгрузка в Exel",
+                   web_app=WebAppInfo
+                   (url='https://518c7250-6314-4f7a-8d21-d28071f7def2-e1.tunnel4.com/stats/export/excel'))
 
     return builder.as_markup()
 
