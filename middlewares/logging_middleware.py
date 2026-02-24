@@ -11,6 +11,11 @@ class LoggingMiddleware(BaseMiddleware):
         event: Message,
         data: Dict[str, Any]
     ) -> Any:
-        user = event.from_user
-        logger.info(f"Получено сообщение от {user.full_name} (ID: {user.id}): {event.text or '[не текст]'}")
+        user = data.get("event_from_user")
+        if user:
+            message_text = getattr(event, 'text', getattr(event.event, 'text', '[не текст]'))\
+                if hasattr(event, 'event') else getattr(
+                event, 'text', '[не текст]')
+            logger.info(f"Событие от {user.full_name} (ID: {user.id}): {message_text}")
+
         return await handler(event, data)

@@ -3,7 +3,6 @@ import os
 import sys
 from datetime import datetime
 from aiogram import Bot, Dispatcher
-from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import FSInputFile
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import FastAPI
@@ -16,14 +15,19 @@ from handlers import start, admin, buttons
 from handlers.buttons import get_profile_keyboard
 from middlewares.logging_middleware import LoggingMiddleware
 from admin_module.api import router
+from redis.asyncio import Redis
+from aiogram.fsm.storage.redis import RedisStorage
 
 
+
+redis_client = Redis(host='redis', port=6379, db=0)
 logger.remove()
 logger.add(sys.stderr, level='INFO')
 logger.add('logs/bot_log.log', rotation='1 MB', retention='10 days', compression="zip", enqueue=True)
 app = FastAPI()
 app.include_router(router)
 setup_admin(app, engine)
+storage = RedisStorage(redis=redis_client)
 
 
 async def send_backup_to_admin(bot: Bot):
@@ -91,8 +95,8 @@ async def main():
     logger.info("Инициализация базы данных...")
     await init_db()
     bot = Bot(token=BOT_TOKEN)
-    dp = Dispatcher(storage=MemoryStorage())
-    dp.message.outer_middleware(LoggingMiddleware())
+    dp = Dispatcher(storage=storage)
+    dp.update.outer_middleware(LoggingMiddleware())
     scheduler = AsyncIOScheduler()
     scheduler.add_job(send_backup_to_admin, 'cron', day_of_week='sat', hour=19, minute=0, args=(bot,))
     scheduler.add_job(check_abon_mailing, 'cron', hour=10, minute=0, args=(bot,))
@@ -117,13 +121,14 @@ if __name__ == '__main__':
 
 
 # в отчет выгружать купленные абонементы обязательно!
-#замок и двери есть инфа в скринах
+# замок и двери есть инфа в скринах
 
 # добавить логирования к последним блокам оплата налом и регестрация
 
-#добавить трансляицю всем у кого есть абонемент но не было зафиксированно посещение и отправлять уведомление
+# добавить трансляицю всем у кого есть абонемент но не было зафиксированно посещение и отправлять уведомление
 # упаковка под саас
 
-#Reddis для отработки флуда
-#добавить выручку за день и месяц , сделать уведомление тем кто не посещает ,
+# добавить выручку за день и месяц , сделать уведомление тем кто не посещает ,
 # добавить колонку через алимбик с днем рождения и поздравлять, др обязательно
+# сделал докеригноре , осталось оплатить тайм веб и выложить через гит по идее добавить магин айди в админы
+# указывать именно имя и фамилию!!! в регестр

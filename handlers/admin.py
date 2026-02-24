@@ -3,7 +3,7 @@ import qrcode
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 import io
 from database.db import get_all_users_count, get_active_subs_count, AsyncSessionLocal, User, get_daily_stats, \
-    get_student_list, get_all_subscriptions, Student
+    get_student_list, get_all_subscriptions, Student, process_student_freeze
 from config import ADMIN_IDS, secret_key
 from sqlalchemy import select
 from handlers.buttons import get_bjj_keyboard, get_kids_keyboard, get_main_menu_keyboard, admin_keyboard, \
@@ -458,20 +458,73 @@ async def show_daily_report(callback: types.CallbackQuery):
     await callback.answer()
 
 
+@router.callback_query(F.data.startswith("confirm_freeze_"))
+async def finalize_freeze_action(callback: types.CallbackQuery):
+    try:
+        student_id = int(callback.data.split("_")[-1])
+    except (ValueError, IndexError):
+        return await callback.answer("❌ Ошибка: неверный формат данных ID", show_alert=True)
+
+    # Вызываем вашу функцию БД (process_student_freeze), которую мы написали ранее
+    new_date = await process_student_freeze(student_id)
+
+    if new_date:
+        formatted_date = new_date.strftime('%d.%m.%Y')
+        await callback.answer("✅ Абонемент успешно заморожен!", show_alert=True)
+
+        # Обновляем сообщение, чтобы пользователь видел результат
+        await callback.message.edit_text(
+            f"✅ **Заморозка выполнена успешно!**\n\n"
+            f"Абонемент продлен на 5 дней.\n"
+            f"Новая дата окончания: **{formatted_date}**\n\n"
+            f"❄️ *Статус: Заморожен (разморозится при первом посещении)*",
+            parse_mode="Markdown"
+        )
+    else:
+        # Если None — значит can_freeze был 0 или студент не найден
+        await callback.answer(
+            "❌ Заморозка недоступна.\n"
+            "Возможно, она уже была использована для этого абонемента.",
+            show_alert=True
+        )
+
+
 @router.callback_query(F.data == "freeze_sub")
 async def choose_student_for_freeze(callback: types.CallbackQuery):
     user_id = callback.from_user.id
-    students = await get_student_list(user_id)
+    # Получаем список всех атлетов этого родителя
+    students = await get_all_subscriptions(user_id)
+
     if not students:
         return await callback.answer("У вас нет зарегистрированных атлетов!", show_alert=True)
+
     builder = InlineKeyboardBuilder()
+    count = 0
+
     for s in students:
-        if s.expire_date and s.expire_date > datetime.now():
-            builder.row(InlineKeyboardButton(text=f"❄️ {s.name}", callback_data=f"confirm_freeze_{s.id}"))
-    if not builder.as_markup().inline_keyboard:
-        return await callback.answer("Нет активных абонементов для заморозки!", show_alert=True)
-    builder.row(InlineKeyboardButton(text="⬅️ Назад", callback_data="my_profile"))
-    await callback.message.edit_text("Выберите атлета для заморозки (на 5 дней):", reply_markup=builder.as_markup())
+        # Условие: есть дата, она не истекла и can_freeze == 1
+        if s.expire_date and s.expire_date > datetime.now() and s.can_freeze > 0:
+            builder.row(types.InlineKeyboardButton(
+                text=f"❄️ {s.name}",
+                # Передаем ID конкретного студента в callback_data
+                callback_data=f"confirm_freeze_{s.id}"
+            ))
+            count += 1
+
+    if count == 0:
+        return await callback.answer("Нет активных абонементов, доступных для заморозки (или она уже использована)!",
+                                     show_alert=True)
+
+    builder.row(types.InlineKeyboardButton(text="⬅️ Назад", callback_data="my_profile"))
+
+    await callback.message.edit_text(
+        "❄️ **Заморозка абонемента**\n\n"
+        "Выберите атлета из списка ниже.\n"
+        "Срок действия будет продлен на **5 дней**.\n"
+        "⚠️ Заморозка доступна 1 раз за период.",
+        reply_markup=builder.as_markup(),
+        parse_mode="Markdown"
+    )
 
 
 @router.callback_query(F.data == 'show_qr')
@@ -494,59 +547,69 @@ async def choose_student_for_qr(callback: types.CallbackQuery):
 async def parse_qr_scan(message: types.Message):
     raw_data = message.web_app_data.data
     logger.info(f"🔍 Сканер (Admin: {message.from_user.id}) считал: {raw_data}")
+    parent_to_notify = None
+    student_name = "Атлет"
     try:
         parts = raw_data.split(':')
         if len(parts) != 4 or parts[0] != 'student':
-            return await message.answer("❌ Ошибка: Неверный формат QR (ожидался профиль атлета)")
-
+            return await message.answer("❌ Ошибка: Неверный формат QR")
         _, scanned_id_str, time_salt, signature = parts
         scanned_id = int(scanned_id_str)
         expected_sig = generate_signature(scanned_id, time_salt)
         if not hmac.compare_digest(signature, expected_sig):
-            logger.warning(f"🚨 Поддельный QR студента: {scanned_id}")
             return await message.answer("🚨 ВНИМАНИЕ: QR-код подделан!")
         now = datetime.now()
-        current_salt = now.strftime('%Y-%m-%d-%H')
-        previous_hour_salt = (now - timedelta(hours=1)).strftime('%Y-%m-%d-%H')
-        if time_salt != current_salt and time_salt != previous_hour_salt:
-            return await message.answer("⌛ Срок действия QR истек. Обновите его в боте.")
         async with AsyncSessionLocal() as session:
             student = await session.get(Student, scanned_id)
             if not student:
                 return await message.answer("❌ Атлет не найден в базе!")
-            if student.last_visit and (now - student.last_visit).total_seconds() < 300:
+            parent_to_notify = student.parent_id
+            student_name = student.name
+            if student.is_frozen == 1:
+                days_actually_frozen = (now - student.last_visit).days
+                if days_actually_frozen < 5:
+                    days_to_subtract = 5 - days_actually_frozen
+                    student.expire_date -= timedelta(days=days_to_subtract)
+                    msg = f"❄️ Разморозка! Прошло дней: {days_actually_frozen}. Срок абонемента скорректирован (-{days_to_subtract} дн.)"
+                else:
+                    msg = f"❄️ Абонемент {student.name} разморожен (5 дней истекли)!"
+
+                student.is_frozen = 0
+                await message.answer(msg)
+
+            if student.last_visit and (now - student.last_visit).total_seconds() < 300 and student.is_frozen == 0:
                 return await message.answer(f"⚠️ {student.name} уже отмечен! Повтор через 5 мин.")
             if not student.expire_date or student.expire_date < now:
                 return await message.answer(
                     f"🔴 ДОСТУП ЗАПРЕЩЕН\n👤 {student.name}\n"
                     f"❌ Истек: {student.expire_date.strftime('%d.%m.%Y') if student.expire_date else 'Нет данных'}"
                 )
-            if student.is_frozen == 1:
-                student.is_frozen = 0
-                student.can_freeze = 0
-                await message.answer(f"❄️ Абонемент {student.name} разморожен!")
             student.balance_lessons += 1
-            student.last_visit = now
+            student.last_visit = now  # Теперь здесь время входа
             current_lessons = student.balance_lessons
-            response_text = (
-                f"🟢 <b>ПРОХОДИТЕ</b>\n"
-                f"👤 Атлет: <b>{student.name}</b>\n"
-                f"✅ До: {student.expire_date.strftime('%d.%m.%Y')}\n"
-                f"📈 Посещение №{current_lessons}"
-            )
-            parent_to_notify = student.parent_id
-            session.commit()
+            expire_str = student.expire_date.strftime('%d.%m.%Y')
+
+            await session.commit()
+        response_text = (
+            f"🟢 <b>ПРОХОДИТЕ</b>\n"
+            f"👤 Атлет: <b>{student_name}</b>\n"
+            f"✅ До: {expire_str}\n"
+            f"📈 Посещение №{current_lessons}"
+        )
         await message.answer(response_text, parse_mode="HTML")
-        try:
-            await message.bot.send_message(
-                parent_to_notify,
-                f"🔔 Вход зафиксирован: <b>{student.name}</b>\nПриятной тренировки! 💪"
-            )
-        except Exception:
-            pass
+        if parent_to_notify:
+            try:
+                await message.bot.send_message(
+                    parent_to_notify,
+                    f"🔔 Вход зафиксирован: <b>{student_name}</b>\nПриятной тренировки! 💪",
+                    parse_mode="HTML"
+                )
+            except Exception:
+                pass
+
     except Exception as e:
         logger.error(f"❌ Ошибка сканера: {e}")
-        await message.answer("❌ Ошибка при чтении данных")
+        await message.answer("❌ Ошибка при обработке данных")
 
 
 @router.callback_query(F.data.startswith("gen_qr_"))
@@ -738,19 +801,33 @@ async def manual_visit_results(message: types.Message, state: FSMContext):
 async def process_manual_checkin(callback: types.CallbackQuery):
     student_id = int(callback.data.split("_")[-1])
     now = datetime.now()
+    student_name = "Атлет"
+    parent_id = None
+    msg_unfreeze = ""
     async with AsyncSessionLocal() as session:
         student = await session.get(Student, student_id)
         if not student:
             return await callback.answer("Атлет не найден!")
-        student.balance_lessons += 1
-        student.last_visit = now
         student_name = student.name
         parent_id = student.parent_id
+        if student.is_frozen == 1:
+            days_actually_frozen = (now - student.last_visit).days
+            if days_actually_frozen < 5:
+                days_to_subtract = 5 - days_actually_frozen
+                student.expire_date -= timedelta(days=days_to_subtract)
+                msg_unfreeze = f"\n❄️ <b>Разморозка!</b> Лишние {days_to_subtract} дн. аннулированы."
+            else:
+                msg_unfreeze = f"\n❄️ <b>Разморозка!</b> (5 дней истекли)"
+            student.is_frozen = 0
+        student.balance_lessons += 1
+        student.last_visit = now
         current_lessons = student.balance_lessons
-
-        session.commit()
+        await session.commit()
     await callback.message.edit_text(
-        f"✅ <b>Вход отмечен вручную</b>\n👤 Атлет: <b>{student_name}</b>\n📈 Посещение №{current_lessons}",
+        f"✅ <b>Вход отмечен вручную</b>\n"
+        f"👤 Атлет: <b>{student_name}</b>\n"
+        f"📈 Посещение №{current_lessons}"
+        f"{msg_unfreeze}",
         parse_mode="HTML"
     )
     if parent_id and parent_id != 0:
@@ -762,4 +839,6 @@ async def process_manual_checkin(callback: types.CallbackQuery):
             )
         except Exception:
             pass
+
     await callback.answer("Посещение зафиксировано")
+

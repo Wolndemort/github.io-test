@@ -2,7 +2,6 @@ from aiogram import Router, types
 from aiogram.filters import Command
 from handlers.buttons import get_main_menu_keyboard
 from database.db import AsyncSessionLocal, User
-
 from aiogram.fsm.context import FSMContext
 from loguru import logger
 

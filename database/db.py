@@ -1,9 +1,9 @@
 from typing import Optional, List
 from sqlalchemy.orm import Mapped, DeclarativeBase, mapped_column, relationship
-from sqlalchemy import BigInteger, DateTime, String, func,select, Integer, ForeignKey
+from sqlalchemy import BigInteger, DateTime, String, func, Integer, ForeignKey
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from config import db_file
-from datetime import datetime, timedelta
+from datetime import datetime
 from loguru import logger
 import asyncio
 
@@ -87,11 +87,37 @@ async def get_expire_students():
         return []
 
 
+from datetime import timedelta
+from sqlalchemy import select
+
+
+async def process_student_freeze(student_id: int):
+    try:
+        async with AsyncSessionLocal() as session:
+            stmt = select(Student).where(Student.id == student_id)
+            result = await session.execute(stmt)
+            student = result.scalar_one_or_none()
+
+            if student and student.can_freeze > 0 and student.expire_date:
+                student.expire_date += timedelta(days=5)
+                student.last_visit = datetime.now()
+                student.can_freeze = 0
+                student.is_frozen = 1
+
+                await session.commit()
+                return student.expire_date
+            return None
+    except Exception as e:
+        logger.error(f"❌ Ошибка при заморозке: {e}")
+        return None
+
+
+
 async def has_subscription(user_id: int):
     try:
         async with AsyncSessionLocal() as session:
             stmt = select(Student).where(Student.parent_id == user_id)
-            result  = await session.execute(stmt)
+            result = await session.execute(stmt)
             students = result.scalars().all()
 
             if not students:

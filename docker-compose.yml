@@ -3,6 +3,11 @@ version: '3.8'
 services:
   db:
     image: postgres:15-alpine
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U postgres -d crm_db" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
     container_name: gym_db
     restart: always
     environment:
@@ -16,11 +21,19 @@ services:
     build: .
     container_name: gym_bot
     restart: always
+    # ПРАВИЛЬНЫЙ БЛОК DEPENDS_ON:
     depends_on:
-      - db
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    command: >
+      sh -c "alembic upgrade head && python start.py"
     env_file:
       - .env
     environment:
+      REDIS_URL: "redis://redis:6379/0"
+      # Убедись, что в коде бота и env.py ты используешь именно DB_FILE
       DB_FILE: "postgresql+asyncpg://postgres:${DB_PASSWORD}@db:5432/crm_db"
     volumes:
       - .:/app
@@ -41,6 +54,14 @@ services:
       - "8000:8000"
     volumes:
       - .:/app
+
+
+  redis:
+     image: redis:7-alpine
+     restart: always
+     ports:
+       - "6379:6379"
+
 
 volumes:
   pg_data:

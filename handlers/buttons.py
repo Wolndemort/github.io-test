@@ -10,7 +10,10 @@ def get_profile_keyboard():
     builder.row(types.InlineKeyboardButton(text='➕ Добавить атлета', callback_data='add_athlete'))
     builder.row(types.InlineKeyboardButton(text='Проверить статус абонемента', callback_data='check_status_now'))
     builder.row(types.InlineKeyboardButton(text='Купить абонемент 💳', callback_data='choose_section'))
-    builder.row(types.InlineKeyboardButton(text='Заморозить абонемент', callback_data='freeze_sub'))
+    builder.row(types.InlineKeyboardButton(
+        text='❄️ Заморозить абонемент',
+        callback_data='freeze_sub'
+    ))
     builder.row(types.InlineKeyboardButton(text='📲 МОЙ QR-ПРОПУСК', callback_data='show_qr'))
     builder.row(types.InlineKeyboardButton(text='НАЧАЛО ◀️🔙', callback_data='begin'))
     return builder.as_markup()
