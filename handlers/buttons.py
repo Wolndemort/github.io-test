@@ -5,7 +5,7 @@ from aiogram.types import WebAppInfo, KeyboardButton
 router = Router()
 
 
-def get_profile_keyboard():
+def get_profile_keyboard(is_authorized: bool = False):
     builder = InlineKeyboardBuilder()
     builder.row(types.InlineKeyboardButton(text='➕ Добавить атлета', callback_data='add_athlete'))
     builder.row(types.InlineKeyboardButton(text='Проверить статус абонемента', callback_data='check_status_now'))
@@ -16,6 +16,8 @@ def get_profile_keyboard():
     ))
     builder.row(types.InlineKeyboardButton(text='📲 МОЙ QR-ПРОПУСК', callback_data='show_qr'))
     builder.row(types.InlineKeyboardButton(text='НАЧАЛО ◀️🔙', callback_data='begin'))
+    if not is_authorized:
+        builder.row(types.InlineKeyboardButton(text='🔐 Привязать профиль по номеру', callback_data='auth_by_phone'))
     return builder.as_markup()
 
 

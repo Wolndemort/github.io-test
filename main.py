@@ -19,7 +19,6 @@ from redis.asyncio import Redis
 from aiogram.fsm.storage.redis import RedisStorage
 
 
-
 redis_client = Redis(host='redis', port=6379, db=0)
 logger.remove()
 logger.add(sys.stderr, level='INFO')
@@ -132,3 +131,8 @@ if __name__ == '__main__':
 # добавить колонку через алимбик с днем рождения и поздравлять, др обязательно
 # сделал докеригноре , осталось оплатить тайм веб и выложить через гит по идее добавить магин айди в админы
 # указывать именно имя и фамилию!!! в регестр
+# .env.example , прокинуть сессию через middlewear  paytest, sentry
+
+#Logging (Structlog): Вместо обычных принтов внедри структурированное логирование в JSON. Это позволит в будущем легко анализировать логи через ELK-стек или Grafana Loki.
+#CI/CD (GitHub Actions): Настрой автоматический запуск твоих новых Pytest при каждом git push. Если тесты упали — деплой блокируется. Это сэкономит кучу нервов.
+#Prometheus + Grafana: Есл

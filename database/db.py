@@ -27,14 +27,15 @@ class User(Base):
 class Student(Base):
     __tablename__ = 'students'
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    parent_id: Mapped[int] = mapped_column(ForeignKey('users.user_id'))
+    parent_id: Mapped[int] = mapped_column(ForeignKey('users.user_id'), nullable=True)
     name: Mapped[str] = mapped_column(String)
     expire_date: Mapped[Optional[datetime]] = mapped_column(DateTime)
-    can_freeze: Mapped[int] = mapped_column(default=1)
-    is_frozen: Mapped[int] = mapped_column(default=0)
+    can_freeze: Mapped[int] = mapped_column(Integer, default=1)
+    is_frozen: Mapped[int] = mapped_column(Integer, default=0)
     balance_lessons: Mapped[int] = mapped_column(default=0)
     last_visit: Mapped[Optional[datetime]] = mapped_column(DateTime)
     parent: Mapped["User"] = relationship(back_populates="students")
+    parent_phone: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
 
 
 async def init_db():

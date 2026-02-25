@@ -9,6 +9,8 @@ services:
       timeout: 5s
       retries: 5
     container_name: gym_db
+    ports:
+      - "5432:5432"
     restart: always
     environment:
       POSTGRES_USER: postgres
@@ -21,7 +23,7 @@ services:
     build: .
     container_name: gym_bot
     restart: always
-    # ПРАВИЛЬНЫЙ БЛОК DEPENDS_ON:
+
     depends_on:
       db:
         condition: service_healthy
@@ -33,7 +35,6 @@ services:
       - .env
     environment:
       REDIS_URL: "redis://redis:6379/0"
-      # Убедись, что в коде бота и env.py ты используешь именно DB_FILE
       DB_FILE: "postgresql+asyncpg://postgres:${DB_PASSWORD}@db:5432/crm_db"
     volumes:
       - .:/app

@@ -2,6 +2,9 @@ import asyncio
 import qrcode
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 import io
+
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from database.db import get_all_users_count, get_active_subs_count, AsyncSessionLocal, User, get_daily_stats, \
     get_student_list, get_all_subscriptions, Student, process_student_freeze
 from config import ADMIN_IDS, secret_key
@@ -15,7 +18,7 @@ import os
 import pandas as pd
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import FSInputFile, InlineKeyboardButton, BufferedInputFile
+from aiogram.types import FSInputFile, InlineKeyboardButton, BufferedInputFile, ReplyKeyboardMarkup, KeyboardButton
 from datetime import timedelta
 from aiogram import Router, F, types
 from datetime import datetime
@@ -93,12 +96,17 @@ async def go_to_begin(callback: types.CallbackQuery, state: FSMContext):
 async def universal_profile_handler(callback: types.CallbackQuery):
     user_id = callback.from_user.id
     now = datetime.now()
-    logger.debug(f"🔍 Запрос профиля/статуса для ID: {user_id} (кнопка: {callback.data})")
+    logger.debug(f"🔍 Запрос профиля для ID: {user_id}")
     try:
         students = await get_all_subscriptions(user_id)
-        if not students:
-            status_text = ("⚠️ <b>У вас еще нет зарегистрированных атлетов.</b>\n"
-                           "Добавьте профиль в личном кабинете, чтобы пользоваться функциями клуба.")
+        is_auth = bool(students)
+        if not is_auth:
+            status_text = (
+                "⚠️ <b>У вас еще нет привязанных атлетов.</b>\n\n"
+                "Если вы уже занимаетесь у нас, нажмите <b>«Привязать профиль»</b>, "
+                "чтобы войти по номеру телефона.\n"
+                "Или добавьте нового атлета вручную."
+            )
         else:
             status_text = "🆔 <b>Ваши профили:</b>\n"
             for s in students:
@@ -110,25 +118,29 @@ async def universal_profile_handler(callback: types.CallbackQuery):
                     status = f"✅ <b>Активен</b> до <code>{s.expire_date.strftime('%d.%m.%Y')}</code>"
                 else:
                     status = f"🔴 <b>ИСТЕК</b> (<code>{s.expire_date.strftime('%d.%m.%Y')}</code>)"
-                status_text += f"\n• <b>{s.name}</b>: {status}"
+
+                phone_info = f" [📞 {s.parent_phone}]" if s.parent_phone else " [📱 нет номера]"
+                lessons = f" (Занятий: {s.balance_lessons})" if hasattr(s, 'balance_lessons') else ""
+                status_text += f"\n• <b>{s.name}</b>: {status}{lessons}\n,{phone_info}"
+
         await callback.message.edit_text(
             text=f"👤 <b>Личный кабинет</b>\n\n{status_text}\n\n"
                  "<i>Используйте кнопки ниже для управления:</i>",
-            reply_markup=get_profile_keyboard(),
+            reply_markup=get_profile_keyboard(is_authorized=is_auth),
             parse_mode="HTML"
         )
-        logger.debug(f"✅ Профиль ID {user_id} успешно отображен")
-
+        logger.debug(f"✅ Профиль ID {user_id} отображен (Auth: {is_auth})")
     except Exception as e:
         if "message is not modified" in str(e):
             await callback.answer("Данные актуальны")
-            logger.debug(f"ℹ️ Профиль ID {user_id} не изменился")
         else:
-            logger.error(f"❌ Ошибка в профиле для ID {user_id}: {e}", exc_info=True)
+            logger.error(f"❌ Ошибка в профиле: {e}")
             await callback.answer("Ошибка связи с базой данных")
-
     finally:
-        await callback.answer()
+        try:
+            await callback.answer()
+        except:
+            pass
 
 
 @router.callback_query(F. data == 'bjj')
@@ -464,15 +476,12 @@ async def finalize_freeze_action(callback: types.CallbackQuery):
         student_id = int(callback.data.split("_")[-1])
     except (ValueError, IndexError):
         return await callback.answer("❌ Ошибка: неверный формат данных ID", show_alert=True)
-
-    # Вызываем вашу функцию БД (process_student_freeze), которую мы написали ранее
     new_date = await process_student_freeze(student_id)
 
     if new_date:
         formatted_date = new_date.strftime('%d.%m.%Y')
         await callback.answer("✅ Абонемент успешно заморожен!", show_alert=True)
 
-        # Обновляем сообщение, чтобы пользователь видел результат
         await callback.message.edit_text(
             f"✅ **Заморозка выполнена успешно!**\n\n"
             f"Абонемент продлен на 5 дней.\n"
@@ -481,7 +490,6 @@ async def finalize_freeze_action(callback: types.CallbackQuery):
             parse_mode="Markdown"
         )
     else:
-        # Если None — значит can_freeze был 0 или студент не найден
         await callback.answer(
             "❌ Заморозка недоступна.\n"
             "Возможно, она уже была использована для этого абонемента.",
@@ -651,7 +659,9 @@ async def process_athlete_name(message: types.Message, state: FSMContext):
                 parent_id=user_id,
                 name=name,
                 expire_date=None,
-                balance_lessons=0
+                balance_lessons=0,
+                can_freeze=1,
+                is_frozen=0
             )
             session.add(new_student)
             await session.commit()
@@ -677,27 +687,79 @@ async def manual_add_start(callback: types.CallbackQuery, state: FSMContext):
 
 @router.message(AdminManualAdd.waiting_for_name)
 async def manual_add_process_name(message: types.Message, state: FSMContext):
-    student_name = message.text
-    async with AsyncSessionLocal() as session:
-        new_student = Student(
-            name=student_name,
-            parent_id=0,
-            expire_date=None,
-            balance_lessons=0
-        )
-        session.add(new_student)
-        await session.commit()
-        student_id = new_student.id
-    builder = InlineKeyboardBuilder()
-    builder.row(InlineKeyboardButton(text="💵 Оплатил наличными", callback_data=f"confirm_cash_{student_id}"))
-    builder.row(InlineKeyboardButton(text="🏠 В меню", callback_data="admin"))
+    await state.update_data(student_name=message.text) # Сохраняем имя в FSM
     await message.answer(
-        f"✅ Атлет <b>{student_name}</b> (ID: {student_id}) добавлен в базу!\n\n"
-        f"Хотите сразу активировать абонемент?",
-        reply_markup=builder.as_markup(),
+        f"👤 Атлет: <b>{message.text}</b>\n\n"
+        "📱 Теперь введите <b>номер телефона пользователя</b>.\n"
+        "<i>По этому номеру пользователь сможет войти в свой кабинет.</i>",
         parse_mode="HTML"
     )
-    await state.clear()
+    await state.set_state(AdminManualAdd.waiting_for_phone)
+
+
+#
+@router.callback_query(F.data == 'admin_add_manual')
+async def manual_add_start(callback: types.CallbackQuery, state: FSMContext):
+    await callback.message.answer("📝 Введите <b>Имя и Фамилию</b> нового атлета:", parse_mode="HTML")
+    await state.set_state(AdminManualAdd.waiting_for_name)
+    await callback.answer()
+
+
+@router.message(AdminManualAdd.waiting_for_name)
+async def manual_add_process_name(message: types.Message, state: FSMContext):
+    await state.update_data(student_name=message.text)  # Сохраняем имя в FSM
+    await message.answer(
+        f"👤 Атлет: <b>{message.text}</b>\n\n"
+        "📱 Теперь введите <b>номер телефона родителя</b>.\n"
+        "<i>По этому номеру родитель сможет войти в свой кабинет.</i>",
+        parse_mode="HTML"
+    )
+    await state.set_state(AdminManualAdd.waiting_for_phone)
+
+
+@router.message(AdminManualAdd.waiting_for_phone)
+async def manual_add_process_phone(message: types.Message, state: FSMContext):
+    phone = "".join(filter(str.isdigit, message.text))
+    if len(phone) < 10:
+        return await message.answer("❌ Номер слишком короткий. Попробуйте еще раз (например, 79991234567):")
+
+    data = await state.get_data()
+    student_name = data['student_name']
+
+    try:
+        async with AsyncSessionLocal() as session:
+            new_student = Student(
+                name=student_name,
+                parent_phone=phone,
+                parent_id=None,
+                expire_date=None,
+                balance_lessons=0,
+                can_freeze=1,
+                is_frozen=0
+            )
+            session.add(new_student)
+            await session.commit()
+            await session.refresh(new_student)
+            student_id = new_student.id
+
+        # Готовим кнопки
+        builder = InlineKeyboardBuilder()
+        builder.row(InlineKeyboardButton(text="💵 Оплатил наличными", callback_data=f"confirm_cash_{student_id}"))
+        builder.row(InlineKeyboardButton(text="🏠 В меню", callback_data="admin"))
+
+        await message.answer(
+            f"✅ Атлет <b>{student_name}</b> (ID: {student_id}) успешно добавлен!\n"
+            f"📱 Привязан телефон: <code>{phone}</code>\n\n"
+            f"Хотите сразу активировать абонемент?",
+            reply_markup=builder.as_markup(),
+            parse_mode="HTML"
+        )
+        await state.clear()
+
+    except Exception as e:
+        logger.error(f"Ошибка при ручном добавлении: {e}")
+        await message.answer("❌ Произошла ошибка при сохранении в базу.")
+        await state.clear()
 
 
 @router.callback_query(F.data == "admin_cash_list")
@@ -842,3 +904,50 @@ async def process_manual_checkin(callback: types.CallbackQuery):
 
     await callback.answer("Посещение зафиксировано")
 
+
+@router.callback_query(F.data == 'auth_by_phone')
+async def auth_by_phone_call(callback: types.CallbackQuery):
+    kb = ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="📱 Поделиться номером", request_contact=True)]],
+        resize_keyboard=True,
+        one_time_keyboard=True
+    )
+    await callback.message.answer(
+        "Нажмите кнопку ниже, чтобы подтвердить ваш номер телефона и привязать профиль:",
+        reply_markup=kb
+    )
+    await callback.answer()
+
+
+@router.message(F.contact)
+async def process_user_contact(message: types.Message, session: AsyncSession):
+    raw_phone = message.contact.phone_number.replace("+", "")
+    clean_phone = raw_phone[-10:]
+    stmt = select(Student).where(Student.parent_phone.contains(clean_phone))
+    result = await session.execute(stmt)
+    students = result.scalars().all()
+
+    if not students:
+        await message.answer(
+            "❌ Студент с таким номером не найден в нашей базе.\n"
+            "Пожалуйста, свяжитесь с администратором, чтобы он внес ваш номер.",
+            reply_markup=types.ReplyKeyboardRemove()
+        )
+        return
+    user_id = message.from_user.id
+    for student in students:
+        student.parent_id = user_id
+
+    try:
+        await session.commit()
+        names = ", ".join([s.name for s in students])
+        await message.answer(
+            f"✅ Авторизация успешна!\n"
+            f"Привязаны атлеты: <b>{names}</b>\n\n"
+            "Теперь вам доступен личный кабинет.",
+            parse_mode="HTML",
+            reply_markup=get_main_menu_keyboard()
+        )
+    except Exception as e:
+        logger.error(f"Ошибка при привязке контакта: {e}")
+        await message.answer("Произошла ошибка при обновлении данных.")

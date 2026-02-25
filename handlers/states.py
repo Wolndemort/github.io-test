@@ -14,5 +14,5 @@ class AdminManualAdd(StatesGroup):
     waiting_for_parent_id = State()
     waiting_for_search = State()
     waiting_for_search_visit = State()
-
+    waiting_for_phone = State()
 
