@@ -6,6 +6,8 @@ from config import db_file
 from datetime import datetime
 from loguru import logger
 import asyncio
+from datetime import timedelta
+from sqlalchemy import select
 
 
 engine = create_async_engine(db_file, echo=False)
@@ -88,10 +90,6 @@ async def get_expire_students():
         return []
 
 
-from datetime import timedelta
-from sqlalchemy import select
-
-
 async def process_student_freeze(student_id: int):
     try:
         async with AsyncSessionLocal() as session:
@@ -111,7 +109,6 @@ async def process_student_freeze(student_id: int):
     except Exception as e:
         logger.error(f"❌ Ошибка при заморозке: {e}")
         return None
-
 
 
 async def has_subscription(user_id: int):
@@ -214,7 +211,7 @@ async def create_db_backup():
     command = f"pg_dump -h db -p 5432 -U postgres crm_db > {backup_path}"
     process = await asyncio.create_subprocess_shell(
         command,
-        env={"PGPASSWORD": "lordwolndemort0195"}  # Чтобы не спрашивал пароль
+        env={"PGPASSWORD": "lordwolndemort0195"}
     )
     await process.wait()
     return backup_path

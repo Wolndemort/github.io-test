@@ -24,8 +24,8 @@ def get_profile_keyboard(is_authorized: bool = False):
 def get_main_menu_keyboard():
     builder = InlineKeyboardBuilder()
     builder.button(text='Персональные тренировки', callback_data='personal_trainig')
-    builder.button(text='BJJ', callback_data='bjj')
-    builder.button(text='GRAPPLING KIDS', callback_data='kids')
+    builder.button(text='Джиу-джитсу взрослые', callback_data='bjj')
+    builder.button(text='Джиу-джитсу дети(до 14 лет)', callback_data='kids')
     builder.button(text="Контакты", callback_data='contact')
     builder.button(text='Открыть сайт', url="https://aemaykop.ru")
     builder.row(types.InlineKeyboardButton(text='👤 МОЙ ПРОФИЛЬ ', callback_data='profile'))

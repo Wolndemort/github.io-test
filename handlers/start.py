@@ -40,7 +40,7 @@ async def start_handler(message: types.Message, state: FSMContext):
                 names = ", ".join([s.name for s in students])
                 await message.answer(
                     f"<b>Здравствуйте, {first_name}!</b>\n"
-                    f"Ваши атлеты: <b>{names}</b>\n\nЧем могу помочь?",
+                    f"Атлеты в вашем профиле: <b>{names}</b>\n\nЧем могу помочь?",
                     parse_mode="HTML",
                     reply_markup=get_main_menu_keyboard()
                 )

@@ -551,10 +551,22 @@ async def choose_student_for_qr(callback: types.CallbackQuery):
     await callback.answer()
 
 
+LAYOUT_MAP = str.maketrans(
+    "йцукенгшщзхъфывапролджэячсмитьбю.ЙЦУКЕНГШЩЗХЪФЫВАПРОЛДЖЭЯЧСМИТЬБЮ,",
+    "qwertyuiop[]asdfghjkl;'zxcvbnm,./QWERTYUIOP{}ASDFGHJKL:\"ZXCVBNM<>?"
+)
+
+
+def fix_layout(text: str) -> str:
+    if any(c in "фывапрол" for c in text.lower()):
+        return text.translate(LAYOUT_MAP)
+    return text
+
+
 @router.message(F.web_app_data)
-async def parse_qr_scan(message: types.Message):
-    raw_data = message.web_app_data.data
-    logger.info(f"🔍 Сканер (Admin: {message.from_user.id}) считал: {raw_data}")
+async def parse_qr_scan(message: types.Message, raw_data: str):
+    raw_data = fix_layout(raw_data)
+    logger.info(f"🔍 Обработка данных: {raw_data}")
     parent_to_notify = None
     student_name = "Атлет"
     try:
@@ -618,6 +630,16 @@ async def parse_qr_scan(message: types.Message):
     except Exception as e:
         logger.error(f"❌ Ошибка сканера: {e}")
         await message.answer("❌ Ошибка при обработке данных")
+
+
+@router.message(F.web_app_data)
+async def web_app_qr_handler(message: types.Message):
+    await parse_qr_scan(message, message.web_app_data.data)
+
+
+@router.message(F.text.startswith(("student", "ыегвуте")))
+async def manual_scanner_handler(message: types.Message):
+    await parse_qr_scan(message, message.text)
 
 
 @router.callback_query(F.data.startswith("gen_qr_"))
