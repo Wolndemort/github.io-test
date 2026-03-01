@@ -83,7 +83,14 @@ def get_scanner_keyboard():
 
 def discipline():
     builder = InlineKeyboardBuilder()
-    builder.row(types.InlineKeyboardButton(text='Взрослые BJJ 🥋', callback_data='buy_bjj'))
-    builder.row(types.InlineKeyboardButton(text='ДЕТИ (Kids) BJJ👶', callback_data='buy_kids'))
+    builder.row(types.InlineKeyboardButton(text='Взрослые Джиу-джитсу 🥋', callback_data='buy_bjj'))
+    builder.row(types.InlineKeyboardButton(text='ДЕТИ (Kids) Джиу-джитсу👶', callback_data='buy_kids'))
     builder.row(types.InlineKeyboardButton(text='⬅️ В главное меню', callback_data='begin'))
     return builder.as_markup()
+
+
+def kids_pay_options():
+    builder = InlineKeyboardBuilder()
+    builder.row(types.InlineKeyboardButton(text="Безлимит(1мес)", callback_data="set_limit_0"))
+    builder.row(types.InlineKeyboardButton(text="12 занятий(1мес)", callback_data="set_limit_12"))
+    return builder

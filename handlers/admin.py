@@ -2,15 +2,13 @@ import asyncio
 import qrcode
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 import io
-
 from sqlalchemy.ext.asyncio import AsyncSession
-
 from database.db import get_all_users_count, get_active_subs_count, AsyncSessionLocal, User, get_daily_stats, \
     get_student_list, get_all_subscriptions, Student, process_student_freeze
 from config import ADMIN_IDS, secret_key
 from sqlalchemy import select
 from handlers.buttons import get_bjj_keyboard, get_kids_keyboard, get_main_menu_keyboard, admin_keyboard, \
-    get_scanner_keyboard, get_profile_keyboard, discipline
+    get_scanner_keyboard, get_profile_keyboard, discipline,kids_pay_options
 from handlers.states import AdminManualAdd
 from database.db import add_abon
 from aiogram.filters import Command
@@ -119,9 +117,16 @@ async def universal_profile_handler(callback: types.CallbackQuery):
                 else:
                     status = f"🔴 <b>ИСТЕК</b> (<code>{s.expire_date.strftime('%d.%m.%Y')}</code>)"
 
+                balance = getattr(s, 'balance_lessons', 0) or 0
+                if balance >= 900:
+                    lessons_info = "♾ <b>Безлимит</b>"
+                elif balance > 0:
+                    lessons_info = f"🔢 Занятий: <b>{balance}</b>"
+                else:
+                    lessons_info = "❌ <b>Занятия окончены</b>"
+
                 phone_info = f" [📞 {s.parent_phone}]" if s.parent_phone else " [📱 нет номера]"
-                lessons = f" (Занятий: {s.balance_lessons})" if hasattr(s, 'balance_lessons') else ""
-                status_text += f"\n• <b>{s.name}</b>: {status}{lessons}\n,{phone_info}"
+                status_text += f"\n• <b>{s.name}</b>: {status}{lessons_info}\n{phone_info}"
 
         await callback.message.edit_text(
             text=f"👤 <b>Личный кабинет</b>\n\n{status_text}\n\n"
@@ -248,6 +253,7 @@ async def show_sections(callback: types.CallbackQuery):
 async def buy_handler(callback: types.CallbackQuery, state: FSMContext):
     user = callback.from_user
     sport_type = callback.data.split('_')[1]
+    await state.update_data(sport_type=sport_type)
     students = await get_student_list(user.id)
     if not students:
         await callback.answer("Сначала добавьте атлета в профиле!", show_alert=True)
@@ -273,14 +279,50 @@ async def buy_handler(callback: types.CallbackQuery, state: FSMContext):
 async def request_receipt(callback: types.CallbackQuery, state: FSMContext):
     student_id = int(callback.data.split('_')[2])
     await state.update_data(chosen_student_id=student_id)
+    data = await state.get_data()
+    sport_type = data.get('sport_type')
+    if sport_type == 'bjj':
+        await state.update_data(lesson_count=0)
+        await state.set_state(PaymentStates.waiting_for_receipt)
+        await callback.message.edit_text(
+            "💳 <b>Реквизиты (Взрослый):</b>\n\nСумма: 5000₽ (Безлимит)\n"
+            "СПБ: `+79606666165` (Адам.О)\n\n"
+            "Пришлите скриншот чека:",
+            parse_mode="HTML"
+        )
+    else:
+        await callback.message.edit_text(
+            "Выберите тип абонемента для ребенка:",
+            reply_markup=kids_pay_options().as_markup()
+        )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith('set_limit_'))
+async def process_pay_choice(callback: types.CallbackQuery, state: FSMContext):
+    count = int(callback.data.split("_")[-1])
+    await state.update_data(lesson_count=count)
+    data = await state.get_data()
+    cash_student_id = data.get('cash_student_id')
+    price = "4000₽" if count == 12 else "8000₽"
+    desc = "12 занятий" if count == 12 else "Безлимит"
+    await state.update_data(lesson_count=count)
+    if cash_student_id:
+        result = await add_abon(cash_student_id, lessons_count=count)
+        desc = "12 занятий" if count == 12 else "Безлимит"
+        if result:
+            new_expire, _ = result
+            await callback.message.edit_text(f"✅ Оплата наличными ({desc}) принята до {new_expire}")
+        await state.clear()
+        return
     await state.set_state(PaymentStates.waiting_for_receipt)
     await callback.message.edit_text(
-        "💳 <b>Реквизиты для перевода:\n\n</b>"
-        "Сумма: 5000₽/4000\n"
-        "СПБ: `+79606666165` (Адам.О)\n"
-        "Банк: Тинькофф\n\n"
-        "⚠️<b> Важно: После оплаты пришлите **скриншот чека** ответным сообщением в этот чат.</b>",
-        parse_mode="HTML")
+        f"💳 <b>Реквизиты (Детский - {desc}):</b>\n\n"
+        f"Сумма к оплате: {price}\n"
+        "СПБ: `+79606666165` (Адам.О)\n\n"
+        "Пришлите скриншот чека:",
+        parse_mode="HTML"
+     )
     await callback.answer()
 
 
@@ -289,13 +331,15 @@ async def handle_receipt_submission(message: types.Message, state: FSMContext):
     data = await state.get_data()
     student_id = data.get("chosen_student_id")
     sport_type = data.get("sport_type", "не указан")
+    lessons_count = data.get('lesson_count', 0)
     async with AsyncSessionLocal() as session:
         student = await session.get(Student, student_id)
         student_name = student.name if student else "Неизвестный"
     builder = InlineKeyboardBuilder()
     builder.row(
-        InlineKeyboardButton(text="✅ Оформить", callback_data=f"adm_confirm_{student_id}"),
+        InlineKeyboardButton(text="✅ Оформить", callback_data=f"adm_confirm_{student_id}_{lessons_count}"),
         InlineKeyboardButton(text="❌ Отклонить", callback_data=f"adm_decline_{message.from_user.id}"))
+    desc = "12 занятий" if lessons_count == 12 else "Безлимит"
     await message.bot.send_photo(
         chat_id=ADMIN_IDS[0],
         photo=message.photo[-1].file_id,
@@ -304,6 +348,7 @@ async def handle_receipt_submission(message: types.Message, state: FSMContext):
             f"👤 Отправитель: @{message.from_user.username or 'без юзернейма'}\n"
             f"🥋 За кого: {student_name} (ID: {student_id})\n"
             f"🥊 Направление: {sport_type.upper()}"
+            f"📊 Тип: <b>{desc}</b>"
         ),
         reply_markup=builder.as_markup(),
         parse_mode="HTML"
@@ -314,8 +359,10 @@ async def handle_receipt_submission(message: types.Message, state: FSMContext):
 
 @router.callback_query(F.data.startswith("adm_confirm_"))
 async def admin_confirm_pay(callback: types.CallbackQuery):
-    student_id = int(callback.data.split("_")[-1])
-    result = await add_abon(student_id)
+    parts = callback.data.split('_')
+    student_id = int(parts[2])
+    count = int(parts[3])
+    result = await add_abon(student_id, lessons_count=count)
     if result:
         new_expire, parent_id = result
         await callback.message.edit_caption(
@@ -500,17 +547,12 @@ async def finalize_freeze_action(callback: types.CallbackQuery):
 @router.callback_query(F.data == "freeze_sub")
 async def choose_student_for_freeze(callback: types.CallbackQuery):
     user_id = callback.from_user.id
-    # Получаем список всех атлетов этого родителя
     students = await get_all_subscriptions(user_id)
-
     if not students:
         return await callback.answer("У вас нет зарегистрированных атлетов!", show_alert=True)
-
     builder = InlineKeyboardBuilder()
     count = 0
-
     for s in students:
-        # Условие: есть дата, она не истекла и can_freeze == 1
         if s.expire_date and s.expire_date > datetime.now() and s.can_freeze > 0:
             builder.row(types.InlineKeyboardButton(
                 text=f"❄️ {s.name}",
@@ -564,7 +606,8 @@ def fix_layout(text: str) -> str:
 
 
 @router.message(F.web_app_data)
-async def parse_qr_scan(message: types.Message, raw_data: str):
+async def parse_qr_scan(message: types.Message):
+    raw_data = message.web_app_data.data
     raw_data = fix_layout(raw_data)
     logger.info(f"🔍 Обработка данных: {raw_data}")
     parent_to_notify = None
@@ -604,17 +647,30 @@ async def parse_qr_scan(message: types.Message, raw_data: str):
                     f"🔴 ДОСТУП ЗАПРЕЩЕН\n👤 {student.name}\n"
                     f"❌ Истек: {student.expire_date.strftime('%d.%m.%Y') if student.expire_date else 'Нет данных'}"
                 )
-            student.balance_lessons += 1
-            student.last_visit = now  # Теперь здесь время входа
-            current_lessons = student.balance_lessons
-            expire_str = student.expire_date.strftime('%d.%m.%Y')
+            balance = student.balance_lessons or 0
+            if balance >= 900:
+                usage_info = "♾ Режим: <b>Безлимит</b>"
+            elif balance > 0:
+                student.balance_lessons -= 1
+                new_balance = student.balance_lessons
+                usage_info = f"📉 Осталось занятий: <b>{new_balance}</b>"
+                if new_balance == 0:
+                    usage_info += "\n⚠️ <b>ВНИМАНИЕ: Это было последнее занятие!</b>"
+            else:
 
+                return await message.answer(
+                    f"🔴 <b>ДОСТУП ЗАПРЕЩЕН</b>\n👤 {student.name}\n"
+                    f"❌ <b>Занятия закончились!</b>\nНужно продлить абонемент.",
+                    parse_mode="HTML"
+                )
+            expire_str = student.expire_date.strftime('%d.%m.%Y') if student.expire_date else "Нет данных"
+            student.last_visit = now
             await session.commit()
         response_text = (
             f"🟢 <b>ПРОХОДИТЕ</b>\n"
             f"👤 Атлет: <b>{student_name}</b>\n"
             f"✅ До: {expire_str}\n"
-            f"📈 Посещение №{current_lessons}"
+            f"📈 {usage_info}"
         )
         await message.answer(response_text, parse_mode="HTML")
         if parent_to_notify:
@@ -626,7 +682,6 @@ async def parse_qr_scan(message: types.Message, raw_data: str):
                 )
             except Exception:
                 pass
-
     except Exception as e:
         logger.error(f"❌ Ошибка сканера: {e}")
         await message.answer("❌ Ошибка при обработке данных")
@@ -801,28 +856,46 @@ async def show_all_students_for_cash(callback: types.CallbackQuery):
 
 
 @router.callback_query(F.data.startswith("cash_pay_"))
-async def process_cash_payment(callback: types.CallbackQuery):
-    student_id = int(callback.data.split("_")[-1])
-    result = await add_abon(student_id)
-    if result:
-        new_expire, parent_id = result
-        await callback.message.edit_text(
-            f"✅ <b>Оплата наличными принята!</b>\n"
-            f"Абонемент атлета продлен до: <b>{new_expire}</b>",
-            parse_mode="HTML"
-        )
-        if parent_id and parent_id != 0:
-            try:
-                await callback.bot.send_message(
-                    chat_id=parent_id,
-                    text=f"💵 <b>Ваша оплата (наличными) подтверждена!</b>\n"
-                         f"Абонемент продлен до: <b>{new_expire}</b>. Спасибо!",
-                    parse_mode="HTML"
-                )
-            except Exception as e:
-                logger.error(f"Не удалось отправить уведомление: {e}")
+async def process_cash_payment(callback: types.CallbackQuery, state: FSMContext):
+    data_parts = callback.data.split("_")
+    student_id = int(data_parts[-1])
+
+    data = await state.get_data()
+    sport_type = data.get('sport_type')
+
+    await state.update_data(cash_student_id=student_id)
+    if sport_type == 'bjj':
+        result = await add_abon(student_id, lessons_count=0)
+
+        if result:
+            new_expire, parent_id = result
+            await callback.message.edit_text(
+                f"✅ <b>Оплата наличными (Взрослый/Безлимит) принята!</b>\n"
+                f"Продлено до: <b>{new_expire}</b>",
+                parse_mode="HTML"
+            )
+
+            if parent_id and parent_id != 0:
+                try:
+                    await callback.bot.send_message(
+                        chat_id=parent_id,
+                        text=f"💵 <b>Ваша оплата подтверждена!</b>\n"
+                             f"Абонемент продлен до: <b>{new_expire}</b>.",
+                        parse_mode="HTML"
+                    )
+                except Exception as e:
+                    logger.error(f"Не удалось отправить уведомление: {e}")
+
+            await state.clear()
+        else:
+            await callback.answer("Ошибка: студент не найден", show_alert=True)
+
     else:
-        await callback.answer("Ошибка: студент не найден", show_alert=True)
+        await callback.message.edit_text(
+            "Выберите тип абонемента для ребенка (Наличные):",
+            reply_markup=kids_pay_options().as_markup()
+        )
+        await callback.answer()
 
 
 @router.callback_query(F.data == "admin_cash_search")
@@ -882,35 +955,45 @@ async def manual_visit_results(message: types.Message, state: FSMContext):
 
 
 @router.callback_query(F.data.startswith("manual_checkin_"))
-async def process_manual_checkin(callback: types.CallbackQuery):
+async def process_manual_checkin(callback: types.CallbackQuery, state: FSMContext):
     student_id = int(callback.data.split("_")[-1])
     now = datetime.now()
-    student_name = "Атлет"
-    parent_id = None
     msg_unfreeze = ""
+    usage_info = ""
+
     async with AsyncSessionLocal() as session:
         student = await session.get(Student, student_id)
         if not student:
-            return await callback.answer("Атлет не найден!")
-        student_name = student.name
+            return await callback.answer("Атлет не найден!", show_alert=True)
+
         parent_id = student.parent_id
+        student_name = student.name
         if student.is_frozen == 1:
             days_actually_frozen = (now - student.last_visit).days
             if days_actually_frozen < 5:
                 days_to_subtract = 5 - days_actually_frozen
                 student.expire_date -= timedelta(days=days_to_subtract)
-                msg_unfreeze = f"\n❄️ <b>Разморозка!</b> Лишние {days_to_subtract} дн. аннулированы."
+                msg_unfreeze = f"\n❄️ <b>Разморозка!</b> Срок скорректирован (-{days_to_subtract} дн.)"
             else:
-                msg_unfreeze = f"\n❄️ <b>Разморозка!</b> (5 дней истекли)"
+                msg_unfreeze = f"\n❄️ <b>Абонемент разморожен!</b>"
             student.is_frozen = 0
-        student.balance_lessons += 1
+        balance = student.balance_lessons or 0
+        if balance >= 900:
+            usage_info = "♾ Режим: <b>Безлимит</b>"
+        elif balance > 0:
+            student.balance_lessons -= 1
+            usage_info = f"📉 Осталось занятий: <b>{student.balance_lessons}</b>"
+        else:
+            return await callback.message.answer(
+                f"🔴 <b>ОШИБКА</b>\n👤 {student.name}\n❌ Занятия закончились!",
+                parse_mode="HTML"
+            )
         student.last_visit = now
-        current_lessons = student.balance_lessons
         await session.commit()
     await callback.message.edit_text(
         f"✅ <b>Вход отмечен вручную</b>\n"
         f"👤 Атлет: <b>{student_name}</b>\n"
-        f"📈 Посещение №{current_lessons}"
+        f"{usage_info}"
         f"{msg_unfreeze}",
         parse_mode="HTML"
     )
@@ -918,12 +1001,11 @@ async def process_manual_checkin(callback: types.CallbackQuery):
         try:
             await callback.bot.send_message(
                 chat_id=parent_id,
-                text=f"🔔 <b>Вход зафиксирован (администратором):</b> {student_name}\nПриятной тренировки! 💪",
+                text=f"🔔 <b>Вход зафиксирован:</b> {student_name}\n{usage_info}\nПриятной тренировки! 💪",
                 parse_mode="HTML"
             )
         except Exception:
             pass
-
     await callback.answer("Посещение зафиксировано")
 
 

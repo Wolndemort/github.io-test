@@ -138,7 +138,7 @@ async def has_subscription(user_id: int):
         return None, None
 
 
-async def add_abon(student_id: int):
+async def add_abon(student_id: int, lessons_count: int):
     try:
         async with AsyncSessionLocal() as session:
             student = await session.get(Student, student_id)
@@ -158,6 +158,11 @@ async def add_abon(student_id: int):
             student.expire_date = new_expire
             student.can_freeze = 1
             student.is_frozen = 0
+            if lessons_count == 0:
+                student.balance_lessons = 999
+                logger.debug("Установлен безлимит (999)")
+            else:
+                student.balance_lessons = lessons_count
             await session.commit()
             logger.success(f"✅ Продлен абонемент для {student.name} до {new_expire.strftime('%d.%m.%Y %H:%M')}")
             return new_expire.strftime('%d.%m.%Y'), student.parent_id
