@@ -10,14 +10,13 @@ from loguru import logger
 from admin_module.sqladmin import setup_admin
 from config import ADMIN_IDS
 from config import BOT_TOKEN
-from database.db import init_db, get_daily_stats, get_expire_students, create_db_backup, engine
-from handlers import start, admin, buttons
+from database.db import init_db, get_daily_stats, get_expire_students, create_db_backup, engine, AsyncSessionLocal
+from handlers import start, user_option, buttons, payments, admin_option
 from handlers.buttons import get_profile_keyboard
-from middlewares.logging_middleware import LoggingMiddleware
+from middlewares.main_middleware import LoggingMiddleware, DbSessionMiddleware
 from admin_module.api import router
 from redis.asyncio import Redis
 from aiogram.fsm.storage.redis import RedisStorage
-
 
 redis_client = Redis(host='redis', port=6379, db=0)
 logger.remove()
@@ -46,7 +45,7 @@ async def send_backup_to_admin(bot: Bot):
 
 
 async def check_abon_mailing(bot: Bot):
-    students = await get_expire_students()
+    students = await get_expire_students(AsyncSessionLocal)
     logger.info(f"Начинаю рассылку для {len(students)} атлетов")
     for s in students:
         try:
@@ -81,7 +80,7 @@ async def send_daily_report_to_admins(bot: Bot):
          f"🌙 <b>ВЕЧЕРНИЙ ОТЧЕТ</b> ({datetime.now().strftime('%d.%m.%Y')})\n\n"
          f"👤 <b>Посещений за день:</b> <code>{visits}</code>\n"
          f"💎 <b>Активных абонементов:</b> <code>{active}</code>\n"
-)
+    )
     for admin_id in ADMIN_IDS:
         try:
             await bot.send_message(admin_id, report_text, parse_mode="HTML")
@@ -96,6 +95,7 @@ async def main():
     bot = Bot(token=BOT_TOKEN)
     dp = Dispatcher(storage=storage)
     dp.update.outer_middleware(LoggingMiddleware())
+    dp.update.outer_middleware(DbSessionMiddleware(session_pool=AsyncSessionLocal))
     scheduler = AsyncIOScheduler()
     scheduler.add_job(send_backup_to_admin, 'cron', day_of_week='sat', hour=19, minute=0, args=(bot,))
     scheduler.add_job(check_abon_mailing, 'cron', hour=10, minute=0, args=(bot,))
@@ -103,7 +103,9 @@ async def main():
     scheduler.start()
     dp.include_router(start.router)
     dp.include_router(buttons.router)
-    dp.include_router(admin.router)
+    dp.include_router(admin_option.router)
+    dp.include_router(user_option.router)
+    dp.include_router(payments.router)
     logger.success("🚀 Бот успешно запущен и готов к работе!")
     try:
         await dp.start_polling(bot)
@@ -114,9 +116,6 @@ if __name__ == '__main__':
         asyncio.run(main())
     except KeyboardInterrupt:
         logger.warning("⭕ Бот остановлен пользователем")
-
-
-
 
 
 # в отчет выгружать купленные абонементы обязательно!
@@ -132,7 +131,8 @@ if __name__ == '__main__':
 # сделал докеригноре , осталось оплатить тайм веб и выложить через гит по идее добавить магин айди в админы
 # указывать именно имя и фамилию!!! в регестр
 # .env.example , прокинуть сессию через middlewear  paytest, sentry
-
-#Logging (Structlog): Вместо обычных принтов внедри структурированное логирование в JSON. Это позволит в будущем легко анализировать логи через ELK-стек или Grafana Loki.
-#CI/CD (GitHub Actions): Настрой автоматический запуск твоих новых Pytest при каждом git push. Если тесты упали — деплой блокируется. Это сэкономит кучу нервов.
-#Prometheus + Grafana: Есл
+# Logging (Structlog): Вместо обычных принтов внедри структурированное логирование в JSON.
+# Это позволит в будущем легко анализировать логи через ELK-стек или Grafana Loki.
+# CI/CD (GitHub Actions): Настрой автоматический запуск твоих новых Pytest при каждом git push.
+# Если тесты упали — деплой блокируется. Это сэкономит кучу нервов.
+# Prometheus + Grafana: Есл

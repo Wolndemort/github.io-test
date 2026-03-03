@@ -16,3 +16,6 @@ class AdminManualAdd(StatesGroup):
     waiting_for_search_visit = State()
     waiting_for_phone = State()
 
+
+class AdminStates(StatesGroup):
+    waiting_for_broadcast_text = State()
