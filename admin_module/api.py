@@ -41,12 +41,10 @@ async def export_students_to_excel(session: AsyncSession = Depends(get_session),
     output.seek(0)
     headers = {'Content-Disposition': 'attachment; filename="report.xlsx"'}
     return StreamingResponse(output, headers=headers, media_type='application/vnd.ms-excel')
-#добавить кнопку !
 
 
 @router.get("/revenue")
 async def get_revenue_stats(session: AsyncSession = Depends(get_session), _=Depends(get_api_key)):
-
     result = await session.execute(select(Student))
     students = result.scalars().all()
     if not students:

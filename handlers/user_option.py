@@ -238,7 +238,7 @@ async def choose_student_for_freeze(callback: types.CallbackQuery, session: Asyn
     if count == 0:
         return await callback.answer("Нет активных абонементов, доступных для заморозки (или она уже использована)!",
                                      show_alert=True)
-    builder.row(types.InlineKeyboardButton(text="⬅️ Назад", callback_data="my_profile"))
+    builder.row(types.InlineKeyboardButton(text="⬅️ Назад", callback_data="profile"))
     await callback.message.edit_text(
         "❄️ **Заморозка абонемента**\n\n"
         "Выберите атлета из списка ниже.\n"

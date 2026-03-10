@@ -41,13 +41,12 @@ async def start_handler(message: types.Message, state: FSMContext, session: Asyn
                 keyboard=[],
                 resize_keyboard=True,
                 one_time_keyboard=True)
-
-        await message.answer(
-            f"<b>Здравствуйте, {first_name}!</b>\n\n"
-            "Похоже, ваш профиль еще не привязан к системе.\n"
-            "Пожалуйста, нажмите кнопку ниже, чтобы войти по номеру телефона:",
-            parse_mode="HTML",
-            reply_markup=kb)
+            await message.answer(
+                f"<b>Здравствуйте, {first_name}!</b>\n\n"
+                "Похоже, ваш профиль еще не привязан к системе.\n"
+                "Пожалуйста, нажмите кнопку ниже, чтобы войти по номеру телефона:",
+                parse_mode="HTML",
+                reply_markup=kb)
     except Exception as e:
         await session.rollback()
         logger.error(f"❌ Ошибка в БД при обработке /start для {user_id}: {e}")

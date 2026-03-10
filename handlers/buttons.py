@@ -86,6 +86,7 @@ def discipline():
     builder.row(types.InlineKeyboardButton(text='Взрослые Джиу-джитсу 🥋', callback_data='buy_bjj'))
     builder.row(types.InlineKeyboardButton(text='ДЕТИ (Kids) Джиу-джитсу👶', callback_data='buy_kids'))
     builder.row(types.InlineKeyboardButton(text='⬅️ В главное меню', callback_data='begin'))
+    builder.row(types.InlineKeyboardButton(text='👤 МОЙ ПРОФИЛЬ ', callback_data='profile'))
     return builder.as_markup()
 
 

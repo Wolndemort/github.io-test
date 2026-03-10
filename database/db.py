@@ -26,6 +26,11 @@ class User(Base):
     students: Mapped[List["Student"]] = relationship(back_populates='parent')
 
 
+async def get_session() -> AsyncSession:
+    async with AsyncSessionLocal() as session:
+        yield session
+
+
 class Student(Base):
     __tablename__ = 'students'
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
