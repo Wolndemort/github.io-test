@@ -59,7 +59,7 @@ docker-compose up -d --build
 
 
 1. База данных (Alembic)
-Ты применил миграцию: docker exec -it gym_bot alembic upgrade head.
+применил миграцию: docker exec -it gym_bot alembic upgrade head.
 В логах было: Running upgrade ... -> ..., add parent_phone.
 Итог: Поле parent_phone физически существует в таблице students.
 2. Добавление админом (AdminManualAdd)
@@ -88,4 +88,4 @@ docker-compose up -d --build
 Внедрил Pytest
 
 Остановился на тестах , дописать тестф кьюара , заморозки, оплат, списания , ручного добавления , авторизации по телефону
-делаю git action ci/cd
+делаю git action ci/cd сделал пуш в сой репозиторий нужуно прописать yml
