@@ -2,6 +2,7 @@ from aiogram import Router, types
 from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
 from aiogram.types import WebAppInfo, KeyboardButton
 
+
 router = Router()
 
 

@@ -1,12 +1,10 @@
 from aiogram import Router, types
 from aiogram.filters import Command
 from sqlalchemy.ext.asyncio import AsyncSession
-
-from handlers.buttons import get_main_menu_keyboard
+from handlers.buttons import get_main_menu_keyboard,get_profile_keyboard
 from database.db import User, Student
 from aiogram.fsm.context import FSMContext
 from sqlalchemy import select
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 from loguru import logger
 
 router = Router()
@@ -37,16 +35,13 @@ async def start_handler(message: types.Message, state: FSMContext, session: Asyn
                 reply_markup=get_main_menu_keyboard()
             )
         else:
-            kb = ReplyKeyboardMarkup(
-                keyboard=[[KeyboardButton(text="📱 Поделиться номером", request_contact=True)]],
-                resize_keyboard=True,
-                one_time_keyboard=True)
             await message.answer(
                 f"<b>Здравствуйте, {first_name}!</b>\n\n"
                 "Похоже, ваш профиль еще не привязан к системе.\n"
                 "Пожалуйста, нажмите кнопку ниже, чтобы войти по номеру телефона:",
                 parse_mode="HTML",
-                reply_markup=kb)
+                reply_markup=get_profile_keyboard()
+            )
     except Exception as e:
         await session.rollback()
         logger.error(f"❌ Ошибка в БД при обработке /start для {user_id}: {e}")
