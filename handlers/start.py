@@ -13,7 +13,6 @@ router = Router()
 @router.message(Command("start"))
 async def start_handler(message: types.Message, state: FSMContext, session: AsyncSession):
     await state.clear()
-    kb = None
     user_id = message.from_user.id
     full_name = message.from_user.full_name
     first_name = message.from_user.first_name
