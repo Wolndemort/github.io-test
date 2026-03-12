@@ -18,4 +18,4 @@ jobs:
             cd /root/my_crm_bot  
             git pull origin master
             pip install -r requirements.txt
-            pm2 restart my_crm_bot
+            docker compose up -d --build
