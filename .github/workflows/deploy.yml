@@ -1,14 +1,20 @@
 name: My_crm_bot
+
 on:
   push:
-    branches [master]
+    branches: [ master ]  # У тебя тут master, ок
 
 jobs:
-  build:
+  deploy:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Say Hello
-        run: "Код успешно доставлен на проверку!"
+      - name: Deploy to Server
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.HOST }}
+          username: ${{ secrets.USERNAME }}
+          key: ${{ secrets.SSH_KEY }}
+          script: |
+            cd /root/my_crm_bot  
+            git pull origin master
+            pm2 restart my_crm_bot
