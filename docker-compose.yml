@@ -34,8 +34,9 @@ services:
     env_file:
       - .env
     environment:
-      REDIS_URL: "redis://redis:6379/0"
-      DB_FILE: "postgresql+asyncpg://postgres:${DB_PASSWORD}@db:5432/crm_db"
+      - REDIS_URL: "redis://redis:6379/0"
+      - DB_FILE: "postgresql+asyncpg://postgres:${DB_PASSWORD}@db:5432/crm_db"
+      - PYTHONPATH=/app
     volumes:
       - .:/app
       - ./logs:/app/logs
