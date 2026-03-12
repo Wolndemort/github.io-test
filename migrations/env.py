@@ -8,12 +8,11 @@ from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
-# Импортируем твой Base и модели
 from database.db import Base, Student, User
 
 load_dotenv()
 
-# Объект конфигурации Alembic
+
 config = context.config
 
 # Настройка логов
