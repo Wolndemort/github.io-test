@@ -13,9 +13,9 @@ services:
       - "5432:5432"
     restart: always
     environment:
-      - POSTGRES_USER: postgres
-      - POSTGRES_PASSWORD: ${DB_PASSWORD}
-      - POSTGRES_DB: crm_db
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=${DB_PASSWORD}
+      - POSTGRES_DB=crm_db
     volumes:
       - pg_data:/var/lib/postgresql/data
 
@@ -34,9 +34,9 @@ services:
     env_file:
       - .env
     environment:
-      - REDIS_URL: redis://redis:6379/0
-      - DB_FILE: postgresql+asyncpg://postgres:${DB_PASSWORD}@db:5432/crm_db
-      - PYTHON=/app
+      - REDIS_URL=redis://redis:6379/0
+      - DB_FILE=postgresql+asyncpg://postgres:${DB_PASSWORD}@db:5432/crm_db
+      - PYTHONPATH=/app
     volumes:
       - .:/app
       - ./logs:/app/logs
@@ -51,7 +51,7 @@ services:
     env_file:
       - .env
     environment:
-      - DB_FILE: "postgresql+asyncpg://postgres:${DB_PASSWORD}@db:5432/crm_db"
+      - DB_FILE=postgresql+asyncpg://postgres:${DB_PASSWORD}@db:5432/crm_db
     ports:
       - "8000:8000"
     volumes:
