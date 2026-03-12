@@ -6,7 +6,7 @@ from handlers.buttons import get_main_menu_keyboard
 from database.db import User, Student
 from aiogram.fsm.context import FSMContext
 from sqlalchemy import select
-from aiogram.types import ReplyKeyboardMarkup
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 from loguru import logger
 
 router = Router()
@@ -38,7 +38,7 @@ async def start_handler(message: types.Message, state: FSMContext, session: Asyn
             )
         else:
             kb = ReplyKeyboardMarkup(
-                keyboard=[],
+                keyboard=[[KeyboardButton(text="📱 Поделиться номером", request_contact=True)]],
                 resize_keyboard=True,
                 one_time_keyboard=True)
             await message.answer(
