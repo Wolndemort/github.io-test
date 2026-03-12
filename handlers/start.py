@@ -51,3 +51,6 @@ async def start_handler(message: types.Message, state: FSMContext, session: Asyn
         await session.rollback()
         logger.error(f"❌ Ошибка в БД при обработке /start для {user_id}: {e}")
         return await message.answer("Произошла техническая ошибка. Попробуйте позже.")
+
+
+

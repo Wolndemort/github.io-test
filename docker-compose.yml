@@ -30,7 +30,7 @@ services:
       redis:
         condition: service_started
     command: >
-      sh -c "alembic upgrade head && python start.py"
+      sh -c "alembic upgrade head && python main.py"
     env_file:
       - .env
     environment:
