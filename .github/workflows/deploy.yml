@@ -5,9 +5,27 @@ on:
     branches: [ master ]
 
 jobs:
-  deploy:
+  test_and_deploy:
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio
+
+      - name: Run test
+        run: |
+          export PYTHONPATH=$PYTHONPATH:$(pwd)
+          pytest
+
       - name: Deploy to Server
         uses: appleboy/ssh-action@v1.0.3
         with:
@@ -19,3 +37,4 @@ jobs:
             git pull origin master
             pip install -r requirements.txt
             docker compose up -d --build
+            docker image prune -f
