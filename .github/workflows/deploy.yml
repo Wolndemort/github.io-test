@@ -23,10 +23,11 @@ jobs:
 
       - name: Run test
         env:
-          DB_FILE: sqlite+aiosqlite:///./test.db
+          DATABASE_URL: sqlite+aiosqlite:///./test.db
           DB_PASSWORD: fake_password
         run: |
           export PYTHONPATH=$PYTHONPATH:$(pwd)
+           pip install aiosqlite
           pytest
 
       - name: Deploy to Server
