@@ -43,3 +43,20 @@ jobs:
             pip install -r requirements.txt
             docker compose up -d --build
             docker image prune -f
+
+      - name: Send Telegram Notification on Failure
+        if: failure()
+        uses: appleboy/telegram-action@master
+        with:
+          to: ${{ secret.TEKEGRAM_TO }}
+          token: ${{ secrets.TELEGRAM_TOKEN }}
+          message: |
+            ❌ ОШИБКА CI/CD в проекте ${{ github.repository }}!
+            
+            Тип события: ${{ github.event_name }}
+            Ветка: ${{ github.ref }}
+            Коммит: ${{ github.sha }}
+            
+            Бро, тесты упали или деплой не прошел. Чекни логи: 
+            https://github.com{{ github.repository }}/actions
+            
