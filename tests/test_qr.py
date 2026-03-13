@@ -44,3 +44,5 @@ async def test_parse_qr_scan_success(mock_gen_sig, mock_session_class):
     session.commit.assert_called_once()
     actual_text = message.answer.call_args[0][0]
     assert "ПРОХОДИТЕ" in actual_text.upper()
+
+
