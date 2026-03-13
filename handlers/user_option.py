@@ -279,7 +279,6 @@ async def parse_qr_scan(message: types.Message):
     raw_data = message.web_app_data.data
     raw_data = fix_layout(raw_data)
     logger.info(f"🔍 Обработка данных: {raw_data}")
-
     try:
         parts = raw_data.split(':')
         if len(parts) != 4 or parts[0] != 'student':
@@ -292,14 +291,10 @@ async def parse_qr_scan(message: types.Message):
         now = datetime.now()
         async with AsyncSessionLocal() as session:
             student = await session.get(Student, scanned_id)
-
             if not student:
                 return await message.answer("❌ Атлет не найден в базе!")
-
-            # Используем .__dict__.get() — это 100% уберет ошибку InstrumentedAttribute
             parent_to_notify = student.__dict__.get('parent_id')
             student_name = str(student.name)
-
             if student.is_frozen == 1:
                 last_v = student.last_visit or now
                 days_actually_frozen = (now - last_v).days
@@ -309,27 +304,17 @@ async def parse_qr_scan(message: types.Message):
                         student.expire_date -= timedelta(days=days_to_subtract)
                 student.is_frozen = 0
                 await message.answer(f"❄️ Абонемент {student_name} разморожен!")
-
-            # Проверка 5 минут
             if student.last_visit and (now - student.last_visit).total_seconds() < 300:
                 return await message.answer(f"⚠️ {student_name} уже отмечен! Повтор через 5 мин.")
-
-            # Проверка баланса и даты
             if not student.expire_date or student.expire_date < now:
                 return await message.answer(f"🔴 ДОСТУП ЗАПРЕЩЕН\n👤 {student_name}\n❌ Срок истек")
-
             if (student.balance_lessons or 0) <= 0:
                 return await message.answer(f"🔴 ДОСТУП ЗАПРЕЩЕН\n👤 {student_name}\n❌ Нет занятий")
-
-            # Списание
             if student.balance_lessons < 900:
                 student.balance_lessons -= 1
-
             student.last_visit = now
             await session.commit()
-
             await message.answer(f"🟢 <b>ПРОХОДИТЕ</b>\n👤 Атлет: <b>{student_name}</b>", parse_mode="HTML")
-
             if parent_to_notify:
                 try:
                     await message.bot.send_message(int(parent_to_notify), f"🔔 Вход: {student_name}")

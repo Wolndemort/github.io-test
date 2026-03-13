@@ -19,19 +19,14 @@ async def start_handler(message: types.Message, state: FSMContext, session: Asyn
     logger.info(f"🚀 Команда /start от {full_name} (ID: {user_id})")
 
     try:
-        # --- БЛОК РАБОТЫ С ПОЛЬЗОВАТЕЛЕМ ---
-        # 1. Пытаемся получить юзера из базы
         db_user = await session.get(User, user_id)
 
         if not db_user:
-            # Если нет — создаем нового
             db_user = User(user_id=user_id, full_name=full_name)
             session.add(db_user)
         else:
-            # Если есть — просто обновляем имя (на случай, если сменил в ТГ)
             db_user.full_name = full_name
 
-        # 2. Ищем привязанных студентов
         stmt = select(Student).where(Student.parent_id == user_id)
         result = await session.execute(stmt)
         students = result.scalars().all()
