@@ -323,7 +323,7 @@ async def parse_qr_scan(message: types.Message):
 
     except Exception as e:
         logger.error(f"❌ Ошибка сканера: {e}")
-        await message.answer("❌ Ошибка при обработке данных")
+        await message.answer("❌  Ошибка при обработке данных")
 
 
 @router.message(F.web_app_data)
