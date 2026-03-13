@@ -25,6 +25,7 @@ jobs:
         env:
           DATABASE_URL: sqlite+aiosqlite:///./test.db
           DB_PASSWORD: fake_password
+          SECRET_KEY: SECRET_KEY
         run: |
           export PYTHONPATH=$PYTHONPATH:$(pwd)
            pip install aiosqlite
