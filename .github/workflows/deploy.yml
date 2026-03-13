@@ -48,7 +48,7 @@ jobs:
         if: failure()
         uses: appleboy/telegram-action@master
         with:
-          to: ${{ secret.TEKEGRAM_TO }}
+          to: ${{ secrets.TEKEGRAM_TO }}
           token: ${{ secrets.TELEGRAM_TOKEN }}
           message: |
             ❌ ОШИБКА CI/CD в проекте ${{ github.repository }}!
