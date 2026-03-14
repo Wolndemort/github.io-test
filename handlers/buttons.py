@@ -63,12 +63,12 @@ def admin_keyboard():
     builder.row(types.InlineKeyboardButton(text="💵 Принять наличку", callback_data="admin_cash_list"))
     builder.row(types.InlineKeyboardButton(text="📝 Отметить посещение", callback_data="admin_manual_visit"))
     builder.button(text="Таблица для админа",
-                   web_app=WebAppInfo(url='https://api.save-city01.ru/admin'))
+                   web_app=WebAppInfo(url='https://api.safe-city01.ru/admin'))
     builder.button(text="Отчет Pandas",
-                   web_app=WebAppInfo(url='https://api.save-city01.ru/revenue'))
+                   web_app=WebAppInfo(url='https://api.safe-city01.ru/revenue'))
     builder.button(text="Выгрузка в Exel",
                    web_app=WebAppInfo
-                   (url='https://api.save-city01.ru/stats/export/excel'))
+                   (url='https://api.safe-city01.ru/stats/export/excel'))
 
     return builder.as_markup()
 
