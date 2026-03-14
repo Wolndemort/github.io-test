@@ -63,12 +63,12 @@ def admin_keyboard():
     builder.row(types.InlineKeyboardButton(text="💵 Принять наличку", callback_data="admin_cash_list"))
     builder.row(types.InlineKeyboardButton(text="📝 Отметить посещение", callback_data="admin_manual_visit"))
     builder.button(text="Таблица для админа",
-                   web_app=WebAppInfo(url='https://518c7250-6314-4f7a-8d21-d28071f7def2-e1.tunnel4.com/admin'))
+                   web_app=WebAppInfo(url='https://api.save-city01.ru/admin'))
     builder.button(text="Отчет Pandas",
-                   web_app=WebAppInfo(url='https://518c7250-6314-4f7a-8d21-d28071f7def2-e1.tunnel4.com/stats/revenue'))
+                   web_app=WebAppInfo(url='https://api.save-city01.ru/revenue'))
     builder.button(text="Выгрузка в Exel",
                    web_app=WebAppInfo
-                   (url='https://518c7250-6314-4f7a-8d21-d28071f7def2-e1.tunnel4.com/stats/export/excel'))
+                   (url='https://api.save-city01.ru/stats/export/excel'))
 
     return builder.as_markup()
 
