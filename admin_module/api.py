@@ -1,5 +1,8 @@
 import pandas as pd
 import io
+from fastapi import Request
+from fastapi.responses import HTMLResponse
+from fastapi.templating import Jinja2Templates
 from fastapi import Depends, HTTPException, APIRouter, Security
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel
@@ -14,7 +17,7 @@ from config import fastapi_key
 
 
 router = APIRouter(prefix="/stats", tags=["Analytics"])
-
+templates = Jinja2Templates(directory="templates")
 
 API_KEY_NAME = "X-API-Key"
 API_KEY = fastapi_key
@@ -32,7 +35,7 @@ async def get_api_key(header_value: str = Security(api_key_header)):
 
 
 @router.get("/export/excel")
-async def export_students_to_excel(session: AsyncSession = Depends(get_session),_=Depends(get_api_key)):
+async def export_students_to_excel(session: AsyncSession = Depends(get_session), _=Depends(get_api_key)):
     result = await session.execute(select(Student))
     df = pd.DataFrame([{"Имя": s.name, "Баланс": s.balance_lessons} for s in result.scalars().all()])
     output = io.BytesIO()
@@ -43,31 +46,35 @@ async def export_students_to_excel(session: AsyncSession = Depends(get_session),
     return StreamingResponse(output, headers=headers, media_type='application/vnd.ms-excel')
 
 
-@router.get("/revenue")
-async def get_revenue_stats(session: AsyncSession = Depends(get_session), _=Depends(get_api_key)):
+@router.get("/revenue", response_class=HTMLResponse)
+async def get_revenue_stats(
+        request=Request,
+        session: AsyncSession = Depends(get_session),
+        _=Depends(get_api_key)
+):
     result = await session.execute(select(Student))
     students = result.scalars().all()
     if not students:
-        return {"message": "Данных пока нет"}
+        return HTMLResponse(content="<h1>Данных пока нет</h1>", status_code=200)
     data = [
-        {
-            "name": s.name,
-            "balance": s.balance_lessons,
-            "is_frozen": s.is_frozen
-        } for s in students
+        {"name": s.name, "balance": s.balance_lessons, 'is_frozen': s.is_frozen}
+        for s in students
     ]
     df = pd.DataFrame(data)
+
     total_lessons = df["balance"].sum()
-    avg_lessons = df["balance"].mean()
-    estimated_revenue = total_lessons * 500  # Пример: 1 занятие = 500 руб.
+    estimated_revenue = total_lessons * 500
     frozen_count = df[df["is_frozen"] == 1].shape[0]
-    return {
-        "total_active_lessons": int(total_lessons),
-        "estimated_revenue_rub": int(estimated_revenue),
-        "average_lessons_per_student": round(float(avg_lessons), 2),
-        "frozen_students": frozen_count,
-        "top_students": df.nlargest(3, "balance")[["name", "balance"]].to_dict(orient="records")
-    }
+    top_students = df.nlargest(3, "balance")[["name", "balance"]].to_dict(orient="records")
+
+    return templates.TemplateResponse(
+        "stats.html",
+        {"request": request,
+            "total_lessons": int(total_lessons),
+            "revenue": int(estimated_revenue),
+            "frozen": frozen_count,
+            "top_students": top_students}
+    )
 
 
 class StudentCreate(BaseModel):
@@ -84,7 +91,7 @@ async def create_student(data: StudentCreate, session: AsyncSession = Depends(ge
 
 
 @router.get("/users", response_model=None)
-async def get_all_users(session: AsyncSession = Depends(get_session),_=Depends(get_api_key)):
+async def get_all_users(session: AsyncSession = Depends(get_session), _=Depends(get_api_key)):
     query = select(User).options(selectinload(User.students))
     result = await session.execute(query)
     users = result.scalars().all()
@@ -92,7 +99,7 @@ async def get_all_users(session: AsyncSession = Depends(get_session),_=Depends(g
 
 
 @router.get("/students/{student_id}")
-async def get_student_info(student_id: int, session: AsyncSession = Depends(get_session),_=Depends(get_api_key)):
+async def get_student_info(student_id: int, session: AsyncSession = Depends(get_session), _=Depends(get_api_key)):
     """Получить детальную информацию по конкретному ученику"""
     query = select(Student).where(Student.id == student_id)
     result = await session.execute(query)
@@ -101,4 +108,3 @@ async def get_student_info(student_id: int, session: AsyncSession = Depends(get_
     if not student:
         raise HTTPException(status_code=404, detail="Student not found")
     return student
-
