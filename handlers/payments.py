@@ -55,6 +55,7 @@ async def buy_handler(callback: types.CallbackQuery, state: FSMContext, session:
 async def request_receipt(callback: types.CallbackQuery, state: FSMContext):
     student_id = int(callback.data.split('_')[2])
     await state.update_data(chosen_student_id=student_id)
+
     data = await state.get_data()
     sport_type = data.get('sport_type')
     if sport_type == 'bjj':

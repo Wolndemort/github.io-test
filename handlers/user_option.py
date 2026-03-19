@@ -63,7 +63,7 @@ async def universal_profile_handler(callback: types.CallbackQuery, session: Asyn
             for s in students:
                 if not s.expire_date:
                     status = "❌ <b>Не куплен</b>"
-                elif s.is_frozen:
+                elif getattr(s, 'is_frozen', 0) == 1:  # Проверка на заморозку
                     status = "❄️ <b>ЗАМОРОЖЕН</b>"
                 elif s.expire_date > now:
                     status = f"✅ <b>Активен</b> до <code>{s.expire_date.strftime('%d.%m.%Y')}</code>"
@@ -79,7 +79,7 @@ async def universal_profile_handler(callback: types.CallbackQuery, session: Asyn
                     lessons_info = "❌ <b>Занятия окончены</b>"
 
                 phone_info = f" [📞 {s.parent_phone}]" if s.parent_phone else " [📱 нет номера]"
-                status_text += f"\n• <b>{s.name}</b>: {status}{lessons_info}\n{phone_info}"
+                status_text += f"\n• <b>{s.name}</b>: {status} {lessons_info}\n {phone_info}"
 
         await callback.message.edit_text(
             text=f"👤 <b>Личный кабинет</b>\n\n{status_text}\n\n"
@@ -293,22 +293,25 @@ async def parse_qr_scan(message: types.Message):
             student = await session.get(Student, scanned_id)
             if not student:
                 return await message.answer("❌ Атлет не найден в базе!")
-            parent_to_notify = student.__dict__.get('parent_id')
+            parent_to_notify = student.parent_id
             student_name = str(student.name)
+            if student.last_visit and (now - student.last_visit).total_seconds() < 300:
+                return await message.answer(f"⚠️ {student_name} уже отмечен! Повтор через 5 мин.")
             if student.is_frozen == 1:
+                student.is_frozen = 0
+                session.add(student)
+                await message.answer(f"❄️ Абонемент {student_name} разморожен!")
                 last_v = student.last_visit or now
                 days_actually_frozen = (now - last_v).days
                 if days_actually_frozen < 5:
                     days_to_subtract = 5 - days_actually_frozen
                     if student.expire_date:
                         student.expire_date -= timedelta(days=days_to_subtract)
-                student.is_frozen = 0
-                await message.answer(f"❄️ Абонемент {student_name} разморожен!")
-            if student.last_visit and (now - student.last_visit).total_seconds() < 300:
-                return await message.answer(f"⚠️ {student_name} уже отмечен! Повтор через 5 мин.")
             if not student.expire_date or student.expire_date < now:
+                await session.commit()
                 return await message.answer(f"🔴 ДОСТУП ЗАПРЕЩЕН\n👤 {student_name}\n❌ Срок истек")
             if (student.balance_lessons or 0) <= 0:
+                await session.commit()
                 return await message.answer(f"🔴 ДОСТУП ЗАПРЕЩЕН\n👤 {student_name}\n❌ Нет занятий")
             if student.balance_lessons < 900:
                 student.balance_lessons -= 1

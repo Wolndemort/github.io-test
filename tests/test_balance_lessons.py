@@ -2,6 +2,8 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from datetime import datetime, timedelta
 from handlers.user_option import parse_qr_scan
+
+
 @pytest.mark.asyncio
 @patch("handlers.user_option.AsyncSessionLocal")
 @patch("handlers.user_option.generate_signature")
