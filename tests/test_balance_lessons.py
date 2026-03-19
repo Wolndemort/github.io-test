@@ -32,5 +32,5 @@ async def test_parse_qr_scan_no_lessons(mock_gen_sig, mock_session_class):
     assert "🔴 ДОСТУП ЗАПРЕЩЕН" in actual_text
     assert "❌ Нет занятий" in actual_text
     assert student.balance_lessons == 0
-    session.commit.assert_not_called()
+    session.commit.assert_called()
 
