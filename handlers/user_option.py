@@ -315,6 +315,7 @@ async def parse_qr_scan(message: types.Message):
                 return await message.answer(f"🔴 ДОСТУП ЗАПРЕЩЕН\n👤 {student_name}\n❌ Нет занятий")
             if student.balance_lessons < 900:
                 student.balance_lessons -= 1
+                await session.commit()
             student.last_visit = now
             await session.commit()
             await message.answer(f"🟢 <b>ПРОХОДИТЕ</b>\n👤 Атлет: <b>{student_name}</b>", parse_mode="HTML")
