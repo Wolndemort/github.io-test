@@ -313,7 +313,7 @@ async def parse_qr_scan(message: types.Message):
             if (student.balance_lessons or 0) <= 0:
                 await session.commit()
                 return await message.answer(f"🔴 ДОСТУП ЗАПРЕЩЕН\n👤 {student_name}\n❌ Нет занятий")
-            if student.balance_lessons < 900:
+            if student.balance_lessons < 999:
                 student.balance_lessons -= 1
             student.last_visit = now
             await session.commit()

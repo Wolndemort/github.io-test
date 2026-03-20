@@ -111,7 +111,7 @@ async def process_student_freeze(student_id: int, session: AsyncSession):
         return None
 
     except Exception as e:
-        await session.rollback()  # Обязательно откатываем при ошибке записи
+        await session.rollback()
         logger.error(f"❌ Ошибка при заморозке: {e}")
         return None
 
