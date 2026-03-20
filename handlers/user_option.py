@@ -319,9 +319,18 @@ async def parse_qr_scan(message: types.Message):
                 return await message.answer(f"🔴 ДОСТУП ЗАПРЕЩЕН\n👤 {student_name}\n❌ Нет занятий")
             if student.balance_lessons < 900:
                 student.balance_lessons -= 1
+                display_balance = f"🔢 Осталось занятий: <b>{student.balance_lessons}</b>"
+            else:
+                display_balance = "♾ <b>Безлимит</b>"
+
             student.last_visit = now
             await session.commit()
-            await message.answer(f"🟢 <b>ПРОХОДИТЕ</b>\n👤 Атлет: <b>{student_name}</b>", parse_mode="HTML")
+            await message.answer(
+                f"🟢 <b>ПРОХОДИТЕ</b>\n👤 Атлет: <b>{student_name}</b>\n"
+                f"{display_balance}\n"
+                f"📅 До:{student.expire_date.strftime('%d.%m.%Y') if student.expire_date else '___'}",
+                parse_mode='HTML')
+
             if parent_to_notify:
                 try:
                     await message.bot.send_message(int(parent_to_notify), f"🔔 Вход: {student_name}")
