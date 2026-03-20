@@ -295,10 +295,10 @@ async def parse_qr_scan(message: types.Message):
                 return await message.answer("❌ Атлет не найден в базе!")
             parent_to_notify = student.parent_id
             student_name = str(student.name)
-            if student.last_visit and (now - student.last_visit).total_seconds() < 300:
-                return await message.answer(f"⚠️ {student_name} уже отмечен! Повтор через 5 мин.")
+            was_frozen = False
             if student.is_frozen == 1:
                 student.is_frozen = 0
+                was_frozen = True
                 session.add(student)
                 await message.answer(f"❄️ Абонемент {student_name} разморожен!")
                 last_v = student.last_visit or now
@@ -307,6 +307,10 @@ async def parse_qr_scan(message: types.Message):
                     days_to_subtract = 5 - days_actually_frozen
                     if student.expire_date:
                         student.expire_date -= timedelta(days=days_to_subtract)
+            if student.last_visit and (now - student.last_visit).total_seconds() < 300:
+                if was_frozen:
+                    await session.commit()
+                return await message.answer(f"⚠️ {student_name} уже отмечен! Повтор через 5 мин.")
             if not student.expire_date or student.expire_date < now:
                 await session.commit()
                 return await message.answer(f"🔴 ДОСТУП ЗАПРЕЩЕН\n👤 {student_name}\n❌ Срок истек")
