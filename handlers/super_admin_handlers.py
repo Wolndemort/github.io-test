@@ -17,31 +17,38 @@ from handlers.states import AddClub
 router = Router()
 
 
-@router.message(Command("super"), F.from_user.id.in_(ADMIN_IDS))
-async def super_admin_main(message: types.Message):
-    builder = InlineKeyboardBuilder()
+@router.message(Command("super"))
+@router.callback_query(F.data == "super") # Теперь ловит и кнопку "Назад"
+async def super_admin_main(event: types.Message | types.CallbackQuery, is_super_adm: bool):
+    # 1. Проверка прав из мидлваря
+    if not is_super_adm:
+        if isinstance(event, types.CallbackQuery):
+            await event.answer("❌ Доступ запрещен", show_alert=True)
+        return
 
-    # 1. Основное управление клубами
+    # 2. Если это колбэк — убираем часики
+    if isinstance(event, types.CallbackQuery):
+        await event.answer()
+
+    builder = InlineKeyboardBuilder()
     builder.row(types.InlineKeyboardButton(text="➕ Добавить клуб", callback_data="add_new_club"))
     builder.row(types.InlineKeyboardButton(text="📋 Список всех клубов", callback_data="list_clubs"))
-
-    # 2. Управление биллингом (чтобы отключать неплательщиков)
     builder.row(types.InlineKeyboardButton(text="💳 Продлить подписку клуба", callback_data="extend_club_sub"))
-
-    # 3. Техническая часть
     builder.row(types.InlineKeyboardButton(text="📊 Общая статистика системы", callback_data="system_stats"))
     builder.row(types.InlineKeyboardButton(text="📢 Рассылка ВСЕМ владельцам", callback_data="broadcast_to_owners"))
 
-    await message.answer(
-        text="👑 <b>ПАНЕЛЬ ГЛАВНОГО АДМИНИСТРАТОРА (SaaS)</b>\n\n"
-             "Здесь вы управляете франшизами, подписками и общей конфигурацией системы.",
-        reply_markup=builder.as_markup(),
-        parse_mode="HTML"
+    text = (
+        "👑 <b>ПАНЕЛЬ ГЛАВНОГО АДМИНИСТРАТОРА (SaaS)</b>\n\n"
+        "Здесь вы управляете франшизами, подписками и общей конфигурацией системы."
     )
 
+    # 3. Логика вывода: если кнопка — редактируем старое, если команда — шлем новое
+    if isinstance(event, types.Message):
+        await event.answer(text, reply_markup=builder.as_markup(), parse_mode="HTML")
+    else:
+        await event.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
 
-# 2. Начало диалога добавления
-# 1. Начало
+
 @router.callback_query(F.data == "add_new_club", F.from_user.id.in_(ADMIN_IDS))
 async def start_add_club(callback: types.CallbackQuery, state: FSMContext):
     await state.set_state(AddClub.waiting_for_name)
@@ -119,56 +126,102 @@ async def process_token(message: types.Message, state: FSMContext, session: Asyn
         await state.clear()
 
 
-@router.callback_query(F.data == "extend_club_sub", F.from_user.id.in_(ADMIN_IDS))
-async def list_for_extend(callback: types.CallbackQuery, session: AsyncSession):
-    # 1. Тянем все клубы
-    result = await session.execute(select(Club).order_by(Club.name))
-    clubs = result.scalars().all()
+@router.callback_query(F.data == "extend_club_sub")
+async def list_for_extend(
+    callback: types.CallbackQuery,
+    session: AsyncSession,
+    is_super_adm: bool
+):
+    # 1. Сразу отвечаем на колбэк, чтобы убрать "часики" (зависание)
+    await callback.answer()
 
-    if not clubs:
-        return await callback.answer("❌ В системе еще нет зарегистрированных клубов.", show_alert=True)
+    # 2. Проверка прав через флаг из мидлваря
+    if not is_super_adm:
+        return await callback.message.answer("❌ У вас нет прав администратора.")
 
-    builder = InlineKeyboardBuilder()
-    for c in clubs:
-        # 🛡️ БЕЗОПАСНО: Сначала проверяем наличие даты, потом форматируем
-        if c.expire_date:
-            expire_str = c.expire_date.strftime('%d.%m.%Y')
-            # Если подписка уже кончилась — помечаем красным
-            status_icon = "🔴" if c.expire_date < datetime.now() else "⏳"
-        else:
-            expire_str = "Без срока"
-            status_icon = "⚪️"
+    try:
+        # 3. Тянем все клубы
+        result = await session.execute(select(Club).order_by(Club.name))
+        clubs = result.scalars().all()
 
-        builder.row(types.InlineKeyboardButton(
-            text=f"{status_icon} {c.name} ({expire_str})",
-            callback_data=f"do_extend_{c.id}")
+        if not clubs:
+            return await callback.message.edit_text("❌ В системе еще нет зарегистрированных клубов.")
+
+        builder = InlineKeyboardBuilder()
+        now = datetime.now()
+
+        for c in clubs:
+            # Проверяем дату
+            if c.expire_date:
+                expire_str = c.expire_date.strftime('%d.%m.%Y')
+                # Сравниваем даты (убедись, что в БД тип DateTime)
+                status_icon = "🔴" if c.expire_date < now else "⏳"
+            else:
+                expire_str = "Без срока"
+                status_icon = "⚪️"
+
+            builder.row(types.InlineKeyboardButton(
+                text=f"{status_icon} {c.name} ({expire_str})",
+                callback_data=f"do_extend_{c.id}")
+            )
+
+        builder.row(types.InlineKeyboardButton(text="🔙 Назад", callback_data="super"))
+
+        await callback.message.edit_text(
+            "💳 <b>Управление подписками клубов</b>\n\n"
+            "Выберите клуб, чтобы продлить доступ на <b>30 дней</b>:",
+            reply_markup=builder.as_markup(),
+            parse_mode="HTML"
         )
-
-    builder.row(types.InlineKeyboardButton(text="🔙 Назад", callback_data="super"))
-
-    await callback.message.edit_text(
-        "💳 <b>Управление подписками клубов</b>\n\n"
-        "Выберите клуб, чтобы продлить доступ на <b>30 дней</b>:",
-        reply_markup=builder.as_markup(),
-        parse_mode="HTML"
-    )
+    except Exception as e:
+        # Если что-то пойдет не так, мы увидим ошибку в консоли, а не зависание
+        print(f"Ошибка в хендлере extend_club_sub: {e}")
+        await callback.message.answer("Произошла ошибка при получении списка клубов.")
 
 
-@router.callback_query(F.data.startswith("do_extend_"), F.from_user.id.in_(ADMIN_IDS))
-async def process_extend(callback: types.CallbackQuery, session: AsyncSession):
-    club_id = int(callback.data.split("_")[-1])
-    club = await session.get(Club, club_id)
+@router.callback_query(F.data.startswith("do_extend_"))
+async def process_extend(
+        callback: types.CallbackQuery,
+        session: AsyncSession,
+        is_super_adm: bool  # Получаем из мидлваря
+):
+    # 1. Сразу убираем часики
+    await callback.answer()
 
-    # Логика: если дата уже прошла, продлеваем от сегодня. Если еще нет — плюсуем к текущей.
-    now = datetime.now()
-    if not club.expire_date or club.expire_date < now:
-        club.expire_date = now + timedelta(days=30)
-    else:
-        club.expire_date += timedelta(days=30)
+    # 2. Проверка прав
+    if not is_super_adm:
+        return await callback.message.answer("❌ У вас нет прав для этой операции.")
 
-    await session.commit()
-    await callback.answer(f"✅ Клуб {club.name} продлен!", show_alert=True)
-    await list_for_extend(callback, session)  # Возвращаемся к списку
+    # 3. Парсим ID клуба
+    try:
+        club_id = int(callback.data.split("_")[-1])
+        club = await session.get(Club, club_id)
+
+        if not club:
+            return await callback.message.answer("❌ Клуб не найден в базе.")
+
+        # 4. Логика продления
+        now = datetime.now()
+
+        # Если даты нет или она в прошлом — считаем от "сейчас"
+        if not club.expire_date or club.expire_date < now:
+            club.expire_date = now + timedelta(days=30)
+        else:
+            # Если подписка еще активна — плюсуем к остатку
+            club.expire_date += timedelta(days=30)
+
+        await session.commit()
+
+        # 5. Уведомление (всплывающее)
+        await callback.answer(f"✅ Клуб {club.name} продлен до {club.expire_date.strftime('%d.%m.%Y')}!",
+                              show_alert=True)
+
+        # 6. Возврат в список (ОБЯЗАТЕЛЬНО передаем все аргументы, которые ждет list_for_extend)
+        await list_for_extend(callback, session, is_super_adm)
+
+    except Exception as e:
+        print(f"Ошибка при продлении: {e}")
+        await callback.message.answer("⚠️ Произошла ошибка при сохранении данных.")
 
 
 @router.message(SuperAdminStates.waiting_for_broadcast_text)
@@ -266,4 +319,33 @@ async def system_stats_handler(callback: types.CallbackQuery, session: AsyncSess
         reply_markup=builder.as_markup(),
         parse_mode="HTML"
     )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "list_clubs")
+async def handle_list_clubs(
+    callback: types.CallbackQuery,
+    session: AsyncSession,
+    is_super_adm: bool,  # Прилетает из мидлваря
+    club: Club           # Прилетает из мидлваря (текущий клуб бота)
+):
+    # Проверка прав (если список клубов только для админов)
+    if not is_super_adm:
+        await callback.answer("У вас нет прав для просмотра всех клубов.", show_alert=True)
+        return
+
+    # Получаем все клубы из базы
+    result = await session.execute(select(Club))
+    clubs = result.scalars().all()
+
+    if not clubs:
+        await callback.message.answer("Список клубов пуст.")
+        return
+
+    # Формируем сообщение
+    text = "<b>Список всех зарегистрированных клубов:</b>\n\n"
+    for i, c in enumerate(clubs, 1):
+        text += f"{i}. {c.name} (ID: {c.id})\n"
+
+    await callback.message.answer(text, parse_mode="HTML")
     await callback.answer()
