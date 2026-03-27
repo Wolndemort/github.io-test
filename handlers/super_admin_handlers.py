@@ -1,6 +1,8 @@
 import asyncio
 from datetime import timedelta, datetime
 from loguru import logger
+from redis.asyncio import Redis
+
 from handlers.states import SuperAdminStates
 from aiogram import Router, types, F, Bot
 from aiogram.filters import Command
@@ -36,6 +38,7 @@ async def super_admin_main(event: types.Message | types.CallbackQuery, is_super_
     builder.row(types.InlineKeyboardButton(text="💳 Продлить подписку клуба", callback_data="extend_club_sub"))
     builder.row(types.InlineKeyboardButton(text="📊 Общая статистика системы", callback_data="system_stats"))
     builder.row(types.InlineKeyboardButton(text="📢 Рассылка ВСЕМ владельцам", callback_data="broadcast_to_owners"))
+    builder.row(types.InlineKeyboardButton(text="🔄 Обновить конфиг (Redis)", callback_data="reload_cache"))
 
     text = (
         "👑 <b>ПАНЕЛЬ ГЛАВНОГО АДМИНИСТРАТОРА (SaaS)</b>\n\n"
@@ -349,3 +352,17 @@ async def handle_list_clubs(
 
     await callback.message.answer(text, parse_mode="HTML")
     await callback.answer()
+
+
+@router.callback_query(F.data == "reload_cache")
+async def reload_system_cache(callback: types.CallbackQuery, redis: Redis, is_super_adm: bool):
+    if not is_super_adm:
+        return await callback.answer("Нет прав", show_alert=True)
+
+    # Очищаем все ключи, начинающиеся с club_config:
+    # Внимание: на большом количестве данных лучше использовать SCAN,
+    # но для начала можно просто удалить текущий
+    bot_token = callback.bot.token
+    await redis.delete(f"club_config:{bot_token}")
+
+    await callback.answer("✅ Конфигурация текущего бота обновлена из БД!", show_alert=True)
