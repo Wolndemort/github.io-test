@@ -4,7 +4,6 @@ from sqlalchemy import select
 from database.db import Club
 from redis.asyncio import Redis
 
-# Список ID супер-админов (добавь свой ID сюда)
 SUPER_ADMIN_IDS = [1271717628]
 
 

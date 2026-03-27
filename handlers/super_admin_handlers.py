@@ -19,16 +19,13 @@ from handlers.states import AddClub
 router = Router()
 
 
-@router.message(Command("super"))
-@router.callback_query(F.data == "super") # Теперь ловит и кнопку "Назад"
-async def super_admin_main(event: types.Message | types.CallbackQuery, is_super_adm: bool):
-    # 1. Проверка прав из мидлваря
-    if not is_super_adm:
-        if isinstance(event, types.CallbackQuery):
-            await event.answer("❌ Доступ запрещен", show_alert=True)
-        return
-
-    # 2. Если это колбэк — убираем часики
+@router.message(Command("super"), F.from_user.id.in_(ADMIN_IDS))
+@router.callback_query(F.data == "super", F.from_user.id.in_(ADMIN_IDS))
+async def super_admin_main(
+    event: types.Message | types.CallbackQuery,
+    is_super_adm: bool  # <--- ВОТ ЭТОГО НЕ ХВАТАЛО!
+):
+    # Если это нажатие кнопки — убираем часики
     if isinstance(event, types.CallbackQuery):
         await event.answer()
 
@@ -45,11 +42,11 @@ async def super_admin_main(event: types.Message | types.CallbackQuery, is_super_
         "Здесь вы управляете франшизами, подписками и общей конфигурацией системы."
     )
 
-    # 3. Логика вывода: если кнопка — редактируем старое, если команда — шлем новое
     if isinstance(event, types.Message):
         await event.answer(text, reply_markup=builder.as_markup(), parse_mode="HTML")
     else:
         await event.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
+
 
 
 @router.callback_query(F.data == "add_new_club", F.from_user.id.in_(ADMIN_IDS))
