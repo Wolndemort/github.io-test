@@ -30,11 +30,11 @@ async def admin_panel(
         club: Club,  # Из Middleware
         club_settings: dict,  # Из Middleware
         is_owner: bool,  # Из Middleware (исправил имя аргумента)
-        is_super_admin: bool,  # Из Middleware
+        is_super_adm: bool,  # Из Middleware
         session: AsyncSession
 ):
     # Проверка: если это не владелец и не ты — игнорим
-    if not (is_owner or is_super_admin):
+    if not (is_owner or is_super_adm):
         return
 
     # Стандартный фикс для Message/Callback
@@ -327,7 +327,6 @@ async def export_database(
     finally:
         if os.path.exists(file_path):
             os.remove(file_path)
-
 
 
 @router.callback_query(F.data == 'daily_report')
