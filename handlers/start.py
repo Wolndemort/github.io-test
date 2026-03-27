@@ -1,65 +1,63 @@
 from aiogram import Router, types
 from aiogram.filters import Command
 from sqlalchemy.ext.asyncio import AsyncSession
-from handlers.buttons import get_main_menu_keyboard,get_profile_keyboard
-from database.db import User, Student
-from aiogram.fsm.context import FSMContext
+from handlers.buttons import admin_keyboard, get_profile_keyboard
+from database.db import User, Student, Club
 from sqlalchemy import select
-from loguru import logger
+from aiogram.fsm.context import FSMContext
 
 router = Router()
 
 
-@router.message(Command("start"))
-async def start_handler(message: types.Message, state: FSMContext, session: AsyncSession):
+@router.message(Command('start'))
+async def start_handler(
+    message: types.Message,
+    state: FSMContext,
+    session: AsyncSession,
+    club: Club,
+    club_id: int,
+    club_settings: dict,     # <--- Настройки для UI
+    is_super_admin: bool,
+    is_owner: bool
+):
     await state.clear()
     user_id = message.from_user.id
-    full_name = message.from_user.full_name
-    first_name = message.from_user.first_name
-    logger.info(f"🚀 Команда /start от {full_name} (ID: {user_id})")
 
-    try:
-        db_user = await session.get(User, user_id)
+    # 1. Регистрация/Обновление пользователя (через merge — это быстрее и чище)
+    # Мы привязываем юзера к ID клуба, через который он зашел
+    user = await session.merge(User(
+        user_id=user_id,
+        club_id=club.id,
+        full_name=message.from_user.full_name
+    ))
+    await session.commit()
 
-        if not db_user:
-            db_user = User(user_id=user_id, full_name=full_name)
-            session.add(db_user)
-        else:
-            db_user.full_name = full_name
+    # 2. Берем текст приветствия (уже не лезем в БД, всё в памяти)
+    welcome_text = club_settings.get("ui", {}).get("welcome_text") or "Добро пожаловать!"
 
-        stmt = select(Student).where(Student.parent_id == user_id)
-        result = await session.execute(stmt)
-        students = result.scalars().all()
+    # 3. Разделение логики (Админ / Клиент)
+    if is_owner or is_super_admin:
+        return await message.answer(
+            f"⚡ **Панель управления клуба «{club.name}»**\n\n{welcome_text}",
+            reply_markup=admin_keyboard(club_settings=club_settings, club_id=club_id)
+        )
 
-        # Коммитим один раз в конце блока работы с данными
-        await session.commit()
+    # 4. Логика клиента (Используем связь relationship из твоих моделей)
+    # Поскольку мы сделали merge/get, у объекта user уже могут быть подгружены students
+    # Но для надежности и фильтрации по club_id сделаем быстрый select:
+    stmt = select(Student).where(
+        Student.parent_id == user_id,
+        Student.club_id == club.id
+    )
+    student = (await session.execute(stmt)).scalar_one_or_none()
 
-        # --- БЛОК ОТВЕТА ---
-        if students:
-            names = ", ".join([s.name for s in students])
-            await message.answer(
-                f"<b>Здравствуйте, {first_name}!</b>\n"
-                f"Атлеты в вашем профиле: <b>{names}</b>\n\n"
-                "Чем могу помочь?",
-                parse_mode="HTML",
-                reply_markup=get_main_menu_keyboard()
-            )
-        else:
-            # Передаем False, чтобы кнопка авторизации ТОЧНО появилась
-            kb = get_profile_keyboard(is_authorized=False)
-            await message.answer(
-                f"<b>Здравствуйте, {first_name}!</b>\n\n"
-                "Похоже, ваш профиль еще не привязан к системе.\n"
-                "Пожалуйста, нажмите кнопку ниже, чтобы авторизоваться:",
-                parse_mode="HTML",
-                reply_markup=kb
-            )
+    if student:
+        expire_str = student.expire_date.strftime('%d.%m.%Y') if student.expire_date else "не указано"
+        status = f"✅ Атлет: {student.name}\n📅 Абонемент до: {expire_str}"
+    else:
+        status = "👋 Вы еще не зарегистрированы. Обратитесь к администратору."
 
-    except Exception as e:
-        await session.rollback()
-        logger.error(f"❌ Ошибка в БД при обработке /start для {user_id}: {e}")
-        return await message.answer("Произошла техническая ошибка. Попробуйте позже.")
-
-
-
-
+    await message.answer(
+        f"📍 {club.name}\n\n{welcome_text}\n\n{status}",
+        reply_markup=get_profile_keyboard(club_settings=club_settings)
+    )
