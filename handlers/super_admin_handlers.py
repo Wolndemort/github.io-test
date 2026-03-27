@@ -48,7 +48,6 @@ async def super_admin_main(
         await event.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
 
 
-
 @router.callback_query(F.data == "add_new_club", F.from_user.id.in_(ADMIN_IDS))
 async def start_add_club(callback: types.CallbackQuery, state: FSMContext):
     await state.set_state(AddClub.waiting_for_name)

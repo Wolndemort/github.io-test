@@ -60,6 +60,6 @@ class ClubMiddleware(BaseMiddleware):
         data["is_owner"] = (user_id == club_obj.owner_id)
 
         # Добавляем ключ, который требовал хендлер в логах (is_super_adm)
-        data["is_super_adm"] = (user_id in SUPER_ADMIN_IDS)
+        data["is_super_admin"] = (user_id in SUPER_ADMIN_IDS)
 
         return await handler(event, data)
