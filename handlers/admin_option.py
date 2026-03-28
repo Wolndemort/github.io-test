@@ -1,6 +1,8 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from handlers.states import AdminStates
 from sqlalchemy import update
+from redis.asyncio import Redis
+
 import pandas as pd
 import os
 from aiogram.types import FSInputFile
@@ -119,7 +121,9 @@ async def save_sub_days(
         callback: types.CallbackQuery,
         club: Club,  # <--- Достаем объект целиком, как в Middleware
         club_settings: dict,
-        session: AsyncSession
+        session: AsyncSession,
+        redis: Redis
+
 ):
     # 1. Парсим дни
     try:
@@ -137,7 +141,7 @@ async def save_sub_days(
         .values(club_settings=club_settings)
     )
     await session.commit()
-
+    await redis.delete(f"club_config:{callback.bot.token}")
     await callback.answer(f"✅ Срок изменен на {new_days} дн.")
 
     # Возвращаемся в меню настроек
@@ -184,7 +188,8 @@ async def toggle_logic(
     callback: types.CallbackQuery,
     club: Club,              # <--- Исправил (берем объект из мидлвари)
     club_settings: dict,
-    session: AsyncSession
+    session: AsyncSession,
+    redis: Redis
 ):
     parts = callback.data.split("_")
     action_type = parts[1]  # 'feat' или 'disc'
@@ -214,6 +219,7 @@ async def toggle_logic(
         .values(club_settings=club_settings)
     )
     await session.commit()
+    await redis.delete(f"club_config:{callback.bot.token}")
 
     await callback.answer("✅ Настройки обновлены")
 
