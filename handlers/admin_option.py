@@ -62,6 +62,22 @@ async def admin_panel(
         logger.error(f"❌ Ошибка в админ-панели клуба {club.id}: {e}")
 
 
+@router.callback_query(F.data == "admin_keyboard")
+async def back_to_admin_main_menu(
+    callback: types.CallbackQuery,
+    club_settings: dict,
+    club: Club,           # Объект из мидлвари
+    is_owner: bool,
+    is_super_admin: bool
+):
+    await callback.message.edit_text(
+        f"🏠 <b>Панель управления клуба {club.name}</b>\n"
+        f"Выберите нужный раздел:",
+        reply_markup=admin_keyboard(club_settings, club.id),
+        parse_mode="HTML"
+    )
+
+
 @router.callback_query(F.data == "admin_settings")
 async def admin_settings_menu(callback: types.CallbackQuery, club_settings: dict):
     builder = InlineKeyboardBuilder()
@@ -185,45 +201,47 @@ async def manage_disciplines_menu(callback: types.CallbackQuery, club_settings: 
 
 @router.callback_query(F.data.startswith("toggle_"))
 async def toggle_logic(
-    callback: types.CallbackQuery,
-    club: Club,              # <--- Исправил (берем объект из мидлвари)
-    club_settings: dict,
-    session: AsyncSession,
-    redis: Redis
+        callback: types.CallbackQuery,
+        club: Club,
+        club_settings: dict,
+        session: AsyncSession,
+        redis: Redis
 ):
     parts = callback.data.split("_")
     action_type = parts[1]  # 'feat' или 'disc'
-    target_key = parts[-1]  # 'freeze', 'boxing' и т.д.
 
-    # Используем .setdefault(), чтобы бот не упал, если ключа еще нет в JSON
+    # Собираем ключ из всех оставшихся частей после 'toggle' и 'type'
+    # Это склеит 'qr' и 'checkin' обратно в 'qr_checkin'
+    target_key = "_".join(parts[2:])
+
     if action_type == "feat":
-        # Гарантируем, что словарь features существует
         features = club_settings.setdefault("features", {})
+        # Важно: берем значение, инвертируем и записываем обратно
         current = features.get(target_key, True)
         features[target_key] = not current
 
     elif action_type == "disc":
-        # Гарантируем, что словарь disciplines существует
         disciplines = club_settings.setdefault("disciplines", {})
-        # Если конкретной дисциплины нет в базе, создаем её на лету
         disc_info = disciplines.get(target_key)
         if disc_info:
             disc_info["active"] = not disc_info.get("active", True)
         else:
-            return await callback.answer("Ошибка: дисциплина не найдена в базе", show_alert=True)
+            return await callback.answer(f"Ошибка: {target_key} не найден", show_alert=True)
 
-    # 💾 Сохраняем обновленный JSON (используем club.id)
+    # 💾 Сохраняем (тут у тебя всё четко)
     await session.execute(
         update(Club)
         .where(Club.id == club.id)
         .values(club_settings=club_settings)
     )
     await session.commit()
+
+    # Чистим кэш
     await redis.delete(f"club_config:{callback.bot.token}")
 
     await callback.answer("✅ Настройки обновлены")
 
-    # Возвращаем админа в нужное меню
+    # Перерисовываем меню с ОБНОВЛЕННЫМ словарем
     if action_type == "feat":
         await admin_settings_menu(callback, club_settings)
     else:
