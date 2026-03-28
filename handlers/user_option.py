@@ -148,32 +148,39 @@ async def universal_section_handler(
 
 
 @router.callback_query(F.data.startswith('price_'))
-async def universal_price_handler(
-        callback: types.CallbackQuery,
-        club_settings: dict
-):
-    # Достаем код секции (bjj, boxing и т.д.)
+async def universal_price_handler(callback: types.CallbackQuery, club_settings: dict):
     code = callback.data.split('_')[1]
     discipline = club_settings.get("disciplines", {}).get(code)
 
     if not discipline:
         return await callback.answer("Данные о ценах не найдены")
 
-    # Собираем текст прайса динамически
     name = discipline.get("name", code.upper())
     price_text = f"💰 <b>Стоимость абонементов {name}:</b>\n\n"
 
+    # 1. Обработка безлимита
     if discipline.get("type") == "unlimited":
-        price_text += f"• Безлимит — {discipline.get('price')}₽"
+        price = discipline.get('price', 'Не указана')
+        price_text += f"• Безлимит — {price}₽"
+
+    # 2. Обработка тарифов по занятиям
     else:
-        # Перебираем тарифы из конфига
-        for t in discipline.get("tariffs", []):
-            price_text += f"• {t['count']} зан. — {t['price']}₽ ({t['days']} дн.)\n"
+        tariffs = discipline.get("tariffs", [])
+        if not tariffs:
+            price_text += "Тарифы пока не добавлены."
+
+        for t in tariffs:
+            count = t.get('count', '?')
+            price = t.get('price', '—')
+            days = t.get('days')
+
+            # Если дни есть — пишем (30 дн.), если нет — просто пропускаем этот кусок
+            days_info = f" ({days} дн.)" if days else ""
+            price_text += f"• {count} зан. — {price}₽{days_info}\n"
 
     await callback.message.edit_text(
         text=price_text,
         parse_mode='HTML',
-        # Кнопка "Назад" в меню этой же секции
         reply_markup=get_section_menu_kb(code, name)
     )
     await callback.answer()

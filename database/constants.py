@@ -37,7 +37,7 @@ DEFAULT_CLUB_SETTINGS = {
             "name": "Йога",
             "active": False,  # Скроет кнопку у юзеров
             "type": "lessons",
-            "tariffs": [{"count": 1, "price": 800}]
+            "tariffs": [{"count": 1, "price": 800}],
         }
     },
 
