@@ -1,5 +1,6 @@
 import json
 from aiogram import BaseMiddleware
+from loguru import logger
 from sqlalchemy import select
 from database.db import Club
 from redis.asyncio import Redis
@@ -13,6 +14,9 @@ class ClubMiddleware(BaseMiddleware):
         super().__init__()
 
     async def __call__(self, handler, event, data):
+        bot = data.get("bot")
+        bot_token = bot.token if bot else "unknown"
+        logger.info(f"ОБРАБОТКА: {bot_token}")
         # Игнорируем события без пользователя (например, системные)
         if not getattr(event, "from_user", None):
             return await handler(event, data)

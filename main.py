@@ -189,8 +189,9 @@ async def main():
     dp = Dispatcher()
 
     # Мидлвари (DbSessionMiddleware должен быть Outer, ClubMiddleware - Inner)
-    dp.update.outer_middleware(DbSessionMiddleware(session_pool=AsyncSessionLocal))
-    dp.update.outer_middleware(ClubMiddleware(redis=redis_client))
+    dp.message.outer_middleware(DbSessionMiddleware(session_pool=AsyncSessionLocal))
+    dp.message.outer_middleware(ClubMiddleware(redis=redis_client))
+    dp.callback_query.outer_middleware(ClubMiddleware(redis=redis_client))
 
     # Роутеры (Порядок важен!)
     # Сначала проверяем права доступа (Admin), потом общие команды
