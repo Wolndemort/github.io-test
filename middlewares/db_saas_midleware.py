@@ -42,6 +42,9 @@ class ClubMiddleware(BaseMiddleware):
         else:
             # 2. Если в кэше нет — идем в БД
             session = data["session"]
+            if not session:
+                logger.error("Критическая ошибка: DbSessionMiddleware не предоставила сессию!")
+                return await handler(event, data)
             result = await session.execute(select(Club).where(Club.bot_token == bot_token))
             club_obj = result.scalar_one_or_none()
 

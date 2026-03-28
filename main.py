@@ -190,6 +190,8 @@ async def main():
 
     # Мидлвари (DbSessionMiddleware должен быть Outer, ClubMiddleware - Inner)
     dp.message.outer_middleware(DbSessionMiddleware(session_pool=AsyncSessionLocal))
+    dp.callback_query.outer_middleware(DbSessionMiddleware(session_pool=AsyncSessionLocal))
+
     dp.message.outer_middleware(ClubMiddleware(redis=redis_client))
     dp.callback_query.outer_middleware(ClubMiddleware(redis=redis_client))
 
