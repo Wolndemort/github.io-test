@@ -30,11 +30,11 @@ async def admin_panel(
         club: Club,  # Из Middleware
         club_settings: dict,  # Из Middleware
         is_owner: bool,  # Из Middleware (исправил имя аргумента)
-        is_super_adm: bool,  # Из Middleware
+        is_super_admin: bool,  # Из Middleware
         session: AsyncSession
 ):
     # Проверка: если это не владелец и не ты — игнорим
-    if not (is_owner or is_super_adm):
+    if not (is_owner or is_super_admin):
         return
 
     # Стандартный фикс для Message/Callback

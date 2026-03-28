@@ -23,7 +23,7 @@ router = Router()
 @router.callback_query(F.data == "super", F.from_user.id.in_(ADMIN_IDS))
 async def super_admin_main(
     event: types.Message | types.CallbackQuery,
-    is_super_adm: bool  # <--- ВОТ ЭТОГО НЕ ХВАТАЛО!
+    is_super_admin: bool  # <--- ВОТ ЭТОГО НЕ ХВАТАЛО!
 ):
     # Если это нажатие кнопки — убираем часики
     if isinstance(event, types.CallbackQuery):
@@ -129,13 +129,13 @@ async def process_token(message: types.Message, state: FSMContext, session: Asyn
 async def list_for_extend(
     callback: types.CallbackQuery,
     session: AsyncSession,
-    is_super_adm: bool
+    is_super_admin: bool
 ):
     # 1. Сразу отвечаем на колбэк, чтобы убрать "часики" (зависание)
     await callback.answer()
 
     # 2. Проверка прав через флаг из мидлваря
-    if not is_super_adm:
+    if not is_super_admin:
         return await callback.message.answer("❌ У вас нет прав администратора.")
 
     try:
@@ -182,13 +182,13 @@ async def list_for_extend(
 async def process_extend(
         callback: types.CallbackQuery,
         session: AsyncSession,
-        is_super_adm: bool  # Получаем из мидлваря
+        is_super_admin: bool  # Получаем из мидлваря
 ):
     # 1. Сразу убираем часики
     await callback.answer()
 
     # 2. Проверка прав
-    if not is_super_adm:
+    if not is_super_admin:
         return await callback.message.answer("❌ У вас нет прав для этой операции.")
 
     # 3. Парсим ID клуба
@@ -216,7 +216,7 @@ async def process_extend(
                               show_alert=True)
 
         # 6. Возврат в список (ОБЯЗАТЕЛЬНО передаем все аргументы, которые ждет list_for_extend)
-        await list_for_extend(callback, session, is_super_adm)
+        await list_for_extend(callback, session, is_super_admin)
 
     except Exception as e:
         print(f"Ошибка при продлении: {e}")
@@ -325,11 +325,11 @@ async def system_stats_handler(callback: types.CallbackQuery, session: AsyncSess
 async def handle_list_clubs(
     callback: types.CallbackQuery,
     session: AsyncSession,
-    is_super_adm: bool,  # Прилетает из мидлваря
+    is_super_admin: bool,  # Прилетает из мидлваря
     club: Club           # Прилетает из мидлваря (текущий клуб бота)
 ):
     # Проверка прав (если список клубов только для админов)
-    if not is_super_adm:
+    if not is_super_admin:
         await callback.answer("У вас нет прав для просмотра всех клубов.", show_alert=True)
         return
 
@@ -351,8 +351,8 @@ async def handle_list_clubs(
 
 
 @router.callback_query(F.data == "reload_cache")
-async def reload_system_cache(callback: types.CallbackQuery, redis: Redis, is_super_adm: bool):
-    if not is_super_adm:
+async def reload_system_cache(callback: types.CallbackQuery, redis: Redis, is_super_admin: bool):
+    if not is_super_admin:
         return await callback.answer("Нет прав", show_alert=True)
 
     # Очищаем все ключи, начинающиеся с club_config:

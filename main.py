@@ -190,7 +190,7 @@ async def main():
 
     # Мидлвари (DbSessionMiddleware должен быть Outer, ClubMiddleware - Inner)
     dp.update.outer_middleware(DbSessionMiddleware(session_pool=AsyncSessionLocal))
-    dp.update.middleware(ClubMiddleware(redis=redis_client))
+    dp.update.outer_middleware(ClubMiddleware(redis=redis_client))
 
     # Роутеры (Порядок важен!)
     # Сначала проверяем права доступа (Admin), потом общие команды
