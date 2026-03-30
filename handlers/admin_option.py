@@ -228,7 +228,7 @@ async def toggle_logic(
         else:
             return await callback.answer(f"Ошибка: {target_key} не найден", show_alert=True)
 
-    # 💾 Сохраняем (тут у тебя всё четко)
+    # 💾 Сохраняем (тут всё четко)
     await session.execute(
         update(Club)
         .where(Club.id == club.id)

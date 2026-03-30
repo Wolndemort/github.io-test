@@ -21,7 +21,7 @@ DEFAULT_CLUB_SETTINGS = {
             "name": "Бокс (Дети)",
             "active": True,
             "type": "lessons",  # Считаем занятия
-            "schedule": "1111",
+            "schedule": "В процессе разроботки",
             "tariffs": [
                 {"count": 8, "price": 3500, "days": 30},  # Обычный месяц
                 {"count": 12, "price": 4500, "days": 45},  # Продленный срок
@@ -33,18 +33,24 @@ DEFAULT_CLUB_SETTINGS = {
             "active": True,
             "type": "unlimited",  # Безлимит
             "price": 5000,
-            "schedule": "1111"
+            "schedule": (
+                    "🗓 <b>График тренировок:</b>\n\n"
+                    "• <b>ПН:</b> 20:00 (No-Gi 🤼‍♂️)\n"
+                    "• <b>ВТ:</b> 20:00 (Gi 🥋)\n"
+                    "• <b>СР:</b> 20:00 (No-Gi 🤼‍♂️)\n"
+                    "• <b>ЧТ:</b> 20:00 (Gi 🥋)\n"
+                    "• <b>ПТ:</b> 20:00 (No-Gi 🤼‍♂️)\n\n"
+                    "⚠️ <i>Чередуем разделы каждый день!</i>"
+                )
         },
         "yoga": {
             "name": "Йога",
-            "active": False,  # Скроет кнопку у юзеров
+            "active": True,  # Скроет кнопку у юзеров
             "type": "lessons",
             "tariffs": [{"count": 1, "price": 800}],
-            "schedule": "1111"
+            "schedule": "В процессе разроботки"
         }
     },
-
-    # 4. Технические лимиты
     "limits": {
         "freeze_days_step": 7,
         "subscription_days": 30

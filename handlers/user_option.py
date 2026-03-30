@@ -640,3 +640,40 @@ async def process_user_contact(
         await session.rollback()
         logger.error(f"❌ Ошибка авторизации в клубе {club.id}: {e}")
         await message.answer("⚠️ Ошибка привязки. Попробуйте позже.")
+
+
+@router.callback_query(F.data.startswith('schedule_'))
+async def show_discipline_schedule(
+        callback: types.CallbackQuery,
+        club_settings: dict
+):
+    # 1. Извлекаем код (префикс schedule_ из кнопки)
+    # Например: schedule_boxing -> boxing
+    discipline_code = callback.data.split('_')[1]
+
+    # 2. Лезем в конфиг за данными этой секции
+    disciplines = club_settings.get("disciplines", {})
+    discipline_cfg = disciplines.get(discipline_code)
+
+    if not discipline_cfg:
+        return await callback.answer("Упс! Данные этой секции не найдены 🛠", show_alert=True)
+
+    # 3. Достаем название и расписание
+    name = discipline_cfg.get("name", discipline_code.upper())
+    # Если в конфиге "1111", то выведем это, если пусто — заглушку
+    schedule_text = discipline_cfg.get("schedule")
+
+    if not schedule_text or schedule_text == "":
+        schedule_text = "Расписание временно не заполнено администратором ⏳"
+
+    await callback.message.edit_text(
+        text=(
+            f"📅 <b>Расписание: {name}</b>\n\n"
+            f"{schedule_text}\n\n"
+            "<i>Выберите действие:</i>"
+        ),
+        reply_markup=get_section_menu_kb(discipline_code, name),
+        parse_mode="HTML"
+    )
+
+    await callback.answer()
