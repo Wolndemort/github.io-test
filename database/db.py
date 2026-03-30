@@ -259,9 +259,9 @@ async def has_subscription(user_id: int, club_id: int, session: AsyncSession):
 
 
 async def add_abon(
-        session: AsyncSession,
         student_id: int,
         lessons_count: int,
+        session: AsyncSession,
         club_id: int,
         club_settings: dict
 ):

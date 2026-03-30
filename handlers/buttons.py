@@ -188,25 +188,37 @@ def discipline(club_settings: dict):
     return builder.as_markup()
 
 
-def get_pay_options_kb(discipline_cfg: dict):
+def get_pay_options_kb(discipline_cfg: dict, discipline_code: str):
     builder = InlineKeyboardBuilder()
 
-    # Если это безлимитный тип — кнопка будет одна
     if discipline_cfg.get("type") == "unlimited":
         price = discipline_cfg.get("price", 0)
+        # callback_data=f"set_limit_0_{discipline_code}"
         builder.row(types.InlineKeyboardButton(
-            text=f"💳 Оплатить безлимит ({price}₽)",
+            text=f"💳 Оплатить безлимит — {price}₽",
             callback_data="set_limit_0"
         ))
     else:
-        # Если это уроки — рисуем кнопки из списка тарифов (8, 12 и т.д.)
         tariffs = discipline_cfg.get("tariffs", [])
         for t in tariffs:
-            label = "Безлимит" if t['count'] == 0 else f"{t['count']} зан."
             builder.row(types.InlineKeyboardButton(
-                text=f"{label} — {t['price']}₽",
+                text=f"{t['count']} зан. — {t['price']}₽",
                 callback_data=f"set_limit_{t['count']}"
             ))
 
-    builder.row(types.InlineKeyboardButton(text="⬅️ Назад", callback_data="choose_section"))
+    # Кнопка назад (обязательно добавь, чтобы не висло)
+    builder.row(types.InlineKeyboardButton(text="🔙 Назад", callback_data="choose_section"))
+
+    return builder.as_markup()
+
+
+def get_cash_options_kb(discipline_cfg: dict):
+    builder = InlineKeyboardBuilder()
+    tariffs = discipline_cfg.get("tariffs", [])
+    for t in tariffs:
+        builder.row(types.InlineKeyboardButton(
+            text=f"💵 {t['count']} зан. — {t['price']}₽",
+            callback_data=f"confirm_cash_{t['count']}"
+        ))
+    builder.row(types.InlineKeyboardButton(text="🔙 Назад", callback_data="admin_cash_list"))
     return builder.as_markup()

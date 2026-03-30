@@ -21,6 +21,7 @@ DEFAULT_CLUB_SETTINGS = {
             "name": "Бокс (Дети)",
             "active": True,
             "type": "lessons",  # Считаем занятия
+            "schedule": "1111",
             "tariffs": [
                 {"count": 8, "price": 3500, "days": 30},  # Обычный месяц
                 {"count": 12, "price": 4500, "days": 45},  # Продленный срок
@@ -31,13 +32,15 @@ DEFAULT_CLUB_SETTINGS = {
             "name": "Бразильское джиу-джитсу",
             "active": True,
             "type": "unlimited",  # Безлимит
-            "price": 5000
+            "price": 5000,
+            "schedule": "1111"
         },
         "yoga": {
             "name": "Йога",
             "active": False,  # Скроет кнопку у юзеров
             "type": "lessons",
             "tariffs": [{"count": 1, "price": 800}],
+            "schedule": "1111"
         }
     },
 
