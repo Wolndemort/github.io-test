@@ -94,6 +94,7 @@ def get_section_menu_kb(discipline_code: str, discipline_name: str):
 
     # 4. Назад
     builder.row(types.InlineKeyboardButton(text='🔙 Назад', callback_data='choose_section'))
+    builder.row(types.InlineKeyboardButton(text='⬅️ В главное меню', callback_data='begin'))
 
     return builder.as_markup()
 
