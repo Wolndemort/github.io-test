@@ -2,7 +2,7 @@ import asyncio
 from datetime import timedelta, datetime
 from loguru import logger
 from redis.asyncio import Redis
-
+from sqlalchemy import update
 from handlers.states import SuperAdminStates
 from aiogram import Router, types, F, Bot
 from aiogram.filters import Command
@@ -351,14 +351,47 @@ async def handle_list_clubs(
 
 
 @router.callback_query(F.data == "reload_cache")
-async def reload_system_cache(callback: types.CallbackQuery, redis: Redis, is_super_admin: bool):
+async def reload_all_system_configs(
+    callback: types.CallbackQuery,
+    redis: Redis,
+    session, # Сессия из Middleware
+    is_super_admin: bool
+):
     if not is_super_admin:
-        return await callback.answer("Нет прав", show_alert=True)
+        return await callback.answer("У вас нет прав суперадмина ⛔", show_alert=True)
 
-    # Очищаем все ключи, начинающиеся с club_config:
-    # Внимание: на большом количестве данных лучше использовать SCAN,
-    # но для начала можно просто удалить текущий
-    bot_token = callback.bot.token
-    await redis.delete(f"club_config:{bot_token}")
+    # 1. ОБНОВЛЯЕМ ВСЮ ТАБЛИЦУ 'clubs' (Всех ботов системы)
+    # Это пропишет твой новый DEFAULT_CLUB_SETTINGS (с кавычками и расписанием)
+    # во все строки базы данных.
+    try:
+        await session.execute(
+            update(Club).values(club_settings=DEFAULT_CLUB_SETTINGS)
+        )
+        await session.commit()
+    except Exception as e:
+        await session.rollback()
+        return await callback.answer(f"Ошибка БД: {e}", show_alert=True)
 
-    await callback.answer("✅ Конфигурация текущего бота обновлена из БД!", show_alert=True)
+    # 2. ОЧИЩАЕМ КЭШ ВСЕХ БОТОВ В REDIS
+    # Твой Middleware использует ключи 'club_config:ТОКЕН'.
+    # Нам нужно удалить ВСЕ такие ключи, чтобы боты пошли в БД за обновой.
+    cursor = 0
+    deleted_count = 0
+    while True:
+        # Ищем все ключи конфигов
+        cursor, keys = await redis.scan(cursor=cursor, match="club_config:*", count=100)
+        if keys:
+            await redis.delete(*keys)
+            deleted_count += len(keys)
+        if cursor == 0:
+            break
+
+    await callback.answer(
+        f"🚀 Глобальное обновление!\n"
+        f"База обновлена. Кэш {deleted_count} ботов сброшен.",
+        show_alert=True
+    )
+
+
+
+
