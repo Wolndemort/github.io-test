@@ -653,8 +653,6 @@ async def show_discipline_schedule(
     # 2. Лезем в конфиг за данными этой секции
     disciplines = club_settings.get("disciplines", club_settings)
     discipline_cfg = disciplines.get(discipline_code)
-    print(f"DEBUG: Пытаюсь найти: '{discipline_code}'")
-    print(f"DEBUG: Доступные ключи: {list(disciplines.keys())}")
 
     if not discipline_cfg:
         return await callback.answer("Упс! Данные этой секции не найдены 🛠", show_alert=True)
