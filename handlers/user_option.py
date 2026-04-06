@@ -651,7 +651,7 @@ async def show_discipline_schedule(
     # Например: schedule_boxing -> boxing
     discipline_code = callback.data.split('_')[1].lower()
     # 2. Лезем в конфиг за данными этой секции
-    disciplines = club_settings.get("disciplines", {})
+    disciplines = club_settings.get("disciplines", club_settings)
     discipline_cfg = disciplines.get(discipline_code)
     print(f"DEBUG: Пытаюсь найти: '{discipline_code}'")
     print(f"DEBUG: Доступные ключи: {list(disciplines.keys())}")
