@@ -125,6 +125,7 @@ async def process_kids_limit(
     # 6. UI часть
     ui_cfg = club_settings.get("ui", {})
     payment_info = ui_cfg.get("payment_info")
+    logger.warning(f"DEBUG: В БД лежит ключ payment_info со значением: '{payment_info}'")
     if not payment_info or payment_info == "+79000000000 (Имя Получателя)":
         payment_info = "⚠️ Реквизиты временно не указаны. Пожалуйста, свяжитесь с администратором."
     text = (
