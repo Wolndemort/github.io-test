@@ -123,14 +123,23 @@ async def process_kids_limit(
     await state.set_state(PaymentStates.waiting_for_receipt)
 
     # 6. UI часть
-    ui = club_settings.get("ui", {})
-    payment_info = ui.get("payment_info", "Реквизиты не указаны")
+    ui_cfg = club_settings.get("ui", {})
+    payment_info = ui_cfg.get("payment_info")
+    if not payment_info or payment_info == "+79000000000 (Имя Получателя)":
+        payment_info = "⚠️ Реквизиты временно не указаны. Пожалуйста, свяжитесь с администратором."
 
-    await callback.message.edit_text(
+    text = (
         f"💰 <b>Оплата: {display_name}</b>\n"
         f"Тариф: <b>{label} — {price}₽</b>\n\n"
-        f"💳 Реквизиты для перевода:\n<code>{payment_info}</code>\n\n"
-        "<b>После оплаты пришлите скриншот чека</b> в ответ на это сообщение:",
+        f"💳 <b>Реквизиты для перевода (СБП):</b>\n"
+        f"<code>{payment_info}</code>\n\n"
+        f"<b>Шаг 1:</b> Переведите {price}₽ по указанным реквизитам.\n"
+        f"<b>Шаг 2:</b> Пришлите <b>скриншот чека</b> сюда в ответ на это сообщение.\n\n"
+        f"<i>После проверки админом занятия будут зачислены автоматически.</i>"
+    )
+
+    await callback.message.edit_text(
+        text=text,
         parse_mode="HTML"
     )
     await callback.answer()
