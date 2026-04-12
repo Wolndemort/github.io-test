@@ -780,46 +780,39 @@ async def edit_payments_info(callback: types.CallbackQuery, state: FSMContext):
 
 @router.message(AdminSettings.waiting_for_payment_info)
 async def save_payment_info(message: types.Message, state: FSMContext, session, club: Club, redis):
-    # 1. Достаем нужные данные прямо из объекта club (который пришел из мидлвари)
-    # Это гарантирует, что мы не получим ошибку отсутствия аргумента
-    club_id = club.id
-
     new_info = message.text.strip()
 
     if len(new_info) > 200:
-        return await message.answer("❌ Слишком длинный текст. Напишите короче.")
+        return await message.answer("❌ Слишком длинный текст.")
 
-    new_settings = dict(club.club_settings)
-    # 2. Обновляем JSON
-    if 'ui' not in new_settings:
-        new_settings['ui'] = {}
-    new_settings['ui']["payment_info"] = new_info
+    # Важно: Делаем глубокую копию, чтобы SQLAlchemy увидела замену объекта
+    # Если просто менять внутри словаря, JSONB может не прокинуть UPDATE в базу
+    updated_settings = dict(club.club_settings)
 
-    # Присваиваем обратно, чтобы SQLAlchemy увидела изменения
-    club.club_settings = new_settings
+    if 'ui' not in updated_settings:
+        updated_settings['ui'] = {}
+
+    # Ключ должен быть в ТОЧНОСТИ как в твоем конфиге (payment_info)
+    updated_settings['ui']["payment_info"] = new_info
+
+    # Присваиваем целиком новый словарь
+    club.club_settings = updated_settings
+    # Принудительно ставим флаг изменения для JSONB
     flag_modified(club, "club_settings")
 
-    # 3. Сохраняем в БД и чистим кэш
     try:
-        # club.club_settings = new_settings + flag_modified уже сделают дело
         await session.commit()
-        logger.info(f"DB UPDATE: Реквизиты клуба {club_id} сохранены в базу.")
 
-        # ВОТ ЭТОГО НЕ ХВАТАЛО:
-        # Чистим Redis, чтобы мидлварь подтянула новые данные
-        bot_token = message.bot.token
-        cache_key = f"club_config:{bot_token}"
+        # ЧИСТИМ КЭШ (самое важное для мидлвари)
+        cache_key = f"club_config:{message.bot.token}"
         await redis.delete(cache_key)
-        logger.info(f"CACHE CLEAR: Кэш {cache_key} удален.")
 
-        await message.answer(
-            f"✅ <b>Реквизиты успешно обновлены!</b>\n\n"
-            f"Новое значение:\n<code>{new_info}</code>",
-            parse_mode="HTML"
-        )
+        logger.info(f"SUCCESS: Club {club.id} updated. Cache {cache_key} deleted.")
+        await message.answer(f"✅ Реквизиты обновлены!\n\n<code>{new_info}</code>", parse_mode="HTML")
         await state.clear()
 
     except Exception as e:
-        logger.error(f"ОШИБКА СОХРАНЕНИЯ: {e}")
+        logger.error(f"DATABASE ERROR: {e}")
         await session.rollback()
-        await message.answer("❌ Произошла ошибка при сохранении в базу.")
+        await message.answer("❌ Ошибка базы данных.")
+
