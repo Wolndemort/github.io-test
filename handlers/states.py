@@ -34,3 +34,7 @@ class SuperAdminStates(StatesGroup):
     waiting_for_broadcast_text = State()
     waiting_for_extend_days = State()    # Если захочешь вводить дни продления вручную
     waiting_for_club_search = State()    # Поиск клуба по ID или названию
+
+
+class AdminSettings(StatesGroup):
+    waiting_for_payment_info = State()

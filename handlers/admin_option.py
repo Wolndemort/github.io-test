@@ -1,5 +1,5 @@
 from sqlalchemy.ext.asyncio import AsyncSession
-from handlers.states import AdminStates
+from handlers.states import AdminStates, AdminSettings
 from sqlalchemy import update
 from redis.asyncio import Redis
 
@@ -102,7 +102,10 @@ async def admin_settings_menu(callback: types.CallbackQuery, club_settings: dict
         text=f"⏳ Срок абона: {sub_days} дн.",
         callback_data="edit_sub_days"  # Ведет на выбор 30/60/90
     ))
-
+    builder.row(types.InlineKeyboardButton(
+        text="💳 Изменить реквизиты",
+        callback_data="admin_edit_payments")
+    )
     # Кнопка перехода в подменю дисциплин
     builder.row(types.InlineKeyboardButton(text="🥋 Управление секциями", callback_data="manage_disciplines"))
     builder.row(types.InlineKeyboardButton(text="⬅️ Назад", callback_data="admin_keyboard"))
@@ -759,3 +762,34 @@ async def process_manual_checkin(
         await session.rollback()
         logger.error(f"❌ Ошибка ручного чекина (Клуб {club.id}, Student {student_id}): {e}")
         await callback.answer("⚠️ Ошибка сохранения", show_alert=True)
+
+
+@router.callback_query(F.data == 'Admin_edit_payments')
+async def edit_payments_info(callback: types.CallbackQuery, state: FSMContext):
+    await callback.message.answer("Введите новые реквизиты для оплаты.\n\n"
+                                  "Например: <code>+79001234567"
+                                  " (Иван И.)</code>\n"
+                                  "Этот текст будут видеть клиенты при покупке.")
+    await state.set_state(AdminSettings.waiting_for_payment_info)
+    await callback.answer()
+
+
+@router.message(AdminSettings.waiting_for_payment_info)
+async def save_payment_info(message: types.Message, state: FSMContext, session, club: Club, redis, club_settings: dict,
+                            club_id: int):
+    new_info = message.text
+    if len(new_info) > 200:
+        return await message.answer("❌ Слишком длинный текст. Напишите короче.")
+    if 'ui' not in club.club_settings:
+        club.club_settings['ui'] = {}
+    club.club_settings['ui']["payment_info"] = new_info
+    await session.commit()
+    cache_key = f"club_config:{message.bot.token}"
+    await redis.delete(cache_key)
+    kb = admin_keyboard(club_settings=club_settings, club_id=club_id)
+    await message.answer(
+        f"✅ Реквизиты обновлены!\n\nТекущий текст:\n<code>{new_info}</code>",
+        reply_markup=kb,  # Сразу отдаем главную админку
+        parse_mode="HTML"
+    )
+    await state.clear()
