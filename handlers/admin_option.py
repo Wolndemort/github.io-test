@@ -106,7 +106,6 @@ async def admin_settings_menu(callback: types.CallbackQuery, club_settings: dict
         text="💳 Изменить реквизиты",
         callback_data="admin_edit_payments")
     )
-    # Кнопка перехода в подменю дисциплин
     builder.row(types.InlineKeyboardButton(text="🥋 Управление секциями", callback_data="manage_disciplines"))
     builder.row(types.InlineKeyboardButton(text="⬅️ Назад", callback_data="admin_keyboard"))
 
@@ -764,32 +763,48 @@ async def process_manual_checkin(
         await callback.answer("⚠️ Ошибка сохранения", show_alert=True)
 
 
-@router.callback_query(F.data == 'Admin_edit_payments')
+@router.callback_query(F.data == 'admin_edit_payments')
 async def edit_payments_info(callback: types.CallbackQuery, state: FSMContext):
-    await callback.message.answer("Введите новые реквизиты для оплаты.\n\n"
-                                  "Например: <code>+79001234567"
-                                  " (Иван И.)</code>\n"
-                                  "Этот текст будут видеть клиенты при покупке.")
+    # Используем edit_text вместо answer, чтобы не плодить сообщения
+    await callback.message.edit_text(
+        "📝 <b>Редактирование реквизитов</b>\n\n"
+        "Введите новый текст.\n"
+        "Например: <code>+79001234567 (Иван И.)</code>",
+        parse_mode="HTML"
+    )
     await state.set_state(AdminSettings.waiting_for_payment_info)
     await callback.answer()
 
 
 @router.message(AdminSettings.waiting_for_payment_info)
-async def save_payment_info(message: types.Message, state: FSMContext, session, club: Club, redis, club_settings: dict,
-                            club_id: int):
-    new_info = message.text
+async def save_payment_info(message: types.Message, state: FSMContext, session, club: Club, redis):
+    # 1. Достаем нужные данные прямо из объекта club (который пришел из мидлвари)
+    # Это гарантирует, что мы не получим ошибку отсутствия аргумента
+    club_id = club.id
+    current_settings = dict(club.club_settings)  # Делаем копию для безопасности
+
+    new_info = message.text.strip()
+
     if len(new_info) > 200:
         return await message.answer("❌ Слишком длинный текст. Напишите короче.")
-    if 'ui' not in club.club_settings:
-        club.club_settings['ui'] = {}
-    club.club_settings['ui']["payment_info"] = new_info
+
+    # 2. Обновляем JSON
+    if 'ui' not in current_settings:
+        current_settings['ui'] = {}
+    current_settings['ui']["payment_info"] = new_info
+
+    # Присваиваем обратно, чтобы SQLAlchemy увидела изменения
+    club.club_settings = current_settings
+
+    # 3. Сохраняем в БД и чистим кэш
     await session.commit()
     cache_key = f"club_config:{message.bot.token}"
     await redis.delete(cache_key)
-    kb = admin_keyboard(club_settings=club_settings, club_id=club_id)
+    kb = admin_keyboard(club_settings=current_settings, club_id=club_id)
+
     await message.answer(
-        f"✅ Реквизиты обновлены!\n\nТекущий текст:\n<code>{new_info}</code>",
-        reply_markup=kb,  # Сразу отдаем главную админку
+        f"✅ <b>Реквизиты обновлены!</b>\n\nТекущий текст:\n<code>{new_info}</code>",
+        reply_markup=kb,
         parse_mode="HTML"
     )
     await state.clear()
