@@ -27,6 +27,10 @@ class ClubMiddleware(BaseMiddleware):
 
         # 1. Пытаемся взять данные из Redis
         cached_club = await self.redis.get(cache_key)
+        if cached_club:
+            logger.info(f"ВЗЯТО ИЗ КЭША: {cache_key}")
+        else:
+            logger.info(f"КЭША НЕТ, ИДУ В БД: {cache_key}")
 
         club_obj = None
 

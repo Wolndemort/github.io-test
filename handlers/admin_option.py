@@ -798,8 +798,9 @@ async def save_payment_info(message: types.Message, state: FSMContext, session, 
 
     # 3. Сохраняем в БД и чистим кэш
     await session.commit()
-    cache_key = f"club_config:{message.bot.token}"
-    await redis.delete(cache_key)
+    bot_token = message.bot.token
+    await redis.delete(f"club_config:{bot_token}")
+    logger.info(f"КЭШ СБРОШЕН ДЛЯ: {bot_token}")
     kb = admin_keyboard(club_settings=current_settings, club_id=club_id)
 
     await message.answer(

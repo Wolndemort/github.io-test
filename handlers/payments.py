@@ -127,7 +127,6 @@ async def process_kids_limit(
     payment_info = ui_cfg.get("payment_info")
     if not payment_info or payment_info == "+79000000000 (Имя Получателя)":
         payment_info = "⚠️ Реквизиты временно не указаны. Пожалуйста, свяжитесь с администратором."
-
     text = (
         f"💰 <b>Оплата: {display_name}</b>\n"
         f"Тариф: <b>{label} — {price}₽</b>\n\n"
