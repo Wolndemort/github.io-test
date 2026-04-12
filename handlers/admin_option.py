@@ -778,41 +778,40 @@ async def edit_payments_info(callback: types.CallbackQuery, state: FSMContext):
     await callback.answer()
 
 
+from sqlalchemy import update
+
+
+# ... остальные импорты ...
+
 @router.message(AdminSettings.waiting_for_payment_info)
 async def save_payment_info(message: types.Message, state: FSMContext, session, club: Club, redis):
     new_info = message.text.strip()
 
-    if len(new_info) > 200:
-        return await message.answer("❌ Слишком длинный текст.")
-
-    # Важно: Делаем глубокую копию, чтобы SQLAlchemy увидела замену объекта
-    # Если просто менять внутри словаря, JSONB может не прокинуть UPDATE в базу
-    updated_settings = dict(club.club_settings)
-
-    if 'ui' not in updated_settings:
-        updated_settings['ui'] = {}
-
-    # Ключ должен быть в ТОЧНОСТИ как в твоем конфиге (payment_info)
-    updated_settings['ui']["payment_info"] = new_info
-
-    # Присваиваем целиком новый словарь
-    club.club_settings = updated_settings
-    # Принудительно ставим флаг изменения для JSONB
-    flag_modified(club, "club_settings")
+    # 1. Глубокое копирование словаря, чтобы изменить объект
+    new_settings = dict(club.club_settings)
+    if 'ui' not in new_settings:
+        new_settings['ui'] = {}
+    new_settings['ui']["payment_info"] = new_info
 
     try:
+        # 2. ЯВНЫЙ UPDATE (бьем прямой наводкой в БД по ID клуба)
+        await session.execute(
+            update(Club)
+            .where(Club.id == club.id)
+            .values(club_settings=new_settings)
+        )
         await session.commit()
 
-        # ЧИСТИМ КЭШ (самое важное для мидлвари)
+        # 3. УДАЛЯЕМ КЭШ (чтобы мидлварь в следующий раз снова пошла в БД)
         cache_key = f"club_config:{message.bot.token}"
         await redis.delete(cache_key)
 
-        logger.info(f"SUCCESS: Club {club.id} updated. Cache {cache_key} deleted.")
-        await message.answer(f"✅ Реквизиты обновлены!\n\n<code>{new_info}</code>", parse_mode="HTML")
+        logger.warning(f"!!! БАЗА ОБНОВЛЕНА ДЛЯ КЛУБА {club.id} !!!")
+        await message.answer(f"✅ Готово! Новые реквизиты записаны в БД.")
         await state.clear()
 
     except Exception as e:
-        logger.error(f"DATABASE ERROR: {e}")
+        logger.error(f"ОШИБКА ЗАПИСИ: {e}")
         await session.rollback()
-        await message.answer("❌ Ошибка базы данных.")
+        await message.answer("❌ Ошибка при сохранении.")
 
