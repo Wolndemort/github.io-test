@@ -156,7 +156,9 @@ async def main():
 
     # 1. Загружаем все активные клубы из БД
     async with AsyncSessionLocal() as session:
-        result = await session.execute(select(Club).where(Club.subscription_expire_at >= datetime.now()))
+        result = await session.execute(
+            select(Club).where(Club.bot_token.is_not(None))
+        )
         active_clubs = result.scalars().all()
 
     # 2. Создаем маппинг ботов {token: bot_instance}
