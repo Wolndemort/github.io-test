@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from aiogram import Router
 from aiogram.utils.keyboard import ReplyKeyboardBuilder
 from aiogram.types import WebAppInfo, KeyboardButton
@@ -99,7 +101,7 @@ def get_section_menu_kb(discipline_code: str, discipline_name: str):
     return builder.as_markup()
 
 
-def admin_keyboard(club_settings: dict, club_id: int):
+def admin_keyboard(club_settings: dict, club_id: int, subscription_date: datetime = None):
     builder = InlineKeyboardBuilder()
 
     # ⚙️ Достаем фичи из конфига
@@ -108,6 +110,17 @@ def admin_keyboard(club_settings: dict, club_id: int):
     # --- БЛОК 1: Управление (Всегда доступны владельцу) ---
     builder.row(types.InlineKeyboardButton(text='🛠 Настройки клуба', callback_data='admin_settings'))
     builder.row(types.InlineKeyboardButton(text="💵 Принять наличку", callback_data="admin_cash_list"))
+
+    sub_text = "💳 Продлить подписку"
+    if subscription_date:
+        days_left = (subscription_date - datetime.now()).days
+        if days_left >= 0:
+            sub_text = f"💳 Подписка: {days_left} дн. (Продлить)"
+        else:
+            sub_text = "❌ Подписка истекла (Оплатить)"
+
+    # --- БЛОК 0: Финансы SaaS (Новый блок) ---
+    builder.row(types.InlineKeyboardButton(text=sub_text, callback_data='pay_menu'))
 
     # --- БЛОК 2: Динамические фичи (Проверка по конфигу) ---
     if features.get("daily_report", True):

@@ -31,17 +31,15 @@ router = Router()
 @router.callback_query(F.data == "admin")
 async def admin_panel(
         event: types.Message | types.CallbackQuery,
-        club: Club,  # Из Middleware
-        club_settings: dict,  # Из Middleware
-        is_owner: bool,  # Из Middleware (исправил имя аргумента)
-        is_super_admin: bool,  # Из Middleware
+        club: Club,
+        club_settings: dict,
+        is_owner: bool,
+        is_super_admin: bool,
         session: AsyncSession
 ):
-    # Проверка: если это не владелец и не ты — игнорим
     if not (is_owner or is_super_admin):
         return
 
-    # Стандартный фикс для Message/Callback
     message = event.message if isinstance(event, types.CallbackQuery) else event
     if isinstance(event, types.CallbackQuery):
         await event.answer()
@@ -51,17 +49,36 @@ async def admin_panel(
         active_subs = await get_active_subs_count(club_id=club.id, session=session)
         club_name = club_settings.get("ui", {}).get("club_name") or club.name
 
+        # --- РАСЧЕТ ОСТАТКА ПОДПИСКИ ---
+        sub_end = club.subscription_expire_at
+        if sub_end:
+            days_left = (sub_end - datetime.now()).days
+            sub_info = f"<code>до {sub_end.strftime('%d.%m.%Y')} ({max(0, days_left)} дн.)</code>"
+        else:
+            sub_info = "<code>не активна</code>"
+        # ------------------------------
+
         text = (
             f"📈 <b>Панель управления: {club_name}</b>\n\n"
+            f"🔐 Подписка CRM: {sub_info}\n"  # Выводим в текст
             f"👥 Всего пользователей: <code>{all_users}</code>\n"
             f"💳 Активных абонементов: <code>{active_subs}</code>\n\n"
             "Чего желаете, босс?"
         )
-        kb_scanner = get_scanner_keyboard(club_id=club.id, club_settings=club_settings)
-        await message.answer(text, reply_markup=admin_keyboard(club_id=club.id, club_settings=club_settings))
+
+        # Передаем дату в твою обновленную клавиатуру
+        await message.answer(
+            text,
+            reply_markup=admin_keyboard(
+                club_id=club.id,
+                club_settings=club_settings,
+                subscription_date=sub_end
+            )
+        )
 
     except Exception as e:
         logger.error(f"❌ Ошибка в админ-панели клуба {club.id}: {e}")
+
 
 
 @router.callback_query(F.data == "admin_keyboard")

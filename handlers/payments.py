@@ -1,4 +1,7 @@
+from datetime import datetime, timedelta
+
 from aiogram.utils.keyboard import InlineKeyboardBuilder
+from redis import Redis
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from loguru import logger
@@ -8,7 +11,7 @@ from database.db import Student, Club
 from handlers.buttons import discipline, get_pay_options_kb, get_cash_options_kb
 from database.db import add_abon
 from aiogram.fsm.context import FSMContext
-from aiogram.types import InlineKeyboardButton
+from aiogram.types import InlineKeyboardButton, LabeledPrice, Message, PreCheckoutQuery
 from aiogram import Router, F, types
 from handlers.states import PaymentStates
 
@@ -426,3 +429,55 @@ async def final_cash_pay(callback: types.CallbackQuery, state: FSMContext, sessi
         new_expire, _ = result
         await callback.message.edit_text(f"✅ <b>Успешно!</b>\nАбонемент продлен до {new_expire}")
         await state.clear()
+
+
+@router.callback_query(F.data.startswith("buy_sub_"))
+async def send_subscription_invoice(callback: types.CallbackQuery):
+    days = int(callback.data.split("_")[-1])
+
+    # Цены: для 30 дней - 500 звезд, для 365 - 5000
+    price_amount = 500 if days == 30 else 5000
+
+    await callback.message.answer_invoice(
+        title=f"Подписка на {days} дней",
+        description=f"Продление доступа к SaaS платформе для клуба",
+        prices=[LabeledPrice(label="XTR", amount=price_amount)],
+        provider_token="",  # Для Stars токен пустой
+        payload=f"sub_{days}",
+        currency="XTR"
+    )
+    await callback.answer()
+
+
+# 2. Обязательный ответ на pre_checkout_query (ТГ ждет его 10 сек)
+@router.pre_checkout_query()
+async def process_pre_checkout(pre_checkout_query: PreCheckoutQuery):
+    await pre_checkout_query.answer(ok=True)
+
+
+# 3. Финальный этап: зачисление подписки после успешной оплаты
+@router.message(F.successful_payment)
+async def on_successful_payment(message: Message, session: AsyncSession, club: Club,  redis: Redis):
+    payload = message.successful_payment.invoice_payload
+    days = int(payload.split("_")[-1])
+
+    now = datetime.now()
+
+    # Если подписка уже есть и не истекла — плюсуем к ней
+    if club.subscription_expire_at and club.subscription_expire_at > now:
+        club.subscription_expire_at += timedelta(days=days)
+    else:
+        # Если истекла или новая — считаем от текущего момента
+        club.subscription_expire_at = now + timedelta(days=days)
+
+    await session.commit()
+    cache_key = f"club_config:{message.bot.token}"
+    await redis.delete(cache_key)
+    logger.info(f"Кэш сброшен для бота: {message.bot.token}")
+
+    await message.answer(
+        f"✅ Оплата прошла успешно!\n"
+        f"Подписка продлена на <b>{days} дней</b>.\n"
+        f"Новая дата окончания: <b>{club.subscription_expire_at.strftime('%d.%m.%Y')}</b>",
+        parse_mode="HTML"
+    )

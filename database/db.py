@@ -2,7 +2,7 @@ from typing import Optional, List
 from sqlalchemy.ext.mutable import MutableDict
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, DeclarativeBase, mapped_column, relationship
-from sqlalchemy import BigInteger, DateTime, String, func, Integer, ForeignKey, Boolean
+from sqlalchemy import BigInteger, DateTime, String, func, Integer, ForeignKey
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from config import db_file
 from datetime import datetime
@@ -58,7 +58,7 @@ class Club(Base):
     club_settings: Mapped[dict] = mapped_column(MutableDict.as_mutable(JSONB()), server_default='{}')
     users: Mapped[List['User']] = relationship(back_populates='club')
     owner_id: Mapped[Optional[int]] = mapped_column(BigInteger, index=True)
-    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    subscription_expire_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
 
 
 async def init_db():
@@ -160,7 +160,7 @@ async def get_expire_students_grouped(session_pool):
                 .where(
                     Student.expire_date <= three_days_limit,
                     Student.expire_date >= today,
-                    Club.is_active == True  # Пишем только от активных клубов
+                    Club.subscription_expire_at == True  # Пишем только от активных клубов
                 )
             )
             result = await session.execute(stmt)

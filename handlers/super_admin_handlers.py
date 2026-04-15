@@ -182,45 +182,47 @@ async def list_for_extend(
 async def process_extend(
         callback: types.CallbackQuery,
         session: AsyncSession,
-        is_super_admin: bool  # Получаем из мидлваря
+        is_super_admin: bool,
+        redis: Redis  # Добавь redis в аргументы (он прилетает из мидлвари)
 ):
-    # 1. Сразу убираем часики
     await callback.answer()
-
-    # 2. Проверка прав
     if not is_super_admin:
-        return await callback.message.answer("❌ У вас нет прав для этой операции.")
+        return await callback.message.answer("❌ У вас нет прав.")
 
-    # 3. Парсим ID клуба
     try:
         club_id = int(callback.data.split("_")[-1])
         club = await session.get(Club, club_id)
 
         if not club:
-            return await callback.message.answer("❌ Клуб не найден в базе.")
+            return await callback.message.answer("❌ Клуб не найден.")
 
-        # 4. Логика продления
         now = datetime.now()
 
-        # Если даты нет или она в прошлом — считаем от "сейчас"
-        if not club.expire_date or club.expire_date < now:
-            club.expire_date = now + timedelta(days=30)
+        # ВАЖНО: используем правильное имя поля из твоей БД
+        current_expire = club.subscription_expire_at
+
+        if not current_expire or current_expire < now:
+            club.subscription_expire_at = now + timedelta(days=30)
         else:
-            # Если подписка еще активна — плюсуем к остатку
-            club.expire_date += timedelta(days=30)
+            club.subscription_expire_at += timedelta(days=30)
 
         await session.commit()
 
-        # 5. Уведомление (всплывающее)
-        await callback.answer(f"✅ Клуб {club.name} продлен до {club.expire_date.strftime('%d.%m.%Y')}!",
-                              show_alert=True)
+        # 🔥 ОЧИСТКА КЭША REDIS
+        # После ручного продления нужно снести старый конфиг из кэша
+        if club.bot_token:
+            await redis.delete(f"club_config:{club.bot_token}")
+            logger.info(f"Супер-админ продлил клуб {club.id}, кэш сброшен.")
 
-        # 6. Возврат в список (ОБЯЗАТЕЛЬНО передаем все аргументы, которые ждет list_for_extend)
+        await callback.answer(
+            f"✅ Продлен до {club.subscription_expire_at.strftime('%d.%m.%Y')}",
+            show_alert=True
+        )
         await list_for_extend(callback, session, is_super_admin)
 
     except Exception as e:
-        print(f"Ошибка при продлении: {e}")
-        await callback.message.answer("⚠️ Произошла ошибка при сохранении данных.")
+        logger.error(f"Ошибка продления: {e}")
+        await callback.message.answer("⚠️ Ошибка при сохранении.")
 
 
 @router.message(SuperAdminStates.waiting_for_broadcast_text)
