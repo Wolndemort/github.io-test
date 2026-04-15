@@ -120,7 +120,7 @@ async def send_daily_report_to_admins(bots_dict: dict):
 
     async with AsyncSessionLocal() as session:
         # 1. Берем все активные клубы
-        result = await session.execute(select(Club).where(Club.is_active == True))
+        result = await session.execute(select(Club).where(Club.subscription_expire_at == True))
         clubs = result.scalars().all()
 
     for club in clubs:
@@ -156,7 +156,7 @@ async def main():
 
     # 1. Загружаем все активные клубы из БД
     async with AsyncSessionLocal() as session:
-        result = await session.execute(select(Club).where(Club.is_active == True))
+        result = await session.execute(select(Club).where(Club.subscription_expire_at == True))
         active_clubs = result.scalars().all()
 
     # 2. Создаем маппинг ботов {token: bot_instance}
