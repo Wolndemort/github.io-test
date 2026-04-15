@@ -101,7 +101,7 @@ async def process_token(message: types.Message, state: FSMContext, session: Asyn
             bot_token=bot_token,
             owner_id=owner_id,
             club_settings=DEFAULT_CLUB_SETTINGS.copy(),
-            is_active=True
+            subscription_expire_at=datetime.now() + timedelta(days=30)
         )
 
         session.add(new_club)
@@ -301,7 +301,7 @@ async def system_stats_handler(callback: types.CallbackQuery, session: AsyncSess
     # Используем твой быстрый метод подсчета через func.count
     clubs_count = (await session.execute(select(func.count(Club.id)))).scalar() or 0
     students_count = (await session.execute(select(func.count(Student.id)))).scalar() or 0
-    active_clubs = (await session.execute(select(func.count(Club.id)).where(Club.is_active == True))).scalar() or 0
+    active_clubs = (await session.execute(select(func.count(Club.id)).where(Club.subscription_expire_at == True))).scalar() or 0
 
     text = (
         "📊 <b>ГЛОБАЛЬНАЯ СТАТИСТИКА SaaS</b>\n\n"

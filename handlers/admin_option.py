@@ -1,8 +1,6 @@
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm.attributes import flag_modified
 
 from handlers.states import AdminStates, AdminSettings
-from sqlalchemy import update
 from redis.asyncio import Redis
 
 import pandas as pd
@@ -13,7 +11,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from database.db import get_all_users_count, get_active_subs_count, User, get_daily_stats, Student, \
     Club
 from sqlalchemy import select
-from handlers.buttons import admin_keyboard, get_scanner_keyboard
+from handlers.buttons import admin_keyboard
 from handlers.states import AdminManualAdd
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext

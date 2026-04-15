@@ -86,7 +86,7 @@ async def register_new_club(
             bot_token=bot_token,
             owner_id=owner_id,
             club_settings=DEFAULT_CLUB_SETTINGS.copy(),  # Копируем эталон
-            is_active=True
+            subscription_expire_at=datetime.now() + timedelta(days=30)
         )
         session.add(new_club)
         await session.commit()
