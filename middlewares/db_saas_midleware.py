@@ -103,5 +103,5 @@ class ClubMiddleware(BaseMiddleware):
         data["is_owner"] = is_owner
         data["is_super_admin"] = is_super
         data["redis"] = self.redis
-
+        data["club_settings"] = club_obj.club_settings
         return await handler(event, data)
