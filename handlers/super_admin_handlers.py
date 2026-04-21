@@ -151,10 +151,11 @@ async def list_for_extend(
 
         for c in clubs:
             # Проверяем дату
-            if c.expire_date:
-                expire_str = c.expire_date.strftime('%d.%m.%Y')
-                # Сравниваем даты (убедись, что в БД тип DateTime)
-                status_icon = "🔴" if c.expire_date < now else "⏳"
+            expire_dt = c.subscription_expire_at
+
+            if expire_dt:
+                expire_str = expire_dt.strftime('%d.%m.%Y')
+                status_icon = "🔴" if expire_dt < now else "⏳"
             else:
                 expire_str = "Без срока"
                 status_icon = "⚪️"
@@ -333,7 +334,7 @@ async def handle_list_clubs(
     # Проверка прав (если список клубов только для админов)
     if not is_super_admin:
         await callback.answer("У вас нет прав для просмотра всех клубов.", show_alert=True)
-        return
+    await callback.answer()
 
     # Получаем все клубы из базы
     result = await session.execute(select(Club))
