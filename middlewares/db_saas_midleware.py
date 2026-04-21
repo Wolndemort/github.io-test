@@ -3,7 +3,6 @@ from datetime import datetime
 
 from aiogram import BaseMiddleware, types
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-from loguru import logger
 from sqlalchemy import select
 from database.db import Club
 from redis.asyncio import Redis
@@ -47,10 +46,8 @@ class ClubMiddleware(BaseMiddleware):
             session = data["session"]
             result = await session.execute(select(Club).where(Club.bot_token == bot_token))
             club_obj = result.scalar_one_or_none()
-
             if not club_obj:
                 return
-
                 # Сохраняем в Redis (дату превращаем в ISO строку)
             club_to_cache = {
                 "id": club_obj.id,
@@ -100,6 +97,7 @@ class ClubMiddleware(BaseMiddleware):
 
         # 4. Прокидываем данные в хендлеры
         data["club"] = club_obj
+        data["club_id"] = club_obj.id
         data["is_owner"] = is_owner
         data["is_super_admin"] = is_super
         data["redis"] = self.redis
