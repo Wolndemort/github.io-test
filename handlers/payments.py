@@ -62,7 +62,8 @@ async def select_athlete_handler(callback: types.CallbackQuery, state: FSMContex
     for s in students:
         kb.row(types.InlineKeyboardButton(text=f"👦 {s.name}", callback_data=f"set_at_{s.id}"))
 
-    await callback.message.edit_text("<b>Для кого оформляем абонемент?</b>", reply_markup=kb.as_markup(), parse_mode="HTML")
+    await callback.message.edit_text("<b>Для кого оформляем абонемент?</b>", reply_markup=kb.as_markup(),
+                                     parse_mode="HTML")
 
 
 @router.callback_query(F.data.startswith('set_at_'))
@@ -500,5 +501,4 @@ async def on_successful_payment(message: Message, session: AsyncSession, club: C
         f"✅ Оплата прошла успешно!\n"
         f"Подписка продлена на <b>{days} дней</b>.\n"
         f"Новая дата окончания: <b>{club.subscription_expire_at.strftime('%d.%m.%Y')}</b>",
-        parse_mode="HTML"
-    )
+        parse_mode="HTML")
