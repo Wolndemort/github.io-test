@@ -210,14 +210,14 @@ def get_pay_options_kb(discipline_cfg: dict, discipline_code: str):
         # callback_data=f"set_limit_0_{discipline_code}"
         builder.row(types.InlineKeyboardButton(
             text=f"💳 Оплатить безлимит — {price}₽",
-            callback_data="set_limit_0"
+            callback_data=f"set_limit_{discipline_code}_0"
         ))
     else:
         tariffs = discipline_cfg.get("tariffs", [])
         for t in tariffs:
             builder.row(types.InlineKeyboardButton(
                 text=f"{t['count']} зан. — {t['price']}₽",
-                callback_data=f"set_limit_{t['count']}"
+                callback_data=f"set_limit_{discipline_code}_{t['count']}"
             ))
 
     # Кнопка назад (обязательно добавь, чтобы не висло)

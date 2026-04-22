@@ -48,34 +48,38 @@ async def show_sections(
 
 
 @router.callback_query(F.data.startswith('buy_'))
-async def select_tariff_handler(
-        callback: types.CallbackQuery,
-        state: FSMContext,
-        club_settings: dict
-):
-    # Разбираем callback_data (ожидаем buy_boxing)
-    parts = callback.data.split('_')
-    discipline_code = parts[1]
-
-    # Сохраняем тип спорта в стейт, чтобы следующий шаг (set_limit) его видел
+async def select_athlete_handler(callback: types.CallbackQuery, state: FSMContext, session: AsyncSession):
+    discipline_code = callback.data.split('_')[1]
     await state.update_data(sport_type=discipline_code)
 
-    # Ищем настройки
-    discipline_cfg = club_settings.get("disciplines", {}).get(discipline_code)
+    # Ищем детей юзера в БД (используем твои модели)
+    from database.db import Student
+    res = await session.execute(select(Student).where(Student.parent_id == callback.from_user.id))
+    students = res.scalars().all()
 
-    if not discipline_cfg or not discipline_cfg.get("active"):
-        return await callback.answer("Ошибка: тарифы не найдены", show_alert=True)
+    kb = InlineKeyboardBuilder()
+    kb.row(types.InlineKeyboardButton(text="🙋‍♂️ За себя", callback_data=f"set_at_me"))
+    for s in students:
+        kb.row(types.InlineKeyboardButton(text=f"👦 {s.name}", callback_data=f"set_at_{s.id}"))
 
-    # Генерируем клаву (убедись, что функция принимает discipline_cfg)
-    markup = get_pay_options_kb(discipline_cfg, discipline_code)
+    await callback.message.edit_text("<b>Для кого оформляем абонемент?</b>", reply_markup=kb.as_markup(), parse_mode="HTML")
 
-    await callback.message.edit_text(
-        f"🥋 Секция: <b>{discipline_cfg['name']}</b>\n\n"
-        "<b>Выберите подходящий тариф:</b>",
-        reply_markup=markup,
-        parse_mode="HTML"
-    )
-    await callback.answer()
+
+@router.callback_query(F.data.startswith('set_at_'))
+async def athlete_chosen_handler(callback: types.CallbackQuery, state: FSMContext, club_settings: dict):
+    target = callback.data.split('_')[2]
+    student_id = callback.from_user.id if target == "me" else int(target)
+
+    # ВОТ ТУТ МЫ ПОБЕЖДАЕМ NONE
+    await state.update_data(student_id=student_id)
+
+    data = await state.get_data()
+    discipline_cfg = club_settings.get("disciplines", {}).get(data['sport_type'])
+
+    # Показываем твою клавиатуру (8 зан, 12 зан и т.д.)
+    markup = get_pay_options_kb(discipline_cfg, data['sport_type'])
+    await callback.message.edit_text(f"🥋 Секция: <b>{discipline_cfg['name']}</b>\nВыберите тариф:", reply_markup=markup,
+                                     parse_mode="HTML")
 
 
 @router.callback_query(F.data.startswith('set_limit_'))
@@ -84,53 +88,70 @@ async def process_kids_limit(
         state: FSMContext,
         club_settings: dict
 ):
-    # 1. Извлекаем лимит из callback_data (set_limit_8 -> 8)
+    # 1. Извлекаем лимит из callback_data (set_limit_8 -> 8 или set_limit_boxing_8 -> 8)
+    parts = callback.data.split('_')
     try:
-        limit = int(callback.data.split('_')[2])
+        # Берем последний элемент, так надежнее всего
+        limit = int(parts[-1])
     except (IndexError, ValueError):
         return await callback.answer("Ошибка данных кнопки", show_alert=True)
 
-    # 2. Берем данные из FSM, которые сохранили в хендлере buy_
+    # 2. Берем данные из FSM
     data = await state.get_data()
     sport_type = data.get('sport_type')
+
+    # Если вдруг стейт сбросился, пытаемся взять код дисциплины из середины колбэка
+    if not sport_type and len(parts) > 2:
+        sport_type = parts[2]
+        await state.update_data(sport_type=sport_type)
 
     if not sport_type:
         return await callback.answer("Сессия истекла, начните выбор заново", show_alert=True)
 
     # 3. Достаем конфиг конкретной секции
     discipline_cfg = club_settings.get("disciplines", {}).get(sport_type, {})
+    if not discipline_cfg:
+        return await callback.answer("Ошибка: секция не найдена", show_alert=True)
 
-    # 4. ЛОГИКА ОПРЕДЕЛЕНИЯ ЦЕНЫ (Универсальная для SaaS)
+    # 4. ЛОГИКА ОПРЕДЕЛЕНИЯ ЦЕНЫ
     price = None
     display_name = discipline_cfg.get('name', 'Секция')
 
     if discipline_cfg.get("type") == "unlimited":
-        # Если безлимит — берем цену из корня секции
         price = discipline_cfg.get("price")
         label = "Безлимит"
     else:
-        # Если уроки — ищем в списке тарифов
         tariffs = discipline_cfg.get("tariffs", [])
-        selected_tariff = next((t for t in tariffs if t['count'] == limit), None)
+        # Ищем тариф, где count совпадает с выбранным лимитом
+        selected_tariff = next((t for t in tariffs if int(t['count']) == limit), None)
         if selected_tariff:
             price = selected_tariff.get('price')
         label = f"{limit} зан."
 
-    # Если цену так и не нашли — стопаем процесс
     if price is None:
         logger.error(f"Цена не найдена для {sport_type} (limit: {limit})")
         return await callback.answer("Ошибка: тариф не найден в базе клуба", show_alert=True)
 
-    # 5. Сохраняем финальные данные в стейт перед ожиданием фото
-    await state.update_data(lesson_count=limit, price=price, discipline_name=display_name)
+    # 5. ФИКС NONE: Сохраняем все данные, включая ID атлета
+    # Если student_id не был выбран ранее (в цепочке "за себя/ребенка"),
+    # используем ID того, кто нажал на кнопку.
+    current_student_id = data.get('student_id') or callback.from_user.id
+
+    await state.update_data(
+        student_id=current_student_id,
+        lesson_count=limit,
+        price=price,
+        discipline_name=display_name
+    )
     await state.set_state(PaymentStates.waiting_for_receipt)
 
-    # 6. UI часть
+    # 6. UI часть (Реквизиты)
     ui_cfg = club_settings.get("ui", {})
     payment_info = ui_cfg.get("payment_info")
-    logger.warning(f"DEBUG: В БД лежит ключ payment_info со значением: '{payment_info}'")
-    if not payment_info or payment_info == "+79000000000 (Имя Получателя)":
+
+    if not payment_info or "+79000000000" in payment_info:
         payment_info = "⚠️ Реквизиты временно не указаны. Пожалуйста, свяжитесь с администратором."
+
     text = (
         f"💰 <b>Оплата: {display_name}</b>\n"
         f"Тариф: <b>{label} — {price}₽</b>\n\n"
