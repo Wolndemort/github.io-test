@@ -2,7 +2,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from handlers.states import AdminStates, AdminSettings
 from redis.asyncio import Redis
-
+from sqlalchemy import update
 import pandas as pd
 import os
 from aiogram.types import FSInputFile
@@ -792,11 +792,6 @@ async def edit_payments_info(callback: types.CallbackQuery, state: FSMContext):
     await state.set_state(AdminSettings.waiting_for_payment_info)
     await callback.answer()
 
-
-from sqlalchemy import update
-
-
-# ... остальные импорты ...
 
 @router.message(AdminSettings.waiting_for_payment_info)
 async def save_payment_info(message: types.Message, state: FSMContext, session, club: Club, redis):

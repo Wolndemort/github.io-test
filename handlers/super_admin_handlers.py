@@ -7,7 +7,6 @@ from handlers.states import SuperAdminStates
 from aiogram import Router, types, F, Bot
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
-from aiogram.types import Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -226,72 +225,36 @@ async def process_extend(
         await callback.message.answer("⚠️ Ошибка при сохранении.")
 
 
-@router.message(SuperAdminStates.waiting_for_broadcast_text)
-async def process_broadcast_to_owners(
-    message: types.Message,
-    state: FSMContext,
-    session: AsyncSession
-):
-    # 1. Получаем список ВСЕХ уникальных владельцев клубов
-    # (Используем set или DISTINCT в SQL, чтобы не спамить одному человеку дважды)
-    stmt = select(Club.owner_id).where(Club.owner_id.isnot(None))
-    result = await session.execute(stmt)
-    # Множество (set) уберет дубликаты
-    owner_ids = set(result.scalars().all())
-
-    if not owner_ids:
-        return await message.answer("📭 В системе еще нет владельцев клубов.")
-
-    await message.answer(f"🚀 Начинаю рассылку для {len(owner_ids)} владельцев...")
-
-    count = 0
-    for oid in owner_ids:
-        try:
-            # Копируем сообщение (текст, фото, видео — всё подхватит)
-            await message.copy_to(chat_id=oid)
-            count += 1
-            # Небольшая пауза для защиты от Flood Limit Telegram
-            await asyncio.sleep(0.05)
-        except Exception as e:
-            logger.warning(f"Не удалось отправить владельцу {oid}: {e}")
-
-    await message.answer(f"✅ Рассылка завершена!\nДоставлено: <b>{count}</b> из <b>{len(owner_ids)}</b>",
-                         parse_mode="HTML")
-    await state.clear()
+@router.callback_query(F.data == "broadcast_to_owners", F.from_user.id.in_(ADMIN_IDS))
+async def start_broadcast_step(callback: types.CallbackQuery, state: FSMContext):
+    await callback.message.answer("📝 Введите текст рассылки (можно прикрепить фото или видео):")
+    await state.set_state(SuperAdminStates.waiting_for_broadcast_text)
+    await callback.answer()
 
 
 @router.message(SuperAdminStates.waiting_for_broadcast_text, F.from_user.id.in_(ADMIN_IDS))
-async def send_broadcast(message: Message, state: FSMContext, session: AsyncSession):
-    broadcast_text = message.text
-
-    # 1. 🛡️ ИЗОЛЯЦИЯ: Только реальные ID и без дублей
+async def process_unified_broadcast(message: types.Message, state: FSMContext, session: AsyncSession):
     stmt = select(Club.owner_id).where(Club.owner_id.isnot(None)).distinct()
     result = await session.execute(stmt)
     owner_ids = result.scalars().all()
 
     if not owner_ids:
-        return await message.answer("📭 В системе еще нет владельцев.")
+        await state.clear()
+        return await message.answer("📭 В системе еще нет владельцев клубов.")
 
-    await message.answer(f"🚀 Начинаю рассылку для {len(owner_ids)} владельцев...")
-
+    status_msg = await message.answer(f"🚀 Начинаю рассылку для {len(owner_ids)}владельцев...")
     count = 0
-    for o_id in owner_ids:
+    for oid in owner_ids:
         try:
-            # Используем copy_to, если вдруг ты захочешь отправить фото или видео
-            # Или оставляем send_message, как у тебя
-            await message.bot.send_message(
-                o_id,
-                f"📢 <b>УВЕДОМЛЕНИЕ ОТ ПЛАТФОРМЫ:</b>\n\n{broadcast_text}",
-                parse_mode="HTML"
-            )
+            await message.copy_to(chat_id=oid)
             count += 1
-            # Защита от лимитов Telegram (Flood)
             await asyncio.sleep(0.05)
-        except Exception:
-            continue
-
+        except Exception as e:
+            logger.warning(f"Ошибка отправки пользователю {oid}: {e}")
     await message.answer(
-        f"✅ Рассылка завершена!\nДоставлено: <b>{count}</b> из <b>{len(owner_ids)}</b> владельцам.",
+        f"✅ <b>Рассылка завершена!</b>\n\n"
+        f"📈 Доставлено: <b>{count}</b>\n"
+        f"❌ Ошибки: <b>{len(owner_ids) - count}</b>",
         parse_mode="HTML"
     )
     await state.clear()

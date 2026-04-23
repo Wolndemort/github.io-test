@@ -143,7 +143,7 @@ async def get_all_subscriptions(user_id: int, club_id: int, session: AsyncSessio
         return []
 
 
-async def get_expire_students_grouped(session_pool):
+async def get_expire_students_grouped(session):
     """
     Достает студентов, у которых кончается абонемент,
     и сразу подтягивает данные их Клуба (чтобы знать, с какого токена писать)
@@ -152,27 +152,24 @@ async def get_expire_students_grouped(session_pool):
     three_days_limit = today + timedelta(days=3)
 
     try:
-        async with session_pool() as session:
-            # Делаем JOIN со связанной таблицей Club, чтобы сразу получить токен
-            stmt = (
-                select(Student, Club.bot_token)
-                .join(Club, Student.club_id == Club.id)
-                .where(
-                    Student.expire_date <= three_days_limit,
-                    Student.expire_date >= today,
-                    Club.subscription_expire_at == True  # Пишем только от активных клубов
-                )
+        stmt = (
+            select(Student, Club.bot_token)
+            .join(Club, Student.club_id == Club.id)
+            .where(
+                Student.expire_date <= three_days_limit,
+                Student.expire_date >= today,
+                Club.subscription_expire_at >= today  # Поменял == True на проверку даты
             )
-            result = await session.execute(stmt)
-            # Получаем список кортежей: (объект_студента, токен_бота)
-            rows = result.all()
+        )
+        result = await session.execute(stmt)
+        rows = result.all()
 
-            if rows:
-                logger.info(f"✅ Найдено {len(rows)} атлетов для рассылки в разных клубах")
-            return rows
+        if rows:
+            logger.info(f"✅ Найдено {len(rows)} атлетов")
+        return rows
 
     except Exception as e:
-        logger.error(f"❌ Ошибка при запросе истекающих абонементов для SaaS: {e}")
+        logger.error(f"❌ Ошибка при запросе: {e}")
         return []
 
 

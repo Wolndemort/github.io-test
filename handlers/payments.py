@@ -471,6 +471,30 @@ async def send_subscription_invoice(callback: types.CallbackQuery):
     await callback.answer()
 
 
+@router.callback_query(F.data == "pay_menu")
+async def show_pay_menu(callback: types.CallbackQuery):
+    builder = InlineKeyboardBuilder()
+
+    # Создаем кнопки с правильными префиксами buy_sub_
+    builder.row(types.InlineKeyboardButton(
+        text="🌙 1 месяц — 500 ⭐", callback_data="buy_sub_30")
+    )
+    builder.row(types.InlineKeyboardButton(
+        text="☀️ 1 год — 5000 ⭐", callback_data="buy_sub_365")
+    )
+    builder.row(types.InlineKeyboardButton(
+        text="⬅️ Назад", callback_data="admin")  # Если есть главное меню
+    )
+
+    await callback.message.edit_text(
+        "<b>Выберите тарифный план:</b>\n\n"
+        "Оплата производится через Telegram Stars. Подписка активируется мгновенно.",
+        reply_markup=builder.as_markup(),
+        parse_mode="HTML"
+    )
+    await callback.answer()
+
+
 # 2. Обязательный ответ на pre_checkout_query (ТГ ждет его 10 сек)
 @router.pre_checkout_query()
 async def process_pre_checkout(pre_checkout_query: PreCheckoutQuery):
