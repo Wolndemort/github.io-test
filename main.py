@@ -1,12 +1,9 @@
 import asyncio
-import socket
 import os
 import sys
 from datetime import datetime
 from aiogram import Bot, Dispatcher, types
 from aiogram.client.default import DefaultBotProperties
-from aiogram.client.session import aiohttp
-from aiogram.client.session.aiohttp import AiohttpSession
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import FastAPI
 from loguru import logger
@@ -165,22 +162,21 @@ async def main():
         active_clubs = result.scalars().all()
 
     # 2. Создаем маппинг ботов {token: bot_instance}
+    # 2. Создаем маппинг ботов {token: bot_instance}
     bots_dict = {}
     for club in active_clubs:
+        bot = None # Инициализируем переменную для корректной очистки
         try:
-            # Пытаемся создать экземпляр бота
-            session = AiohttpSession(
-                timeout=60,  # Ждем ответа от Телеграма до 60 секунд
-                connector=aiohttp.TCPConnector(family=socket.AF_INET)  # Только IPv4
-            )
+            # Создаем бота без кастомных сессий (aiogram сам создаст нужную)
             bot = Bot(
                 token=club.bot_token,
-                session=session,
                 default=DefaultBotProperties(parse_mode="HTML")
             )
 
-            # Проверка: живой ли токен (делаем легкий запрос к API)
-            # Это гарантирует, что бот не упадет позже при старте поллинга
+            # Настраиваем уже созданную сессию бота (увеличиваем таймаут)
+            bot.session.timeout = 60
+
+            # Проверка: живой ли токен
             await bot.get_me()
 
             bots_dict[club.bot_token] = bot
@@ -188,10 +184,10 @@ async def main():
 
         except Exception as e:
             logger.error(f"❌ Ошибка токена для клуба '{club.name}' (ID: {club.id}): {e}")
-            # Просто идем дальше, не давая ошибке одного бота уронить всю систему
-            if 'bot' in locals():
+            if bot is not None:
                 await bot.session.close()
             continue
+
 
     if not bots_dict:
         logger.critical("❌ Нет ни одного валидного активного токена в БД! Работа невозможна.")
