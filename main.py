@@ -4,6 +4,8 @@ import sys
 from datetime import datetime
 from aiogram import Bot, Dispatcher, types
 from aiogram.client.default import DefaultBotProperties
+from aiogram.client.session import aiohttp
+from aiogram.client.session.aiohttp import AiohttpSession
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import FastAPI
 from loguru import logger
@@ -166,8 +168,13 @@ async def main():
     for club in active_clubs:
         try:
             # Пытаемся создать экземпляр бота
+            session = AiohttpSession(
+                timeout=60,  # Ждем ответа от Телеграма до 60 секунд
+                connector=aiohttp.TCPConnector(family=aiohttp.AF_INET)  # Только IPv4
+            )
             bot = Bot(
                 token=club.bot_token,
+                session=session,
                 default=DefaultBotProperties(parse_mode="HTML")
             )
 
@@ -181,6 +188,8 @@ async def main():
         except Exception as e:
             logger.error(f"❌ Ошибка токена для клуба '{club.name}' (ID: {club.id}): {e}")
             # Просто идем дальше, не давая ошибке одного бота уронить всю систему
+            if 'bot' in locals():
+                await bot.session.close()
             continue
 
     if not bots_dict:
