@@ -1,4 +1,5 @@
 import asyncio
+import socket
 import os
 import sys
 from datetime import datetime
@@ -170,7 +171,7 @@ async def main():
             # Пытаемся создать экземпляр бота
             session = AiohttpSession(
                 timeout=60,  # Ждем ответа от Телеграма до 60 секунд
-                connector=aiohttp.TCPConnector(family=aiohttp.AF_INET)  # Только IPv4
+                connector=aiohttp.TCPConnector(family=socket.AF_INET)  # Только IPv4
             )
             bot = Bot(
                 token=club.bot_token,
