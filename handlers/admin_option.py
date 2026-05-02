@@ -650,6 +650,14 @@ async def cash_search_results(
         await message.answer("⚠️ Произошла ошибка при обращении к базе данных.")
 
 
+@router.callback_query(F.data == "admin_manual_visit")
+async def start_manual_visit_search(callback: types.CallbackQuery, state: FSMContext):
+    # Без этой строки следующий хендлер (который ты скинул) не увидит твой текст
+    await state.set_state(AdminManualAdd.waiting_for_search_visit)
+    await callback.message.answer("🔍 Введите имя или фамилию атлета для поиска:")
+    await callback.answer()
+
+
 @router.message(AdminManualAdd.waiting_for_search_visit)
 async def manual_visit_results(
         message: types.Message,
