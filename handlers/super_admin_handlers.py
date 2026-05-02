@@ -273,8 +273,8 @@ async def system_stats_handler(callback: types.CallbackQuery, session: AsyncSess
     # Используем твой быстрый метод подсчета через func.count
     clubs_count = (await session.execute(select(func.count(Club.id)))).scalar() or 0
     students_count = (await session.execute(select(func.count(Student.id)))).scalar() or 0
-    active_clubs = (await session.execute(select(func.count(Club.id)).where(Club.subscription_expire_at == True))).scalar() or 0
-
+    active_clubs = (await session.execute(select(func.count(Club.id)).where(Club.subscription_expire_at >
+                                                                            datetime.now()))).scalar() or 0
     text = (
         "📊 <b>ГЛОБАЛЬНАЯ СТАТИСТИКА SaaS</b>\n\n"
         f"🏢 Всего клубов в системе: <b>{clubs_count}</b>\n"
@@ -328,7 +328,7 @@ async def handle_list_clubs(
 async def reload_all_system_configs(
     callback: types.CallbackQuery,
     redis: Redis,
-    session, # Сессия из Middleware
+    session,
     is_super_admin: bool
 ):
     if not is_super_admin:
@@ -365,7 +365,3 @@ async def reload_all_system_configs(
         f"База обновлена. Кэш {deleted_count} ботов сброшен.",
         show_alert=True
     )
-
-
-
-
