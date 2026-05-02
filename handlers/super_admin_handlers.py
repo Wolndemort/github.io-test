@@ -1,5 +1,6 @@
 import asyncio
 from datetime import timedelta, datetime
+from aiogram.exceptions import TelegramUnauthorizedError, TelegramNetworkError
 from loguru import logger
 from redis.asyncio import Redis
 from sqlalchemy import update
@@ -86,15 +87,23 @@ async def process_token(message: types.Message, state: FSMContext, session: Asyn
     owner_id = data['owner_id']
     bot_token = message.text.strip()
 
+    # 1. Валидация токена
     try:
-        # Валидация токена (Защита main.py от падения)
-        try:
-            temp_bot = Bot(token=bot_token)
+        # Используем .context(), чтобы aiogram сам ПРАВИЛЬНО закрыл сессию
+        async with Bot(token=bot_token).context() as temp_bot:
             await temp_bot.get_me()
-            await temp_bot.session.close()
-        except Exception:
-            return await message.answer("❌ Токен невалиден! Проверьте данные.")
+    except TelegramUnauthorizedError:
+        return await message.answer("❌ Токен невалиден! Проверьте данные в @BotFather.")
+    except TelegramNetworkError as e:
+        # Если здесь вылетает Timeout - значит сервер всё еще в бане/без сети
+        logger.error(f"Сетевая ошибка при проверке токена: {e}")
+        return await message.answer(f"🌐 Ошибка сети на сервере: {e}\nСкорее всего, Telegram временно ограничил ваш IP.")
+    except Exception as e:
+        logger.error(f"Неизвестная ошибка валидации: {e}")
+        return await message.answer(f"⚠️ Ошибка при проверке: {e}")
 
+    # 2. Сохранение в БД
+    try:
         new_club = Club(
             name=club_name,
             bot_token=bot_token,
@@ -111,7 +120,6 @@ async def process_token(message: types.Message, state: FSMContext, session: Asyn
             f"✅ <b>Клуб успешно создан!</b>\n\n"
             f"🆔 ID в SaaS: <code>{new_club.id}</code>\n"
             f"🏢 Название: <code>{club_name}</code>\n"
-            f"👤 Владелец ID: <code>{owner_id}</code>\n\n"
             f"🚀 Перезапустите систему для активации бота.",
             parse_mode="HTML"
         )
@@ -119,9 +127,9 @@ async def process_token(message: types.Message, state: FSMContext, session: Asyn
 
     except Exception as e:
         await session.rollback()
-        logger.error(f"Ошибка регистрации клуба: {e}")
+        logger.error(f"Ошибка записи в БД: {e}")
+        # Если здесь будет ошибка "timestamp = boolean", мы её увидим в логах
         await message.answer(f"❌ Ошибка БД: {str(e)}")
-        await state.clear()
 
 
 @router.callback_query(F.data == "extend_club_sub")
