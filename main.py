@@ -174,10 +174,10 @@ async def main():
             )
 
             # Настраиваем уже созданную сессию бота (увеличиваем таймаут)
-            bot.session.timeout = 60
+            #bot.session.timeout = 60
 
             # Проверка: живой ли токен
-            await bot.get_me()
+            #await bot.get_me()
 
             bots_dict[club.bot_token] = bot
             logger.info(f"✅ Бот для клуба '{club.name}' (ID: {club.id}) готов к работе.")
@@ -189,9 +189,9 @@ async def main():
             continue
 
 
-    if not bots_dict:
-        logger.critical("❌ Нет ни одного валидного активного токена в БД! Работа невозможна.")
-        return
+    #if not bots_dict:
+        #logger.critical("❌ Нет ни одного валидного активного токена в БД! Работа невозможна.")
+        #return
 
     # 3. Настройка диспетчера
     dp = Dispatcher()
