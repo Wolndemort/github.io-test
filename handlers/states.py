@@ -41,5 +41,5 @@ class AdminSettings(StatesGroup):
 
 
 class TurnstileSetup(StatesGroup):
-    wait_fot_url = State()
+    wait_for_url = State()
     wait_for_password = State()
