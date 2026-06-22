@@ -63,27 +63,27 @@ async def save_and_test_turnstile(
         url: str,
         password: str
 ) -> None:
-    # ИСПРАВЛЕНО: Ключи приведены в точное соответствие с функцией trigger_dingtian_turnstile
     new_turnstile_config = {
         "enabled": True,
         "type": "dingtian_http",
         "base_url": url,
         "password": password,
-        "relay_index": 1,  # Поменял на 1, так как у Dingtian реле начинаются с 1
-        "pulse_time_seconds": 1,  # Было: pulse_time_second
-        "timeout_seconds": 5  # Было: timeout
+        "relay_index": 1,
+        "pulse_time_seconds": 1,
+        "timeout_seconds": 5
     }
 
-    current_settings = dict(club.settings) if club.settings else {}
+    # ИСПРАВЛЕНО: Заменили .settings на .club_settings
+    current_settings = dict(club.club_settings) if club.club_settings else {}
     current_settings["turnstile"] = new_turnstile_config
 
     try:
-        club.settings = current_settings
+        # ИСПРАВЛЕНО: Заменили .settings на .club_settings
+        club.club_settings = current_settings
         session.add(club)
         await session.commit()
     except Exception as db_err:
         logger.error(f"❌ Не удалось сохранить настройки: {db_err}")
-        # ИСПРАВЛЕНО: Закрывающий тег HTML-разметки </b>
         await message.answer("❌ <b>Ошибка БД.</b> Не удалось сохранить настройки. Попробуйте позже.")
         return
 
@@ -113,3 +113,4 @@ async def save_and_test_turnstile(
             "<i>Пока связь не восстановится, автоматическое открытие работать не будет.</i>",
             parse_mode="HTML"
         )
+
