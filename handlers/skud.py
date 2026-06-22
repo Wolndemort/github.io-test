@@ -76,12 +76,12 @@ async def save_and_test_turnstile(
     # ИСПРАВЛЕНО: Заменили .settings на .club_settings
     current_settings = dict(club.club_settings) if club.club_settings else {}
     current_settings["turnstile"] = new_turnstile_config
-
     try:
-        # ИСПРАВЛЕНО: Заменили .settings на .club_settings
         club.club_settings = current_settings
-        session.add(club)
+        # ИСПРАВЛЕНО: используем merge вместо add, чтобы обновить, а не дублировать запись
+        await session.merge(club)
         await session.commit()
+
     except Exception as db_err:
         logger.error(f"❌ Не удалось сохранить настройки: {db_err}")
         await message.answer("❌ <b>Ошибка БД.</b> Не удалось сохранить настройки. Попробуйте позже.")
