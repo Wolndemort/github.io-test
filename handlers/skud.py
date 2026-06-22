@@ -22,7 +22,7 @@ async def trigger_dingtian_turnstile(config: dict) -> bool:
     clean_url = base_url.rstrip("/")
 
     # ИСПРАВЛЕНО: Корректный URL API для китайских плат Dingtian
-    url = f"{clean_url}/relay_cgi.cgi?relayno={relay}&action=pulse&time={pulse_time}"
+    url = f"{clean_url}/relay_cgi.cgi?type=2&relay=0&on=1&time={pulse_time}&pwd=0"
 
     timeout = aiohttp.ClientTimeout(total=timeout_val)
     auth = aiohttp.BasicAuth(login="admin", password=password) if password else None
