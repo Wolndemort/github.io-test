@@ -15,6 +15,7 @@ from loguru import logger
 import hashlib
 import hmac
 from handlers.states import RegistrationStates
+from handlers.skud import trigger_dingtian_turnstile
 
 
 def generate_signature(user_id, time_salt):
@@ -417,24 +418,46 @@ async def parse_qr_scan(
         student.last_visit = now
         await session.commit()  # Сохраняем всё одним махом
 
+        #интеграция турникета
+        # === ИНТЕГРАЦИЯ ТУРНИКЕТА ===
+        # ИСПРАВЛЕНО: Правильное имя ключа "turnstile"
+        turnstile_config = club_settings.get("turnstile", {})
+        turnstile_opened = False
+        turnstile_status = ""
+        status_emoji = "🔵"
+
+        # ИСПРАВЛЕНО: Проверяем правильный флаг "enabled"
+        if turnstile_config.get("enabled", False):
+            turnstile_opened = await trigger_dingtian_turnstile(turnstile_config)
+
+            # ИСПРАВЛЕНО: Исправлены HTML-теги </b> и логика сборки статуса
+            if turnstile_opened:
+                turnstile_status = "\n✅ <b>Турникет открыт</b>"
+                status_emoji = "🟢"
+            else:
+                turnstile_status = "\n⚠️ <b>Ошибка турникета. Пропустите вручную!</b>"
+                status_emoji = "⚠️"
+
+        # ИСПРАВЛЕНО: Переменная turnstile_status и status_emoji добавлены в итоговый текст
         await message.answer(
-            f"🟢 <b>ПРОХОДИТЕ</b>\n👤 Атлет: <b>{student_name}</b>\n"
+            f"{status_emoji} <b>ПРОХОДИТЕ</b>\n👤 Атлет: <b>{student_name}</b>\n"
             f"{display_balance}\n"
-            f"📅 До: <b>{student.expire_date.strftime('%d.%m.%Y')}</b>",
+            f"📅 До: <b>{student.expire_date.strftime('%d.%m.%Y')}</b>"
+            f"{turnstile_status}",
             parse_mode='HTML'
         )
 
         # 8. Уведомление родителю
         if student.parent_id:
             try:
-                # Добавляем название клуба в уведомление родителя
                 await message.bot.send_message(
-                    chat_id=int(student.parent_id),  # <--- Используй объект с маленькой буквы!
+                    chat_id=int(student.parent_id),
                     text=f"🔔 <b>{club.name}</b>: {student_name} вошел в зал.",
                     parse_mode="HTML"
                 )
-            except Exception:
-                pass
+            except Exception as parent_err:
+                logger.warning(f"Не удалось отправить уведомление родителю {student.parent_id}: {parent_err}")
+
 
     except Exception as e:
         logger.error(f"❌ Ошибка сканера: {e}")

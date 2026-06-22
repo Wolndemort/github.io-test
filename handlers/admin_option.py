@@ -1,6 +1,7 @@
 from sqlalchemy.ext.asyncio import AsyncSession
-
-from handlers.states import AdminStates, AdminSettings
+from handlers.skud import trigger_dingtian_turnstile, save_and_test_turnstile
+from sqlalchemy.orm.attributes import flag_modified
+from handlers.states import AdminStates, AdminSettings, TurnstileSetup
 from redis.asyncio import Redis
 from sqlalchemy import update
 import pandas as pd
@@ -123,6 +124,10 @@ async def admin_settings_menu(callback: types.CallbackQuery, club_settings: dict
         text="💳 Изменить реквизиты",
         callback_data="admin_edit_payments")
     )
+    turnstile_config = club_settings.get("turnstile", {})
+    t_status = "✅" if turnstile_config.get("enabled", False) else "❌"
+    builder.row(types.InlineKeyboardButton(
+                    text=f"{t_status} СКУД(Турникет)", callback_data='admin_turnstile_main'))
     builder.row(types.InlineKeyboardButton(text="🥋 Управление секциями", callback_data="manage_disciplines"))
     builder.row(types.InlineKeyboardButton(text="⬅️ Назад", callback_data="admin_keyboard"))
 
@@ -832,4 +837,140 @@ async def save_payment_info(message: types.Message, state: FSMContext, session, 
         logger.error(f"ОШИБКА ЗАПИСИ: {e}")
         await session.rollback()
         await message.answer("❌ Ошибка при сохранении.")
+
+
+# ИСПРАВЛЕНО: F.data вместо F.dara
+@router.callback_query(F.data == "admin_turnstile_main")
+async def admin_turnstile_main(callback: types.CallbackQuery, club_settings: dict):
+    turnstile_config = club_settings.get("turnstile", {})
+    is_enabled = turnstile_config.get("enabled", False)
+    builder = InlineKeyboardBuilder()
+
+    if not is_enabled:
+        builder.row(types.InlineKeyboardButton(text="🪛 Настроить и включить", callback_data="setup_t_start"))
+        builder.row(types.InlineKeyboardButton(text="🛠 Назад в настройки", callback_data="admin_settings"))
+        await callback.message.edit_text(
+            "📡 <b>Интеграция СКУД (Турникет)</b>\n\n"
+            "Функция отключена.\n"
+            "Для подключения вам понадобится реле DTWONDER (dingtian) и настроенный KeenDNS адрес.",
+            reply_markup=builder.as_markup(),
+            parse_mode="HTML"
+        )
+    else:
+        builder.row(types.InlineKeyboardButton(text="🔄 Изменить настройки", callback_data="setup_t_start"))
+        builder.row(types.InlineKeyboardButton(text="🛑 Выключить СКУД", callback_data="disable_t_confirm"))
+        builder.row(types.InlineKeyboardButton(text="🛠 Назад в настройки", callback_data="admin_settings"))
+        current_url = turnstile_config.get("base_url", "Не задан")
+
+        # ИСПРАВЛЕНО: Исправлены теги </b> и добавлен правильный <code> для красивого копирования адреса
+        await callback.message.edit_text(
+            f"📡 <b>Интеграция СКУД (Турникет) активна</b>\n\n"
+            f"📌 Текущий адрес реле: <code>{current_url}</code>\n\n"
+            f"Вы можете изменить параметры или отключить интеграцию.",
+            reply_markup=builder.as_markup(),
+            parse_mode="HTML"
+        )
+
+
+# Заполнение данных
+@router.callback_query(F.data == "setup_t_start")
+async def setup_turnstile_url_step(callback: types.CallbackQuery, state: FSMContext):
+    # ИСПРАВЛЕНО: Проверьте ваш класс TurnstileSetup, обычно пишется wait_for_url (через r)
+    await state.set_state(TurnstileSetup.wait_for_url)
+    builder = InlineKeyboardBuilder()
+    builder.row(types.InlineKeyboardButton(text="🛠 Назад в настройки", callback_data="admin_settings"))
+
+    # ИСПРАВЛЕНО: Закрыт тег </b>
+    await callback.message.edit_text(
+        "📝 <b>Шаг 1: Введите адрес KeenDNS (или IP)</b>\n\n"
+        "⚠️ Протокол (http://) и порты указывать не нужно, бот подставит их сам.",
+        reply_markup=builder.as_markup(),
+        parse_mode="HTML"
+    )
+
+
+from aiogram import F  # Не забудьте импортировать F, если еще не сделали этого
+
+
+# ИСПРАВЛЕНО: Стейт изменен на правильный wait_for_url
+@router.message(TurnstileSetup.wait_for_url)
+async def process_t_url(message: types.Message, state: FSMContext):
+    url_input = message.text.strip().lower()
+
+    # ИСПРАВЛЕНО: Проверяем, начинается ли ввод с http:// или https://, чтобы не ломать ссылки
+    if not (url_input.startswith("http://") or url_input.startswith("https://")):
+        url_input = f"http://{url_input}"
+
+    await state.update_data(base_url=url_input)
+    await state.set_state(TurnstileSetup.wait_for_password)
+
+    builder = InlineKeyboardBuilder()
+    builder.row(types.InlineKeyboardButton(text="❌ Без пароля (Пропустить)", callback_data="skip_t_password"))
+
+    # ИСПРАВЛЕНО: Закрыт тег </b>
+    await message.answer(
+        "🔐 <b>Шаг 2: Введите пароль от веб-панели реле</b>\n\n"
+        "Если вы установили пароль на доступ к плате, то введите его сейчас в ответном сообщении.\n"
+        "Если на плате остался стандартный доступ без пароля, нажмите на кнопку ниже:",
+        reply_markup=builder.as_markup(),
+        parse_mode="HTML"
+    )
+
+
+# НОВЫЙ ХЕНДЛЕР: Обработка нажатия на кнопку "Пропустить"
+@router.callback_query(TurnstileSetup.wait_for_password, F.data == "skip_t_password")
+async def skip_t_password(callback: types.CallbackQuery, state: FSMContext, session: AsyncSession, club: Club):
+    user_data = await state.get_data()
+    await state.clear()
+
+    # Отвечаем на колбэк, чтобы кнопка перестала "часиками" крутиться
+    await callback.answer()
+
+    # Вызываем вашу функцию сохранения, передавая пустую строку в качестве пароля
+    await save_and_test_turnstile(callback.message, session, club, user_data["base_url"], password="")
+
+
+@router.message(TurnstileSetup.wait_for_password)
+async def process_t_password(message: types.Message, state: FSMContext, session: AsyncSession, club: Club):
+    password_input = message.text.strip()
+    user_data = await state.get_data()
+    await state.clear()
+
+    await save_and_test_turnstile(message, session, club, user_data["base_url"], password_input)
+
+
+@router.callback_query(F.data == "disable_t_confirm")
+async def disable_turnstile(callback: types.CallbackQuery, session: AsyncSession, club: Club):
+    current_settings = dict(club.settings) if club.settings else {}
+
+    if "turnstile" in current_settings:
+        current_settings["turnstile"]["enabled"] = False
+
+        club.settings = current_settings
+        # Явно говорим SQLAlchemy, что JSON-поле внутри изменилось
+        flag_modified(club, "settings")
+
+        try:
+            session.add(club)
+            await session.commit()
+            await callback.answer("🔒 Интеграция СКУД успешно отключена", show_alert=True)
+        except Exception as e:
+            logger.error(f"Ошибка при отключении СКУД в БД: {e}")
+            await callback.answer("❌ Не удалось сохранить изменения в БД", show_alert=True)
+            return
+
+        # ИСПРАВЛЕНО: Вызываем функцию главного меню СКУД, которую вы присылали в начале,
+        # и передаем ей обновленный словарь настроек
+        await admin_turnstile_main(callback, club_settings=current_settings)
+    else:
+        await callback.answer("СКУД и так не был настроен", show_alert=True)
+
+
+
+
+
+
+
+
+
 

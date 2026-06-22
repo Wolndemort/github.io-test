@@ -55,5 +55,15 @@ DEFAULT_CLUB_SETTINGS = {
     "limits": {
         "freeze_days_step": 7,
         "subscription_days": 30
+    },
+    "turnstile": {
+         "enabled": False,  #включение и выключение
+         "type": "dingtian_http",   #тип реле (бренд)
+         "base_url": "",  #заполняется через админку (фсм)
+         "password": "", #заполняется через админку (фсм)
+         "relay_index": 1, # первое реле слева
+         "pulse_time_seconds": 1, #время откртия
+         "timeout_seconds": 5  #таймаут ожидания ответа клуба
     }
 }
+

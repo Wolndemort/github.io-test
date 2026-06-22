@@ -38,3 +38,8 @@ class SuperAdminStates(StatesGroup):
 
 class AdminSettings(StatesGroup):
     waiting_for_payment_info = State()
+
+
+class TurnstileSetup(StatesGroup):
+    wait_fot_url = State()
+    wait_for_password = State()
