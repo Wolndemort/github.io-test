@@ -1070,22 +1070,35 @@ async def admin_manage_section_tariffs(callback: types.CallbackQuery, club_setti
 
 
 @router.callback_query(F.data.startswith("adm_tar_toggle_"))
-async def admin_toggle_section_type(callback: types.CallbackQuery, club_settings: dict, session, redis: Redis, bot,
-                                    club_id: int):
+async def admin_toggle_section_type(
+        callback: types.CallbackQuery,
+        club_settings: dict,
+        session,
+        redis: Redis,
+        bot,
+        club_id: int
+):
     disc_id = callback.data.split("_")[-1]
+
     if disc_id in club_settings["disciplines"]:
         cur = club_settings["disciplines"][disc_id].get("type", "lessons")
         new_type = "unlimited" if cur == "lessons" else "lessons"
+
+        # 1. Меняем тип локально в словаре
         club_settings["disciplines"][disc_id]["type"] = new_type
 
-        # Если переключили в безлимит, перезаписываем все count на 999
+        # Если переключили в безлимит — принудительно ставим маркер 999 во все существующие тарифы
         if new_type == "unlimited":
             for t in club_settings["disciplines"][disc_id].get("tariffs", []):
-                t["count"] = 999  # Подстраиваем под вашу логику
+                t["count"] = 999
 
+        # 2. Пишем изменения в БД и чистим Redis
         await save_club_settings(session, redis, bot.token, club_id, club_settings)
-        await callback.answer("Тип направления успешно изменен!")
-        callback.data = f"adm_tar_sect_{disc_id}"
+        await callback.answer("Тип направления изменен! ✨")
+
+        # ================= ИСПРАВЛЕНИЕ ТУТ =================
+        # Принудительно вызываем хендлер отрисовки меню этой же секции.
+        # Передаем уже МОДИФИЦИРОВАННЫЙ club_settings, чтобы бот сразу прочитал новые данные!
         await admin_manage_section_tariffs(callback, club_settings)
 
 
