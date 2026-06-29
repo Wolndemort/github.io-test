@@ -73,5 +73,5 @@ async def test_parse_qr_scan_unlimited_success(mock_gen_sig):
 
     # Проверяем, что безлимитчика пустило и текст корректный
     assert "ПРОХОДИТЕ" in actual_text
-    assert "♾ Режим: Безлимит" in actual_text
+    assert "♾ <b>Режим: Безлимит</b>" in actual_text
     assert student.balance_lessons == 999 # Баланс НЕ уменьшился!
