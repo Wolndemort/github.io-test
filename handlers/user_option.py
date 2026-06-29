@@ -53,7 +53,7 @@ async def go_to_begin(
     await callback.answer()
 
 
-@router.message(Command('profile'))
+@router.message(Command('profile','check_status_now'))
 @router.callback_query(F.data.in_(['profile', 'check_status_now']))
 async def universal_profile_handler(
         callback: types.CallbackQuery,
