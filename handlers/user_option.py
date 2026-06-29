@@ -192,7 +192,7 @@ async def finalize_freeze_action(
     callback: types.CallbackQuery,
     session: AsyncSession,
     club_settings: dict,
-    club: Club  # 1. ДОБАВИЛИ ТИП (Club)
+    club: Club
 ):
     try:
         # Парсим ID студента из колбэка
@@ -203,18 +203,20 @@ async def finalize_freeze_action(
     # Достаем шаг заморозки из конфига клуба
     freeze_days = club_settings.get("limits", {}).get("freeze_days_step", 7)
 
-    # 2. ИСПРАВЛЕННЫЙ ВЫЗОВ ФУНКЦИИ БАЗЫ:
-    # Передаем саму сессию (session), а не тип (AsyncSession)
+    # ИСПРАВЛЕНО: Порядок аргументов строго соответствует функции бд
     new_date = await process_student_freeze(
         student_id=student_id,
-        session=session,
-        days=freeze_days,
         club_id=club.id,
-        club_settings=club_settings
-
+        club_settings=club_settings,
+        session=session,
+        days=freeze_days
     )
 
-    if new_date:
+    # Добавили проверку на отключенный функционал в самом клубе
+    if new_date == "disabled":
+        return await callback.answer("🚫 В вашем клубе функция заморозки отключена в настройках!", show_alert=True)
+
+    elif new_date:
         formatted_date = new_date.strftime('%d.%m.%Y')
         await callback.answer("✅ Абонемент заморожен!", show_alert=True)
 
@@ -230,7 +232,7 @@ async def finalize_freeze_action(
     else:
         await callback.answer(
             "❌ Заморозка недоступна.\n"
-            "Лимит исчерпан или абонемент неактивен.",
+            "Лимит исчерпан, абонемент просрочен или уже заморожен.",
             show_alert=True
         )
 

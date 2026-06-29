@@ -175,40 +175,56 @@ async def get_expire_students_grouped(session):
 
 async def process_student_freeze(
         student_id: int,
-        club_id: int,  # <--- ID клуба из Middleware
-        club_settings: dict,  # <--- Настройки из Middleware
+        club_id: int,  # ID клуба из Middleware
+        club_settings: dict,  # Настройки из Middleware
         session: AsyncSession,
-        days: int
+        days: int  # Переданный из хендлера шаг (например, 7)
 ):
     try:
-        # 🛡️ Загружаем студента и сразу проверяем принадлежность к клубу
+        # 1. Загружаем студента и проверяем изоляцию данных (SaaS Security Check)
         student = await session.get(Student, student_id)
 
         if not student or student.club_id != club_id:
             logger.warning(f"❌ Попытка заморозки чужого студента! ID: {student_id}, Club: {club_id}")
             return None
 
-        # ⚙️ Настройки из конфига клуба
-        # Если в конфиге нет freeze_days_step, берем дефолт 5 дней
-        freeze_days = club_settings.get("limits", {}).get("freeze_days_step", 5)
+        # 2. Проверяем глобальный флаг заморозки в этом клубе
         can_freeze_global = club_settings.get("features", {}).get("freeze", True)
-
-        # Проверка: разрешена ли заморозка в этом клубе и есть ли попытки у студента
         if not can_freeze_global:
             logger.info(f"🚫 В клубе {club_id} заморозка отключена в настройках")
-            return "disabled"  # Специальный статус для хендлера
+            return "disabled"
 
-        if student and student.can_freeze > 0 and student.expire_date:
-            # Применяем срок из настроек клуба
-            student.expire_date += timedelta(days=freeze_days)
-            student.last_visit = datetime.now()
+        now = datetime.now()
+
+        # 3. Проверяем, активен ли абонемент и не заморожен ли он уже прямо сейчас
+        if not student.expire_date or student.expire_date < now:
+            logger.info(f"🚫 У студента ID {student_id} абонемент уже просрочен")
+            return None
+
+        if getattr(student, "is_frozen", 0) == 1:
+            logger.info(f"🚫 Студент ID {student_id} уже находится в заморозке")
+            return None
+
+        # 4. Проверяем лимит доступных заморозок у самого студента
+        if student.can_freeze > 0:
+            # Сдвигаем дату окончания на точное количество дней из аргумента тарифа
+            student.expire_date += timedelta(days=days)
+
+            # 🚨 ИСПРАВЛЕНО: УБРАЛИ student.last_visit = datetime.now(),
+            # чтобы логика автоматической разморозки в QR-сканере не воровала дни у клиента!
+
+            # Списываем право на заморозку и ставим флаг
             student.can_freeze = 0
             student.is_frozen = 1
 
-            # session.add(student) — не обязательно, SQLAlchemy уже "следит" за объектом
+            # 🚨 ПОДСТРАХОВКА ДЛЯ БЕЗЛИМИТА: Защищаем маркер 999 на балансе
+            if student.balance_lessons == 999:
+                student.balance_lessons = 999
+
             await session.commit()
 
-            logger.success(f"❄️ Клуб {club_id}: Студент {student.name} заморожен на {freeze_days} дней")
+            logger.info(
+                f"❄️ Клуб {club_id}: Студент {student.name} заморожен на {days} дней. До: {student.expire_date.strftime('%d.%m.%Y')}")
             return student.expire_date
 
         return None
