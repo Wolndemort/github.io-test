@@ -1,6 +1,11 @@
 import qrcode
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 import io
+from datetime import datetime
+from aiogram import types
+from aiogram.filters import Command
+from aiogram import F
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from database.db import Student, process_student_freeze, Club
 from config import secret_key
@@ -53,15 +58,16 @@ async def go_to_begin(
     await callback.answer()
 
 
-@router.message(Command('profile','check_status_now'))
+
+@router.message(Command('profile', 'check_status_now'))
 @router.callback_query(F.data.in_(['profile', 'check_status_now']))
 async def universal_profile_handler(
-        callback: types.CallbackQuery,
+        event: types.Message | types.CallbackQuery,  # 1. Меняем callback на универсальный event
         session: AsyncSession,
         club: Club,  # Из мидлвари
         club_settings: dict  # Из мидлвари
 ):
-    user_id = callback.from_user.id
+    user_id = event.from_user.id
     now = datetime.now()
 
     # 1. Изоляция: тянем студентов ТОЛЬКО этого родителя и ТОЛЬКО этого клуба
@@ -105,20 +111,38 @@ async def universal_profile_handler(
 
             status_text += f"\n• <b>{s.name}</b>: {status}\n  └ {lessons_info}"
 
+    # Формируем итоговый текст и клавиатуру
+    final_text = (
+        f"👤 <b>Личный кабинет</b>\n\n{status_text}\n\n"
+        "<i>Используйте кнопки ниже для управления:</i>"
+    )
+    reply_markup = get_profile_keyboard(club_settings=club_settings, is_authorized=is_auth)
+
     try:
-        # Вызываем твою динамическую клавиатуру (передаем настройки клуба!)
-        await callback.message.edit_text(
-            text=f"👤 <b>Личный кабинет</b>\n\n{status_text}\n\n"
-                 "<i>Используйте кнопки ниже для управления:</i>",
-            reply_markup=get_profile_keyboard(club_settings=club_settings, is_authorized=is_auth),
-            parse_mode="HTML"
-        )
+        # 2. Проверяем тип события для правильного ответа
+        if isinstance(event, types.CallbackQuery):
+            # Если это кнопка — плавно редактируем старое сообщение
+            await event.message.edit_text(
+                text=final_text,
+                reply_markup=reply_markup,
+                parse_mode="HTML"
+            )
+            await event.answer()  # Гасим часики на кнопке
+        else:
+            # Если это текстовая команда — отправляем новое сообщение в ответ
+            await event.answer(
+                text=final_text,
+                reply_markup=reply_markup,
+                parse_mode="HTML"
+            )
+            
     except Exception as e:
         if "message is not modified" not in str(e):
             logger.error(f"❌ Ошибка в профиле: {e}")
-            await callback.answer("Ошибка обновления данных")
+            # Безопасный ответ на случай падения внутри callback
+            if isinstance(event, types.CallbackQuery):
+                await event.answer("Ошибка обновления данных")
 
-    await callback.answer()
 
 
 @router.callback_query(F.data.startswith('section_'))
