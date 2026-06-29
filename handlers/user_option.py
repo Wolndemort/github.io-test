@@ -401,22 +401,31 @@ async def parse_qr_scan(
             return await message.answer(f"⚠️ {student_name} уже в зале! (Повтор через 5 мин)")
 
         # 5. Проверка прав доступа (Срок и Баланс)
+        # 5. Проверка прав доступа (Срок действия абонемента)
         if not student.expire_date or student.expire_date < now:
-            return await message.answer(f"🔴 ДОСТУП ЗАПРЕЩЕН\n👤 {student_name}\n❌ Срок истек")
+            return await message.answer(f"🔴 ДОСТУП ЗАПРЕЩЕН\n👤 {student_name}\n❌ Срок действия абонемента истек")
 
-        if (student.balance_lessons or 0) <= 0:
-            return await message.answer(f"🔴 ДОСТУП ЗАПРЕЩЕН\n👤 {student_name}\n❌ Нет занятий")
+        # Проверяем, является ли абонемент безлимитным (используем ваш маркер 999)
+        is_unlimited = (student.balance_lessons == 999)
 
-        # 6. Списание занятия (SaaS-friendly: 900+ это безлимит)
-        if student.balance_lessons < 900:
+        # Если абонемент НЕ безлимитный, проверяем остаток занятий
+        if not is_unlimited:
+            if (student.balance_lessons or 0) <= 0:
+                return await message.answer(f"🔴 ДОСТУП ЗАПРЕЩЕН\n👤 {student_name}\n❌ На балансе нет занятий")
+
+        # 6. Списание занятия / Формирование вывода баланса
+        if is_unlimited:
+            # Для безлимита ничего не вычитаем, баланс остается 999
+            display_balance = "♾ <b>Режим: Безлимит</b>"
+        else:
+            # Для обычного абонемента списываем 1 занятие
             student.balance_lessons -= 1
             display_balance = f"🔢 Осталось занятий: <b>{student.balance_lessons}</b>"
-        else:
-            display_balance = "♾ <b>Безлимит</b>"
 
         # 7. Фиксация визита
         student.last_visit = now
-        await session.commit()  # Сохраняем всё одним махом
+        await session.commit()  # Сохраняем изменения в базе данных
+
 
         #интеграция турникета
         # === ИНТЕГРАЦИЯ ТУРНИКЕТА ===

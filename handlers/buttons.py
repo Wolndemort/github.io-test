@@ -202,37 +202,56 @@ def discipline(club_settings: dict):
     return builder.as_markup()
 
 
-def get_pay_options_kb(discipline_cfg: dict, discipline_code: str):
-    builder = InlineKeyboardBuilder()
-
-    if discipline_cfg.get("type") == "unlimited":
-        price = discipline_cfg.get("price", 0)
-        # callback_data=f"set_limit_0_{discipline_code}"
-        builder.row(types.InlineKeyboardButton(
-            text=f"💳 Оплатить безлимит — {price}₽",
-            callback_data=f"set_limit_{discipline_code}_0"
-        ))
-    else:
-        tariffs = discipline_cfg.get("tariffs", [])
-        for t in tariffs:
-            builder.row(types.InlineKeyboardButton(
-                text=f"{t['count']} зан. — {t['price']}₽",
-                callback_data=f"set_limit_{discipline_code}_{t['count']}"
-            ))
-
-    # Кнопка назад (обязательно добавь, чтобы не висло)
-    builder.row(types.InlineKeyboardButton(text="🔙 Назад", callback_data="choose_section"))
-
-    return builder.as_markup()
-
-
-def get_cash_options_kb(discipline_cfg: dict):
+def get_pay_options_kb(discipline_cfg: dict, sport_type: str) -> types.InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     tariffs = discipline_cfg.get("tariffs", [])
-    for t in tariffs:
+    d_type = discipline_cfg.get("type", "lessons")
+
+    for idx, tariff in enumerate(tariffs):
+        price = tariff.get("price")
+        days = tariff.get("days")
+        count = tariff.get("count")
+
+        if d_type == "unlimited" or count == 999:
+            btn_text = f"♾ Безлимит {days} дн. — {price}₽"
+        else:
+            btn_text = f"🔢 {count} зан. / {days} дн. — {price}₽"
+
+        # ВАЖНО: Передаем ИНДЕКС тарифа: set_tariff_[sport_type]_[idx]
         builder.row(types.InlineKeyboardButton(
-            text=f"💵 {t['count']} зан. — {t['price']}₽",
-            callback_data=f"confirm_cash_{t['count']}"
+            text=btn_text,
+            callback_data=f"set_tariff_{sport_type}_{idx}"
         ))
+
+    builder.row(types.InlineKeyboardButton(text="⬅️ Назад", callback_data="choose_section"))
+    return builder.as_markup()
+
+
+def get_cash_options_kb(discipline_cfg: dict) -> types.InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    tariffs = discipline_cfg.get("tariffs", [])
+    d_type = discipline_cfg.get("type", "lessons")
+
+    for idx, t in enumerate(tariffs):
+        price = t.get("price")
+        days = t.get("days")
+        count = t.get("count")
+
+        # 1. Формируем понятный для админа текст кнопки
+        if d_type == "unlimited" or count == 999:
+            # Для безлимита прячем число 999 и пишем красивый текст
+            btn_text = f"♾ Безлимит {days} дн. — {price}₽"
+        else:
+            # Для обычных занятий выводим лимит и срок
+            btn_text = f"🔢 {count} зан. / {days} дн. — {price}₽"
+
+        # 2. В callback_data передаем ИНДЕКС тарифа в списке (0, 1, 2...)
+        builder.row(types.InlineKeyboardButton(
+            text=btn_text,
+            callback_data=f"confirm_cash_{idx}"
+        ))
+
+    # Кнопка возврата в список (используем ваш callback_data)
     builder.row(types.InlineKeyboardButton(text="🔙 Назад", callback_data="admin_cash_list"))
     return builder.as_markup()
+

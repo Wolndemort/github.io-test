@@ -260,14 +260,15 @@ async def add_abon(
         lessons_count: int,
         session: AsyncSession,
         club_id: int,
-        club_settings: dict
+        club_settings: dict,
+        days_to_add: int = None  # <--- Добавили аргумент для точного срока тарифа
 ):
     """
     Универсальная функция зачисления абонемента (SaaS).
     Работает и для онлайн-чеков, и для налички.
     """
     try:
-        # 1. Загружаем студента и проверяем принадлежность к клубу (Security Check)
+        # 1. Загружаем студента и проверяем принадлежность к клубу
         student = await session.get(Student, student_id)
 
         if not student or student.club_id != club_id:
@@ -277,8 +278,9 @@ async def add_abon(
         now = datetime.now()
 
         # 2. Расчет даты продления
-        # Берем срок из конфига клуба или 30 дней по дефолту
-        days_to_add = club_settings.get("limits", {}).get("subscription_days", 30)
+        # Если days_to_add передан (из тарифа) — берем его. Иначе берем дефолт из конфига (или 30 дней)
+        if days_to_add is None:
+            days_to_add = club_settings.get("limits", {}).get("subscription_days", 30)
 
         # Если абонемент еще активен — плюсуем к дате окончания. Если просрочен — отсчет от сегодня.
         current_expire = student.expire_date
@@ -287,28 +289,30 @@ async def add_abon(
         new_expire = start_date + timedelta(days=days_to_add)
         student.expire_date = new_expire
 
-        # 3. Логика занятий (Складываем с остатком, если не безлимит)
-        if lessons_count == 0:
-            # Режим безлимита (ставим 999 или другое спец. число)
+        # 3. Логика занятий (Сверяем с маркером безлимита 999)
+        if lessons_count == 999:
+            # Режим безлимита (у вас маркер 999)
             student.balance_lessons = 999
         else:
-            # Плюсуем новые занятия к тем, что уже были (чтобы не затереть остаток)
+            # Если у пользователя до этого был безлимит (999), а сейчас он купил обычный лимит,
+            # мы обнуляем прошлый безлимит, чтобы не складывать числа с 999.
             current_balance = student.balance_lessons or 0
+            if current_balance == 999:
+                current_balance = 0
+
             student.balance_lessons = current_balance + lessons_count
 
         # 4. Сброс флагов заморозки
-        # Если оплатил — значит пришел тренироваться, снимаем заморозку
         student.is_frozen = 0
 
-        # Даем ли право на заморозку в новом периоде? (смотрим настройки клуба)
+        # Даем ли право на заморозку в новом периоде?
         can_freeze_global = club_settings.get("features", {}).get("freeze", True)
         student.can_freeze = 1 if can_freeze_global else 0
 
         # 5. Сохранение
         await session.commit()
-        # Refresh не нужен, так как мы только обновляем поля
 
-        logger.success(
+        logger.info(
             f"✅ [Клуб {club_id}] Продлен: {student.name} | До: {new_expire.strftime('%d.%m.%Y')} | Занятий: {student.balance_lessons}")
 
         return new_expire.strftime('%d.%m.%Y'), student.parent_id

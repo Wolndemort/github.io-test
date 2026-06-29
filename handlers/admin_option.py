@@ -1,7 +1,7 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from handlers.skud import trigger_dingtian_turnstile, save_and_test_turnstile
 from sqlalchemy.orm.attributes import flag_modified
-from handlers.states import AdminStates, AdminSettings, TurnstileSetup
+from handlers.states import AdminStates, AdminSettings, TurnstileSetup, AdminTariffStates
 from redis.asyncio import Redis
 from sqlalchemy import update
 import pandas as pd
@@ -79,7 +79,6 @@ async def admin_panel(
         logger.error(f"❌ Ошибка в админ-панели клуба {club.id}: {e}")
 
 
-
 @router.callback_query(F.data == "admin_keyboard")
 async def back_to_admin_main_menu(
     callback: types.CallbackQuery,
@@ -120,6 +119,12 @@ async def admin_settings_menu(callback: types.CallbackQuery, club_settings: dict
         text=f"⏳ Срок абона: {sub_days} дн.",
         callback_data="edit_sub_days"  # Ведет на выбор 30/60/90
     ))
+
+    builder.row(types.InlineKeyboardButton(
+        text="💰 Настройка тарифов",
+        callback_data="admin_tariffs_sections"
+    ))
+
     builder.row(types.InlineKeyboardButton(
         text="💳 Изменить реквизиты",
         callback_data="admin_edit_payments")
@@ -967,10 +972,303 @@ async def disable_turnstile(callback: types.CallbackQuery, session: AsyncSession
 
 
 
+# Тарифы и цены
+async def save_club_settings(session, redis:Redis, bot_token: str, club_id: int, updated_settings: dict):
+    """Обновляет JSON-поле настроек в СУБД и очищает Redis-кэш для middleware"""
+    await session.execute(
+        update(Club).where(Club.id == club_id).values(club_settings=updated_settings)
+    )
+    await session.commit()
+    await redis.delete(f"club_config:{bot_token}")
+
+
+async def return_to_tariff_menu(message: types.Message, club_settings: dict, disc_id: str):
+    """Генерирует актуальное меню тарифов конкретной дисциплины после любых изменений"""
+    discipline = club_settings.get("disciplines", {}).get(disc_id, {})
+    tariffs = discipline.get("tariffs", [])
+    d_type = discipline.get("type", "lessons")
+
+    builder = InlineKeyboardBuilder()
+    for idx, tariff in enumerate(tariffs):
+        if d_type == "unlimited":
+            t_text = f"💳 {tariff.get('days')} дн. — {tariff.get('price')} руб."
+        else:
+            t_text = f"💳 {tariff.get('count')} зан. / {tariff.get('days')} дн. — {tariff.get('price')} руб."
+        builder.row(types.InlineKeyboardButton(text=t_text, callback_data=f"adm_tar_edit_{disc_id}_{idx}"))
+
+    builder.row(types.InlineKeyboardButton(text="➕ Добавить тариф", callback_data=f"adm_tar_add_{disc_id}"))
+    builder.row(types.InlineKeyboardButton(text="⬅️ Назад", callback_data="admin_tariffs_sections"))
+
+    await message.answer(
+        f"🥋 <b>Секция: {discipline.get('name')}</b>\n"
+        f"Режим работы: <u>{'Безлимит ♾' if d_type == 'unlimited' else 'Лимитированные занятия 🔢'}</u>\n\n"
+        f"Выберите тариф для управления или нажмите кнопку добавления:",
+        reply_markup=builder.as_markup(),
+        parse_mode="HTML"
+    )
+
+
+#НАВИГАЦИЯ и Выбор секций
+
+# ================= НАВИГАЦИЯ И ВЫБОР СЕКЦИЙ =================
+
+@router.callback_query(F.data == "admin_tariffs_sections")
+async def admin_tariffs_sections_list(callback: types.CallbackQuery, club_settings: dict):
+    """Выводит список всех дисциплин, зарегистрированных в системе"""
+    builder = InlineKeyboardBuilder()
+    disciplines = club_settings.get("disciplines", {})
+
+    for disc_id, disc_data in disciplines.items():
+        name = disc_data.get("name", disc_id)
+        d_type = "♾" if disc_data.get("type") == "unlimited" else "🔢"
+        builder.row(types.InlineKeyboardButton(
+            text=f"{d_type} {name}", callback_data=f"adm_tar_sect_{disc_id}"
+        ))
+    builder.row(types.InlineKeyboardButton(text="⬅️ Назад", callback_data="admin_settings"))
+    await callback.message.edit_text(
+        "<b>💰 Настройка тарифных планов клуба</b>\n\nВыберите интересующее направление тренировок:",
+        reply_markup=builder.as_markup(), parse_mode="HTML"
+    )
+
+
+@router.callback_query(F.data.startswith("adm_tar_sect_"))
+async def admin_manage_section_tariffs(callback: types.CallbackQuery, club_settings: dict):
+    """Показывает внутренности выбранной секции (переключатель типа + список тарифов)"""
+    disc_id = callback.data.split("_")[-1]
+    discipline = club_settings.get("disciplines", {}).get(disc_id)
+    if not discipline:
+        return await callback.answer("Указанная секция не найдена!", show_alert=True)
+
+    builder = InlineKeyboardBuilder()
+    d_type = discipline.get("type", "lessons")
+
+    type_label = "Безлимитная (♾)" if d_type == "unlimited" else "По занятиям (🔢)"
+    builder.row(
+        types.InlineKeyboardButton(text=f"🔄 Тип секции: {type_label}", callback_data=f"adm_tar_toggle_{disc_id}"))
+
+    for idx, tariff in enumerate(discipline.get("tariffs", [])):
+        t_text = f"💳 {tariff.get('days')} дн. — {tariff.get('price')} руб." if d_type == "unlimited" else f"💳 {tariff.get('count')} зан. / {tariff.get('days')} дн. — {tariff.get('price')} руб."
+        builder.row(types.InlineKeyboardButton(text=t_text, callback_data=f"adm_tar_edit_{disc_id}_{idx}"))
+
+    builder.row(types.InlineKeyboardButton(text="➕ Добавить тариф", callback_data=f"adm_tar_add_{disc_id}"))
+    builder.row(types.InlineKeyboardButton(text="⬅️ Назад", callback_data="admin_tariffs_sections"))
+
+    await callback.message.edit_text(
+        f"🥋 <b>Направление: {discipline.get('name')}</b>\n"
+        f"Текущий режим: <u>{'Безлимитные абонементы' if d_type == 'unlimited' else 'Списание занятий'}</u>\n\n"
+        f"Управление существующей тарифной сеткой:",
+        reply_markup=builder.as_markup(), parse_mode="HTML"
+    )
+
+
+@router.callback_query(F.data.startswith("adm_tar_toggle_"))
+async def admin_toggle_section_type(callback: types.CallbackQuery, club_settings: dict, session, redis: Redis, bot,
+                                    club_id: int):
+    disc_id = callback.data.split("_")[-1]
+    if disc_id in club_settings["disciplines"]:
+        cur = club_settings["disciplines"][disc_id].get("type", "lessons")
+        new_type = "unlimited" if cur == "lessons" else "lessons"
+        club_settings["disciplines"][disc_id]["type"] = new_type
+
+        # Если переключили в безлимит, перезаписываем все count на 999
+        if new_type == "unlimited":
+            for t in club_settings["disciplines"][disc_id].get("tariffs", []):
+                t["count"] = 999  # Подстраиваем под вашу логику
+
+        await save_club_settings(session, redis, bot.token, club_id, club_settings)
+        await callback.answer("Тип направления успешно изменен!")
+        callback.data = f"adm_tar_sect_{disc_id}"
+        await admin_manage_section_tariffs(callback, club_settings)
+
+
+@router.callback_query(F.data.startswith("adm_tar_edit_"))
+async def admin_edit_tariff_menu(callback: types.CallbackQuery, club_settings: dict):
+    """Экран изменения конкретного выбранного тарифа"""
+    _, _, _, disc_id, tariff_idx = callback.data.split("_")
+    tariff_idx = int(tariff_idx)
+    discipline = club_settings["disciplines"][disc_id]
+    tariff = discipline["tariffs"][tariff_idx]
+
+    builder = InlineKeyboardBuilder()
+    builder.row(types.InlineKeyboardButton(text=f"💰 Цена: {tariff['price']} руб.", callback_data=f"input_tar_price_{disc_id}_{tariff_idx}"))
+    builder.row(types.InlineKeyboardButton(text=f"⏳ Срок: {tariff['days']} дней", callback_data=f"input_tar_days_{disc_id}_{tariff_idx}"))
+    if discipline.get("type") == "lessons":
+        builder.row(types.InlineKeyboardButton(text=f"🔢 Занятий: {tariff['count']}", callback_data=f"input_tar_count_{disc_id}_{tariff_idx}"))
+
+    builder.row(types.InlineKeyboardButton(text="❌ Удалить тариф", callback_data=f"adm_tar_del_{disc_id}_{tariff_idx}"))
+    builder.row(types.InlineKeyboardButton(text="⬅️ Назад", callback_data=f"adm_tar_sect_{disc_id}"))
+
+    await callback.message.edit_text(
+        f"⚙️ <b>Редактирование тарифа ({discipline['name']})</b>\n\nВы можете изменить отдельные параметры или полностью удалить тариф:",
+        reply_markup=builder.as_markup(), parse_mode="HTML"
+    )
 
 
 
+@router.callback_query(F.data.startswith("adm_tar_del_"))
+async def admin_delete_tariff(callback: types.CallbackQuery, club_settings: dict, session, redis: Redis, bot, club_id: int):
+    """Удаление тарифа из списка"""
+    _, _, _, disc_id, tariff_idx = callback.data.split("_")
+    tariffs = club_settings["disciplines"].get(disc_id, {}).get("tariffs", [])
+    if 0 <= int(tariff_idx) < len(tariffs):
+        tariffs.pop(int(tariff_idx))
+        await save_club_settings(session, redis, bot.token, club_id, club_settings)
+        await callback.answer("Тариф удален!")
+    callback.data = f"adm_tar_sect_{disc_id}"
+    await admin_manage_section_tariffs(callback, club_settings)
+
+
+# ================= РАБОТА С ТЕКСТОВЫМ ВВОДОМ ЧЕРЕЗ FSM =================
+
+@router.callback_query(F.data.startswith("input_tar_"))
+async def admin_start_tariff_edit(callback: types.CallbackQuery, state: FSMContext, club_id: int):
+    """Инициализация процесса изменения конкретного поля тарифа"""
+    parts = callback.data.split("_")
+    await state.update_data(edit_type=parts[2], disc_id=parts[3], tariff_idx=int(parts[4]), club_id=club_id)
+
+    if parts[2] == "price":
+        await state.set_state(AdminTariffStates.waiting_for_price)
+        await callback.message.answer("💰 Введите новую <b>стоимость</b> тарифа (целое число, например 4000):",
+                                      parse_mode="HTML")
+    elif parts[2] == "days":
+        await state.set_state(AdminTariffStates.waiting_for_days)
+        await callback.message.answer("⏳ Введите новое <b>количество дней</b> действия абонемента:", parse_mode="HTML")
+    elif parts[2] == "count":
+        await state.set_state(AdminTariffStates.waiting_for_count)
+        await callback.message.answer("🔢 Введите новое <b>количество занятий</b> для лимита:", parse_mode="HTML")
+    await callback.answer()
+
+
+@router.message(AdminTariffStates.waiting_for_price)
+@router.message(AdminTariffStates.waiting_for_days)
+@router.message(AdminTariffStates.waiting_for_count)
+async def admin_save_tariff_field(message: types.Message, state: FSMContext, club_settings: dict, session, redis: Redis,
+                                  bot):
+    """Валидация и сохранение измененного текстового поля"""
+    if not message.text.isdigit():
+        return await message.answer("❌ Ошибка ввода! Пожалуйста, отправьте корректное целое число.")
+
+    val = int(message.text)
+    s_data = await state.get_data()
+    disc_id, idx, field = s_data["disc_id"], s_data["tariff_idx"], s_data["edit_type"]
+
+    club_settings["disciplines"][disc_id]["tariffs"][idx][field] = val
+    await save_club_settings(session, redis, bot.token, s_data["club_id"], club_settings)
+    await state.clear()
+    await return_to_tariff_menu(message, club_settings, disc_id)
 
 
 
+#Создание Тарифов
+# 1. Ловим нажатие на кнопку "➕ Добавить тариф"
+@router.callback_query(F.data.startswith("adm_tar_add_"))
+async def admin_start_add_tariff(callback: types.CallbackQuery, state: FSMContext, club_id: int, club_settings: dict):
+    disc_id = callback.data.split("_")[-1]
+    d_type = club_settings["disciplines"][disc_id].get("type", "lessons")
 
+    await state.update_data(disc_id=disc_id, club_id=club_id, d_type=d_type)
+    await state.set_state(AdminTariffStates.add_price)
+
+    await callback.message.answer(
+        "➕ <b>Создание нового тарифа</b>\n\n"
+        "<b>Шаг 1 из 3:</b> Введите стоимость тарифа в рублях (только число, например: 4000):",
+        parse_mode="HTML"
+    )
+    await callback.answer()
+
+
+# 2. Ловим ввод ЦЕНЫ
+@router.message(AdminTariffStates.add_price)
+async def admin_add_tariff_price(message: types.Message, state: FSMContext):
+    if not message.text.isdigit():
+        return await message.answer("❌ Стоимость должна быть целым числом! Попробуйте еще раз:")
+
+    await state.update_data(new_price=int(message.text))
+    await state.set_state(AdminTariffStates.add_days)
+
+    await message.answer(
+        "<b>Шаг 2 из 3:</b> Введите количество дней действия абонемента (например: 30):",
+        parse_mode="HTML"
+    )
+
+
+# 3. Ловим ввод ДНЕЙ (Записываем 999 для безлимитных секций)
+@router.message(AdminTariffStates.add_days)
+async def admin_add_tariff_days(
+        message: types.Message,
+        state: FSMContext,
+        club_settings: dict,
+        session,
+        redis: Redis,
+        bot
+):
+    if not message.text.isdigit():
+        return await message.answer("❌ Срок действия должен быть числом дней! Попробуйте еще раз:")
+
+    days = int(message.text)
+    s_data = await state.get_data()
+    disc_id = s_data["disc_id"]
+    club_id = s_data["club_id"]
+    d_type = s_data["d_type"]
+    new_price = s_data["new_price"]
+
+    # ЕСЛИ СЕКЦИЯ БЕЗЛИМИТНАЯ — СТАВИМ COUNT = 999 И СРАЗУ СОХРАНЯЕМ В БД
+    if d_type == "unlimited":
+        new_tariff = {
+            "count": 999,  # Маркер безлимита для вашей системы
+            "price": new_price,
+            "days": days
+        }
+
+        if "tariffs" not in club_settings["disciplines"][disc_id]:
+            club_settings["disciplines"][disc_id]["tariffs"] = []
+
+        club_settings["disciplines"][disc_id]["tariffs"].append(new_tariff)
+
+        await save_club_settings(session, redis, bot.token, club_id, club_settings)
+        await state.clear()
+        await return_to_tariff_menu(message, club_settings, disc_id)
+
+    # ЕСЛИ СЕКЦИЯ ОБЫЧНАЯ — ПЕРЕХОДИМ К ВВОДУ ЗАНЯТИЙ
+    else:
+        await state.update_data(new_days=days)
+        await state.set_state(AdminTariffStates.add_count)
+
+        await message.answer(
+            "<b>Шаг 3 из 3:</b> Введите лимит количества занятий для этого тарифа (например: 12):",
+            parse_mode="HTML"
+        )
+
+
+# 4. Ловим ввод ЗАНЯТИЙ (Только для обычных секций)
+@router.message(AdminTariffStates.add_count)
+async def admin_add_tariff_count(
+        message: types.Message,
+        state: FSMContext,
+        club_settings: dict,
+        session,
+        redis: Redis,
+        bot
+):
+    if not message.text.isdigit():
+        return await message.answer("❌ Количество занятий должно быть целым числом! Попробуйте еще раз:")
+
+    count = int(message.text)
+    s_data = await state.get_data()
+    disc_id = s_data["disc_id"]
+    club_id = s_data["club_id"]
+
+    new_tariff = {
+        "count": count,
+        "price": s_data["new_price"],
+        "days": s_data["new_days"]
+    }
+
+    if "tariffs" not in club_settings["disciplines"][disc_id]:
+        club_settings["disciplines"][disc_id]["tariffs"] = []
+
+    club_settings["disciplines"][disc_id]["tariffs"].append(new_tariff)
+
+    await save_club_settings(session, redis, bot.token, club_id, club_settings)
+    await state.clear()
+    await return_to_tariff_menu(message, club_settings, disc_id)

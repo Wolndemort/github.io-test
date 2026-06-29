@@ -43,3 +43,15 @@ class AdminSettings(StatesGroup):
 class TurnstileSetup(StatesGroup):
     wait_for_url = State()
     wait_for_password = State()
+
+
+class AdminTariffStates(StatesGroup):
+    # Состояния для быстрого редактирования полей текущего тарифа
+    waiting_for_price = State()
+    waiting_for_days = State()
+    waiting_for_count = State()
+
+    # Состояния для пошагового мастера создания нового тарифа
+    add_price = State()
+    add_days = State()
+    add_count = State()

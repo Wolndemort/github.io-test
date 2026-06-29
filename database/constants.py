@@ -20,36 +20,43 @@ DEFAULT_CLUB_SETTINGS = {
         "boxing": {
             "name": "Бокс (Дети)",
             "active": True,
-            "type": "lessons",  # Считаем занятия
-            "schedule": "В процессе разроботки",
+            "type": "lessons",
+            "schedule": "В процессе разработки",
             "tariffs": [
-                {"count": 8, "price": 3500, "days": 30},  # Обычный месяц
-                {"count": 12, "price": 4500, "days": 45},  # Продленный срок
+                {"count": 8, "price": 3500, "days": 30},
+                {"count": 12, "price": 4500, "days": 45},
                 {"count": 24, "price": 8000, "days": 90}
+            ]
+        },
+        # НОВАЯ СЕКЦИЯ КИКБОКСИНГА
+        "kickboxing": {
+            "name": "Кикбоксинг",
+            "active": True,
+            "type": "lessons",
+            "schedule": "В процессе разработки",
+            "tariffs": [
+                {"count": 8, "price": 3800, "days": 30},
+                {"count": 12, "price": 4800, "days": 45},
+                {"count": 24, "price": 8500, "days": 90}
             ]
         },
         "bjj": {
             "name": "Бразильское джиу-джитсу",
             "active": True,
-            "type": "unlimited",  # Безлимит
-            "price": 5000,
-            "schedule": """🗓 <b>График тренировок:</b>
-
-• <b>ПН:</b> 20:00 (No-Gi 🤼‍♂️)
-• <b>ВТ:</b> 20:00 (Gi 🥋)
-• <b>СР:</b> 20:00 (No-Gi 🤼‍♂️)
-• <b>ЧТ:</b> 20:00 (Gi 🥋)
-• <b>ПТ:</b> 20:00 (No-Gi 🤼‍♂️)
-
-⚠️ <i>Чередуем разделы каждый день!</i>"""
-
+            "type": "unlimited",
+            "schedule": "В процессе разработки",
+            "tariffs": [
+                {"count": 0, "price": 5000, "days": 30}
+            ]
         },
         "yoga": {
             "name": "Йога",
-            "active": True,  # Скроет кнопку у юзеров
+            "active": True,
             "type": "lessons",
-            "tariffs": [{"count": 1, "price": 800}],
-            "schedule": "В процессе разроботки"
+            "schedule": "В процессе разработки",
+            "tariffs": [
+                {"count": 1, "price": 800, "days": 7}
+            ]
         }
     },
     "limits": {
