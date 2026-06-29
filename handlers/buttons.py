@@ -140,7 +140,9 @@ def admin_keyboard(club_settings: dict, club_id: int, subscription_date: datetim
 
     # --- БЛОК 3: WebApps (Изоляция через club_id) ---
     # Передаем club_id в параметры, чтобы твой бэкенд на FastAPI понимал, чьи данные грузить
-    base_url = "https://api.safe-city01.ru"
+    # Строка 143
+    base_url = f"https://{club_slug}.speedycrm.ru"
+
 
     builder.row(types.InlineKeyboardButton(
         text="📊 Таблица (WebApp)",
