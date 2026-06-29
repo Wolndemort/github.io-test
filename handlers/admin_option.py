@@ -1146,7 +1146,6 @@ async def admin_start_tariff_edit(callback: types.CallbackQuery, state: FSMConte
     """Инициализация процесса изменения конкретного поля тарифа"""
     parts = callback.data.split("_")
     await state.update_data(edit_type=parts[2], disc_id=parts[3], tariff_idx=int(parts[4]), club_id=club_id)
-
     if parts[2] == "price":
         await state.set_state(AdminTariffStates.waiting_for_price)
         await callback.message.answer("💰 Введите новую <b>стоимость</b> тарифа (целое число, например 4000):",
@@ -1154,9 +1153,16 @@ async def admin_start_tariff_edit(callback: types.CallbackQuery, state: FSMConte
     elif parts[2] == "days":
         await state.set_state(AdminTariffStates.waiting_for_days)
         await callback.message.answer("⏳ Введите новое <b>количество дней</b> действия абонемента:", parse_mode="HTML")
+    # === ДОБАВИЛИ ТОП-АКЦЕНТ НА БЕЗЛИМИТ СЮДА ===
     elif parts[2] == "count":
         await state.set_state(AdminTariffStates.waiting_for_count)
-        await callback.message.answer("🔢 Введите новое <b>количество занятий</b> для лимита:", parse_mode="HTML")
+        text = (
+            "🔢 <b>Введите новое количество занятий для тарифа:</b>\n\n"
+            "• Укажите обычный лимит тренировок (например: <code>8</code>, <code>12</code>, <code>24</code>).\n\n"
+            "🚨🚨🚨 <b>ВАЖНО: ЕСЛИ ВЫ ДЕЛАЕТЕ ЭТОТ ТАРИФ БЕЗЛИМИТНЫМ — ВВЕДИТЕ СТРОГО ЧИСЛО</b> <code>999</code> 🚨🚨🚨\n\n"
+            "<i>Если ввести 999, система автоматически переключит проход по этому тарифу в режим безлимита без списания занятий!</i>"
+        )
+        await callback.message.answer(text=text, parse_mode="HTML")
     await callback.answer()
 
 
