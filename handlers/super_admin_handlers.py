@@ -326,33 +326,33 @@ async def handle_list_clubs(
 
 @router.callback_query(F.data == "reload_cache")
 async def reload_all_system_configs(
-    callback: types.CallbackQuery,
-    redis: Redis,
-    session,
-    is_super_admin: bool
+        callback: types.CallbackQuery,
+        redis: Redis,
+        session,
+        is_super_admin: bool
 ):
     if not is_super_admin:
         return await callback.answer("У вас нет прав суперадмина ⛔", show_alert=True)
 
-    # 1. ОБНОВЛЯЕМ ВСЮ ТАБЛИЦУ 'clubs' (Всех ботов системы)
-    # Это пропишет твой новый DEFAULT_CLUB_SETTINGS (с кавычками и расписанием)
-    # во все строки базы данных.
     try:
+        # 1. Записываем пустой DEFAULT_CLUB_SETTINGS во все клубы
         await session.execute(
             update(Club).values(club_settings=DEFAULT_CLUB_SETTINGS)
         )
         await session.commit()
+
+        # ВАЖНО: Намертво сбрасываем кэш текущей сессии SQLAlchemy!
+        # Это заставит бот принудительно перечитать пустой JSON из СУБД при следующем клике
+        session.expire_all()
+
     except Exception as e:
         await session.rollback()
         return await callback.answer(f"Ошибка БД: {e}", show_alert=True)
 
-    # 2. ОЧИЩАЕМ КЭШ ВСЕХ БОТОВ В REDIS
-    # Твой Middleware использует ключи 'club_config:ТОКЕН'.
-    # Нам нужно удалить ВСЕ такие ключи, чтобы боты пошли в БД за обновой.
+    # 2. Очищаем кэш всех ботов в Redis (твой идеальный рабочий цикл SCAN)
     cursor = 0
     deleted_count = 0
     while True:
-        # Ищем все ключи конфигов
         cursor, keys = await redis.scan(cursor=cursor, match="club_config:*", count=100)
         if keys:
             await redis.delete(*keys)
@@ -362,9 +362,8 @@ async def reload_all_system_configs(
 
     await callback.answer(
         f"🚀 Глобальное обновление!\n"
-        f"База обновлена. Кэш {deleted_count} ботов сброшен.",
+        f"База обнулена. Кэш {deleted_count} ботов полностью сброшен.",
         show_alert=True
     )
-
 
 
