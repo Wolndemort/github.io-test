@@ -19,44 +19,31 @@ DEFAULT_CLUB_SETTINGS = {
     "disciplines": {
         "boxing": {
             "name": "Бокс (Дети)",
-            "active": True,
+            "active": False,  # Выключен, пока админ не настроит тарифы
             "type": "lessons",
             "schedule": "В процессе разработки",
-            "tariffs": [
-                {"count": 8, "price": 3500, "days": 30},
-                {"count": 12, "price": 4500, "days": 45},
-                {"count": 24, "price": 8000, "days": 90}
-            ]
+            "tariffs": []  # Пусто!
         },
-        # НОВАЯ СЕКЦИЯ КИКБОКСИНГА
         "kickboxing": {
             "name": "Кикбоксинг",
-            "active": True,
+            "active": False,
             "type": "lessons",
             "schedule": "В процессе разработки",
-            "tariffs": [
-                {"count": 8, "price": 3800, "days": 30},
-                {"count": 12, "price": 4800, "days": 45},
-                {"count": 24, "price": 8500, "days": 90}
-            ]
+            "tariffs": []  # Пусто!
         },
         "bjj": {
             "name": "Бразильское джиу-джитсу",
-            "active": True,
+            "active": False,
             "type": "unlimited",
             "schedule": "В процессе разработки",
-            "tariffs": [
-                {"count": 0, "price": 5000, "days": 30}
-            ]
+            "tariffs": []  # Пусто!
         },
         "yoga": {
             "name": "Йога",
-            "active": True,
+            "active": False,
             "type": "lessons",
             "schedule": "В процессе разработки",
-            "tariffs": [
-                {"count": 1, "price": 800, "days": 7}
-            ]
+            "tariffs": []  # Пусто!
         }
     },
     "limits": {

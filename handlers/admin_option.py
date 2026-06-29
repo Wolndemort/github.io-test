@@ -1033,7 +1033,6 @@ async def admin_tariffs_sections_list(callback: types.CallbackQuery, club_settin
 
 @router.callback_query(F.data.startswith("adm_tar_sect_"))
 async def admin_manage_section_tariffs(callback: types.CallbackQuery, club_settings: dict):
-    """Показывает внутренности выбранной секции (переключатель типа + список тарифов)"""
     disc_id = callback.data.split("_")[-1]
     discipline = club_settings.get("disciplines", {}).get(disc_id)
     if not discipline:
@@ -1046,17 +1045,26 @@ async def admin_manage_section_tariffs(callback: types.CallbackQuery, club_setti
     builder.row(
         types.InlineKeyboardButton(text=f"🔄 Тип секции: {type_label}", callback_data=f"adm_tar_toggle_{disc_id}"))
 
-    for idx, tariff in enumerate(discipline.get("tariffs", [])):
+    tariffs = discipline.get("tariffs", [])
+
+    # Генерируем кнопки, только если тарифы есть
+    for idx, tariff in enumerate(tariffs):
         t_text = f"💳 {tariff.get('days')} дн. — {tariff.get('price')} руб." if d_type == "unlimited" else f"💳 {tariff.get('count')} зан. / {tariff.get('days')} дн. — {tariff.get('price')} руб."
         builder.row(types.InlineKeyboardButton(text=t_text, callback_data=f"adm_tar_edit_{disc_id}_{idx}"))
 
     builder.row(types.InlineKeyboardButton(text="➕ Добавить тариф", callback_data=f"adm_tar_add_{disc_id}"))
     builder.row(types.InlineKeyboardButton(text="⬅️ Назад", callback_data="admin_tariffs_sections"))
 
+    # ДИНАМИЧЕСКИЙ ТЕКСТ ПОДСКАЗКИ
+    if not tariffs:
+        tariffs_info = "⚠️ <b>Ни одного тарифного плана еще не создано!</b>\nНажмите кнопку ниже, чтобы добавить первый тариф."
+    else:
+        tariffs_info = "Управление существующей тарифной сеткой:"
+
     await callback.message.edit_text(
         f"🥋 <b>Направление: {discipline.get('name')}</b>\n"
         f"Текущий режим: <u>{'Безлимитные абонементы' if d_type == 'unlimited' else 'Списание занятий'}</u>\n\n"
-        f"Управление существующей тарифной сеткой:",
+        f"{tariffs_info}",
         reply_markup=builder.as_markup(), parse_mode="HTML"
     )
 
