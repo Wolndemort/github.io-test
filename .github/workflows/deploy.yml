@@ -38,12 +38,13 @@ jobs:
           username: ${{ secrets.USERNAME }}
           key: ${{ secrets.SSH_KEY }}
           script: |
-            cd /root/my_crm_bot
+            cd /root/github.io-test
             mkdir -p backups
             docker exec gym_db pg_dump -U postgres crm_db > backups/pre_deploy_$(date +%F_%H-%M).sql
-            ls -t backups/pre_deploy_*.sql | tail -n +11 | xargs rm -f -- 2>/dev/null || true
-            git pull origin master
-            pip install -r requirements.txt
+            ls -t backups/pre_deploy_*.sql | tail -n +11 | xargs rm -f -- 2>/dev/null || true 
+            git fetch --all
+            git reset --hard origin/master
+            docker compose down
             docker compose up -d --build
             docker image prune -f
 
