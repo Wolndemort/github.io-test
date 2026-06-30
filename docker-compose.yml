@@ -71,6 +71,26 @@ services:
      ports:
        - "6379:6379"
 
+  nginx:
+    image: nginx:alpine
+    container_name: gym_nginx
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    networks:
+      - web_network
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./certbot/conf:/etc/letsencrypt
+      - ./certbot/www:/var/www/certbot
+    depends_on:
+      - gym-api
+
+
+
+
+
 
 volumes:
   pg_data:
