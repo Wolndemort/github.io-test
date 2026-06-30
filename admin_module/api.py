@@ -249,8 +249,8 @@ async def webapp_schedule_page(
         <h2>🏰 <span id="club-name-target">Загрузка...</span></h2>
         
         <!-- Скрытый контейнер, куда Python безопасно положит строку настроек -->
-        <div id="raw-settings-holder" data-settings='{{CLUB_SETTINGS_JSON}}' data-name="{{CLUB_NAME}}" style="display:none;"></div>
-        
+        <div id="raw-settings-holder" data-settings="{{CLUB_SETTINGS_JSON}}" data-name="{{CLUB_NAME}}" style="display:none;"></div>
+
         <div id="schedule-root">Загрузка модулей...</div>
 
         <script>
