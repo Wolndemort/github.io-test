@@ -21,28 +21,28 @@ DEFAULT_CLUB_SETTINGS = {
             "name": "Бокс (Дети)",
             "active": False,  # Выключен, пока админ не настроит тарифы
             "type": "lessons",
-            "schedule": "В процессе разработки",
+            "schedule": {"mon": [], "tue": [], "wed": [], "thu": [], "fri": [], "sat": [], "sun": []},
             "tariffs": []  # Пусто!
         },
         "kickboxing": {
             "name": "Кикбоксинг",
             "active": False,
             "type": "lessons",
-            "schedule": "В процессе разработки",
+            "schedule": {"mon": [], "tue": [], "wed": [], "thu": [], "fri": [], "sat": [], "sun": []},
             "tariffs": []  # Пусто!
         },
         "bjj": {
             "name": "Бразильское джиу-джитсу",
             "active": False,
             "type": "unlimited",
-            "schedule": "В процессе разработки",
+            "schedule": {"mon": [], "tue": [], "wed": [], "thu": [], "fri": [], "sat": [], "sun": []},
             "tariffs": []  # Пусто!
         },
         "yoga": {
             "name": "Йога",
             "active": False,
             "type": "lessons",
-            "schedule": "В процессе разработки",
+            "schedule": {"mon": [], "tue": [], "wed": [], "thu": [], "fri": [], "sat": [], "sun": []},
             "tariffs": []  # Пусто!
         }
     },
