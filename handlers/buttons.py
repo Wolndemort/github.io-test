@@ -139,20 +139,18 @@ def admin_keyboard(club_settings: dict, club_id: int, subscription_date: datetim
         builder.row(types.InlineKeyboardButton(text='📥 Выгрузка БД (CSV)', callback_data='export_db'))
 
     # --- БЛОК 3: WebApps (Изоляция через club_id) ---
-    # Передаем club_id в параметры, чтобы твой бэкенд на FastAPI понимал, чьи данные грузить
-    # Строка 143
     base_url = f"https://{club_id}.speedycrm.ru"
-
 
     builder.row(types.InlineKeyboardButton(
         text="📊 Таблица (WebApp)",
         web_app=WebAppInfo(url=f"{base_url}/admin?club_id={club_id}"))
     )
     
-      builder.row(types.InlineKeyboardButton(
+    # ИСПРАВЛЕНО: Убраны лишние пробелы в начале строки и добавлены )) в конце
+    builder.row(types.InlineKeyboardButton(
         text="🗓 Расписание (WebApp)",
-        web_app=WebAppInfo(url=f"{base_url}/webapp/schedule")  # club_id вытащится из хоста!
-    )
+        web_app=WebAppInfo(url=f"{base_url}/webapp/schedule")
+    ))
     
     builder.row(types.InlineKeyboardButton(
         text="📈 Отчет Pandas",
@@ -166,6 +164,7 @@ def admin_keyboard(club_settings: dict, club_id: int, subscription_date: datetim
     builder.row(types.InlineKeyboardButton(text='🔙 Назад', callback_data='begin'))
 
     return builder.as_markup()
+
 
 
 def get_scanner_keyboard(club_settings: dict, club_id: int):
