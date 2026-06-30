@@ -33,8 +33,12 @@ async def super_admin_main(
 
     # --- НАША НОВАЯ КНОПКА (Переход в SqlAdmin на /master-dashboard) ---
     builder.row(types.InlineKeyboardButton(
-        text="🖥 Управление БД (SqlAdmin)",
-        web_app=types.WebAppInfo(url="https://speedycrm.ru")
+        text="🖥 Управление всеми клубами (SqlAdmin)",
+        url="https://speedycrm.ru/master-dashboard"  # Откроет список франшиз
+    ))
+    builder.row(types.InlineKeyboardButton(
+        text="👥 Общая база всех атлетов (SqlAdmin)",
+        url="https://speedycrm.ru/student/list"  # Откроет полный список учеников
     ))
 
     # --- Остальные кнопки управления SaaS ---
