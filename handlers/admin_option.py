@@ -1311,7 +1311,7 @@ async def admin_schedule_select_discipline(callback: types.CallbackQuery, club_s
             callback_data=f"adm_sch_manage_{disc_id}" # Ведёт прямо на наш готовый хендлер с днями недели!
         ))
         
-    builder.row(types.InlineKeyboardButton(text="🔙 Назад в админку", callback_data="admin_settings")) # или твой колбэк возврата в меню
+    builder.row(types.InlineKeyboardButton(text="🔙 Назад в админку", callback_data="admin")) # или твой колбэк возврата в меню
     
     await callback.message.edit_text(
         text="📅 <b>Управление расписанием</b>\n\nВыберите спортивную дисциплину для настройки сетки занятий:",
