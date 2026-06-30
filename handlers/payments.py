@@ -70,7 +70,10 @@ async def select_athlete_handler(callback: types.CallbackQuery, state: FSMContex
         kb.row(types.InlineKeyboardButton(text=f"👦 {s.name}", callback_data=f"set_at_{s.id}"))
 
     # Добавим кнопку возврата назад к выбору секций для удобства
-    kb.row(types.InlineKeyboardButton(text="⬅️ Назад к секциям", callback_data="choose_section"))
+    kb.row(types.InlineKeyboardButton(
+        text="⬅️ Назад к секции", 
+        callback_data=f"section_{discipline_code}"
+    ))
 
     await callback.message.edit_text(
         "<b>Для кого оформляем абонемент?</b>\n\n"
