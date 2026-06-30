@@ -1,6 +1,7 @@
 import asyncio
 import os
 import sys
+from fastapi.middleware.proxy_headers import ProxyHeadersMiddleware
 from contextlib import asynccontextmanager
 from fastapi import Request
 from datetime import datetime
@@ -99,6 +100,7 @@ async def lifespan(app: FastAPI):
 
 # Инициализация FastAPI
 app = FastAPI(title="SpeedyCRM SaaS API", lifespan=lifespan)
+app.add_middleware(ProxyHeadersMiddleware, trusted_hosts=["*"])
 app.include_router(router)
 setup_admin(app, engine)
 
