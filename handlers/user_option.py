@@ -837,29 +837,60 @@ async def show_discipline_schedule(
         callback: types.CallbackQuery,
         club_settings: dict
 ):
-    # 1. Извлекаем код (префикс schedule_ из кнопки)
-    # Например: schedule_boxing -> boxing
+    # 1. Извлекаем код (например: schedule_boxing -> boxing)
     discipline_code = callback.data.split('_')[1].lower()
+    
     # 2. Лезем в конфиг за данными этой секции
-    disciplines = club_settings.get("disciplines", club_settings)
+    disciplines = club_settings.get("disciplines", {})
     discipline_cfg = disciplines.get(discipline_code)
 
     if not discipline_cfg:
         return await callback.answer("Упс! Данные этой секции не найдены 🛠", show_alert=True)
 
-    # 3. Достаем название и расписание
     name = discipline_cfg.get("name", discipline_code.upper())
-    # Если в конфиге "1111", то выведем это, если пусто — заглушку
-    schedule_text = discipline_cfg.get("schedule")
+    schedule_data = discipline_cfg.get("schedule")
 
-    if not schedule_text or schedule_text == "":
-        schedule_text = "Расписание временно не заполнено администратором ⏳"
+    # 3. Парсим наше новое структурированное JSONB-расписание
+    # Если там старая строка или вообще пусто — выводим красивую заглушку
+    if not schedule_data or isinstance(schedule_data, str):
+        final_schedule_text = "⏳ <i>Расписание временно не заполнено администратором.</i>"
+    else:
+        # Словарь для перевода ключей дней недели на человеческий русский
+        day_translations = {
+            "mon": "Понедельник", "tue": "Вторник", "wed": "Среда", 
+            "thu": "Четверг", "fri": "Пятница", "sat": "Суббота", "sun": "Воскресенье"
+        }
+        
+        lines = []
+        # Проходим строго по порядку дней недели
+        for day_key in ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]:
+            day_lessons = schedule_data.get(day_key, [])
+            
+            # Если в этот день есть тренировки — красиво их форматируем
+            if day_lessons:
+                lines.append(f"📌 <b>{day_translations[day_key]}:</b>")
+                for lesson in day_lessons:
+                    # Считаем свободные места (всего минус занято)
+                    free_slots = max(0, lesson.get("max_slots", 15) - lesson.get("taken_slots", 0))
+                    
+                    lines.append(
+                        f"  ⏱ <code>{lesson['time']}</code> — {lesson['coach']}\n"
+                        f"  └ 👥 Мест осталось: <b>{free_slots}</b> из {lesson.get('max_slots', 15)}\n"
+                    )
+                lines.append("") # Делаем пустую строку-отступ между днями для читаемости
+                
+        # Собираем все строки вместе. Если массив пустой — значит админ завел структуру, но уроков 0
+        if lines:
+            final_schedule_text = "\n".join(lines)
+        else:
+            final_schedule_text = "⏳ <i>Расписание на эту неделю пока не заполнено.</i>"
 
+    # 4. Выводим итоговый красивый результат пользователю (атлету или родителю)
     await callback.message.edit_text(
         text=(
-            f"📅 <b>Расписание: {name}</b>\n\n"
-            f"{schedule_text}\n\n"
-            "<i>Выберите действие:</i>"
+            f"📅 <b>Расписание секции: {name}</b>\n\n"
+            f"{final_schedule_text}\n"
+            "<i>Используйте меню ниже для записи на занятия:</i>"
         ),
         reply_markup=get_section_menu_kb(discipline_code, name),
         parse_mode="HTML"
