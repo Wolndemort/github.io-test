@@ -165,11 +165,15 @@ async def webapp_schedule_page(
     if not club:
         return HTMLResponse(content="<h1>🏰 Клуб не найден в системе SpeedyCRM</h1>", status_code=404)
 
-    # Безопасно достаем словарь дисциплин из JSONB на стороне Python
     settings = club.club_settings if isinstance(club.club_settings, dict) else {}
     disciplines = settings.get("disciplines", {})
 
-    # Собираем карточки секций прямо в Python (как на зеленом тесте)
+    day_names = {
+        "mon": "Понедельник", "tue": "Вторник", "wed": "Среда",
+        "thu": "Четверг", "fri": "Пятница", "sat": "Суббота", "sun": "Воскресенье"
+    }
+
+    # Собираем полноценное расписание прямо в Python
     disciplines_html = ""
     
     if not disciplines:
@@ -177,17 +181,59 @@ async def webapp_schedule_page(
     else:
         for disc_key, disc_data in disciplines.items():
             disc_name = disc_data.get("name", "Спортивная секция")
+            schedule_data = disc_data.get("schedule", {})
             
-            disciplines_html += f"""
-            <div class="discipline-section">
-                <div class="discipline-title">🥋 {disc_name}</div>
+            # Собираем блоки дней для этой дисциплины
+            days_html = ""
+            
+            for day_key, day_title in day_names.items():
+                lessons = schedule_data.get(day_key, [])
+                if not lessons or not isinstance(lessons, list):
+                    continue  # Пропускаем пустые дни, чтобы не забивать экран
+                
+                lessons_cards_html = ""
+                for lesson in lessons:
+                    time_str = lesson.get("time", "00:00")
+                    coach_str = lesson.get("coach", "Инструктор")
+                    max_slots = int(lesson.get("max_slots", 0))
+                    taken_slots = int(lesson.get("taken_slots", 0))
+                    free_slots = max(0, max_slots - taken_slots)
+                    
+                    lessons_cards_html += f"""
+                    <div class="lesson-card">
+                        <div class="time">{time_str}</div>
+                        <div class="info">
+                            <div class="coach">👤 {coach_str}</div>
+                        </div>
+                        <div class="slots">
+                            <div>Свободно</div>
+                            <b>{free_slots} / {max_slots}</b>
+                        </div>
+                    </div>
+                    """
+                
+                days_html += f"""
+                <div class="day-container">
+                    <div class="day-title">{day_title}</div>
+                    {lessons_cards_html}
+                </div>
+                """
+            
+            # Если вообще ни одной тренировки во всех днях не нашли
+            if not days_html:
+                days_html = """
                 <div class="day-container">
                     <div class="no-lessons">🗓 Тренировок на этой неделе пока нет.</div>
                 </div>
+                """
+                
+            disciplines_html += f"""
+            <div class="discipline-section">
+                <div class="discipline-title">🥋 {disc_name}</div>
+                {days_html}
             </div>
             """
 
-    # Формируем финальный HTML. Вообще БЕЗ опасных подстановок внутрь <script>
     html_content = f"""
     <!DOCTYPE html>
     <html lang="ru">
@@ -229,6 +275,34 @@ async def webapp_schedule_page(
                 margin-bottom: 12px;
                 border: 1px solid #3a3a3c;
             }}
+            .day-title {{
+                font-size: 16px;
+                font-weight: bold;
+                margin-bottom: 8px;
+                color: #ff9f0a;
+            }}
+            .lesson-card {{
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                background: #3a3a3c;
+                padding: 10px;
+                border-radius: 8px;
+                margin-bottom: 8px;
+            }}
+            .lesson-card:last-child {{ margin-bottom: 0; }}
+            .time {{
+                font-family: monospace;
+                font-size: 16px;
+                font-weight: bold;
+                background: var(--tg-theme-button-color);
+                color: var(--tg-theme-button-text-color);
+                padding: 4px 8px;
+                border-radius: 6px;
+            }}
+            .info {{ flex-grow: 1; margin-left: 12px; }}
+            .coach {{ font-size: 14px; color: #aeaeb2; }}
+            .slots {{ font-size: 12px; color: #30d158; text-align: right; }}
             .no-lessons {{ color: #8e8e93; font-style: italic; font-size: 13px; }}
         </style>
     </head>
@@ -239,7 +313,6 @@ async def webapp_schedule_page(
         </div>
 
         <script>
-            // Чисто инициализация WebApp, никакой работы с данными БД внутри JS!
             if (window.Telegram && window.Telegram.WebApp) {{
                 const tg = window.Telegram.WebApp;
                 tg.ready();
@@ -251,6 +324,7 @@ async def webapp_schedule_page(
     """
 
     return HTMLResponse(content=html_content, status_code=200)
+
 
 
     
