@@ -1,4 +1,5 @@
 import qrcode
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 import io
 from aiogram.utils.keyboard import ReplyKeyboardBuilder
