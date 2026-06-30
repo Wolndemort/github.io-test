@@ -328,11 +328,16 @@ async def webapp_schedule_page(
             }}
 
             // Рендерим расписание из кэша, переданного сервером
-            renderAllSchedules();
+             // Обернем рендер в try/catch, чтобы вывести ошибку прямо на экран смартфона, если JS упадет
+            try {
+                renderAllSchedules();
+            } catch (err) {
+                document.getElementById('schedule-root').innerHTML = 
+                    '<p style="color:red;">❌ Ошибка JS: ' + err.message + '</p>';
+            }
         </script>
     </body>
-    </html>
-    """
+    </html>"""
     
     html_content = html_content.replace("{{CLUB_NAME}}", club.name)
     html_content = html_content.replace("{{CLUB_SETTINGS_JSON}}", club_settings_json)
