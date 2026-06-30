@@ -152,7 +152,7 @@ def admin_keyboard(club_settings: dict, club_id: int, subscription_date: datetim
       builder.row(types.InlineKeyboardButton(
         text="🗓 Расписание (WebApp)",
         web_app=WebAppInfo(url=f"{base_url}/webapp/schedule")  # club_id вытащится из хоста!
-    ))
+    )
     
     builder.row(types.InlineKeyboardButton(
         text="📈 Отчет Pandas",
