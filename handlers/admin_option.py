@@ -461,23 +461,42 @@ async def manual_add_name(message: types.Message, state: FSMContext):
 # ШАГ 3: Поймали телефон -> Запрашиваем ЗАНЯТИЯ
 @router.message(AdminManualAdd.waiting_for_phone)
 async def manual_add_process_phone(message: types.Message, state: FSMContext):
-    # Очищаем номер от лишних символов
     phone = "".join(filter(str.isdigit, message.text))
     if len(phone) < 10:
         return await message.answer("❌ Номер слишком короткий. Введите минимум 10 цифр:")
 
     await state.update_data(phone=phone)
-    # Теперь переключаем на ввод занятий
-    await state.set_state(AdminManualAdd.waiting_for_lessons)
+
+    # Переключаем стейт на ввод ДР
+    await state.set_state(AdminManualAdd.waiting_for_birthday)
     await message.answer(
         f"✅ Телефон: <code>{phone}</code>\n\n"
-        f"Введите количество занятий для активации абонемента\n"
-        f"<i>(0 — для безлимита, если оплатил наличными):</i>",
+        f"Введите <b>день рождения атлета</b> в формате ДД.ММ.ГГГГ\n"
+        f"<i>(например: 25.10.2015 или напишите '0', если неизвестно):</i>",
         parse_mode="HTML"
     )
 
 
-# ШАГ 4: Финал -> Создаем запись в базе
+@router.message(AdminManualAdd.waiting_for_birthday)
+async def manual_add_process_birthday(message: types.Message, state: FSMContext):
+    if message.text.strip() == "0":
+        await state.update_data(birthday=None)
+    else:
+        try:
+            # Парсим строку ДД.ММ.ГГГГ в объект даты
+            birthday_date = datetime.strptime(message.text.strip(), "%d.%m.%Y").date()
+            await state.update_data(birthday=birthday_date)
+        except ValueError:
+            return await message.answer("❌ Неверный формат! Введите дату строго как ДД.ММ.ГГГГ (например, 15.08.2012):")
+
+    # Теперь переключаем на ввод занятий
+    await state.set_state(AdminManualAdd.waiting_for_lessons)
+    await message.answer(
+        "✅ Дата рождения сохранена!\n\n"
+        "Введите количество занятий для активации абонемента (0 для безлимита):"
+    )
+
+
 @router.message(AdminManualAdd.waiting_for_lessons)
 async def manual_add_finish(
         message: types.Message,
@@ -491,21 +510,23 @@ async def manual_add_finish(
     except ValueError:
         return await message.answer("❌ Введите числовое значение!")
 
-    # Достаем всё, что накопили в стейте
+    # Достаем ВСЕ накопленные данные из стейта (включая birthday!)
     data = await state.get_data()
     name = data.get("name")
     phone = data.get("phone")
+    birthday = data.get("birthday")  # <--- Наша новая переменная!
 
     try:
         days = club_settings.get("limits", {}).get("subscription_days", 30)
         new_expire = datetime.now() + timedelta(days=days)
 
-        # Создаем атлета со ВСЕМИ данными сразу
+        # Создаем студента и передаем birthday в базу данных
         new_student = Student(
             name=name,
             club_id=club.id,
             parent_phone=phone,
-            parent_id=None,  # Пока не зашел через свой ТГ
+            birthday=birthday,  # <--- ПЕРЕДАЕМ В МОДЕЛЬ!
+            parent_id=None,
             balance_lessons=999 if lessons == 0 else lessons,
             expire_date=new_expire,
             can_freeze=1,
@@ -516,34 +537,30 @@ async def manual_add_finish(
         await session.commit()
         await session.refresh(new_student)
 
-        student_id = new_student.id
-
-        # Формируем клавиатуру
+        # Клавиатура и ответ (остается без изменений)
         builder = InlineKeyboardBuilder()
-        builder.row(types.InlineKeyboardButton(
-            text="💵 Оплатил наличными",
-            callback_data=f"confirm_cash_{student_id}")
-        )
+        builder.row(
+            types.InlineKeyboardButton(text="💵 Оплатил наличными", callback_data=f"confirm_cash_{new_student.id}"))
         builder.row(types.InlineKeyboardButton(text="🏠 В меню", callback_data="admin"))
 
         await message.answer(
             f"✅ <b>Атлет успешно добавлен!</b>\n\n"
             f"👤 Имя: <b>{name}</b>\n"
+            f"🎂 ДР: <b>{birthday.strftime('%d.%m.%Y') if birthday else 'не указан'}</b>\n"
             f"📱 Телефон: <code>{phone}</code>\n"
             f"📊 Баланс: <b>{new_student.balance_lessons} зан.</b>\n"
             f"⏳ Срок до: <b>{new_expire.strftime('%d.%m.%Y')}</b>\n"
-            f"🆔 ID: <code>{student_id}</code>\n\n"
-            f"Хотите сразу подтвердить оплату наличными?",
+            f"🆔 ID: <code>{new_student.id}</code>",
             reply_markup=builder.as_markup(),
             parse_mode="HTML"
         )
 
-        logger.info(f"🆕 [Клуб {club.id}] Админ вручную добавил атлета {name} с телефоном {phone}")
+        logger.info(f"🆕 [Клуб {club.id}] Ручное добавление атлета {name} с ДР {birthday}")
         await state.clear()
 
     except Exception as e:
         await session.rollback()
-        logger.error(f"❌ Ошибка ручного добавления в клубе {club.id}: {e}")
+        logger.error(f"❌ Ошибка сохранения атлета: {e}")
         await message.answer("❌ Ошибка при сохранении в базу данных.")
 
 

@@ -7,6 +7,7 @@ class PaymentStates(StatesGroup):
 
 class RegistrationStates(StatesGroup):
     waiting_for_name = State()
+    waiting_for_birthday = State()
 
 
 class AdminManualAdd(StatesGroup):
@@ -16,6 +17,7 @@ class AdminManualAdd(StatesGroup):
     waiting_for_search = State()
     waiting_for_search_visit = State()
     waiting_for_phone = State()
+    waiting_for_birthday = State()
 
 
 class AdminStates(StatesGroup):

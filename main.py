@@ -253,7 +253,6 @@ async def handle_telegram_webhook(token: str, request: Request):
 
 
 # --- НОВЫЕ БИЗНЕС-ФИЧИ ИЗ ТВОЕГО ТЗ ---
-
 async def saas_daily_morning_check():
     """Ежедневная фоновая проверка: Дни рождения и Прогульщики (10 дней без посещений)"""
     logger.info("📊 Запуск фонового анализа базы атлетов...")
@@ -262,7 +261,9 @@ async def saas_daily_morning_check():
         result = await session.execute(select(Student))
         students = result.scalars().all()
 
-        now = datetime.now()
+        # ФИКС: Берем только чистую текущую дату (без часов и минут)
+        today = datetime.now().date()
+        now_datetime = datetime.now() # Оставляем datetime для вычитания из last_visit
 
         for student in students:
             # Вытаскиваем токен клуба этого студента для отправки сообщения
@@ -272,26 +273,34 @@ async def saas_daily_morning_check():
                 continue
             bot = bots_dict[club.bot_token]
 
-            # 🎂 Фича 1: Поздравление с Днем Рождения (если колонка добавления через Alembic активна)
+            # Если у студента еще нет привязанного Telegram ID (родитель не зашел в бота), пропускаем
+            if not student.parent_id:
+                continue
+
+            # 🎂 Фича 1: Поздравление с Днем Рождения (Сверяем типы date == date)
             if hasattr(student, 'birthday') and student.birthday:
-                if student.birthday.month == now.month and student.birthday.day == now.day:
+                if student.birthday.month == today.month and student.birthday.day == today.day:
                     try:
                         await bot.send_message(
                             chat_id=student.parent_id,
-                            text=f"🎂 Клуб <b>{club.name}</b> поздравляет атлета <b>{student.name}</b> с Днём Рождения! 🎉\nЖелаем новых спортивных побед и крепкого здоровья!"
+                            text=f"🎂 Клуб <b>{club.name}</b> поздравляет атлета <b>{student.name}</b> с Днём Рождения! 🎉\n"
+                                 f"Желаем новых спортивных побед и крепкого здоровья!",
+                            parse_mode="HTML"
                         )
-                        logger.info(f"🎉 Поздравление с ДР отправлено атлету {student.name}")
+                        logger.info(f"🎉 Поздравление с ДР отправлено атлету {student.name} (Родитель: {student.parent_id})")
                     except Exception as e:
                         logger.error(f"Не удалось отправить ДР сообщение родителю {student.parent_id}: {e}")
 
             # 🏃‍♂️ Фича 2: Контроль прогульщиков (Не было 10 дней, но есть активный абонемент)
             if student.last_visit and student.balance_lessons > 0 and not student.is_frozen:
-                days_absent = (now - student.last_visit).days
+                # student.last_visit — это datetime, так что вычитаем из такого же datetime
+                days_absent = (now_datetime - student.last_visit).days
                 if days_absent == 10:
                     try:
                         await bot.send_message(
                             chat_id=student.parent_id,
-                            text=f"👋 Здравствуйте! Мы заметили, что атлет <b>{student.name}</b> не посещал тренировки уже 10 дней. Мы соскучились! Ждём вас на занятиях. 😉"
+                            text=f"👋 Здравствуйте! Мы заметили, что атлет <b>{student.name}</b> не посещал тренировки уже 10 дней. Мы соскучились! Ждём вас на занятиях. 😉",
+                            parse_mode="HTML"
                         )
                         logger.info(f"📢 Уведомление о прогуле (10 дней) отправлено атлету {student.name}")
                     except Exception as e:

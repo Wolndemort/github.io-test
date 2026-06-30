@@ -582,42 +582,75 @@ async def handle_gen_qr(
 
 @router.callback_query(F.data == "add_athlete")
 async def start_add_athlete(callback: types.CallbackQuery, state: FSMContext, club: Club):
-    # Сохраняем ID клуба в стейт, чтобы на следующем шаге знать, куда привязать атлета
+    await state.clear()  # Сбрасываем старое на всякий случай
+    # Сохраняем ID клуба в стейт
     await state.update_data(current_club_id=club.id)
 
     await callback.message.answer(
         f"📍 Регистрация в клубе: <b>{club.name}</b>\n\n"
-        f"Введите Имя и Фамилию атлета (себя или ребенка):",
+        f"Введите <b>Имя и Фамилия</b> атлета (себя или ребенка):",
         parse_mode="HTML"
     )
     await state.set_state(RegistrationStates.waiting_for_name)
     await callback.answer()
 
 
+# ШАГ 2: Поймали имя -> Запрашиваем ДЕНЬ РОЖДЕНИЯ
 @router.message(RegistrationStates.waiting_for_name)
-async def process_athlete_name(
+async def process_athlete_name(message: types.Message, state: FSMContext):
+    # Требуем, чтобы ввели минимум два слова (Имя и Фамилия), как ты просил в ТЗ!
+    parts = message.text.strip().split()
+    if len(parts) < 2:
+        return await message.answer(
+            "⚠️ Пожалуйста, укажите именно <b>Имя и Фамилию</b> через пробел (например: Иван Иванов):",
+            parse_mode="HTML"
+        )
+
+    await state.update_data(athlete_name=message.text.strip())
+
+    # Переключаем на новый шаг ввода ДР
+    await state.set_state(RegistrationStates.waiting_for_birthday)
+    await message.answer(
+        f"✅ Имя сохранено: <b>{message.text}</b>\n\n"
+        f"Введите <b>день рождения атлета</b> в формате ДД.ММ.ГГГГ\n"
+        f"<i>(например: 15.08.2012):</i>",
+        parse_mode="HTML"
+    )
+
+
+# ШАГ 3: Поймали ДР -> Валидируем и сохраняем в базу PostgreSQL
+@router.message(RegistrationStates.waiting_for_birthday)
+async def process_athlete_birthday(
         message: types.Message,
         state: FSMContext,
         session: AsyncSession,
-        club: Club,  # Из мидлвари
-        club_settings: dict  # Из мидлвари
+        club: Club,
+        club_settings: dict
 ):
-    name = message.text
+    try:
+        # Валидируем формат даты
+        birthday_date = datetime.strptime(message.text.strip(), "%d.%m.%Y").date()
+    except ValueError:
+        return await message.answer(
+            "❌ Неверный формат! Введите дату строго в формате ДД.ММ.ГГГГ (например: 25.10.2015):"
+        )
+
+    # Достаем накопленные данные из стейта
+    data = await state.get_data()
+    name = data.get('athlete_name')
+    club_id = data.get('current_club_id') or club.id
     user_id = message.from_user.id
 
-    # 1. Достаем ID клуба из стейта (или напрямую из аргумента club)
-    data = await state.get_data()
-    club_id = data.get('current_club_id') or club.id
-
     try:
-        # 2. Создаем атлета С ПРИВЯЗКОЙ К КЛУБУ (club_id)
+        # Создаем атлета со ВСЕМИ привязками и Днём Рождения!
         new_student = Student(
             parent_id=user_id,
-            club_id=club_id,  # <--- САМОЕ ВАЖНОЕ ДЛЯ SAAS
+            club_id=club_id,
             name=name,
+            birthday=birthday_date,  # <--- ЗАПИСЫВАЕМ ДР В БАЗУ!
             expire_date=None,
             balance_lessons=0,
-            can_freeze=1,  # Можно брать дефолт из club_settings["limits"]
+            can_freeze=1,
             is_frozen=0,
             last_visit=datetime.now()
         )
@@ -625,21 +658,21 @@ async def process_athlete_name(
         session.add(new_student)
         await session.commit()
 
-        logger.success(f"👤 Добавлен атлет: {name} (Клуб ID: {club_id}) для {user_id}")
+        logger.success(f"👤 Клиент сам добавил атлета: {name} с ДР {birthday_date} (Клуб ID: {club_id})")
 
-        # 3. Отправляем в главное меню, передавая настройки клуба
+        # Отправляем в главное меню
         await message.answer(
             f"✅ Атлет <b>{name}</b> успешно зарегистрирован в <b>{club.name}</b>!\n\n"
             "Теперь вы можете купить абонемент или сформировать QR-пропуск в меню.",
             parse_mode="HTML",
-            reply_markup=get_main_menu_keyboard(club_settings, club.id)  # <--- ФИКС ОШИБКИ UNFILLED
+            reply_markup=get_main_menu_keyboard(club_settings, club.id)
         )
         await state.clear()
 
     except Exception as e:
         await session.rollback()
-        logger.error(f"❌ Ошибка при добавлении атлета: {e}")
-        await message.answer("⚠️ Произошла ошибка. Попробуйте позже.")
+        logger.error(f"❌ Ошибка при самостоятельном добавлении атлета: {e}")
+        await message.answer("⚠️ Произошла ошибка при сохранении. Попробуйте позже.")
 
 
 @router.callback_query(F.data == "auth_by_phone")
