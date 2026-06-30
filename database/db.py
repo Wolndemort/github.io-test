@@ -409,12 +409,36 @@ async def get_active_subs_count(club_id: int, session: AsyncSession):
         return 0
 
 
-async def create_db_backup():
-    backup_path = f"backup_{datetime.now().strftime('%Y-%m-%d')}.sql"
-    command = f"pg_dump -h db -p 5432 -U postgres crm_db > {backup_path}"
-    process = await asyncio.create_subprocess_shell(
-        command,
-        env={"PGPASSWORD": "lordwolndemort0195"}
-    )
-    await process.wait()
-    return backup_path
+async def create_db_backup() -> str | None:
+    # Добавляем расширение .gz, так как файл будет сжатым архивом
+    backup_path = f"backup_{datetime.now().strftime('%Y-%m-%d')}.sql.gz"
+    
+    # Добавляем | gzip > в конец команды для сжатия на лету
+    command = f"pg_dump -h gym_db -p 5432 -U postgres crm_db | gzip > {backup_path}"
+    
+    try:
+        process = await asyncio.create_subprocess_shell(
+            command,
+            env={"PGPASSWORD": "lordwolndemort0195"},
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        
+        # Ждем завершения и собираем логи ошибок, если они будут
+        stdout, stderr = await process.communicate()
+        
+        # Если код возврата не 0 — значит pg_dump завершился с ошибкой!
+        if process.returncode != 0:
+            error_msg = stderr.decode().strip()
+            logger.error(f"❌ Ошибка внутри pg_dump: {error_msg}")
+            # Если файл успел создаться пустым, удаляем его
+            if os.path.exists(backup_path):
+                os.remove(backup_path)
+            return None
+            
+        logger.info(f"📦 Бэкап базы данных успешно создан: {backup_path}")
+        return backup_path
+
+    except Exception as e:
+        logger.error(f"❌ Критическая ошибка при создании бэкапа: {e}")
+        return None
