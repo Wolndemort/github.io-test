@@ -17,7 +17,7 @@ def get_profile_keyboard(club_settings: dict, is_authorized: bool = False):
 
     # 1. Всегда доступные кнопки (или базовые)
     builder.row(types.InlineKeyboardButton(text='➕ Добавить атлета', callback_data='add_athlete'))
-    builder.row(types.InlineKeyboardButton(text='📊 Статус абонемента', callback_data='check_status_now'))
+    builder.row(types.InlineKeyboardButton(text='📊 Статус абонемента', callback_data='detailed_status_info'))
 
     # 2. ДИНАМИЧЕСКИЕ КНОПКИ (Показываем только если включено в админке)
 
