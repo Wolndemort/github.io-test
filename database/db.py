@@ -414,7 +414,9 @@ async def create_db_backup() -> str | None:
     backup_path = f"backup_{datetime.now().strftime('%Y-%m-%d')}.sql.gz"
     
     # Добавляем | gzip > в конец команды для сжатия на лету
-    command = f"pg_dump -h gym_db -p 5432 -U postgres crm_db | gzip > {backup_path}"
+    # Используем именно -h db, как прописано в сервисах docker-compose!
+    command = f"pg_dump -h db -p 5432 -U postgres crm_db | gzip > {backup_path}"
+
     
     try:
         process = await asyncio.create_subprocess_shell(
