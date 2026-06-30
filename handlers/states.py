@@ -57,3 +57,10 @@ class AdminTariffStates(StatesGroup):
     add_price = State()
     add_days = State()
     add_count = State()
+    
+    
+class AdminScheduleStates(StatesGroup):
+    choose_day = State()         # Выбор дня недели кнопками
+    add_time = State()           # Ожидание ввода времени (напр. 19:00)
+    add_coach = State()          # Ожидание ввода тренера/группы
+    add_slots = State()          # Ожидание ввода лимита мест (макс. мест)
