@@ -1292,3 +1292,162 @@ async def admin_add_tariff_count(
     await save_club_settings(session, redis, bot.token, club_id, club_settings)
     await state.clear()
     await return_to_tariff_menu(message, club_settings, disc_id)
+
+
+
+# 1. Выбор дня недели (Полная клавиатура на все 7 дней)
+@router.callback_query(F.data.startswith("adm_sch_manage_"))
+async def admin_start_schedule_manage(callback: types.CallbackQuery, state: FSMContext, club_id: int, club_settings: dict):
+    disc_id = callback.data.split("_")[-1]
+    
+    await state.update_data(disc_id=disc_id, club_id=club_id)
+    await state.set_state(AdminScheduleStates.choose_day)
+    
+    # Полная сетка на все 7 дней недели + кнопка возврата
+    days_kb = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="🗓 Пн", callback_data="sch_day_mon"), 
+            InlineKeyboardButton(text="🗓 Вт", callback_data="sch_day_tue")
+        ],
+        [
+            InlineKeyboardButton(text="🗓 Ср", callback_data="sch_day_wed"), 
+            InlineKeyboardButton(text="🗓 Чт", callback_data="sch_day_thu")
+        ],
+        [
+            InlineKeyboardButton(text="🗓 Пт", callback_data="sch_day_fri"), 
+            InlineKeyboardButton(text="🗓 Сб", callback_data="sch_day_sat")
+        ],
+        [
+            InlineKeyboardButton(text="🎉 Вс", callback_data="sch_day_sun")
+        ],
+        [
+            InlineKeyboardButton(text="⬅️ Назад в меню секции", callback_data=f"manage_disc_{disc_id}")
+        ]
+    ])
+    
+    disc_name = club_settings["disciplines"][disc_id]["name"]
+    await callback.message.edit_text(
+        text=(
+            f"📅 <b>Управление расписанием: {disc_name}</b>\n\n"
+            f"Выберите день недели, в который хотите добавить новую тренировку:"
+        ),
+        reply_markup=days_kb,
+        parse_mode="HTML"
+    )
+    await callback.answer()
+
+
+# ==========================================
+# ШАГ 2: Ловим выбранный день и просим время
+# ==========================================
+@router.callback_query(AdminScheduleStates.choose_day, F.data.startswith("sch_day_"))
+async def admin_schedule_choose_day(callback: types.CallbackQuery, state: FSMContext):
+    day = callback.data.split("_")[-1]  # Вытаскиваем "mon", "tue" и т.д.
+    await state.update_data(chosen_day=day)
+    await state.set_state(AdminScheduleStates.add_time)
+    
+    await callback.message.answer(
+        "⏱ <b>Шаг 1 из 3: Введите время начала занятия</b>\n\n"
+        "Отправьте текст в формате ЧЧ:ММ (например: <code>19:30</code> или <code>09:00</code>):",
+        parse_mode="HTML"
+    )
+    await callback.answer()
+
+
+# ==========================================
+# ШАГ 3: Ловим ввод ВРЕМЕНИ и просим тренера
+# ==========================================
+@router.message(AdminScheduleStates.add_time)
+async def admin_add_schedule_time(message: types.Message, state: FSMContext):
+    time_text = message.text.strip()
+    
+    # Проверка формата ЧЧ:ММ
+    if ":" not in time_text or len(time_text) != 5:
+        return await message.answer("❌ Неверный формат! Введите время строго в формате ЧЧ:ММ (например, 18:00):")
+        
+    await state.update_data(new_time=time_text)
+    await state.set_state(AdminScheduleStates.add_coach)
+    
+    await message.answer(
+        "👤 <b>Шаг 2 из 3: Введите имя тренера или название группы</b>\n\n"
+        "Например: <i>Омаров А.</i> или <i>Общая группа</i>:",
+        parse_mode="HTML"
+    )
+
+
+# ==========================================
+# ШАГ 4: Ловим ввод ТРЕНЕРА и просим места
+# ==========================================
+@router.message(AdminScheduleStates.add_coach)
+async def admin_add_schedule_coach(message: types.Message, state: FSMContext):
+    await state.update_data(new_coach=message.text.strip())
+    await state.set_state(AdminScheduleStates.add_slots)
+    
+    await message.answer(
+        "🔢 <b>Шаг 3 из 3: Укажите лимит свободных мест на занятие</b>\n\n"
+        "Введите максимальное количество атлетов (только число, например: 15):",
+        parse_mode="HTML"
+    )
+
+
+# ==========================================
+# ШАГ 5: Финал! Ловим места и сохраняем в базу и Redis
+# ==========================================
+@router.message(AdminScheduleStates.add_slots)
+async def admin_finalize_schedule(
+    message: types.Message,
+    state: FSMContext,
+    club_settings: dict,
+    session,
+    redis: Redis,
+    bot
+):
+    if not message.text.isdigit():
+        return await message.answer("❌ Лимит мест должен быть целым числом! Попробуйте еще раз:")
+        
+    max_slots = int(message.text)
+    s_data = await state.get_data()
+    
+    disc_id = s_data["disc_id"]
+    club_id = s_data["club_id"]
+    day = s_data["chosen_day"]
+    time_text = s_data["new_time"]
+    coach_text = s_data["new_coach"]
+    
+    new_lesson = {
+        "time": time_text,
+        "coach": coach_text,
+        "max_slots": max_slots,
+        "taken_slots": 0
+    }
+    
+    # Защита: если там была старая строка, пересобираем в пустую структуру расписания
+    discipline_block = club_settings["disciplines"][disc_id]
+    if "schedule" not in discipline_block or isinstance(discipline_block["schedule"], str):
+        club_settings["disciplines"][disc_id]["schedule"] = {
+            "mon": [], "tue": [], "wed": [], "thu": [], "fri": [], "sat": [], "sun": []
+        }
+        
+    # Добавляем новую тренировку в нужный день
+    club_settings["disciplines"][disc_id]["schedule"][day].append(new_lesson)
+    
+    # Авто-сортировка по времени, чтобы в базе всё лежало по порядку (09:00, 12:00, 19:00...)
+    club_settings["disciplines"][disc_id]["schedule"][day].sort(key=lambda x: x["time"])
+    
+    # Твоя родная функция сохранения в Postgres + автоматический пуш в Redis!
+    await save_club_settings(session, redis, bot.token, club_id, club_settings)
+    await state.clear()
+    
+    day_names = {"mon": "Понедельник", "tue": "Вторник", "wed": "Среда", "thu": "Четверг", "fri": "Пятница", "sat": "Суббота", "sun": "Воскресенье"}
+    
+    await message.answer(
+        f"✅ <b>Занятие успешно добавлено в расписание!</b>\n\n"
+        f"📅 День: <b>{day_names[day]}</b>\n"
+        f"⏱ Время: <b>{time_text}</b>\n"
+        f"👤 Инструктор: <b>{coach_text}</b>\n"
+        f"🔢 Мест в группе: <b>{max_slots}</b>",
+        parse_mode="HTML"
+    )
+
+
+
