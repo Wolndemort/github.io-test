@@ -1,7 +1,7 @@
 import asyncio
 import os
 import sys
-from fastapi.middleware.proxy_headers import ProxyHeadersMiddleware
+from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 from contextlib import asynccontextmanager
 from fastapi import Request
 from datetime import datetime
