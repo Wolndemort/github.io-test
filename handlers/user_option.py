@@ -140,6 +140,89 @@ async def universal_profile_handler(
                 await event.answer("Ошибка обновления данных")
 
 
+@router.callback_query(F.data == 'detailed_status_info')
+async def detailed_status_handler(
+        callback: types.CallbackQuery,
+        session: AsyncSession,
+        club: Club
+):
+    user_id = callback.from_user.id
+    now = datetime.now()
+
+    # Запрашиваем студентов этого родителя для текущего клуба
+    stmt = select(Student).where(
+        Student.parent_id == user_id,
+        Student.club_id == club.id
+    ).order_by(Student.name)
+
+    result = await session.execute(stmt)
+    students = result.scalars().all()
+
+    if not students:
+        await callback.answer("⚠️ У вас нет привязанных атлетов для просмотра деталей.", show_alert=True)
+        return
+
+    # Заголовок нового экрана
+    detail_text = f"📊 <b>Подробный статус абонементов</b>\n🏰 Клуб: <b>{club.name}</b>\n\n"
+
+    for s in students:
+        # 1. Расчет дней до окончания или сколько дней назад истек
+        if s.expire_date:
+            days_left = (s.expire_date - now).days
+            if days_left >= 0:
+                time_info = f"⏳ Осталось дней: <b>{days_left}</b>"
+            else:
+                time_info = f"🗓 Истёк: <b>{abs(days_left)} дн. назад</b>"
+        else:
+            time_info = "⏳ Срок действия: <b>не установлен</b>"
+
+        # 2. Форматирование даты последнего визита
+        if s.last_visit:
+            last_visit_str = f"<b>{s.last_visit.strftime('%d.%m.%Y в %H:%M')}</b>"
+        else:
+            last_visit_str = "<i>еще не посещал занятия</i>"
+
+        # 3. Форматирование дня рождения
+        if s.birthday:
+            birthday_str = f"<b>{s.birthday.strftime('%d.%m.%Y')}</b>"
+        else:
+            birthday_str = "<i>не указан</i>"
+
+        # 4. Логика возможности заморозки (can_freeze)
+        freeze_status = "✅ Доступна" if s.can_freeze == 1 else "❌ Недоступна"
+
+        # Собираем блок информации по конкретному студенту
+        detail_text += (
+            f"👤 Атлет: <b>{s.name}</b>\n"
+            f"🆔 ID профиля: <code>{s.id}</code>\n"
+            f"🎂 День рождения: {birthday_str}\n"
+            f"{time_info}\n"
+            f"❄️ Возможность заморозки: {freeze_status}\n"
+            f"👟 Последний визит: {last_visit_str}\n"
+            f"───────────────────\n\n"
+        )
+
+    # Кнопка «Назад», которая использует старый callback 'profile'
+    # При нажатии на неё сработает ваш universal_profile_handler и вернет главный экран ЛК
+    back_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⬅️ Назад в Личный Кабинет", callback_data="profile")]
+    ])
+
+    try:
+        await callback.message.edit_text(
+            text=detail_text,
+            reply_markup=back_keyboard,
+            parse_mode="HTML"
+        )
+        await callback.answer()
+    except Exception as e:
+        logger.error(f"❌ Ошибка в детальном статусе: {e}")
+        await callback.answer("Ошибка при загрузке подробных данных")
+
+
+
+
+
 @router.callback_query(F.data.startswith('section_'))
 async def universal_section_handler(
         callback: types.CallbackQuery,
