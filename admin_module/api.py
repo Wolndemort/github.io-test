@@ -148,6 +148,11 @@ async def webapp_schedule_page(
     club_id: int = None,  # Получаем club_id прямо из URL (?club_id=...)
     session: AsyncSession = Depends(get_session)
 ):
+    # Железобетонные локальные импорты прямо внутри функции, чтобы избежать циклических зависимостей
+    import json
+    from database.db import Club
+    from sqlalchemy.future import select
+
     # Если из URL не пришел, пробуем вытащить из поддомена
     if not club_id:
         try:
@@ -167,10 +172,9 @@ async def webapp_schedule_page(
         return HTMLResponse(content="<h1>🏰 Клуб не найден в системе SpeedyCRM</h1>", status_code=404)
 
     # Превращаем конфиг в JSON-строку для безопасной передачи прямо в JavaScript фронтенда
-    club_settings_json = json.dumps(club.club_settings or {})
+    club_settings_json = json.dumps(club.club_settings or {}, ensure_ascii=False)
 
-    # Дальше идет твоя строка html_content = """ ...
-
+    # Обычный HTML-текст БЕЗ буквы 'f' в начале строки
     html_content = """
     <!DOCTYPE html>
     <html lang="ru">
@@ -178,49 +182,45 @@ async def webapp_schedule_page(
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Расписание занятий</title>
-        <script src="https://telegram.org/js/telegram-web-app.js"></script>
+        
+        <!-- Правильный скрипт Telegram WebApp -->
+        <script src="https://telegram.org"></script>
+        
         <style>
-            :root {{
+            :root {
                 --tg-theme-bg-color: #181818;
                 --tg-theme-text-color: #ffffff;
                 --tg-theme-hint-color: #aaaaaa;
                 --tg-theme-button-color: #2481cc;
                 --tg-theme-button-text-color: #ffffff;
-            }}
-            body {{
+            }
+            body {
                 background-color: var(--tg-theme-bg-color, #1c1c1e);
                 color: var(--tg-theme-text-color, #ffffff);
                 font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
                 margin: 0;
                 padding: 16px;
                 -webkit-user-select: none;
-            }}
-            h2 {{ margin-top: 0; color: var(--tg-theme-button-color); text-align: center; }}
-            .discipline-section {{
-                margin-bottom: 24px;
-            }}
-            .discipline-title {{
+            }
+            h2 { margin-top: 0; color: var(--tg-theme-button-color); text-align: center; }
+            .discipline-section { margin-bottom: 24px; }
+            .discipline-title {
                 font-size: 20px;
                 font-weight: bold;
                 color: var(--tg-theme-button-color);
                 margin-bottom: 12px;
                 border-bottom: 2px solid var(--tg-theme-button-color);
                 padding-bottom: 4px;
-            }}
-            .day-container {{
+            }
+            .day-container {
                 background: #2c2c2e;
                 border-radius: 12px;
                 padding: 12px;
                 margin-bottom: 12px;
                 border: 1px solid #3a3a3c;
-            }}
-            .day-title {{
-                font-size: 16px;
-                font-weight: bold;
-                margin-bottom: 8px;
-                color: #ff9f0a;
-            }}
-            .lesson-card {{
+            }
+            .day-title { font-size: 16px; font-weight: bold; margin-bottom: 8px; color: #ff9f0a; }
+            .lesson-card {
                 display: flex;
                 justify-content: space-between;
                 align-items: center;
@@ -228,9 +228,9 @@ async def webapp_schedule_page(
                 padding: 10px;
                 border-radius: 8px;
                 margin-bottom: 8px;
-            }}
-            .lesson-card:last-child {{ margin-bottom: 0; }}
-            .time {{
+            }
+            .lesson-card:last-child { margin-bottom: 0; }
+            .time {
                 font-family: monospace;
                 font-size: 16px;
                 font-weight: bold;
@@ -238,15 +238,19 @@ async def webapp_schedule_page(
                 color: var(--tg-theme-button-text-color);
                 padding: 4px 8px;
                 border-radius: 6px;
-            }}
-            .info {{ flex-grow: 1; margin-left: 12px; }}
-            .coach {{ font-size: 14px; color: #aeaeb2; }}
-            .slots {{ font-size: 12px; color: #30d158; text-align: right; }}
-            .no-lessons {{ color: #8e8e93; font-style: italic; font-size: 13px; }}
+            }
+            .info { flex-grow: 1; margin-left: 12px; }
+            .coach { font-size: 14px; color: #aeaeb2; }
+            .slots { font-size: 12px; color: #30d158; text-align: right; }
+            .no-lessons { color: #8e8e93; font-style: italic; font-size: 13px; }
         </style>
     </head>
     <body>
-        <h2>🏰 {{CLUB_NAME}}</h2>
+        <h2>🏰 <span id="club-name-target">Загрузка...</span></h2>
+        
+        <!-- Скрытый контейнер, куда Python безопасно положит строку настроек -->
+        <div id="raw-settings-holder" data-settings='{{CLUB_SETTINGS_JSON}}' data-name="{{CLUB_NAME}}" style="display:none;"></div>
+        
         <div id="schedule-root">Загрузка модулей...</div>
 
         <script>
@@ -254,93 +258,99 @@ async def webapp_schedule_page(
             tg.ready();
             tg.expand();
 
-            // Вшиваем настройки клуба напрямую из Python в JavaScript
-            const clubSettings = {{CLUB_SETTINGS_JSON}};
+            // Безопасно вытаскиваем данные из HTML-атрибутов, избегая поломки синтаксиса JS
+            const holder = document.getElementById('raw-settings-holder');
+            const rawName = holder.getAttribute('data-name') || 'Без названия';
+            const rawSettings = holder.getAttribute('data-settings') || '{}';
+
+            // Подставляем название клуба в заголовок страницы
+            document.getElementById('club-name-target').innerText = rawName;
+
+            let clubSettings = {};
+            try {
+                clubSettings = JSON.parse(rawSettings);
+            } catch (e) {
+                document.getElementById('schedule-root').innerHTML = '<p style="color:red;">❌ Ошибка парсинга настроек: ' + e.message + '</p>';
+            }
             
-            const dayNames = {{
+            const dayNames = {
                 "mon": "Понедельник", "tue": "Вторник", "wed": "Среда",
                 "thu": "Четверг", "fri": "Пятница", "sat": "Суббота", "sun": "Воскресенье"
-            }};
+            };
 
-            function renderAllSchedules() {{
+            function renderAllSchedules() {
                 const root = document.getElementById('schedule-root');
                 root.innerHTML = ''; 
 
-                const disciplines = clubSettings.disciplines || {{}};
+                const disciplines = clubSettings.disciplines || {};
                 let activeDisciplinesCount = 0;
 
-                for (const [discKey, discData] of Object.entries(disciplines)) {{
-                    // Выводим расписание только для тех секций, которые админ ВКЛЮЧИЛ в системе
+                for (const [discKey, discData] of Object.entries(disciplines)) {
                     if (!discData.active) continue;
                     activeDisciplinesCount++;
 
                     const discSection = document.createElement('div');
                     discSection.className = 'discipline-section';
-                    discSection.innerHTML = `<div class="discipline-title">🥋 ${{discData.name}}</div>`;
+                    discSection.innerHTML = `<div class="discipline-title">🥋 ${discData.name}</div>`;
 
-                    const scheduleData = discData.schedule || {{}};
+                    const scheduleData = discData.schedule || {};
                     
-                    // Если расписание старое (строка) или пустое
-                    if (typeof scheduleData === 'string' || !scheduleData) {{
+                    if (typeof scheduleData === 'string' || !scheduleData) {
                         discSection.innerHTML += '<div class="day-container"><div class="no-lessons">⏳ Расписание заполняется администратором...</div></div>';
                         root.appendChild(discSection);
                         continue;
-                    }}
+                    }
 
-                    // Пробегаемся по дням недели внутри дисциплины
-                    for (const [dayKey, dayName] of Object.entries(dayNames)) {{
+                    for (const [dayKey, dayName] of Object.entries(dayNames)) {
                         const lessons = scheduleData[dayKey] || [];
-                        if (lessons.length === 0) continue; // Пустые дни скрываем, чтобы не забивать экран
+                        if (lessons.length === 0) continue;
 
                         const dayDiv = document.createElement('div');
                         dayDiv.className = 'day-container';
-                        dayDiv.innerHTML = `<div class="day-title">${{dayName}}</div>`;
+                        dayDiv.innerHTML = `<div class="day-title">${dayName}</div>`;
 
-                        lessons.forEach(lesson => {{
+                        lessons.forEach(lesson => {
                             const freeSlots = Math.max(0, lesson.max_slots - lesson.taken_slots);
                             dayDiv.innerHTML += `
                                 <div class="lesson-card">
-                                    <div class="time">${{lesson.time}}</div>
+                                    <div class="time">${lesson.time}</div>
                                     <div class="info">
-                                        <div class="coach">👤 ${{lesson.coach}}</div>
+                                        <div class="coach">👤 ${lesson.coach}</div>
                                     </div>
                                     <div class="slots">
                                         <div>Свободно</div>
-                                        <b>${{freeSlots}} / ${{lesson.max_slots}}</b>
+                                        <b>${freeSlots} / ${lesson.max_slots}</b>
                                     </div>
                                 </div>
                             `;
-                        }});
+                        });
                         discSection.appendChild(dayDiv);
-                    }}
+                    }
 
-                    // Если админ включил секцию, но вообще ни одного занятия не добавил
-                    if (discSection.children.length === 1) {{
+                    if (discSection.children.length === 1) {
                         discSection.innerHTML += '<div class="day-container"><div class="no-lessons">🗓 Тренировок на этой неделе пока нет.</div></div>';
-                    }}
+                    }
 
                     root.appendChild(discSection);
-                }}
+                }
 
-                if (activeDisciplinesCount === 0) {{
+                if (activeDisciplinesCount === 0) {
                     root.innerHTML = '<p class="no-lessons">В клубе пока нет активных спортивных секций.</p>';
-                }}
-            }}
+                }
+            }
 
-            // Рендерим расписание из кэша, переданного сервером
-             // Обернем рендер в try/catch, чтобы вывести ошибку прямо на экран смартфона, если JS упадет
             try {
                 renderAllSchedules();
             } catch (err) {
-                document.getElementById('schedule-root').innerHTML = 
-                    '<p style="color:red;">❌ Ошибка JS: ' + err.message + '</p>';
+                document.getElementById('schedule-root').innerHTML = '<p style="color:red;">❌ Ошибка JS при рендере: ' + err.message + '</p>';
             }
         </script>
     </body>
     </html>"""
-    
-    html_content = html_content.replace("{{CLUB_NAME}}", club.name)
-    html_content = html_content.replace("{{CLUB_SETTINGS_JSON}}", club_settings_json)
+
+    # Подставляем реальные данные на свои места
+    html_content = html_content.replace("{{CLUB_NAME}}", str(club.name or "Без названия"))
+    html_content = html_content.replace("{{CLUB_SETTINGS_JSON}}", str(club_settings_json))
 
     return HTMLResponse(content=html_content, status_code=200)
 
