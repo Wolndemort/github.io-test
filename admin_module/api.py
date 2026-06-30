@@ -173,30 +173,50 @@ async def webapp_schedule_page(
         "thu": "Четверг", "fri": "Пятница", "sat": "Суббота", "sun": "Воскресенье"
     }
 
-    # Собираем полноценное расписание прямо в Python
+    # Железобетонная сборка расписания
     disciplines_html = ""
     
     if not disciplines:
         disciplines_html = '<p class="no-lessons">В клубе пока нет созданных спортивных секций.</p>'
     else:
         for disc_key, disc_data in disciplines.items():
+            if not isinstance(disc_data, dict):
+                continue
+                
             disc_name = disc_data.get("name", "Спортивная секция")
             schedule_data = disc_data.get("schedule", {})
+            if not isinstance(schedule_data, dict):
+                schedule_data = {}
             
-            # Собираем блоки дней для этой дисциплины
             days_html = ""
             
             for day_key, day_title in day_names.items():
                 lessons = schedule_data.get(day_key, [])
                 if not lessons or not isinstance(lessons, list):
-                    continue  # Пропускаем пустые дни, чтобы не забивать экран
+                    continue
                 
                 lessons_cards_html = ""
                 for lesson in lessons:
-                    time_str = lesson.get("time", "00:00")
-                    coach_str = lesson.get("coach", "Инструктор")
-                    max_slots = int(lesson.get("max_slots", 0))
-                    taken_slots = int(lesson.get("taken_slots", 0))
+                    if not isinstance(lesson, dict):
+                        continue
+                        
+                    time_str = str(lesson.get("time", "00:00"))
+                    coach_str = str(lesson.get("coach", "Инструктор"))
+                    
+                    # Пытаемся прочитать лимиты по любым возможным ключам
+                    max_slots = lesson.get("max_slots") or lesson.get("slots") or lesson.get("limit") or 0
+                    taken_slots = lesson.get("taken_slots") or 0
+                    
+                    try:
+                        max_slots = int(max_slots)
+                    except (ValueError, TypeError):
+                        max_slots = 50
+                        
+                    try:
+                        taken_slots = int(taken_slots)
+                    except (ValueError, TypeError):
+                        taken_slots = 0
+                        
                     free_slots = max(0, max_slots - taken_slots)
                     
                     lessons_cards_html += f"""
@@ -212,14 +232,14 @@ async def webapp_schedule_page(
                     </div>
                     """
                 
-                days_html += f"""
-                <div class="day-container">
-                    <div class="day-title">{day_title}</div>
-                    {lessons_cards_html}
-                </div>
-                """
+                if lessons_cards_html:
+                    days_html += f"""
+                    <div class="day-container">
+                        <div class="day-title">{day_title}</div>
+                        {lessons_cards_html}
+                    </div>
+                    """
             
-            # Если вообще ни одной тренировки во всех днях не нашли
             if not days_html:
                 days_html = """
                 <div class="day-container">
@@ -324,7 +344,6 @@ async def webapp_schedule_page(
     """
 
     return HTMLResponse(content=html_content, status_code=200)
-
 
 
     
