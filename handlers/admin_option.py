@@ -1,7 +1,7 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from handlers.skud import trigger_dingtian_turnstile, save_and_test_turnstile
 from sqlalchemy.orm.attributes import flag_modified
-from handlers.states import AdminStates, AdminSettings, TurnstileSetup, AdminTariffStates
+from handlers.states import AdminStates, AdminSettings, TurnstileSetup, AdminTariffStates,AdminScheduleStates
 from redis.asyncio import Redis
 from sqlalchemy import update
 import pandas as pd
