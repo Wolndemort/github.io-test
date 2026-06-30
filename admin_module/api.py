@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from starlette import status
 from starlette.responses import StreamingResponse
-from database.db import User, Student
+from database.db import User, Student, Club
 from database.db import get_session
 from config import fastapi_key
 
