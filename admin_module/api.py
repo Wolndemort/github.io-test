@@ -161,14 +161,14 @@ async def webapp_schedule_page(
     # Превращаем конфиг в JSON-строку для безопасной передачи прямо в JavaScript фронтенда
     club_settings_json = json.dumps(club.club_settings or {})
 
-    html_content = f"""
+    html_content = """
     <!DOCTYPE html>
     <html lang="ru">
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Расписание занятий</title>
-        <script src="https://telegram.org"></script>
+        <script src="https://telegram.org/js/telegram-web-app.js"></script>
         <style>
             :root {{
                 --tg-theme-bg-color: #181818;
