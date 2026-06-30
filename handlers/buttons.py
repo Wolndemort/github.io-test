@@ -1,5 +1,4 @@
 from datetime import datetime
-
 from aiogram import Router
 from aiogram.utils.keyboard import ReplyKeyboardBuilder
 from aiogram.types import WebAppInfo, KeyboardButton
@@ -149,7 +148,7 @@ def admin_keyboard(club_settings: dict, club_id: int, subscription_date: datetim
     # ИСПРАВЛЕНО: Убраны лишние пробелы в начале строки и добавлены )) в конце
     builder.row(types.InlineKeyboardButton(
         text="🗓 Расписание (WebApp)",
-        web_app=WebAppInfo(url=f"{base_url}/webapp/schedule")
+        web_app=WebAppInfo(url=f"{base_url}/webapp/schedule?club_id={club_id}")
     ))
     
     builder.row(types.InlineKeyboardButton(
