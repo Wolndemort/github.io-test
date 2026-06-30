@@ -236,7 +236,7 @@ async def webapp_schedule_page(
         </style>
     </head>
     <body>
-        <h2>🏰 {club.name}</h2>
+        <h2>🏰 {{CLUB_NAME}}</h2>
         <div id="schedule-root">Загрузка модулей...</div>
 
         <script>
@@ -245,7 +245,7 @@ async def webapp_schedule_page(
             tg.expand();
 
             // Вшиваем настройки клуба напрямую из Python в JavaScript
-            const clubSettings = {club_settings_json};
+            const clubSettings = {{CLUB_SETTINGS_JSON}};
             
             const dayNames = {{
                 "mon": "Понедельник", "tue": "Вторник", "wed": "Среда",
@@ -323,6 +323,10 @@ async def webapp_schedule_page(
     </body>
     </html>
     """
+    
+    html_content = html_content.replace("{{CLUB_NAME}}", club.name)
+    html_content = html_content.replace("{{CLUB_SETTINGS_JSON}}", club_settings_json)
+
     return HTMLResponse(content=html_content, status_code=200)
 
 
