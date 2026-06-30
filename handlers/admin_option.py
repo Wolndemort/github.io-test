@@ -1294,6 +1294,34 @@ async def admin_add_tariff_count(
     await return_to_tariff_menu(message, club_settings, disc_id)
 
 
+# Ловим клик из главного меню админа и предлагаем выбрать секцию
+@router.callback_query(F.data == "admin_schedule_main")
+async def admin_schedule_select_discipline(callback: types.CallbackQuery, club_settings: dict):
+    disciplines = club_settings.get("disciplines", {})
+    
+    if not disciplines:
+        return await callback.answer("❌ В конфиге клуба пока нет созданных дисциплин!", show_alert=True)
+        
+    builder = InlineKeyboardBuilder()
+    
+    # Динамически выводим кнопками только те дисциплины, которые есть в твоем DEFAULT_CLUB_SETTINGS
+    for disc_id, disc_data in disciplines.items():
+        builder.row(types.InlineKeyboardButton(
+            text=f"🥋 {disc_data['name']}",
+            callback_data=f"adm_sch_manage_{disc_id}" # Ведёт прямо на наш готовый хендлер с днями недели!
+        ))
+        
+    builder.row(types.InlineKeyboardButton(text="🔙 Назад в админку", callback_data="admin_settings")) # или твой колбэк возврата в меню
+    
+    await callback.message.edit_text(
+        text="📅 <b>Управление расписанием</b>\n\nВыберите спортивную дисциплину для настройки сетки занятий:",
+        reply_markup=builder.as_markup(),
+        parse_mode="HTML"
+    )
+    await callback.answer()
+
+
+
 
 # 1. Выбор дня недели (Полная клавиатура на все 7 дней)
 @router.callback_query(F.data.startswith("adm_sch_manage_"))
