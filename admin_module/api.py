@@ -247,86 +247,41 @@ async def webapp_schedule_page(
         <div id="schedule-root">Загрузка модулей...</div>
 
         <script>
-            const tg = window.Telegram.WebApp;
-            tg.ready();
-            tg.expand();
-
-            const clubSettings = JSON.parse('{{CLUB_SETTINGS_JSON}}');
-
-            
-            const dayNames = {
-                "mon": "Понедельник", "tue": "Вторник", "wed": "Среда",
-                "thu": "Четверг", "fri": "Пятница", "sat": "Суббота", "sun": "Воскресенье"
+            // Ловим абсолютно все ошибки на странице и выводим их текстом на экран
+            window.onerror = function(message, source, lineno, colno, error) {
+                document.getElementById('schedule-root').innerHTML = 
+                    `<div style="color:#ff453a; padding:10px; background:#2c2c2e; border-radius:8px;">
+                        <h3>💥 Критическая ошибка JS:</h3>
+                        <p>${message}</p>
+                        <small>Строка: ${lineno}, Колонка: ${colno}</small>
+                     </div>`;
+                return true;
             };
 
-            function renderAllSchedules() {
-                const root = document.getElementById('schedule-root');
-                root.innerHTML = ''; 
-
-                const disciplines = clubSettings.disciplines || {};
-                let activeDisciplinesCount = 0;
-
-                for (const [discKey, discData] of Object.entries(disciplines)) {
-                    // ВРЕМЕННО ОТКЛЮЧИЛИ ПРОВЕРКУ АКТИВНОСТИ, ЧТОБЫ УВИДЕТЬ ДЕФОЛТНЫЕ СЕКЦИИ:
-                    // if (!discData.active) continue; 
-                    activeDisciplinesCount++;
-
-                    const discSection = document.createElement('div');
-                    discSection.className = 'discipline-section';
-                    discSection.innerHTML = `<div class="discipline-title">🥋 ${discData.name}</div>`;
-
-                    const scheduleData = discData.schedule || {};
-                    
-                    if (typeof scheduleData === 'string' || !scheduleData) {
-                        discSection.innerHTML += '<div class="day-container"><div class="no-lessons">⏳ Расписание заполняется администратором...</div></div>';
-                        root.appendChild(discSection);
-                        continue;
-                    }
-
-                    for (const [dayKey, dayName] of Object.entries(dayNames)) {
-                        const lessons = scheduleData[dayKey] || [];
-                        if (lessons.length === 0) continue;
-
-                        const dayDiv = document.createElement('div');
-                        dayDiv.className = 'day-container';
-                        dayDiv.innerHTML = `<div class="day-title">${dayName}</div>`;
-
-                        lessons.forEach(lesson => {
-                            const freeSlots = Math.max(0, lesson.max_slots - lesson.taken_slots);
-                            dayDiv.innerHTML += `
-                                <div class="lesson-card">
-                                    <div class="time">${lesson.time}</div>
-                                    <div class="info">
-                                        <div class="coach">👤 ${lesson.coach}</div>
-                                    </div>
-                                    <div class="slots">
-                                        <div>Свободно</div>
-                                        <b>${freeSlots} / ${lesson.max_slots}</b>
-                                    </div>
-                                </div>
-                            `;
-                        });
-                        discSection.appendChild(dayDiv);
-                    }
-
-                    if (discSection.children.length === 1) {
-                        discSection.innerHTML += '<div class="day-container"><div class="no-lessons">🗓 Тренировок на этой неделе пока нет.</div></div>';
-                    }
-
-                    root.appendChild(discSection);
-                }
-
-                if (activeDisciplinesCount === 0) {
-                    root.innerHTML = '<p class="no-lessons">В клубе пока нет активных спортивных секций.</p>';
-                }
+            // Безопасно проверяем WebApp
+            if (window.Telegram && window.Telegram.WebApp) {
+                const tg = window.Telegram.WebApp;
+                tg.ready();
+                tg.expand();
             }
 
-            try {
-                renderAllSchedules();
-            } catch (err) {
-                document.getElementById('schedule-root').innerHTML = '<p style="color:red;">❌ Ошибка рендера: ' + err.message + '</p>';
-            }
+            // Вытаскиваем настройки, переданные из Python
+            const clubSettings = {{CLUB_SETTINGS_JSON}};
+            
+            // Выведем сырой JSON на экран, чтобы своими глазами увидеть, пришли ли данные из БД
+            const debugDiv = document.createElement('pre');
+            debugDiv.style.background = '#1c1c1e';
+            debugDiv.style.padding = '10px';
+            debugDiv.style.color = '#30d158';
+            debugDiv.style.fontSize = '11px';
+            debugDiv.style.overflowX = 'auto';
+            debugDiv.innerText = "Данные из БД:\n" + JSON.stringify(clubSettings, null, 2);
+            
+            const root = document.getElementById('schedule-root');
+            root.innerHTML = ''; // Стираем "Загрузка модулей..."
+            root.appendChild(debugDiv); // Вставляем сырые данные клуба
         </script>
+
     </body>
     </html>"""
 
