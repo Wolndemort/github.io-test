@@ -141,25 +141,34 @@ async def export_students_to_excel(request: Request, session: AsyncSession = Dep
 
 from fastapi.responses import HTMLResponse
 # Убедитесь, что импортированы: Club, Student, datetime
-
 @router.get("/webapp/schedule", response_class=HTMLResponse)
 async def webapp_schedule_page(
     request: Request,
+    club_id: int = None,  # Получаем club_id прямо из URL (?club_id=...)
     session: AsyncSession = Depends(get_session)
 ):
-    # Автоматически вытаскиваем club_id из поддомена (твоя крутая функция!)
-    club_id = get_club_id_from_host(request)
+    # Если из URL не пришел, пробуем вытащить из поддомена
+    if not club_id:
+        try:
+            club_id = get_club_id_from_host(request)
+        except Exception:
+            club_id = None
 
-    # Тянем настройки клуба, чтобы взять актуальные дисциплины
+    if not club_id:
+        return HTMLResponse(content="<h1>❌ Ошибка: Не удалось определить ID клуба</h1>", status_code=400)
+
+    # Ищем клуб в базе данных по полученному club_id
     stmt = select(Club).where(Club.id == club_id)
     result = await session.execute(stmt)
     club = result.scalar_one_or_none()
     
     if not club:
-        return "<h1>🏰 Клуб не найден в системе SpeedyCRM</h1>"
+        return HTMLResponse(content="<h1>🏰 Клуб не найден в системе SpeedyCRM</h1>", status_code=404)
 
     # Превращаем конфиг в JSON-строку для безопасной передачи прямо в JavaScript фронтенда
     club_settings_json = json.dumps(club.club_settings or {})
+
+    # Дальше идет твоя строка html_content = """ ...
 
     html_content = """
     <!DOCTYPE html>
