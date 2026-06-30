@@ -143,42 +143,194 @@ async def export_students_to_excel(request: Request, session: AsyncSession = Dep
 from fastapi.responses import HTMLResponse
 # Убедитесь, что импортированы: Club, Student, datetime
 
-
 @router.get("/webapp/schedule", response_class=HTMLResponse)
 async def webapp_schedule_page(
     request: Request,
     club_id: int = None,
     session: AsyncSession = Depends(get_session)
 ):
+    import json
     from database.db import Club
     from sqlalchemy.future import select
-    import time
 
     if not club_id:
         try: club_id = get_club_id_from_host(request)
         except Exception: club_id = None
 
+    if not club_id:
+        return HTMLResponse(content="<h1>❌ Ошибка: Не удалось определить ID клуба</h1>", status_code=400)
+
     stmt = select(Club).where(Club.id == club_id)
     result = await session.execute(stmt)
     club = result.scalar_one_or_none()
-    club_name = club.name if club else "Клуб не найден"
+    
+    if not club:
+        return HTMLResponse(content="<h1>🏰 Клуб не найден в системе SpeedyCRM</h1>", status_code=404)
 
-    # Выводим текущее время сервера, чтобы сразу увидеть, живой код или кэш
-    current_time = time.strftime("%H:%M:%S")
+    # Так как у тебя JSONB, Алхимия уже вернула dict. 
+    settings_dict = club.club_settings if isinstance(club.club_settings, dict) else {}
+    club_settings_json = json.dumps(settings_dict, ensure_ascii=False)
 
-    html_test = f"""
+    html_content = """
     <!DOCTYPE html>
-    <html>
-    <head><meta charset="UTF-8"></head>
-    <body style="background: #1c1c1e; color: #30d158; padding: 20px; font-family: sans-serif;">
-        <h1>🔥 ПРОВЕРКА ДЕПЛОЯ И КЭША</h1>
-        <h2>🏰 Клуб: {club_name} (ID: {club_id})</h2>
-        <p>⏰ Время на сервере: <b>{current_time}</b></p>
-        <p>Если ты видишь этот текст, значит новый код успешно встал!</p>
+    <html lang="ru">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Расписание занятий</title>
+        <script src="https://telegram.org"></script>
+        <style>
+            :root {
+                --tg-theme-bg-color: #181818;
+                --tg-theme-text-color: #ffffff;
+                --tg-theme-hint-color: #aaaaaa;
+                --tg-theme-button-color: #2481cc;
+                --tg-theme-button-text-color: #ffffff;
+            }
+            body {
+                background-color: var(--tg-theme-bg-color, #1c1c1e);
+                color: var(--tg-theme-text-color, #ffffff);
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+                margin: 0;
+                padding: 16px;
+                -webkit-user-select: none;
+            }
+            h2 { margin-top: 0; color: var(--tg-theme-button-color); text-align: center; }
+            .discipline-section { margin-bottom: 24px; }
+            .discipline-title {
+                font-size: 20px;
+                font-weight: bold;
+                color: var(--tg-theme-button-color);
+                margin-bottom: 12px;
+                border-bottom: 2px solid var(--tg-theme-button-color);
+                padding-bottom: 4px;
+            }
+            .day-container {
+                background: #2c2c2e;
+                border-radius: 12px;
+                padding: 12px;
+                margin-bottom: 12px;
+                border: 1px solid #3a3a3c;
+            }
+            .day-title { font-size: 16px; font-weight: bold; margin-bottom: 8px; color: #ff9f0a; }
+            .lesson-card {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                background: #3a3a3c;
+                padding: 10px;
+                border-radius: 8px;
+                margin-bottom: 8px;
+            }
+            .lesson-card:last-child { margin-bottom: 0; }
+            .time {
+                font-family: monospace;
+                font-size: 16px;
+                font-weight: bold;
+                background: var(--tg-theme-button-color);
+                color: var(--tg-theme-button-text-color);
+                padding: 4px 8px;
+                border-radius: 6px;
+            }
+            .info { flex-grow: 1; margin-left: 12px; }
+            .coach { font-size: 14px; color: #aeaeb2; }
+            .slots { font-size: 12px; color: #30d158; text-align: right; }
+            .no-lessons { color: #8e8e93; font-style: italic; font-size: 13px; }
+        </style>
+    </head>
+    <body>
+        <h2>🏰 {{CLUB_NAME}}</h2>
+        <div id="schedule-root">Загрузка модулей...</div>
+
+        <script>
+            const tg = window.Telegram.WebApp;
+            tg.ready();
+            tg.expand();
+
+            // Подставляем настройки как чистый JS-объект напрямую
+            const clubSettings = {{CLUB_SETTINGS_JSON}};
+            
+            const dayNames = {
+                "mon": "Понедельник", "tue": "Вторник", "wed": "Среда",
+                "thu": "Четверг", "fri": "Пятница", "sat": "Суббота", "sun": "Воскресенье"
+            };
+
+            function renderAllSchedules() {
+                const root = document.getElementById('schedule-root');
+                root.innerHTML = ''; 
+
+                const disciplines = clubSettings.disciplines || {};
+                let disciplinesCount = 0;
+
+                for (const [discKey, discData] of Object.entries(disciplines)) {
+                    // Специально убрали проверку .active, чтобы показать твои дефолтные секции!
+                    disciplinesCount++;
+
+                    const discSection = document.createElement('div');
+                    discSection.className = 'discipline-section';
+                    discSection.innerHTML = `<div class="discipline-title">🥋 ${discData.name}</div>`;
+
+                    const scheduleData = discData.schedule || {};
+                    
+                    if (typeof scheduleData === 'string' || !scheduleData) {
+                        discSection.innerHTML += '<div class="day-container"><div class="no-lessons">⏳ Расписание заполняется администратором...</div></div>';
+                        root.appendChild(discSection);
+                        continue;
+                    }
+
+                    for (const [dayKey, dayName] of Object.entries(dayNames)) {
+                        const lessons = scheduleData[dayKey] || [];
+                        if (lessons.length === 0) continue;
+
+                        const dayDiv = document.createElement('div');
+                        dayDiv.className = 'day-container';
+                        dayDiv.innerHTML = `<div class="day-title">${dayName}</div>`;
+
+                        lessons.forEach(lesson => {
+                            const freeSlots = Math.max(0, lesson.max_slots - lesson.taken_slots);
+                            dayDiv.innerHTML += `
+                                <div class="lesson-card">
+                                    <div class="time">${lesson.time}</div>
+                                    <div class="info">
+                                        <div class="coach">👤 ${lesson.coach}</div>
+                                    </div>
+                                    <div class="slots">
+                                        <div>Свободно</div>
+                                        <b>${freeSlots} / ${lesson.max_slots}</b>
+                                    </div>
+                                </div>
+                            `;
+                        });
+                        discSection.appendChild(dayDiv);
+                    }
+
+                    // Если вообще ни одного занятия не добавлено в этот день
+                    if (discSection.children.length === 1) {
+                        discSection.innerHTML += '<div class="day-container"><div class="no-lessons">🗓 Тренировок на этой неделе пока нет.</div></div>';
+                    }
+
+                    root.appendChild(discSection);
+                }
+
+                if (disciplinesCount === 0) {
+                    root.innerHTML = '<p class="no-lessons">В клубе пока нет созданных спортивных секций.</p>';
+                }
+            }
+
+            try {
+                renderAllSchedules();
+            } catch (err) {
+                document.getElementById('schedule-root').innerHTML = '<p style="color:red;">❌ Ошибка рендера JS: ' + err.message + '</p>';
+            }
+        </script>
     </body>
-    </html>
-    """
-    return HTMLResponse(content=html_test, status_code=200)
+    </html>"""
+
+    html_content = html_content.replace("{{CLUB_NAME}}", str(club.name or "Без названия"))
+    html_content = html_content.replace("{{CLUB_SETTINGS_JSON}}", club_settings_json)
+
+    return HTMLResponse(content=html_content, status_code=200)
+
 
 
     
