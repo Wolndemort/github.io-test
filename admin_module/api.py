@@ -52,20 +52,24 @@ def get_club_id_from_host(request: Request) -> int:
 
 # 1. Добавляем роут /admin, который просила кнопка в ТГ (убрали get_api_key!)
 @router.get("/admin", response_class=HTMLResponse)
-async def get_admin_dashboard(request: Request, session: AsyncSession = Depends(get_session)):
+async def get_admin_dashboard(
+        request: Request,  # <--- ИСПРАВИЛИ ОПЕЧАТКУ ЗДЕСЬ!
+        session: AsyncSession = Depends(get_session)
+):
     club_id = get_club_id_from_host(request)
 
-    # ЗДЕСЬ в будущем ты добавишь фильтрацию по твоему club_id, например:
-    # result = await session.execute(select(Student).where(Student.club_id == club_id))
-    result = await session.execute(select(Student))
+    result = await session.execute(
+        select(Student).where(Student.club_id == club_id)
+    )
     students = result.scalars().all()
 
     return templates.TemplateResponse(
-        "admin_table.html",  # Создай этот HTML шаблон в папке templates для главной таблицы
+        "stats.html",  # Временно отдаем stats.html, пока не сверстаешь полноценную админку
         {"request": request, "club_id": club_id, "students": students}
     )
 
 
+#
 # 2. Роут /revenue (убрали get_api_key, чтобы открывался в WebApp Телеграма)
 @router.get("/revenue", response_class=HTMLResponse)
 async def get_revenue_stats(
@@ -74,21 +78,39 @@ async def get_revenue_stats(
 ):
     club_id = get_club_id_from_host(request)
 
-    result = await session.execute(select(Student))
+    # ИЗОЛЯЦИЯ SAAS: Вытаскиваем студентов ТОЛЬКО этого конкретного клуба!
+    result = await session.execute(
+        select(Student).where(Student.club_id == club_id)
+    )
     students = result.scalars().all()
     if not students:
         return HTMLResponse(content="<h1>Данных пока нет</h1>", status_code=200)
 
+    # Безопасный сбор данных с защитой от None
     data = [
-        {"name": s.name, "balance": s.balance_lessons, 'is_frozen': s.is_frozen}
+        {
+            "name": s.name or "Атлет",
+            "balance": s.balance_lessons if s.balance_lessons is not None else 0,
+            'is_frozen': s.is_frozen if s.is_frozen is not None else 0
+        }
         for s in students
     ]
     df = pd.DataFrame(data)
 
+    # 1. Общий баланс занятий для турникета считаем по ВСЕМ в этом клубе
     total_lessons = df["balance"].sum()
-    estimated_revenue = total_lessons * 500
+
+    # 2. ФИКС ФИНАНСОВ: Для выручки отсекаем технический баланс 999
+    real_packages = df[df["balance"] < 500]
+
+    # Считаем реальную выручку на основе проданных пакетов занятий
+    estimated_revenue = real_packages["balance"].sum() * 500
+
     frozen_count = df[df["is_frozen"] == 1].shape[0]
-    top_students = df.nlargest(3, "balance")[["name", "balance"]].to_dict(orient="records")
+
+    # Для Топа атлетов тоже отсекаем 999, чтобы там висели реальные люди
+    real_students_df = df[df["balance"] < 500]
+    top_students = real_students_df.nlargest(3, "balance")[["name", "balance"]].to_dict(orient="records")
 
     return templates.TemplateResponse(
         "stats.html",
