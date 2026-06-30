@@ -142,18 +142,19 @@ async def export_students_to_excel(request: Request, session: AsyncSession = Dep
 
 from fastapi.responses import HTMLResponse
 # Убедитесь, что импортированы: Club, Student, datetime
+
+
+
 @router.get("/webapp/schedule", response_class=HTMLResponse)
 async def webapp_schedule_page(
     request: Request,
-    club_id: int = None,  # Получаем club_id прямо из URL (?club_id=...)
+    club_id: int = None,
     session: AsyncSession = Depends(get_session)
 ):
-    # Железобетонные локальные импорты прямо внутри функции, чтобы избежать циклических зависимостей
     import json
     from database.db import Club
     from sqlalchemy.future import select
 
-    # Если из URL не пришел, пробуем вытащить из поддомена
     if not club_id:
         try:
             club_id = get_club_id_from_host(request)
@@ -163,7 +164,6 @@ async def webapp_schedule_page(
     if not club_id:
         return HTMLResponse(content="<h1>❌ Ошибка: Не удалось определить ID клуба</h1>", status_code=400)
 
-    # Ищем клуб в базе данных по полученному club_id
     stmt = select(Club).where(Club.id == club_id)
     result = await session.execute(stmt)
     club = result.scalar_one_or_none()
@@ -171,10 +171,10 @@ async def webapp_schedule_page(
     if not club:
         return HTMLResponse(content="<h1>🏰 Клуб не найден в системе SpeedyCRM</h1>", status_code=404)
 
-    # Превращаем конфиг в JSON-строку для безопасной передачи прямо в JavaScript фронтенда
-    club_settings_json = json.dumps(club.club_settings or {}, ensure_ascii=False)
+    # Берём словарь настроек из JSONB
+    settings_dict = club.club_settings if isinstance(club.club_settings, dict) else {}
+    club_settings_json = json.dumps(settings_dict, ensure_ascii=False)
 
-    # Обычный HTML-текст БЕЗ буквы 'f' в начале строки
     html_content = """
     <!DOCTYPE html>
     <html lang="ru">
@@ -182,10 +182,7 @@ async def webapp_schedule_page(
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Расписание занятий</title>
-        
-        <!-- Правильный скрипт Telegram WebApp -->
         <script src="https://telegram.org"></script>
-        
         <style>
             :root {
                 --tg-theme-bg-color: #181818;
@@ -246,11 +243,7 @@ async def webapp_schedule_page(
         </style>
     </head>
     <body>
-        <h2>🏰 <span id="club-name-target">Загрузка...</span></h2>
-        
-        <!-- Скрытый контейнер, куда Python безопасно положит строку настроек -->
-        <div id="raw-settings-holder" data-settings="{{CLUB_SETTINGS_JSON}}" data-name="{{CLUB_NAME}}" style="display:none;"></div>
-
+        <h2>🏰 {{CLUB_NAME}}</h2>
         <div id="schedule-root">Загрузка модулей...</div>
 
         <script>
@@ -258,20 +251,7 @@ async def webapp_schedule_page(
             tg.ready();
             tg.expand();
 
-            // Безопасно вытаскиваем данные из HTML-атрибутов, избегая поломки синтаксиса JS
-            const holder = document.getElementById('raw-settings-holder');
-            const rawName = holder.getAttribute('data-name') || 'Без названия';
-            const rawSettings = holder.getAttribute('data-settings') || '{}';
-
-            // Подставляем название клуба в заголовок страницы
-            document.getElementById('club-name-target').innerText = rawName;
-
-            let clubSettings = {};
-            try {
-                clubSettings = JSON.parse(rawSettings);
-            } catch (e) {
-                document.getElementById('schedule-root').innerHTML = '<p style="color:red;">❌ Ошибка парсинга настроек: ' + e.message + '</p>';
-            }
+            const clubSettings = {{CLUB_SETTINGS_JSON}};
             
             const dayNames = {
                 "mon": "Понедельник", "tue": "Вторник", "wed": "Среда",
@@ -286,7 +266,8 @@ async def webapp_schedule_page(
                 let activeDisciplinesCount = 0;
 
                 for (const [discKey, discData] of Object.entries(disciplines)) {
-                    if (!discData.active) continue;
+                    // ВРЕМЕННО ОТКЛЮЧИЛИ ПРОВЕРКУ АКТИВНОСТИ, ЧТОБЫ УВИДЕТЬ ДЕФОЛТНЫЕ СЕКЦИИ:
+                    // if (!discData.active) continue; 
                     activeDisciplinesCount++;
 
                     const discSection = document.createElement('div');
@@ -342,18 +323,19 @@ async def webapp_schedule_page(
             try {
                 renderAllSchedules();
             } catch (err) {
-                document.getElementById('schedule-root').innerHTML = '<p style="color:red;">❌ Ошибка JS при рендере: ' + err.message + '</p>';
+                document.getElementById('schedule-root').innerHTML = '<p style="color:red;">❌ Ошибка рендера: ' + err.message + '</p>';
             }
         </script>
     </body>
     </html>"""
 
-    # Подставляем реальные данные на свои места
     html_content = html_content.replace("{{CLUB_NAME}}", str(club.name or "Без названия"))
-    html_content = html_content.replace("{{CLUB_SETTINGS_JSON}}", str(club_settings_json))
+    html_content = html_content.replace("{{CLUB_SETTINGS_JSON}}", club_settings_json)
 
     return HTMLResponse(content=html_content, status_code=200)
 
+
+    
 
 
 
