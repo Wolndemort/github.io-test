@@ -251,7 +251,8 @@ async def webapp_schedule_page(
             tg.ready();
             tg.expand();
 
-            const clubSettings = {{CLUB_SETTINGS_JSON}};
+            const clubSettings = JSON.parse('{{CLUB_SETTINGS_JSON}}');
+
             
             const dayNames = {
                 "mon": "Понедельник", "tue": "Вторник", "wed": "Среда",
@@ -329,8 +330,12 @@ async def webapp_schedule_page(
     </body>
     </html>"""
 
+    # Экранируем одинарные кавычки для безопасной передачи в JS-строку
+    safe_json = club_settings_json.replace("'", "\\'")
+
     html_content = html_content.replace("{{CLUB_NAME}}", str(club.name or "Без названия"))
-    html_content = html_content.replace("{{CLUB_SETTINGS_JSON}}", club_settings_json)
+    html_content = html_content.replace("{{CLUB_SETTINGS_JSON}}", safe_json)
+
 
     return HTMLResponse(content=html_content, status_code=200)
 
