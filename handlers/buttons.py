@@ -135,7 +135,6 @@ def admin_keyboard(club_settings: dict, club_id: int, subscription_date: datetim
     if features.get("qr_checkin", True):  # Посещения обычно связаны с QR или ручной отметкой
         builder.row(types.InlineKeyboardButton(text="📝 Отметить посещение", callback_data="admin_manual_visit"))
     
-    МЕНЮ
     builder.row(types.InlineKeyboardButton(text="📅 Расписание (Бот)", callback_data="admin_schedule_main"))
     
     if features.get("export", True):
