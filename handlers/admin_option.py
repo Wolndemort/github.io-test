@@ -425,19 +425,16 @@ async def show_daily_report(
 async def manual_add_start(
         callback: types.CallbackQuery,
         state: FSMContext,
-        is_owner: bool,  # <--- Поправил под Middleware
-        is_super_admin: bool  # <--- Поправил под Middleware
+        is_owner: bool,
+        is_super_admin: bool
 ):
-    # Проверка прав
     if not (is_owner or is_super_admin):
         return await callback.answer("❌ У вас нет прав администратора.", show_alert=True)
 
-    # Ставим стейт
     await state.set_state(AdminManualAdd.waiting_for_name)
 
-    # Кнопка отмены (чтобы не застрять в FSM)
     kb = InlineKeyboardBuilder()
-    kb.button(text="❌ Отмена", callback_data="admin")  # Возврат в главное меню
+    kb.button(text="❌ Отмена", callback_data="admin")
 
     await callback.message.answer(
         "📝 <b>Добавление нового атлета</b>\n\n"
@@ -448,37 +445,67 @@ async def manual_add_start(
     await callback.answer()
 
 
+# ШАГ 2: Поймали имя -> Запрашиваем ТЕЛЕФОН родителя
 @router.message(AdminManualAdd.waiting_for_name)
 async def manual_add_name(message: types.Message, state: FSMContext):
     await state.update_data(name=message.text)
+    # ПЕРЕКЛЮЧАЕМ НА ТЕЛЕФОН, а не на занятия!
+    await state.set_state(AdminManualAdd.waiting_for_phone)
+    await message.answer(
+        f"✅ Имя: <b>{message.text}</b>\n\n"
+        f"Введите <b>номер телефона</b> родителя (например, 79991112233):",
+        parse_mode="HTML"
+    )
+
+
+# ШАГ 3: Поймали телефон -> Запрашиваем ЗАНЯТИЯ
+@router.message(AdminManualAdd.waiting_for_phone)
+async def manual_add_process_phone(message: types.Message, state: FSMContext):
+    # Очищаем номер от лишних символов
+    phone = "".join(filter(str.isdigit, message.text))
+    if len(phone) < 10:
+        return await message.answer("❌ Номер слишком короткий. Введите минимум 10 цифр:")
+
+    await state.update_data(phone=phone)
+    # Теперь переключаем на ввод занятий
     await state.set_state(AdminManualAdd.waiting_for_lessons)
-    await message.answer(f"✅ Имя: <b>{message.text}</b>\n\nВведите количество занятий (0 для безлимита):",
-                         parse_mode="HTML")
+    await message.answer(
+        f"✅ Телефон: <code>{phone}</code>\n\n"
+        f"Введите количество занятий для активации абонемента\n"
+        f"<i>(0 — для безлимита, если оплатил наличными):</i>",
+        parse_mode="HTML"
+    )
 
 
+# ШАГ 4: Финал -> Создаем запись в базе
 @router.message(AdminManualAdd.waiting_for_lessons)
 async def manual_add_finish(
         message: types.Message,
         state: FSMContext,
-        club: Club,  # <--- Исправил (объект из мидлвари)
-        club_settings: dict,  # <--- Добавил (нужно для сроков)
+        club: Club,
+        club_settings: dict,
         session: AsyncSession
 ):
-    data = await state.get_data()
-    name = data.get("name")
-
-    # 1. Валидация ввода
     try:
         lessons = int(message.text)
     except ValueError:
         return await message.answer("❌ Введите числовое значение!")
 
+    # Достаем всё, что накопили в стейте
+    data = await state.get_data()
+    name = data.get("name")
+    phone = data.get("phone")
+
     try:
         days = club_settings.get("limits", {}).get("subscription_days", 30)
         new_expire = datetime.now() + timedelta(days=days)
+
+        # Создаем атлета со ВСЕМИ данными сразу
         new_student = Student(
             name=name,
-            club_id=club.id,  # <--- Используем ID из объекта
+            club_id=club.id,
+            parent_phone=phone,
+            parent_id=None,  # Пока не зашел через свой ТГ
             balance_lessons=999 if lessons == 0 else lessons,
             expire_date=new_expire,
             can_freeze=1,
@@ -489,64 +516,10 @@ async def manual_add_finish(
         await session.commit()
         await session.refresh(new_student)
 
-        # 4. Красивый ответ
-        await message.answer(
-            f"✅ <b>Атлет успешно добавлен!</b>\n\n"
-            f"👤 Имя: <b>{name}</b>\n"
-            f"📊 Баланс: <b>{new_student.balance_lessons} зан.</b>\n"
-            f"⏳ Срок до: <b>{new_expire.strftime('%d.%m.%Y')}</b>\n"
-            f"🆔 ID: <code>{new_student.id}</code>",
-            parse_mode="HTML"
-        )
-
-        logger.info(f"🆕 [Клуб {club.id}] Админ вручную добавил атлета {name}")
-        await state.clear()
-
-    except Exception as e:
-        await session.rollback()
-        logger.error(f"❌ Ошибка ручного добавления в клубе {club.id}: {e}")
-        await message.answer("❌ Ошибка при сохранении в базу.")
-
-
-@router.message(AdminManualAdd.waiting_for_phone)
-async def manual_add_process_phone(
-        message: types.Message,
-        state: FSMContext,
-        club: Club,  # <--- ИСПРАВИЛ (берем объект из Middleware)
-        session: AsyncSession
-):
-    # 1. Чистим номер телефона
-    phone = "".join(filter(str.isdigit, message.text))
-    if len(phone) < 10:
-        return await message.answer("❌ Номер слишком короткий. Введите минимум 10 цифр:")
-
-    # 2. Достаем данные из стейта (проверь ключ, в прошлом шаге был 'name')
-    data = await state.get_data()
-    student_name = data.get('name') or data.get('student_name') or 'Атлет'
-
-    try:
-        # 3. Создаем атлета и ЖЕСТКО привязываем к club.id
-        new_student = Student(
-            name=student_name,
-            club_id=club.id,  # <--- Используем ID из объекта
-            parent_phone=phone,
-            parent_id=None,  # Пока не привязан к аккаунту ТГ
-            expire_date=None,
-            balance_lessons=0,
-            can_freeze=1,
-            is_frozen=0
-        )
-
-        session.add(new_student)
-        await session.commit()
-        await session.refresh(new_student)
-
         student_id = new_student.id
 
-        # 4. Готовим кнопки
+        # Формируем клавиатуру
         builder = InlineKeyboardBuilder()
-        # Важно: если в confirm_cash ты планируешь зачислять стандартный абонемент,
-        # убедись, что хендлер этого калбэка знает, сколько занятий зачислять.
         builder.row(types.InlineKeyboardButton(
             text="💵 Оплатил наличными",
             callback_data=f"confirm_cash_{student_id}")
@@ -554,20 +527,23 @@ async def manual_add_process_phone(
         builder.row(types.InlineKeyboardButton(text="🏠 В меню", callback_data="admin"))
 
         await message.answer(
-            f"✅ Атлет <b>{student_name}</b> добавлен в базу клуба <b>{club.name}</b>!\n"
-            f"🆔 ID: <code>{student_id}</code>\n"
-            f"📱 Телефон: <code>{phone}</code>\n\n"
-            f"Хотите сразу активировать абонемент?",
+            f"✅ <b>Атлет успешно добавлен!</b>\n\n"
+            f"👤 Имя: <b>{name}</b>\n"
+            f"📱 Телефон: <code>{phone}</code>\n"
+            f"📊 Баланс: <b>{new_student.balance_lessons} зан.</b>\n"
+            f"⏳ Срок до: <b>{new_expire.strftime('%d.%m.%Y')}</b>\n"
+            f"🆔 ID: <code>{student_id}</code>\n\n"
+            f"Хотите сразу подтвердить оплату наличными?",
             reply_markup=builder.as_markup(),
             parse_mode="HTML"
         )
 
+        logger.info(f"🆕 [Клуб {club.id}] Админ вручную добавил атлета {name} с телефоном {phone}")
         await state.clear()
-        logger.success(f"🆕 [Клуб {club.id}] Админ добавил атлета {student_name}")
 
     except Exception as e:
         await session.rollback()
-        logger.error(f"❌ Ошибка ручного добавления (Клуб {club.id}): {e}")
+        logger.error(f"❌ Ошибка ручного добавления в клубе {club.id}: {e}")
         await message.answer("❌ Ошибка при сохранении в базу данных.")
 
 

@@ -1,11 +1,8 @@
 import qrcode
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 import io
-from datetime import datetime
-from aiogram import types
+from aiogram.utils.keyboard import ReplyKeyboardBuilder
 from aiogram.filters import Command
-from aiogram import F
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from database.db import Student, process_student_freeze, Club
 from config import secret_key
@@ -56,7 +53,6 @@ async def go_to_begin(
         reply_markup=get_main_menu_keyboard(club_settings, club.id)
     )
     await callback.answer()
-
 
 
 @router.message(Command('profile', 'check_status_now'))
@@ -142,7 +138,6 @@ async def universal_profile_handler(
             # Безопасный ответ на случай падения внутри callback
             if isinstance(event, types.CallbackQuery):
                 await event.answer("Ошибка обновления данных")
-
 
 
 @router.callback_query(F.data.startswith('section_'))
@@ -645,6 +640,25 @@ async def process_athlete_name(
         await session.rollback()
         logger.error(f"❌ Ошибка при добавлении атлета: {e}")
         await message.answer("⚠️ Произошла ошибка. Попробуйте позже.")
+
+
+@router.callback_query(F.data == "auth_by_phone")
+async def auth_by_phone_callback(callback: types.CallbackQuery, club: Club):
+    # Создаем реплай-кнопку для отправки контакта
+    builder = ReplyKeyboardBuilder()
+    builder.row(types.KeyboardButton(
+        text="📱 Поделиться контактом",
+        request_contact=True
+    ))
+
+    await callback.message.answer(
+        f"📍 <b>Авторизация в клубе {club.name}</b>\n\n"
+        f"Нажмите кнопку <b>«📱 Поделиться контактом»</b> внизу экрана, "
+        f"чтобы система проверила ваш номер телефона в базе данных.",
+        reply_markup=builder.as_markup(resize_keyboard=True, one_time_keyboard=True),
+        parse_mode="HTML"
+    )
+    await callback.answer()
 
 
 @router.message(F.contact)

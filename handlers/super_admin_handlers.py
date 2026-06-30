@@ -22,14 +22,22 @@ router = Router()
 @router.message(Command("super"), F.from_user.id.in_(ADMIN_IDS))
 @router.callback_query(F.data == "super", F.from_user.id.in_(ADMIN_IDS))
 async def super_admin_main(
-    event: types.Message | types.CallbackQuery,
-    is_super_admin: bool  # <--- ВОТ ЭТОГО НЕ ХВАТАЛО!
+        event: types.Message | types.CallbackQuery,
+        is_super_admin: bool
 ):
     # Если это нажатие кнопки — убираем часики
     if isinstance(event, types.CallbackQuery):
         await event.answer()
 
     builder = InlineKeyboardBuilder()
+
+    # --- НАША НОВАЯ КНОПКА (Переход в SqlAdmin на /master-dashboard) ---
+    builder.row(types.InlineKeyboardButton(
+        text="🖥 Управление БД (SqlAdmin)",
+        web_app=types.WebAppInfo(url="https://speedycrm.ru")
+    ))
+
+    # --- Остальные кнопки управления SaaS ---
     builder.row(types.InlineKeyboardButton(text="➕ Добавить клуб", callback_data="add_new_club"))
     builder.row(types.InlineKeyboardButton(text="📋 Список всех клубов", callback_data="list_clubs"))
     builder.row(types.InlineKeyboardButton(text="💳 Продлить подписку клуба", callback_data="extend_club_sub"))

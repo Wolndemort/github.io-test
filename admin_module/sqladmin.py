@@ -25,12 +25,15 @@ class AnalyticsAdmin(BaseView):
 
     @expose("/analytics", methods=["GET"])
     async def analytics_page(self, request: Request):
-        # Просто перенаправляем пользователя на ваш рабочий API-метод
+        # Перенаправляем на наш рабочий роут статистики
         return RedirectResponse(url="/revenue")
 
 
 def setup_admin(app, engine):
-    admin = Admin(app, engine)
+    # КРИТИЧНО ДЛЯ SAAS: Переносим главную админку на другой адрес,
+    # чтобы освободить путь /admin для WebApp-кнопок Telegram-ботов!
+    admin = Admin(app, engine, base_url="/master-dashboard")
+
     admin.add_view(UserAdmin)
     admin.add_view(StudentAdmin)
     admin.add_view(AnalyticsAdmin)

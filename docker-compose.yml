@@ -21,47 +21,31 @@ services:
     volumes:
       - pg_data:/var/lib/postgresql/data
 
-  bot:
-    build: .
-    container_name: gym_bot
-    networks:
-      - web_network
-    restart: always
-    depends_on:
-      db:
-        condition: service_healthy
-      redis:
-        condition: service_started
-    command: >
-      sh -c "alembic upgrade head && python main.py"
-    env_file:
-      - .env
-    environment:
-      - REDIS_URL=redis://redis:6379/0
-      - DB_FILE=postgresql+asyncpg://postgres:${DB_PASSWORD}@db:5432/crm_db
-      - PYTHONPATH=/app
-    volumes:
-      - .:/app
-      - ./logs:/app/logs
-
   gym-api:
     build: .
     container_name: gym_crm_api
     networks:
       - web_network
     restart: always
-    command: uvicorn main:app --host 0.0.0.0 --port 8000
+    # ПЕРЕНЕСЛИ МИГРАЦИИ СЮДА: Сначала накатятся таблицы Alembic, затем запустится FastAPI + Боты
+    command: >
+      sh -c "alembic upgrade head && uvicorn main:app --host 0.0.0.0 --port 8000"
     depends_on:
-      - db
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
     env_file:
       - .env
     environment:
+      - REDIS_URL=redis://redis:6379/0
       - DB_FILE=postgresql+asyncpg://postgres:${DB_PASSWORD}@db:5432/crm_db
+      - PYTHONPATH=/app
     ports:
       - "8000:8000"
     volumes:
       - .:/app
-
+      - ./logs:/app/logs
 
   redis:
      image: redis:7-alpine
@@ -94,9 +78,6 @@ services:
       - ./certbot/conf:/etc/letsencrypt
       - ./certbot/www:/var/www/certbot
     entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew; sleep 12d & wait $${!}; done;'"
-
-
-
 
 volumes:
   pg_data:
