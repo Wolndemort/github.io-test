@@ -1,3 +1,4 @@
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from sqlalchemy.ext.asyncio import AsyncSession
 from handlers.skud import trigger_dingtian_turnstile, save_and_test_turnstile
 from sqlalchemy.orm.attributes import flag_modified
