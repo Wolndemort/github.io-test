@@ -2,10 +2,10 @@ from typing import Optional, List
 from sqlalchemy.ext.mutable import MutableDict
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, DeclarativeBase, mapped_column, relationship
-from sqlalchemy import BigInteger, DateTime, String, func, Integer, ForeignKey, Column
+from sqlalchemy import BigInteger, DateTime, String, func, Integer, ForeignKey
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from config import db_file
-from datetime import datetime
+from datetime import datetime, date
 from sqlalchemy import Date
 from loguru import logger
 import asyncio
@@ -46,7 +46,7 @@ class Student(Base):
     can_freeze: Mapped[int] = mapped_column(Integer, default=1)
     is_frozen: Mapped[int] = mapped_column(Integer, default=0)
     balance_lessons: Mapped[int] = mapped_column(default=0)
-    birthday = Column(Date, nullable=True)
+    birthday: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     last_visit: Mapped[Optional[datetime]] = mapped_column(DateTime)
     parent: Mapped["User"] = relationship(back_populates="students")
     parent_phone: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)

@@ -196,3 +196,6 @@ nano /etc/docker/daemon.json
 * **Analytics:** Pandas, XlsxWriter
 * **Infrastructure:** Nginx, Docker, Docker Compose, Certbot (Let's Encrypt), Linux (Aezza VPS)
 * **CI/CD & Logs:** GitHub Actions, Loguru (структурированные логи с ротацией в zip)
+
+
+добавили колонку дней рождения пр ручной регестрации и регестрации юзером , авто поздравления
