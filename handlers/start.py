@@ -196,4 +196,6 @@ async def accept_legal_handler(
         await callback.message.answer(
             f"📍 <b>{club.name}</b>\n\n{welcome_text}\n\n{status_text}",
             reply_markup=builder.as_markup(resize_keyboard=True, one_time_keyboard=True),
-            parse_mode="HTML")
+            parse_mode="HTML"
+        )
+
