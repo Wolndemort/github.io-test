@@ -1,9 +1,9 @@
 from aiogram import Router, types
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
-from aiogram.utils.keyboard import ReplyKeyboardBuilder  # Чистый импорт для текстовой кнопки
+from aiogram.utils.keyboard import ReplyKeyboardBuilder, InlineKeyboardBuilder
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from handlers.buttons import admin_keyboard, get_profile_keyboard
 from database.db import User, Student, Club
@@ -25,18 +25,65 @@ async def start_handler(
     await state.clear()
     user_id = message.from_user.id
 
-    # 1. Регистрация/Обновление пользователя (убрали неиспользуемую переменную user)
-    await session.merge(User(
-        user_id=user_id,
-        club_id=club.id,
-        full_name=message.from_user.full_name
-    ))
-    await session.commit()
+    # 1. Регистрация/Обновление пользователя
+    db_user = await session.get(User, user_id)
 
-    # 2. Берем текст приветствия из памяти
+    if not db_user:
+        # Если юзера нет, создаем новую запись с is_accepted=False
+        db_user = User(
+            user_id=user_id,
+            club_id=club.id,
+            full_name=message.from_user.full_name,
+            is_accepted=False
+        )
+        session.add(db_user)
+        await session.commit()
+    else:
+        # Если юзер есть, но сменил имя в Телеге — обновляем его
+        if db_user.full_name != message.from_user.full_name:
+            db_user.full_name = message.from_user.full_name
+            await session.commit()
+
+    # 2. ПРОВЕРКА ЮРИДИЧЕСКОГО СОГЛАСИЯ
+    # Блокируем меню, если юзер еще не нажал кнопку «Принять»
+    if not db_user.is_accepted:
+        # Формируем боевой URL на основе твоего поддомена speedycrm.ru
+        base_url = f"https://{club_id}.speedycrm.ru"
+
+        inline_builder = InlineKeyboardBuilder()
+        inline_builder.row(types.InlineKeyboardButton(
+            text="📄 Политика конфиденциальности",
+            web_app=types.WebAppInfo(url=f"{base_url}/privacy")
+        ))
+        inline_builder.row(types.InlineKeyboardButton(
+            text="📜 Публичная оферта",
+            web_app=types.WebAppInfo(url=f"{base_url}/oferta")
+        ))
+        inline_builder.row(types.InlineKeyboardButton(
+            text="✅ Принять и продолжить",
+            callback_data="accept_legal_rules"
+        ))
+
+        legal_text = (
+            f"📍 <b>{club.name}</b>\n\n"
+            "Рады видеть вас! Чтобы получить доступ к личному кабинету и системе СКУД (турникету), "
+            "вам необходимо ознакомиться и согласиться с условиями обработки персональных данных и публичной офертой.\n\n"
+            "Вы можете прочитать документы прямо внутри Telegram, нажав на кнопки ниже. "
+            "После прочтения нажмите кнопку <b>«Принять и продолжить»</b>:"
+        )
+
+        return await message.answer(
+            legal_text,
+            reply_markup=inline_builder.as_markup(),
+            parse_mode="HTML"
+        )
+
+    # --- ОСТАЛЬНАЯ ЛОГИКА БЕЗ ИЗМЕНЕНИЙ ---
+
+    # 3. Настройки UI из памяти
     welcome_text = club_settings.get("ui", {}).get("welcome_text") or "Добро пожаловать!"
 
-    # 3. Разделение логики (Админ / Владелец / Суперадмин)
+    # 4. Разделение логики (Админ / Владелец / Суперадмин)
     if is_owner or is_super_admin:
         return await message.answer(
             f"⚡ <b>Панель управления клуба «{club.name}»</b>\n\n{welcome_text}",
@@ -44,7 +91,7 @@ async def start_handler(
             parse_mode="HTML"
         )
 
-    # 4. Логика клиента (Ищем привязанного атлета по Telegram ID)
+    # 5. Логика клиента (Ищем привязанного атлета по Telegram ID)
     stmt = select(Student).where(
         Student.parent_id == user_id,
         Student.club_id == club.id
@@ -61,7 +108,6 @@ async def start_handler(
             parse_mode="HTML"
         )
     else:
-        # Используем импортированный напрямую ReplyKeyboardBuilder без префикса types.
         builder = ReplyKeyboardBuilder()
         builder.row(types.KeyboardButton(
             text="📱 Войти по номеру телефона",
@@ -79,3 +125,44 @@ async def start_handler(
             reply_markup=builder.as_markup(resize_keyboard=True, one_time_keyboard=True),
             parse_mode="HTML"
         )
+
+
+# ОБРАБОТЧИК ДЛЯ КНОПКИ СОГЛАСИЯ
+@router.callback_query(lambda c: c.data == "accept_legal_rules")
+async def accept_legal_handler(
+    callback: types.CallbackQuery,
+    session: AsyncSession,
+    state: FSMContext,
+    club: Club,
+    club_id: int,
+    club_settings: dict,
+    is_super_admin: bool,
+    is_owner: bool
+):
+    user_id = callback.from_user.id
+
+    # Ставим True в базе данных
+    await session.execute(
+        update(User).where(User.user_id == user_id).values(is_accepted=True)
+    )
+    await session.commit()
+
+    # Сносим юридическое сообщение
+    await callback.message.delete()
+    await callback.answer("Условия успешно приняты! Добро пожаловать.")
+
+    # Перевызываем основной /start хэндлер
+    fake_message = callback.message
+    fake_message.from_user = callback.from_user
+
+    await start_handler(
+        message=fake_message,
+        state=state,
+        session=session,
+        club=club,
+        club_id=club_id,
+        club_settings=club_settings,
+        is_super_admin=is_super_admin,
+        is_owner=is_owner
+    )
+
