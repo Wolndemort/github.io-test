@@ -726,12 +726,16 @@ async def process_athlete_birthday(
     user_id = message.from_user.id
 
     try:
+        # Превращаем объект даты в строку формата 'YYYY-MM-DD'
+        # Это защитит Redis от падения, а PostgreSQL без проблем примет этот формат
+        birthday_str = birthday_date.isoformat() 
+
         # Создаем атлета со ВСЕМИ привязками и Днём Рождения!
         new_student = Student(
             parent_id=user_id,
             club_id=club_id,
             name=name,
-            birthday=birthday_date,  # <--- ЗАПИСЫВАЕМ ДР В БАЗУ!
+            birthday=birthday_str,  # <--- Передаем строку ISO (PostgreSQL поймет)
             expire_date=None,
             balance_lessons=0,
             can_freeze=1,
