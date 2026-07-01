@@ -1412,8 +1412,14 @@ async def admin_schedule_choose_day(callback: types.CallbackQuery, state: FSMCon
 # =====================================================================
 # ХЕНДЛЕР УДАЛЕНИЯ (Вырезает занятие по индексу и сохраняет изменения)
 # =====================================================================
+# =====================================================================
+# ХЕНДЛЕР УДАЛЕНИЯ (Исправленный: answer() вызывается сразу)
+# =====================================================================
 @router.callback_query(F.data.startswith("adm_sch_del_"))
 async def admin_delete_schedule_lesson(callback: types.CallbackQuery, state: FSMContext, club_settings: dict, session, redis: Redis, bot):
+    # Отвечаем телеграму СРАЗУ, чтобы кнопка не зависала и не было таймаута
+    await callback.answer()
+    
     _, _, _, disc_id, day, lesson_idx = callback.data.split("_")
     lesson_idx = int(lesson_idx)
     s_data = await state.get_data()
@@ -1422,21 +1428,23 @@ async def admin_delete_schedule_lesson(callback: types.CallbackQuery, state: FSM
     try:
         lessons_list = club_settings["disciplines"][disc_id]["schedule"][day]
         if 0 <= lesson_idx < len(lessons_list):
-            removed_lesson = lessons_list.pop(lesson_idx) # Вырезали из JSON по индексу
+            removed_lesson = lessons_list.pop(lesson_idx)
             
             # Сохраняем чистый конфиг в PostgreSQL и Redis
             await save_club_settings(session, redis, bot.token, club_id, club_settings)
-            await callback.answer(f"✅ Занятие на {removed_lesson['time']} успешно удалено!", show_alert=True)
+            
+            # Вместо всплывающего alert (который уже не показать после answer) 
+            # мы просто обновим интерфейс ниже
         else:
-            await callback.answer("❌ Занятие не найдено, возможно уже удалено.", show_alert=True)
+            logger.warning("Занятие не найдено, возможно уже удалено.")
             
     except Exception as e:
-        await callback.answer("❌ Ошибка базы данных при удалении", show_alert=True)
         logger.error(f"Ошибка удаления расписания: {e}")
 
-    # Обновляем экран: подменяем callback.data и заново вызываем отрисовку списка
+    # Обновляем экран: заново вызываем отрисовку списка
     callback.data = f"sch_day_{day}"
     await admin_schedule_choose_day(callback, state, club_settings)
+
 
 
 # =====================================================================
