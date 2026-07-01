@@ -486,7 +486,10 @@ async def manual_add_process_birthday(message: types.Message, state: FSMContext)
         try:
             # Парсим строку ДД.ММ.ГГГГ в объект даты
             birthday_date = datetime.strptime(message.text.strip(), "%d.%m.%Y").date()
-            await state.update_data(birthday=birthday_date)
+            
+            # ВАЖНО: сохраняем в стейт СТРОКУ, а не объект даты!
+            await state.update_data(birthday=birthday_date.isoformat())
+            
         except ValueError:
             return await message.answer("❌ Неверный формат! Введите дату строго как ДД.ММ.ГГГГ (например, 15.08.2012):")
 
@@ -496,6 +499,8 @@ async def manual_add_process_birthday(message: types.Message, state: FSMContext)
         "✅ Дата рождения сохранена!\n\n"
         "Введите количество занятий для активации абонемента (0 для безлимита):"
     )
+
+    
 
 
 @router.message(AdminManualAdd.waiting_for_lessons)
