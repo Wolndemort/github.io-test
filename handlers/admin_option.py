@@ -1350,8 +1350,9 @@ async def admin_start_schedule_manage(callback: types.CallbackQuery, state: FSMC
         [InlineKeyboardButton(text="🗓 Ср", callback_data="sch_day_wed"), InlineKeyboardButton(text="🗓 Чт", callback_data="sch_day_thu")],
         [InlineKeyboardButton(text="🗓 Пт", callback_data="sch_day_fri"), InlineKeyboardButton(text="🗓 Сб", callback_data="sch_day_sat")],
         [InlineKeyboardButton(text="🎉 Вс", callback_data="sch_day_sun")],
-        [InlineKeyboardButton(text="⬅️ Назад в меню секции", callback_data=f"manage_disc_{disc_id}")]
+        [InlineKeyboardButton(text="⬅️ Назад в меню секции", callback_data=f"section_{discipline_code}"]
     ])
+
     
     disc_name = club_settings["disciplines"][disc_id]["name"]
     await callback.message.edit_text(
