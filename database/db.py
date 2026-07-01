@@ -32,6 +32,7 @@ class User(Base):
     club: Mapped["Club"] = relationship(back_populates="users")
     user_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     club_id: Mapped[Optional[int]] = mapped_column(ForeignKey('clubs.id'), nullable=True, index=True)
+    is_accepted: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
     full_name: Mapped[Optional[str]] = mapped_column(String)
     students: Mapped[List["Student"]] = relationship(back_populates='parent')
 
