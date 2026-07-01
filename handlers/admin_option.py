@@ -511,22 +511,26 @@ async def manual_add_finish(
     except ValueError:
         return await message.answer("❌ Введите числовое значение!")
 
-    # Достаем ВСЕ накопленные данные из стейта (включая birthday!)
     data = await state.get_data()
     name = data.get("name")
     phone = data.get("phone")
-    birthday = data.get("birthday")  # <--- Наша новая переменная!
+    birthday_str = data.get("birthday")  # Получаем строку из Redis ("YYYY-MM-DD" или None)
+
+    # Конвертируем строку обратно в объект date исключительно для красивого вывода .strftime()
+    birthday_obj = None
+    if birthday_str:
+        birthday_obj = datetime.strptime(birthday_str, "%Y-%m-%d").date()
 
     try:
         days = club_settings.get("limits", {}).get("subscription_days", 30)
         new_expire = datetime.now() + timedelta(days=days)
 
-        # Создаем студента и передаем birthday в базу данных
+        # Создаем студента. В SQLAlchemy можно передать как birthday_str, так и birthday_obj
         new_student = Student(
             name=name,
             club_id=club.id,
             parent_phone=phone,
-            birthday=birthday,  # <--- ПЕРЕДАЕМ В МОДЕЛЬ!
+            birthday=birthday_obj,  # Передаем объект даты (или строку) в БД
             parent_id=None,
             balance_lessons=999 if lessons == 0 else lessons,
             expire_date=new_expire,
@@ -538,16 +542,15 @@ async def manual_add_finish(
         await session.commit()
         await session.refresh(new_student)
 
-        # Клавиатура и ответ (остается без изменений)
         builder = InlineKeyboardBuilder()
-        builder.row(
-            types.InlineKeyboardButton(text="💵 Оплатил наличными", callback_data=f"confirm_cash_{new_student.id}"))
+        builder.row(types.InlineKeyboardButton(text="💵 Оплатил наличными", callback_data=f"confirm_cash_{new_student.id}"))
         builder.row(types.InlineKeyboardButton(text="🏠 В меню", callback_data="admin"))
 
+        # Используем birthday_obj для вывода красивого формата ДД.ММ.ГГГГ
         await message.answer(
             f"✅ <b>Атлет успешно добавлен!</b>\n\n"
             f"👤 Имя: <b>{name}</b>\n"
-            f"🎂 ДР: <b>{birthday.strftime('%d.%m.%Y') if birthday else 'не указан'}</b>\n"
+            f"🎂 ДР: <b>{birthday_obj.strftime('%d.%m.%Y') if birthday_obj else 'не указан'}</b>\n"
             f"📱 Телефон: <code>{phone}</code>\n"
             f"📊 Баланс: <b>{new_student.balance_lessons} зан.</b>\n"
             f"⏳ Срок до: <b>{new_expire.strftime('%d.%m.%Y')}</b>\n"
@@ -556,13 +559,14 @@ async def manual_add_finish(
             parse_mode="HTML"
         )
 
-        logger.info(f"🆕 [Клуб {club.id}] Ручное добавление атлета {name} с ДР {birthday}")
+        logger.info(f"🆕 [Клуб {club.id}] Ручное добавление атлета {name} с ДР {birthday_obj}")
         await state.clear()
 
     except Exception as e:
         await session.rollback()
         logger.error(f"❌ Ошибка сохранения атлета: {e}")
         await message.answer("❌ Ошибка при сохранении в базу данных.")
+
 
 
 @router.callback_query(F.data == "admin_cash_search")
