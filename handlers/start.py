@@ -147,22 +147,54 @@ async def accept_legal_handler(
     )
     await session.commit()
 
-    # Сносим юридическое сообщение
-    await callback.message.delete()
+    # Закрываем часики на кнопке и пишем уведомление
     await callback.answer("Условия успешно приняты! Добро пожаловать.")
+    
+    # Сносим юридическое сообщение с кнопками
+    await callback.message.delete()
 
-    # Перевызываем основной /start хэндлер
-    fake_message = callback.message
-    fake_message.from_user = callback.from_user
+    # Отрисовываем меню без вызова start_handler
+    welcome_text = club_settings.get("ui", {}).get("welcome_text") or "Добро пожаловать!"
 
-    await start_handler(
-        message=fake_message,
-        state=state,
-        session=session,
-        club=club,
-        club_id=club_id,
-        club_settings=club_settings,
-        is_super_admin=is_super_admin,
-        is_owner=is_owner
+    # Проверка на Админа / Владельца / Суперадмин
+    if is_owner or is_super_admin:
+        return await callback.message.answer(
+            f"⚡ <b>Панель управления клуба «{club.name}»</b>\n\n{welcome_text}",
+            reply_markup=admin_keyboard(club_settings=club_settings, club_id=club_id),
+            parse_mode="HTML"
+        )
+
+    # Логика клиента (Ищем привязанного атлета по Telegram ID)
+    stmt = select(Student).where(
+        Student.parent_id == user_id,
+        Student.club_id == club.id
     )
+    student = (await session.execute(stmt)).scalar_one_or_none()
 
+    if student:
+        expire_str = student.expire_date.strftime('%d.%m.%Y') if student.expire_date else "не указано"
+        status_text = f"✅ Атлет: <b>{student.name}</b>\n📅 Абонемент до: <b>{expire_str}</b>"
+
+        await callback.message.answer(
+            f"📍 <b>{club.name}</b>\n\n{welcome_text}\n\n{status_text}",
+            reply_markup=get_profile_keyboard(club_settings=club_settings, is_authorized=True),
+            parse_mode="HTML"
+        )
+    else:
+        builder = ReplyKeyboardBuilder()
+        builder.row(types.KeyboardButton(
+            text="📱 Войти по номеру телефона",
+            request_contact=True
+        ))
+
+        status_text = (
+            "👋 Рады видеть вас!\n\n"
+            "Если администратор клуба уже внёс вас в базу данных, нажмите кнопку ниже, "
+            "чтобы подтвердить свой номер телефона и войти в личный кабинет."
+        )
+
+        await callback.message.answer(
+            f"📍 <b>{club.name}</b>\n\n{welcome_text}\n\n{status_text}",
+            reply_markup=builder.as_markup(resize_keyboard=True, one_time_keyboard=True),
+            parse_mode="HTML"
+        )
