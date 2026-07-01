@@ -186,13 +186,11 @@ async def accept_legal_handler(
             text="📱 Войти по номеру телефона",
             request_contact=True
         ))
-
         status_text = (
             "👋 Рады видеть вас!\n\n"
             "Если администратор клуба уже внёс вас в базу данных, нажмите кнопку ниже, "
             "чтобы подтвердить свой номер телефона и войти в личный кабинет."
         )
-
         await callback.message.answer(
             f"📍 <b>{club.name}</b>\n\n{welcome_text}\n\n{status_text}",
             reply_markup=builder.as_markup(resize_keyboard=True, one_time_keyboard=True),
