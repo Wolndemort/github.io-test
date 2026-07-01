@@ -382,3 +382,16 @@ async def get_student_info(student_id: int, session: AsyncSession = Depends(get_
     if not student:
         raise HTTPException(status_code=404, detail="Student not found")
     return student
+
+
+@router.get("/privacy", response_class=HTMLResponse)
+async def get_privacy_page(request: Request):
+    """Страница политики конфиденциальности для WebApp"""
+    return templates.TemplateResponse("privacy.html", {"request": request})
+
+@router.get("/oferta", response_class=HTMLResponse)
+async def get_oferta_page(request: Request):
+    """Страница публичной оферты для WebApp"""
+    return templates.TemplateResponse("oferta.html", {"request": request})
+
+
