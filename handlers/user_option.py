@@ -702,6 +702,7 @@ async def process_athlete_name(message: types.Message, state: FSMContext):
     )
 
 
+
 # ШАГ 3: Поймали ДР -> Валидируем и сохраняем в базу PostgreSQL
 @router.message(RegistrationStates.waiting_for_birthday)
 async def process_athlete_birthday(
@@ -712,7 +713,7 @@ async def process_athlete_birthday(
         club_settings: dict
 ):
     try:
-        # Валидируем формат даты
+        # Валидируем формат даты и получаем объект datetime.date
         birthday_date = datetime.strptime(message.text.strip(), "%d.%m.%Y").date()
     except ValueError:
         return await message.answer(
@@ -726,16 +727,12 @@ async def process_athlete_birthday(
     user_id = message.from_user.id
 
     try:
-        # Превращаем объект даты в строку формата 'YYYY-MM-DD'
-        # Это защитит Redis от падения, а PostgreSQL без проблем примет этот формат
-        birthday_str = birthday_date.isoformat() 
-
         # Создаем атлета со ВСЕМИ привязками и Днём Рождения!
         new_student = Student(
             parent_id=user_id,
             club_id=club_id,
             name=name,
-            birthday=birthday_str,  # <--- Передаем строку ISO (PostgreSQL поймет)
+            birthday=birthday_date,  # <--- Передаем ОБЪЕКТ даты (birthday_date вместо birthday_str)
             expire_date=None,
             balance_lessons=0,
             can_freeze=1,
@@ -761,6 +758,7 @@ async def process_athlete_birthday(
         await session.rollback()
         logger.error(f"❌ Ошибка при самостоятельном добавлении атлета: {e}")
         await message.answer("⚠️ Произошла ошибка при сохранении. Попробуйте позже.")
+
 
 
 @router.callback_query(F.data == "auth_by_phone")
