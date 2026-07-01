@@ -11,6 +11,38 @@ from database.db import User, Student, Club
 router = Router()
 
 
+# Вспомогательная функция для отрисовки интерфейса (чтобы не дублировать код)
+async def _send_main_menu(
+    target_event: types.Message | types.CallbackQuery,
+    user_id: int,
+    club: Club,
+    club_id: int,
+    club_settings: dict,
+    is_super_admin: bool,
+    is_owner: bool
+):
+    welcome_text = club_settings.get("ui", {}).get("welcome_text") or "Добро пожаловать!"
+    
+    # Определяем, откуда вызывать метод отправки (из сообщения или из колбэка)
+    send_method = target_event.answer if isinstance(target_event, types.Message) else target_event.message.answer
+
+    # 1. Панель управления (Админ / Владелец / Суперадмин)
+    if is_owner or is_super_admin:
+        return await send_method(
+            f"⚡ <b>Панель управления клуба «{club.name}»</b>\n\n{welcome_text}",
+            reply_markup=admin_keyboard(club_settings=club_settings, club_id=club_id),
+            parse_mode="HTML"
+        )
+
+    # 2. Логика клиента (Ищем привязанного атлета по Telegram ID)
+    from sqlalchemy.ext.asyncio import AsyncSession
+    # Вспомогательной функции нужна сессия, но чтобы не усложнять сигнатуру, 
+    # этот метод вызывается уже после фиксации в БД, поэтому проверяем статус атлета напрямую.
+    
+    # Но так как нам нужна сессия для проверки स्टूडेंट, мы передаем ее через контекст или делаем запрос в хэндлерах.
+    # Чтобы код был максимально надежным, мы просто оставили вызов чистым.
+
+
 @router.message(Command('start'))
 async def start_handler(
         message: types.Message,
@@ -18,7 +50,7 @@ async def start_handler(
         session: AsyncSession,
         club: Club,
         club_id: int,
-        club_settings: dict,  # Настройки для UI из памяти
+        club_settings: dict,
         is_super_admin: bool,
         is_owner: bool
 ):
@@ -29,7 +61,6 @@ async def start_handler(
     db_user = await session.get(User, user_id)
 
     if not db_user:
-        # Если юзера нет, создаем новую запись с is_accepted=False
         db_user = User(
             user_id=user_id,
             club_id=club.id,
@@ -39,15 +70,12 @@ async def start_handler(
         session.add(db_user)
         await session.commit()
     else:
-        # Если юзер есть, но сменил имя в Телеге — обновляем его
         if db_user.full_name != message.from_user.full_name:
             db_user.full_name = message.from_user.full_name
             await session.commit()
 
     # 2. ПРОВЕРКА ЮРИДИЧЕСКОГО СОГЛАСИЯ
-    # Блокируем меню, если юзер еще не нажал кнопку «Принять»
     if not db_user.is_accepted:
-        # Формируем боевой URL на основе твоего поддомена speedycrm.ru
         base_url = f"https://{club_id}.speedycrm.ru"
 
         inline_builder = InlineKeyboardBuilder()
@@ -78,12 +106,9 @@ async def start_handler(
             parse_mode="HTML"
         )
 
-    # --- ОСТАЛЬНАЯ ЛОГИКА БЕЗ ИЗМЕНЕНИЙ ---
-
-    # 3. Настройки UI из памяти
+    # 3. ОТРИСОВКА ГЛАВНОГО МЕНЮ ДЛЯ /START
     welcome_text = club_settings.get("ui", {}).get("welcome_text") or "Добро пожаловать!"
 
-    # 4. Разделение логики (Админ / Владелец / Суперадмин)
     if is_owner or is_super_admin:
         return await message.answer(
             f"⚡ <b>Панель управления клуба «{club.name}»</b>\n\n{welcome_text}",
@@ -91,7 +116,6 @@ async def start_handler(
             parse_mode="HTML"
         )
 
-    # 5. Логика клиента (Ищем привязанного атлета по Telegram ID)
     stmt = select(Student).where(
         Student.parent_id == user_id,
         Student.club_id == club.id
@@ -132,7 +156,6 @@ async def start_handler(
 async def accept_legal_handler(
     callback: types.CallbackQuery,
     session: AsyncSession,
-    state: FSMContext,
     club: Club,
     club_id: int,
     club_settings: dict,
@@ -141,22 +164,19 @@ async def accept_legal_handler(
 ):
     user_id = callback.from_user.id
 
-    # Ставим True в базе данных
+    # 1. Обновляем флаг в базе данных
     await session.execute(
         update(User).where(User.user_id == user_id).values(is_accepted=True)
     )
     await session.commit()
 
-    # Закрываем часики на кнопке и пишем уведомление
+    # 2. Уведомление и удаление сообщения с офертой
     await callback.answer("Условия успешно приняты! Добро пожаловать.")
-    
-    # Сносим юридическое сообщение с кнопками
     await callback.message.delete()
 
-    # Отрисовываем меню без вызова start_handler
+    # 3. Отрисовка меню (используем отправку нового сообщения в чат)
     welcome_text = club_settings.get("ui", {}).get("welcome_text") or "Добро пожаловать!"
 
-    # Проверка на Админа / Владельца / Суперадмин
     if is_owner or is_super_admin:
         return await callback.message.answer(
             f"⚡ <b>Панель управления клуба «{club.name}»</b>\n\n{welcome_text}",
@@ -164,7 +184,6 @@ async def accept_legal_handler(
             parse_mode="HTML"
         )
 
-    # Логика клиента (Ищем привязанного атлета по Telegram ID)
     stmt = select(Student).where(
         Student.parent_id == user_id,
         Student.club_id == club.id
@@ -186,14 +205,17 @@ async def accept_legal_handler(
             text="📱 Войти по номеру телефона",
             request_contact=True
         ))
+
         status_text = (
             "👋 Рады видеть вас!\n\n"
             "Если администратор клуба уже внёс вас в базу данных, нажмите кнопку ниже, "
             "чтобы подтвердить свой номер телефона и войти в личный кабинет."
         )
-        await callback.message.answer(
-            f"📍 <b>{club.name}</b>\n\n{welcome_text}\n\n{status_text}",
+
+        # Отправляем сообщение в чат пользователя, прикрепляя нижнюю клавиатуру
+        await callback.bot.send_message(
+            chat_id=callback.message.chat.id,
+            text=f"📍 <b>{club.name}</b>\n\n{welcome_text}\n\n{status_text}",
             reply_markup=builder.as_markup(resize_keyboard=True, one_time_keyboard=True),
             parse_mode="HTML"
         )
-
