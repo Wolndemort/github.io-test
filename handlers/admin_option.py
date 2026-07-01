@@ -1304,24 +1304,28 @@ async def admin_add_tariff_count(
     await return_to_tariff_menu(message, club_settings, disc_id)
 
 
-# Ловим клик из главного меню админа и предлагаем выбрать секцию
+# =====================================================================
+# ШАГ 1: ВЫБОР СЕКЦИИ (Сохраняем club_id, чтобы не терялся)
+# =====================================================================
 @router.callback_query(F.data == "admin_schedule_main")
-async def admin_schedule_select_discipline(callback: types.CallbackQuery, club_settings: dict):
+async def admin_schedule_select_discipline(callback: types.CallbackQuery, state: FSMContext, club: Club, club_settings: dict):
     disciplines = club_settings.get("disciplines", {})
     
     if not disciplines:
         return await callback.answer("❌ В конфиге клуба пока нет созданных дисциплин!", show_alert=True)
         
+    # Сохраняем ID клуба в стейт сразу, чтобы удаление понимало, где чистить базу
+    await state.update_data(club_id=club.id)
+    
     builder = InlineKeyboardBuilder()
     
-    # Динамически выводим кнопками только те дисциплины, которые есть в твоем DEFAULT_CLUB_SETTINGS
     for disc_id, disc_data in disciplines.items():
         builder.row(types.InlineKeyboardButton(
             text=f"🥋 {disc_data['name']}",
-            callback_data=f"adm_sch_manage_{disc_id}" # Ведёт прямо на наш готовый хендлер с днями недели!
+            callback_data=f"adm_sch_manage_{disc_id}"
         ))
         
-    builder.row(types.InlineKeyboardButton(text="🔙 Назад в админку", callback_data="admin")) # или твой колбэк возврата в меню
+    builder.row(types.InlineKeyboardButton(text="🔙 Назад в админку", callback_data="admin"))
     
     await callback.message.edit_text(
         text="📅 <b>Управление расписанием</b>\n\nВыберите спортивную дисциплину для настройки сетки занятий:",
@@ -1331,9 +1335,9 @@ async def admin_schedule_select_discipline(callback: types.CallbackQuery, club_s
     await callback.answer()
 
 
-
-
-# 1. Выбор дня недели (Полная клавиатура на все 7 дней)
+# =====================================================================
+# ШАГ 1.5: ВЫБОР ДНЯ НЕДЕЛИ
+# =====================================================================
 @router.callback_query(F.data.startswith("adm_sch_manage_"))
 async def admin_start_schedule_manage(callback: types.CallbackQuery, state: FSMContext, club_id: int, club_settings: dict):
     disc_id = callback.data.split("_")[-1]
@@ -1341,55 +1345,114 @@ async def admin_start_schedule_manage(callback: types.CallbackQuery, state: FSMC
     await state.update_data(disc_id=disc_id, club_id=club_id)
     await state.set_state(AdminScheduleStates.choose_day)
     
-    # Полная сетка на все 7 дней недели + кнопка возврата
     days_kb = InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="🗓 Пн", callback_data="sch_day_mon"), 
-            InlineKeyboardButton(text="🗓 Вт", callback_data="sch_day_tue")
-        ],
-        [
-            InlineKeyboardButton(text="🗓 Ср", callback_data="sch_day_wed"), 
-            InlineKeyboardButton(text="🗓 Чт", callback_data="sch_day_thu")
-        ],
-        [
-            InlineKeyboardButton(text="🗓 Пт", callback_data="sch_day_fri"), 
-            InlineKeyboardButton(text="🗓 Сб", callback_data="sch_day_sat")
-        ],
-        [
-            InlineKeyboardButton(text="🎉 Вс", callback_data="sch_day_sun")
-        ],
-        [
-            InlineKeyboardButton(text="⬅️ Назад в меню секции", callback_data=f"manage_disc_{disc_id}")
-        ]
+        [InlineKeyboardButton(text="🗓 Пн", callback_data="sch_day_mon"), InlineKeyboardButton(text="🗓 Вт", callback_data="sch_day_tue")],
+        [InlineKeyboardButton(text="🗓 Ср", callback_data="sch_day_wed"), InlineKeyboardButton(text="🗓 Чт", callback_data="sch_day_thu")],
+        [InlineKeyboardButton(text="🗓 Пт", callback_data="sch_day_fri"), InlineKeyboardButton(text="🗓 Сб", callback_data="sch_day_sat")],
+        [InlineKeyboardButton(text="🎉 Вс", callback_data="sch_day_sun")],
+        [InlineKeyboardButton(text="⬅️ Назад в меню секции", callback_data=f"manage_disc_{disc_id}")]
     ])
     
     disc_name = club_settings["disciplines"][disc_id]["name"]
     await callback.message.edit_text(
-        text=(
-            f"📅 <b>Управление расписанием: {disc_name}</b>\n\n"
-            f"Выберите день недели, в который хотите добавить новую тренировку:"
-        ),
+        text=f"📅 <b>Управление расписанием: {disc_name}</b>\n\nВыберите день недели, чтобы посмотреть текущие занятия или добавить новое:",
         reply_markup=days_kb,
         parse_mode="HTML"
     )
     await callback.answer()
 
 
-# ==========================================
-# ШАГ 2: Ловим выбранный день и просим время
-# ==========================================
+# =====================================================================
+# ШАГ 2: ВЫВОД СОЗДАННЫХ ЗАНЯТИЙ И КНОПОК УДАЛЕНИЯ
+# =====================================================================
 @router.callback_query(AdminScheduleStates.choose_day, F.data.startswith("sch_day_"))
-async def admin_schedule_choose_day(callback: types.CallbackQuery, state: FSMContext):
-    day = callback.data.split("_")[-1]  # Вытаскиваем "mon", "tue" и т.д.
-    await state.update_data(chosen_day=day)
-    await state.set_state(AdminScheduleStates.add_time)
+async def admin_schedule_choose_day(callback: types.CallbackQuery, state: FSMContext, club_settings: dict):
+    day = callback.data.split("_")[-1]  
+    s_data = await state.get_data()
+    disc_id = s_data["disc_id"]
     
-    await callback.message.answer(
-        "⏱ <b>Шаг 1 из 3: Введите время начала занятия</b>\n\n"
-        "Отправьте текст в формате ЧЧ:ММ (например: <code>19:30</code> или <code>09:00</code>):",
+    await state.update_data(chosen_day=day)
+    
+    day_names = {"mon": "Понедельник", "tue": "Вторник", "wed": "Среда", "thu": "Четверг", "fri": "Пятница", "sat": "Суббота", "sun": "Воскресенье"}
+    
+    discipline_block = club_settings["disciplines"].get(disc_id, {})
+    schedule_data = discipline_block.get("schedule", {})
+    
+    if not isinstance(schedule_data, dict) or day not in schedule_data:
+        day_lessons = []
+    else:
+        day_lessons = schedule_data[day]
+
+    builder = InlineKeyboardBuilder()
+    text_lines = [f"📅 <b>Расписание на {day_names[day]}</b>\n"]
+    
+    if not day_lessons:
+        text_lines.append("<i>Занятий пока нет.</i>")
+    else:
+        # Перебираем ВСЕ УЖЕ СОЗДАННЫЕ занятия и выводим на экран
+        for idx, lesson in enumerate(day_lessons):
+            text_lines.append(f"#{idx + 1} | ⏱ <b>{lesson['time']}</b> — {lesson['coach']} (👥 Мест: {lesson['max_slots']})")
+            # Для каждого созданного занятия делаем персональную кнопку удаления по индексу!
+            builder.row(types.InlineKeyboardButton(
+                text=f"❌ Удалить #{idx + 1} ({lesson['time']})",
+                callback_data=f"adm_sch_del_{disc_id}_{day}_{idx}"
+            ))
+
+    builder.row(types.InlineKeyboardButton(text="➕ Добавить занятие", callback_data="adm_sch_start_input_time"))
+    builder.row(types.InlineKeyboardButton(text="⬅️ Назад к дням", callback_data=f"adm_sch_manage_{disc_id}"))
+
+    await callback.message.edit_text(
+        text="\n".join(text_lines),
+        reply_markup=builder.as_markup(),
         parse_mode="HTML"
     )
     await callback.answer()
+
+
+# =====================================================================
+# ХЕНДЛЕР УДАЛЕНИЯ (Вырезает занятие по индексу и сохраняет изменения)
+# =====================================================================
+@router.callback_query(F.data.startswith("adm_sch_del_"))
+async def admin_delete_schedule_lesson(callback: types.CallbackQuery, state: FSMContext, club_settings: dict, session, redis: Redis, bot):
+    _, _, _, disc_id, day, lesson_idx = callback.data.split("_")
+    lesson_idx = int(lesson_idx)
+    s_data = await state.get_data()
+    club_id = s_data.get("club_id")
+    
+    try:
+        lessons_list = club_settings["disciplines"][disc_id]["schedule"][day]
+        if 0 <= lesson_idx < len(lessons_list):
+            removed_lesson = lessons_list.pop(lesson_idx) # Вырезали из JSON по индексу
+            
+            # Сохраняем чистый конфиг в PostgreSQL и Redis
+            await save_club_settings(session, redis, bot.token, club_id, club_settings)
+            await callback.answer(f"✅ Занятие на {removed_lesson['time']} успешно удалено!", show_alert=True)
+        else:
+            await callback.answer("❌ Занятие не найдено, возможно уже удалено.", show_alert=True)
+            
+    except Exception as e:
+        await callback.answer("❌ Ошибка базы данных при удалении", show_alert=True)
+        logger.error(f"Ошибка удаления расписания: {e}")
+
+    # Обновляем экран: подменяем callback.data и заново вызываем отрисовку списка
+    callback.data = f"sch_day_{day}"
+    await admin_schedule_choose_day(callback, state, club_settings)
+
+
+# =====================================================================
+# ПЕРЕХОД К ТВОЕМУ СТАРОМУ ШАГУ 2 (Ввод времени для нового занятия)
+# =====================================================================
+@router.callback_query(F.data == "adm_sch_start_input_time")
+async def admin_schedule_trigger_time_input(callback: types.CallbackQuery, state: FSMContext):
+    await state.set_state(AdminScheduleStates.add_time)
+    await callback.message.answer(
+        "⏱ <b>Шаг 1 из 3: Введите время начала занятия</b>\n\n"
+        "Отправьте текст в формате ЧЧ:ММ (например: <code>19:30</code>):",
+        parse_mode="HTML"
+    )
+    await callback.answer()
+
+
 
 
 # ==========================================
