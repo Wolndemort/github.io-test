@@ -141,6 +141,12 @@ def admin_keyboard(club_settings: dict, club_id: int, subscription_date: datetim
     base_url = f"https://{club_id}.speedycrm.ru"
 
     builder.row(types.InlineKeyboardButton(
+        text="📹 Камеры (WebApp)",
+        web_app=types.WebAppInfo(url=f"{base_url}/webapp/cameras?club_id={club_id}")
+    ))
+
+
+    builder.row(types.InlineKeyboardButton(
         text="📊 Таблица (WebApp)",
         web_app=WebAppInfo(url=f"{base_url}/admin?club_id={club_id}"))
     )
