@@ -1,4 +1,8 @@
 import pandas as pd
+import asyncio
+import cv2
+from fastapi import Query
+from fastapi.responses import StreamingResponse
 import io
 import json
 from fastapi import Request
@@ -393,5 +397,63 @@ async def get_privacy_page(request: Request):
 async def get_oferta_page(request: Request):
     """Страница публичной оферты для WebApp"""
     return templates.TemplateResponse("oferta.html", {"request": request})
+
+
+# Вспомогательная функция для чтения RTSP-потока
+async def stream_worker(rtsp_url: str):
+    cap = cv2.VideoCapture(rtsp_url)
+    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1) # Минимизируем задержку видео
+    
+    if not cap.isOpened():
+        return
+
+    try:
+        while True:
+            loop = asyncio.get_event_loop()
+            # Читаем кадр в пуле потоков, чтобы не блокировать асинхронный FastAPI
+            success, frame = await loop.run_in_executor(None, cap.read)
+            
+            if not success:
+                # Если камера отвалилась, ждем 2 секунды и пытаемся переподключиться
+                await asyncio.sleep(2)
+                cap = cv2.VideoCapture(rtsp_url)
+                continue
+
+            # Сжимаем в JPEG (70% качества, чтобы WebApp на смартфонах не лагал)
+            ret, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
+            if not ret:
+                continue
+                
+            frame_bytes = buffer.tobytes()
+
+            # Формируем стандартный MJPEG чанк для браузера
+            yield (b'--frame\r\n'
+                   b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+            
+            # Стабилизируем поток (~25 кадров в секунду)
+            await asyncio.sleep(0.04)
+            
+    finally:
+        cap.release()
+
+
+# 1. Роут, который открывает HTML-страницу с камерами
+@router.get("/cameras", response_class=HTMLResponse)
+async def get_cameras_page(request: Request, club_id: int = Query(...)):
+    """Страница видеонаблюдения для WebApp"""
+    return templates.TemplateResponse("cameras.html", {"request": request, "club_id": club_id})
+
+
+# 2. Роут, который генерирует сам видеопоток для тега <img> внутри HTML
+@router.get("/cameras/stream")
+async def video_stream(club_id: int = Query(...)):
+    # В будущем тут будет запрос к вашей БД: rtsp_url = await get_rtsp_by_club_id(club_id)
+    # Сейчас вставляем тестовую ссылку вашей камеры Tiandy
+    rtsp_url = "rtsp://admin:password@IP_АДРЕС_КАМЕРЫ:554/live/ch0"
+    
+    return StreamingResponse(
+        stream_worker(rtsp_url), 
+        media_type='multipart/x-mixed-replace; boundary=frame'
+    )
 
 
