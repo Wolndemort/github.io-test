@@ -333,11 +333,10 @@ async def get_cameras_page(request: Request, club_id: int = Query(...)):
 @router.get("/webapp/cameras/stream")
 async def video_stream(club_id: int = Query(...)):
     domain = "camera.aemaykop-skud.netcraze.pro"
-    path = "/CGI/Services/Video/Input/Channels/1/Features/Snapshot"
+    path = "/v1/snapshot"
     snapshot_url = f"http://{domain}{path}"
 
     return StreamingResponse(
         stream_worker(snapshot_url),
         media_type='multipart/x-mixed-replace; boundary=frame'
     )
-
