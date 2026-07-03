@@ -904,19 +904,25 @@ async def show_discipline_schedule(
     await callback.answer()
     
     
-await message.answer(
-    text=(
-        "🚀 **Твой профиль успешно настроен!**\n\n"
-        "Чтобы открывать турникет за 1 секунду, вынеси бота на рабочий стол.\n\n"
-        "👉 **Если у тебя iPhone (iOS):**\n"
-        "1. Нажми кнопку **«🍏 Иконка на iPhone»**, скопируй открывшуюся ссылку.\n"
-        "2. Настрой команду по инструкции в заметках.\n"
-        "📸 *В качестве иконки можно просто заскринить логотип `AE` прямо из этого чата!*\n\n"
-        "👉 **Если у тебя Android:**\n"
-        "Нажми кнопку **«🤖 Иконка на Android»** и следуй инструкции."
-    ),
-    reply_markup=get_profile_keyboard(user, club_settings, is_authorized),
-    parse_mode="Markdown"
-)
+@router.callback_query(F.data == "show_android_instructions")
+async def process_android_instruction(callback: types.CallbackQuery):
+    """
+    Ловит нажатие кнопки Android и отправляет инструкцию в чат.
+    """
+    instruction_text = (
+        "🤖 **Инструкция для Android:**\n\n"
+        "1. Перейди прямо сейчас в профиль нашего бота (нажми на его аватарку или имя в самом верху экрана).\n"
+        "2. В правом верхнем углу профиля нажмите на **три вертикальные точки** (меню).\n"
+        "3. Выбери пункт **«Добавить на главный экран»** (Add to Home screen).\n\n"
+        "📸 _Иконка с логотипом создастся автоматически! Если захочешь её изменить, можешь сделать скриншот логотипа прямо из этого чата._\n\n"
+        "🔥 Готово! Теперь бот всегда под рукой."
+    )
+    
+    # Отправляем текст в чат
+    await callback.message.answer(text=instruction_text, parse_mode="Markdown")
+    
+    # Гасим часики на кнопке, чтобы она не «зависала»
+    await callback.answer()
+
 
 
