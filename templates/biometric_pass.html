@@ -15,7 +15,6 @@
 </head>
 <body>
     <h2>Пропускной пункт клуба</h2>
-
     <!-- Добавили блок настройки биометрии -->
     <div id="setup-biometry-box" style="display: none; background: #ffeeba; padding: 15px; margin-bottom: 20px; border-radius: 8px;">
         <p style="margin: 0 0 10px 0; color: #856404;">🔒 Для защиты прохода активируйте FaceID/TouchID</p>
@@ -32,14 +31,19 @@
         {% endfor %}
     </div>
 
-    <script>
+        <script>
         const tg = window.Telegram.WebApp;
-        tg.expand();
+        tg.expand(); // Разворачиваем на весь экран
 
-        // Проверяем статус биометрии при старте страницы
         const bm = tg.BiometricManager;
+        let isBiometricReady = false; // Флаг готовности менеджера биометрии
+
+        // 1. Инициализируем биометрию СТРОГО один раз при старте страницы!
         bm.init(() => {
-            // Если устройство поддерживает FaceID, но доступ приложению еще не дан
+            isBiometricReady = true;
+            console.log("Биометрия успешно инициализирована Telegram");
+
+            // Если устройство поддерживает FaceID, но доступ приложению еще не дан — показываем плашку активации
             if (bm.isBiometricSupported && !bm.isAccessGranted) {
                 document.getElementById('setup-biometry-box').style.display = 'block';
             }
@@ -47,9 +51,13 @@
 
         // Функция первой настройки биометрии
         function setupBiometrics() {
+            if (!isBiometricReady) {
+                tg.showAlert("Система биометрии еще загружается, подождите секунду...");
+                return;
+            }
+
             bm.requestAccess({ reason: "Биометрия нужна для безопасного открытия турникета" }, (accessGranted) => {
                 if (accessGranted) {
-                    // Передаем на бэк сигнал, что юзер включил FaceID, и записываем True в БД
                     fetch('/webapp/enable-biometry', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
@@ -61,54 +69,62 @@
                             tg.showAlert("Отлично! Теперь ваш профиль защищен биометрией.");
                             document.getElementById('setup-biometry-box').style.display = 'none';
                         }
-                    });
+                    })
+                    .catch(err => tg.showAlert("Ошибка сервера при активации: " + err));
                 } else {
-                    tg.showAlert("Доступ к биометрии отклонен устройствам.");
+                    tg.showAlert("Доступ к биометрии отклонен устройством.");
                 }
             });
         }
 
+        // Функция прохода атлета (клик по кнопке)
         function passStudent(studentId) {
             const targetButton = document.getElementById(`btn-${studentId}`);
 
-            bm.init(() => {
-                if (!bm.isBiometricSupported) {
-                    tg.showAlert("Устройство не поддерживает биометрию.");
-                    return;
+            // Проверяем, успел ли Telegram связаться с FaceID телефона
+            if (!isBiometricReady) {
+                tg.showAlert("Секунду, биометрический менеджер еще загружается. Попробуйте снова через миг.");
+                return;
+            }
+
+            // ИСПРАВЛЕНО: Явный вывод предупреждения, если само устройство или настройки ТГ не поддерживают FaceID
+            if (!bm.isBiometricSupported) {
+                tg.showAlert("Ваше устройство не поддерживает биометрию, либо она отключена в настройках конфиденциальности вашего Telegram.");
+                return;
+            }
+
+            // ИСПРАВЛЕНО: Вызываем аутентификацию НАПРЯМУЮ, без повторного bm.init()!
+            bm.authenticate({ reason: "Подтвердите личность родителя для прохода ребенка" }, (isAuthenticated, biometricToken) => {
+                if (isAuthenticated) {
+                    targetButton.disabled = true;
+                    targetButton.innerText = "Открытие...";
+
+                    fetch('/webapp/open-turnstile', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            student_id: parseInt(studentId),
+                            biometric_token: biometricToken || "", // Защита от null
+                            init_data: tg.initData
+                        })
+                    })
+                    .then(res => res.json())
+                    .then(data => {
+                        if (data.success) {
+                            tg.showAlert(data.message || "Турникет открыт! Проходите.");
+                            setTimeout(() => { location.reload(); }, 1500);
+                        } else {
+                            tg.showAlert("Ошибка: " + data.message);
+                        }
+                    })
+                    .catch(err => { tg.showAlert("Ошибка сети или сервера."); })
+                    .finally(() => {
+                        targetButton.disabled = false;
+                        targetButton.innerText = "Пропустить по FaceID";
+                    });
+                } else {
+                    tg.showAlert("Ошибка сканирования лица/пальца.");
                 }
-
-                bm.authenticate({ reason: "Подтвердите личность родителя для прохода ребенка" }, (isAuthenticated, biometricToken) => {
-                    if (isAuthenticated) {
-                        targetButton.disabled = true;
-                        targetButton.innerText = "Открытие...";
-
-                        fetch('/webapp/open-turnstile', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({
-                                student_id: parseInt(studentId),
-                                biometric_token: biometricToken,
-                                init_data: tg.initData
-                            })
-                        })
-                        .then(res => res.json())
-                        .then(data => {
-                            if (data.success) {
-                                tg.showAlert(data.message || "Турникет открыт! Проходите.");
-                                setTimeout(() => { location.reload(); }, 1500);
-                            } else {
-                                tg.showAlert("Ошибка: " + data.message);
-                            }
-                        })
-                        .catch(err => { tg.showAlert("Ошибка сети или сервера."); })
-                        .finally(() => {
-                            targetButton.disabled = false;
-                            targetButton.innerText = "Пропустить по FaceID";
-                        });
-                    } else {
-                        tg.showAlert("Ошибка сканирования лица/пальца.");
-                    }
-                });
             });
         }
     </script>
