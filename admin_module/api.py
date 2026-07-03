@@ -293,8 +293,9 @@ import urllib.request
 import base64
 import asyncio
 
-# 1. Потоковый воркер, который собирает MJPEG из скриншотов камеры
-async def stream_worker(snapshot_url: str):
+
+# 1. Потоковый воркер, который автоматически найдет рабочий URL и соберет MJPEG
+async def stream_worker(snapshot_urls: list):
     auth_str = "admin:Aemaykop2026"
     auth_b64 = base64.b64encode(auth_str.encode()).decode()
 
@@ -302,12 +303,35 @@ async def stream_worker(snapshot_url: str):
         "Authorization": f"Basic {auth_b64}"
     }
 
+    # Перебираем список адресов, чтобы найти тот, который отдаст 200 OK
+    working_url = None
+    for url in snapshot_urls:
+        try:
+            loop = asyncio.get_event_loop()
+
+            def test_connect():
+                req = urllib.request.Request(url, headers=headers)
+                with urllib.request.urlopen(req, timeout=1.5) as response:
+                    return response.getcode()
+
+            status = await loop.run_in_executor(None, test_connect)
+            if status == 200:
+                working_url = url
+                break
+        except Exception:
+            continue
+
+    # Если вдруг все выдали ошибку, берем первый как запасной
+    if not working_url:
+        working_url = snapshot_urls[0]
+
+    # Запускаем бесконечный цикл трансляции найденного пути
     while True:
         try:
             loop = asyncio.get_event_loop()
 
             def fetch_image():
-                req = urllib.request.Request(snapshot_url, headers=headers)
+                req = urllib.request.Request(working_url, headers=headers)
                 with urllib.request.urlopen(req, timeout=2.0) as response:
                     return response.read()
 
@@ -316,27 +340,34 @@ async def stream_worker(snapshot_url: str):
             yield (b'--frame\r\n'
                    b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
 
-        except Exception as e:
+        except Exception:
             await asyncio.sleep(1)
 
-        await asyncio.sleep(0.04)
+        await asyncio.sleep(0.05)
 
 
-# 2. Роут, который открывает саму HTML-страницу с камерами (ТОТ САМЫЙ ПОТЕРЯВШИЙСЯ)
+# 2. Роут открытия самой страницы WebApp
 @router.get("/webapp/cameras", response_class=HTMLResponse)
 async def get_cameras_page(request: Request, club_id: int = Query(...)):
     """Страница видеонаблюдения для WebApp"""
     return templates.TemplateResponse("cameras.html", {"request": request, "club_id": club_id})
 
 
-# 3. Роут, который генерирует видеопоток для тега <img> внутри HTML
+# 3. Роут генерации стрима
 @router.get("/webapp/cameras/stream")
 async def video_stream(club_id: int = Query(...)):
     domain = "camera.aemaykop-skud.netcraze.pro"
-    path = "/onvif/snapshot"
-    snapshot_url = f"http://{domain}{path}"
+
+    # Закидываем топ-3 неубиваемых пути для скриншотов этой линейки камер
+    urls = [
+        f"http://{domain}/reallive/snapshot",
+        f"http://{domain}/tmpfs/auto.jpg",
+        f"http://{domain}/images/snapshot.jpg"
+    ]
 
     return StreamingResponse(
-        stream_worker(snapshot_url),
+        stream_worker(urls),
         media_type='multipart/x-mixed-replace; boundary=frame'
     )
+
+
