@@ -328,7 +328,7 @@ async def stream_worker(snapshot_url: str):
 async def video_stream(club_id: int = Query(...)):
     # Собираем URL по кусочкам через f-строку, чтобы обойти любые фильтры
     domain = "camera.aemaykop-skud.netcraze.pro"
-    path = "/api/v1/snapshot"
+    path = "/images/snapshot.jpg"
     snapshot_url = f"http://{domain}{path}"
 
     return StreamingResponse(
