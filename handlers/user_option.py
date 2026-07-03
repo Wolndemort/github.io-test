@@ -1,5 +1,6 @@
 import qrcode
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from types import SimpleNamespace
+from aiogram.types import InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 import io
 from aiogram.utils.keyboard import ReplyKeyboardBuilder
@@ -113,7 +114,8 @@ async def universal_profile_handler(
         f"👤 <b>Личный кабинет</b>\n\n{status_text}\n\n"
         "<i>Используйте кнопки ниже для управления:</i>"
     )
-    reply_markup = get_profile_keyboard(club_settings=club_settings, is_authorized=is_auth)
+    current_user = SimpleNamespace(user_id=user_id, club_id=club.id)
+    reply_markup = get_profile_keyboard(current_user, club_settings=club_settings, is_authorized=is_auth)
 
     try:
         # 2. Проверяем тип события для правильного ответа
@@ -219,6 +221,7 @@ async def detailed_status_handler(
     except Exception as e:
         logger.error(f"❌ Ошибка в детальном статусе: {e}")
         await callback.answer("Ошибка при загрузке подробных данных")
+
 
 
 
