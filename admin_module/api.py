@@ -1,8 +1,15 @@
+from datetime import datetime
+from handlers.skud import trigger_dingtian_turnstile
 import pandas as pd
 import urllib.request
-import base64
-import asyncio
 from fastapi import Query
+import hmac
+import hashlib
+import json
+from urllib.parse import parse_qsl
+from pydantic import BaseModel
+from fastapi.responses import HTMLResponse
+from fastapi.templating import Jinja2Templates
 import io
 from fastapi import Request
 from fastapi.responses import HTMLResponse
@@ -15,7 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from starlette import status
 from starlette.responses import StreamingResponse
-from database.db import User, Student
+from database.db import User, Student, Club
 from database.db import get_session
 from config import fastapi_key
 
@@ -371,3 +378,189 @@ async def video_stream(club_id: int = Query(...)):
     )
 
 
+@router.get("/pass-app", response_class=HTMLResponse)
+async def get_web_app_page(request: Request, user_id: int, db: AsyncSession = Depends(get_session)):
+    """
+    Эндпоинт, который открывается в Telegram WebApp по ссылке:
+    https://твоя_куча_поддоменов.ru/admin/pass-app?user_id={telegram_id}
+    """
+    # Вытаскиваем родителя и всех его детей из базы данных
+    query = select(User).where(User.user_id == user_id)
+    result = await db.execute(query)
+    user = result.scalar_one_or_none()
+
+    if not user:
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
+
+    # Достаем список студентов для этого родителя
+    students_query = select(Student).where(Student.parent_id == user_id)
+    students_result = await db.execute(students_query)
+    students = students_result.scalars().all()
+
+    # Рендерим HTML страницу и передаем туда список детей
+    return templates.TemplateResponse("biometric_pass.html", {"request": request, "students": students})
+
+
+@router.post("/open-turnstile")
+async def open_turnstile(payload: dict, db: AsyncSession = Depends(get_session)):
+    """
+    Сюда летит POST-запрос с фронтенда после успешного сканирования FaceID
+    """
+    student_id = payload.get("student_id")
+    biometric_token = payload.get("biometric_token")
+    init_data = payload.get("init_data")
+
+    # 1. Сюда добавляем валидацию init_data (чтобы проверить, что запрос не подделан)
+    # 2. Проверяем баланс занятий студента (student.balance_lessons)
+    # 3. Отправляем команду на реле Dingtian
+
+    return {"success": True, "message": "Реле сработало, турникет открыт"}
+
+
+
+#BIOMETRIC BIOMETRIC
+
+
+class BiometricCheckIn(BaseModel):
+    student_id: int
+    biometric_token: str | None = None
+    init_data: str
+
+
+def verify_telegram_data(init_data: str, bot_token: str) -> dict | None:
+    """Криптографическая проверка, что init_data пришла от реального юзера Telegram"""
+    try:
+        parsed_data = dict(parse_qsl(init_data))
+        if "hash" not in parsed_data:
+            return None
+        tg_hash = parsed_data.pop("hash")
+        data_check_string = "\n".join(f"{k}={v}" for k, v in sorted(parsed_data.items()))
+        secret_key = hmac.new(b"WebAppData", bot_token.encode(), hashlib.sha256).digest()
+        calculated_hash = hmac.new(secret_key, data_check_string.encode(), hashlib.sha256).hexdigest()
+        if calculated_hash == tg_hash:
+            return json.loads(parsed_data.get("user", "{}"))
+        return None
+    except Exception:
+        return None
+
+
+# 1. РОУТ ДЛЯ ВЫДАЧИ HTML СТРАНИЦЫ РОДИТЕЛЮ
+@router.get("/webapp/biometric-pass", response_class=HTMLResponse)
+async def get_biometric_page(request: Request, club_id: int, user_id: int, db: AsyncSession = Depends(get_session)):
+    """
+    Отдает красивую HTML-страницу со списком детей.
+    Ссылка в кнопке: https://{club_id}.speedycrm.ru/webapp/biometric-pass?club_id={club_id}&user_id={user_id}
+    """
+    # Достаем студентов, привязанных к этому родителю и этому клубу
+    students_query = select(Student).where(Student.parent_id == user_id, Student.club_id == club_id)
+    students_result = await db.execute(students_query)
+    students = students_result.scalars().all()
+
+    # Рендерим HTML и передаем туда список детей
+    return templates.TemplateResponse("biometric_pass.html", {"request": request, "students": students})
+
+# 2. РОУТ ДЛЯ ОБРАБОТКИ НАЖАТИЯ И ОТКРЫТИЯ ТУРНИКЕТА
+
+@router.post("/webapp/open-turnstile")
+async def open_turnstile(payload: BiometricCheckIn, db: AsyncSession = Depends(get_session)):
+    """Принимает сигнал об успешном FaceID, проверяет лимиты и дергает реле"""
+    student_query = select(Student).where(Student.id == payload.student_id)
+    student_res = await db.execute(student_query)
+    student = student_res.scalar_one_or_none()
+
+    if not student:
+        raise HTTPException(status_code=404, detail="Студент не найден")
+
+    club_query = select(Club).where(Club.id == student.club_id)
+    club_res = await db.execute(club_query)
+    club = club_res.scalar_one_or_none()
+
+    if not club or not club.bot_token:
+        raise HTTPException(status_code=400, detail="Конфигурация клуба не найдена")
+
+    # Безопасность Telegram
+    tg_user = verify_telegram_data(payload.init_data, club.bot_token)
+    if not tg_user or "id" not in tg_user:
+        raise HTTPException(status_code=403, detail="Ошибка безопасности: Неверные данные")
+
+    telegram_user_id = tg_user["id"]
+
+    if student.parent_id != telegram_user_id:
+        raise HTTPException(status_code=403, detail="Доступ запрещен: Вы не родитель")
+
+    user_query = select(User).where(User.user_id == telegram_user_id)
+    user_res = await db.execute(user_query)
+    parent_user = user_res.scalar_one_or_none()
+
+    # Защита от обхода FaceID
+    if parent_user and getattr(parent_user, 'is_biometric_enabled', False) and not payload.biometric_token:
+        raise HTTPException(status_code=400, detail="Необходимо биометрическое подтверждение")
+
+    # Проверки абонемента
+    if student.is_frozen == 1:
+        return {"success": False, "message": "Абонемент заморожен."}
+    if student.expire_date and student.expire_date < datetime.now():
+        return {"success": False, "message": "Срок действия абонемента истек."}
+    if student.balance_lessons <= 0:
+        return {"success": False, "message": "Нет доступных занятий."}
+
+    # Открываем СКУД Dingtian
+    relay_config = club.club_settings.get("dingtian_config", {})
+    try:  # Импортируем твою функцию из skud.py
+        is_opened = await trigger_dingtian_turnstile(relay_config)
+    except Exception as e:
+        return {"success": False, "message": f"Ошибка СКУД: {str(e)}"}
+
+    if is_opened:
+        student.balance_lessons -= 1
+        student.last_visit = datetime.now()
+        await db.commit()
+        return {"success": True, "message": f"Турникет открыт для {student.name}!"}
+
+    return {"success": False, "message": "Турникет не ответил. Попробуйте еще раз."}
+
+
+
+#Enabled biometri!!!!!
+
+
+class BiometricEnable(BaseModel):
+    init_data: str
+
+
+@router.post("/webapp/enable-biometry")
+async def enable_biometry(payload: BiometricEnable, db: AsyncSession = Depends(get_session)):
+    """
+    Эндпоинт вызывается один раз, когда родитель включает FaceID в приложении.
+    Ставит флаг is_biometric_enabled = True в базу данных.
+    """
+    # 1. Достаем временный токен бота для проверки (в данном контексте можно через релейшн или по club_id из init_data)
+    # Для упрощения сначала парсим юзера, чтобы найти его в БД
+    parsed_data = dict(parse_qsl(payload.init_data))
+    tg_user = json.loads(parsed_data.get("user", "{}"))
+    telegram_user_id = tg_user.get("id")
+
+    if not telegram_user_id:
+        raise HTTPException(status_code=400, detail="Неверные данные Telegram")
+
+    # 2. Ищем родителя в базе данных
+    user_query = select(User).where(User.user_id == telegram_user_id)
+    user_res = await db.execute(user_query)
+    parent_user = user_res.scalar_one_or_none()
+
+    if not parent_user:
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
+
+    # 3. Достаем клуб, чтобы верифицировать init_data по токену бота
+    club_query = select(Club).where(Club.id == parent_user.club_id)
+    club_res = await db.execute(club_query)
+    club = club_res.scalar_one_or_none()
+
+    if not club or not verify_telegram_data(payload.init_data, club.bot_token):
+        raise HTTPException(status_code=430, detail="Ошибка безопасности данных")
+
+    # 4. Включаем биометрию в базе данных!
+    parent_user.is_biometric_enabled = True
+    await db.commit()
+
+    return {"success": True, "message": "Биометрия успешно активирована в профиле!"}

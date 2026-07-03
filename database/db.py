@@ -36,6 +36,7 @@ class User(Base):
     is_accepted: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
     full_name: Mapped[Optional[str]] = mapped_column(String)
     students: Mapped[List["Student"]] = relationship(back_populates='parent')
+    is_biometric_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
 
 
 class Student(Base):

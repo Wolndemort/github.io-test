@@ -8,27 +8,36 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 router = Router()
 
 
-def get_profile_keyboard(club_settings: dict, is_authorized: bool = False):
+def get_profile_keyboard(user, club_settings: dict, is_authorized: bool = False):
+    """
+    Передаем объект user (модель User из БД), чтобы динамически подставлять
+    его club_id и user_id в ссылку WebApp.
+    """
     builder = InlineKeyboardBuilder()
 
     # ⚙️ Достаем фичи из настроек клуба
     features = club_settings.get("features", {})
 
-    # 1. Всегда доступные кнопки (или базовые)
+    # Формируем базовый URL с изоляцией поддомена по club_id
+    base_url = f"https://{user.club_id}.speedycrm.ru"
+
+    # ЕДИНАЯ КНОПКА: Передаем и club_id, и user_id в GET-параметрах
+    builder.row(types.InlineKeyboardButton(
+        text="📱 Проход по FaceID",
+        web_app=WebAppInfo(url=f"{base_url}/webapp/biometric-pass?club_id={user.club_id}&user_id={user.user_id}")
+    ))
+
+    # 1. Всегда доступные кнопки
     builder.row(types.InlineKeyboardButton(text='➕ Добавить атлета', callback_data='add_athlete'))
     builder.row(types.InlineKeyboardButton(text='🔍 Подробно об атлетах', callback_data='detailed_status_info'))
 
-    # 2. ДИНАМИЧЕСКИЕ КНОПКИ (Показываем только если включено в админке)
-
-    # Покупка абонемента
-    if features.get("online_payments", False):  # По умолчанию выключено, пока не настроишь
+    # 2. ДИНАМИЧЕСКИЕ КНОПКИ
+    if features.get("online_payments", False):
         builder.row(types.InlineKeyboardButton(text='Купить абонемент 💳', callback_data='choose_section'))
 
-    # Заморозка
     if features.get("freeze", True):
         builder.row(types.InlineKeyboardButton(text='❄️ Заморозить абонемент', callback_data='freeze_sub'))
 
-    # QR-пропуск
     if features.get("qr", True):
         builder.row(types.InlineKeyboardButton(text='📲 МОЙ QR-ПРОПУСК', callback_data='show_qr'))
 
