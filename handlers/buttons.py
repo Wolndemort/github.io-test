@@ -21,6 +21,18 @@ def get_profile_keyboard(user, club_settings: dict, is_authorized: bool = False)
     # Формируем базовый URL с изоляцией поддомена по club_id
     base_url = f"https://{user.club_id}.speedycrm.ru"
 
+    FaceID)
+    builder.row(
+        types.InlineKeyboardButton(
+            text="🍏 Иконка на iPhone",
+            url="tg://resolve?domain=Testaemaykop_bot"  # Ссылка для iOS
+        ),
+        types.InlineKeyboardButton(
+            text="🤖 Иконка на Android",
+            callback_data="show_android_instructions"  # Коллбэк для Android
+        )
+    )
+
     # ЕДИНАЯ КНОПКА: Передаем и club_id, и user_id в GET-параметрах
     builder.row(types.InlineKeyboardButton(
         text="📱 Проход по FaceID",
