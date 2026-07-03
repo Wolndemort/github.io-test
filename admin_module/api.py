@@ -333,7 +333,7 @@ async def get_cameras_page(request: Request, club_id: int = Query(...)):
 
 
 # 2. Роут, который генерирует видеопоток для тега <img class="video-stream">
-@router.get("/cameras/stream")
+@router.get("/webapp/cameras/stream")
 async def video_stream(club_id: int = Query(...)):
     # Отправляем OpenCV читать MJPEG поток через твой рабочий CrazeDNS поддомен
     rtsp_url = "http://admin:Aemaykop2026@camera.aemaykop-skud.netcraze.pro/video.mjpg"
