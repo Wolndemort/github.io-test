@@ -506,17 +506,21 @@ async def open_turnstile(payload: BiometricCheckIn, db: AsyncSession = Depends(g
         return {"success": False, "message": "Нет доступных занятий."}
 
     # Открываем СКУД Dingtian
-    relay_config = club.club_settings.get("turnstile", {})
+    raw_turnstile = club.club_settings.get("turnstile", {})
+    relay_config = dict(raw_turnstile) if raw_turnstile else {}
 
-    # 2. Железная страховка для KeenDNS домена: если протокол http:// забыли, принудительно добавляем
+    # 2. Проверяем адрес и принудительно добавляем http:// если его забыли
     if "base_url" in relay_config:
         url_val = str(relay_config["base_url"])
         if not url_val.startswith("http"):
             relay_config["base_url"] = f"http://{url_val}"
-    try:  # Импортируем твою функцию из skud.py
+
+    # 3. Отправляем команду на открытие реле
+    try:
         is_opened = await trigger_dingtian_turnstile(relay_config)
     except Exception as e:
         return {"success": False, "message": f"Ошибка СКУД: {str(e)}"}
+
 
     if is_opened:
         student.balance_lessons -= 1
