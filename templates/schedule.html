@@ -1,0 +1,119 @@
+<!-- templates/schedule.html -->
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Расписание занятий</title>
+    <!-- Подключаем правильный скрипт Telegram WebApp SDK -->
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <style>
+        :root {
+            --tg-theme-bg-color: #181818;
+            --tg-theme-text-color: #ffffff;
+            --tg-theme-hint-color: #aaaaaa;
+            --tg-theme-button-color: #2481cc;
+            --tg-theme-button-text-color: #ffffff;
+        }
+        body {
+            background-color: var(--tg-theme-bg-color, #1c1c1e);
+            color: var(--tg-theme-text-color, #ffffff);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            margin: 0;
+            padding: 16px;
+            -webkit-user-select: none;
+            box-sizing: border-box;
+        }
+        h2 { margin-top: 0; color: var(--tg-theme-button-color); text-align: center; }
+        .discipline-section { margin-bottom: 24px; }
+        .discipline-title {
+            font-size: 20px;
+            font-weight: bold;
+            color: var(--tg-theme-button-color);
+            margin-bottom: 12px;
+            border-bottom: 2px solid var(--tg-theme-button-color);
+            padding-bottom: 4px;
+        }
+        .day-container {
+            background: #2c2c2e;
+            border-radius: 12px;
+            padding: 12px;
+            margin-bottom: 12px;
+            border: 1px solid #3a3a3c;
+        }
+        .day-title {
+            font-size: 16px;
+            font-weight: bold;
+            margin-bottom: 8px;
+            color: #ff9f0a;
+        }
+        .lesson-card {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: #3a3a3c;
+            padding: 10px;
+            border-radius: 8px;
+            margin-bottom: 8px;
+        }
+        .lesson-card:last-child { margin-bottom: 0; }
+        .time {
+            font-family: monospace;
+            font-size: 16px;
+            font-weight: bold;
+            background: var(--tg-theme-button-color);
+            color: var(--tg-theme-button-text-color);
+            padding: 4px 8px;
+            border-radius: 6px;
+        }
+        .info { flex-grow: 1; margin-left: 12px; }
+        .coach { font-size: 14px; color: #aeaeb2; }
+        .slots { font-size: 12px; color: #30d158; text-align: right; }
+        .no-lessons { color: #8e8e93; font-style: italic; font-size: 13px; }
+    </style>
+</head>
+<body>
+    <h2>🏰 {{ club_name }}</h2>
+    <div id="schedule-root">
+        <!-- Перебираем секции (дисциплины) -->
+        {% for discipline in disciplines %}
+            <div class="discipline-section">
+                <div class="discipline-title">🥋 {{ discipline.name }}</div>
+
+                <!-- Перебираем дни недели внутри секции -->
+                {% for day in discipline.days %}
+                    <div class="day-container">
+                        <div class="day-title">{{ day.title }}</div>
+
+                        <!-- Перебираем тренировки в конкретный день -->
+                        {% for lesson in day.lessons %}
+                            <div class="lesson-card">
+                                <div class="time">{{ lesson.time }}</div>
+                                <div class="info">
+                                    <div class="coach">👤 {{ lesson.coach }}</div>
+                                </div>
+                                <div class="slots">
+                                    <div>Свободно</div>
+                                    <b>{{ lesson.free_slots }} / {{ lesson.max_slots }}</b>
+                                </div>
+                            </div>
+                        {% endfor %}
+                    </div>
+                {% else %}
+                    <div class="day-container">
+                        <div class="no-lessons">🗓 Тренировок на этой неделе пока нет.</div>
+                    </div>
+                {% endfor %}
+            </div>
+        {% else %}
+            <p class="no-lessons">В клубе пока нет созданных спортивных секций.</p>
+        {% endfor %}
+    </div>
+
+    <script>
+        const tg = window.Telegram.WebApp;
+        tg.ready();
+        tg.expand();
+    </script>
+</body>
+</html>

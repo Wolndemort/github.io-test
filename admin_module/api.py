@@ -144,18 +144,21 @@ async def export_students_to_excel(request: Request, session: AsyncSession = Dep
 
 from fastapi.responses import HTMLResponse
 
+
 @router.get("/webapp/schedule", response_class=HTMLResponse)
 async def webapp_schedule_page(
-    request: Request,
-    club_id: int = None,
-    session: AsyncSession = Depends(get_session)
+        request: Request,
+        club_id: int = None,
+        session: AsyncSession = Depends(get_session)
 ):
     from database.db import Club
     from sqlalchemy.future import select
 
     if not club_id:
-        try: club_id = get_club_id_from_host(request)
-        except Exception: club_id = None
+        try:
+            club_id = get_club_id_from_host(request)
+        except Exception:
+            club_id = None
 
     if not club_id:
         return HTMLResponse(content="<h1>❌ Ошибка: Не удалось определить ID клуба</h1>", status_code=400)
@@ -163,193 +166,80 @@ async def webapp_schedule_page(
     stmt = select(Club).where(Club.id == club_id)
     result = await session.execute(stmt)
     club = result.scalar_one_or_none()
-    
+
     if not club:
         return HTMLResponse(content="<h1>🏰 Клуб не найден в системе SpeedyCRM</h1>", status_code=404)
 
     settings = club.club_settings if isinstance(club.club_settings, dict) else {}
-    disciplines = settings.get("disciplines", {})
+    disciplines_data = settings.get("disciplines", {})
 
     day_names = {
         "mon": "Понедельник", "tue": "Вторник", "wed": "Среда",
         "thu": "Четверг", "fri": "Пятница", "sat": "Суббота", "sun": "Воскресенье"
     }
 
-    # Железобетонная сборка расписания
-    disciplines_html = ""
-    
-    if not disciplines:
-        disciplines_html = '<p class="no-lessons">В клубе пока нет созданных спортивных секций.</p>'
-    else:
-        for disc_key, disc_data in disciplines.items():
-            if not isinstance(disc_data, dict):
+    # Парсим JSON-настройки клуба в структурированный список для Jinja2 шаблона
+    parsed_disciplines = []
+
+    if isinstance(disciplines_data, dict):
+        for disc_key, disc_content in disciplines_data.items():
+            if not isinstance(disc_content, dict):
                 continue
-                
-            disc_name = disc_data.get("name", "Спортивная секция")
-            schedule_data = disc_data.get("schedule", {})
+
+            disc_name = disc_content.get("name", "Спортивная секция")
+            schedule_data = disc_content.get("schedule", {})
             if not isinstance(schedule_data, dict):
                 schedule_data = {}
-            
-            days_html = ""
-            
+
+            parsed_days = []
             for day_key, day_title in day_names.items():
                 lessons = schedule_data.get(day_key, [])
                 if not lessons or not isinstance(lessons, list):
                     continue
-                
-                lessons_cards_html = ""
+
+                parsed_lessons = []
                 for lesson in lessons:
                     if not isinstance(lesson, dict):
                         continue
-                        
-                    time_str = str(lesson.get("time", "00:00"))
-                    coach_str = str(lesson.get("coach", "Инструктор"))
-                    
-                    # Пытаемся прочитать лимиты по любым возможным ключам
-                    max_slots = lesson.get("max_slots") or lesson.get("slots") or lesson.get("limit") or 0
+
+                    max_slots = lesson.get("max_slots") or lesson.get("slots") or lesson.get("limit") or 50
                     taken_slots = lesson.get("taken_slots") or 0
-                    
+
                     try:
                         max_slots = int(max_slots)
                     except (ValueError, TypeError):
                         max_slots = 50
-                        
+
                     try:
                         taken_slots = int(taken_slots)
                     except (ValueError, TypeError):
                         taken_slots = 0
-                        
-                    free_slots = max(0, max_slots - taken_slots)
-                    
-                    lessons_cards_html += f"""
-                    <div class="lesson-card">
-                        <div class="time">{time_str}</div>
-                        <div class="info">
-                            <div class="coach">👤 {coach_str}</div>
-                        </div>
-                        <div class="slots">
-                            <div>Свободно</div>
-                            <b>{free_slots} / {max_slots}</b>
-                        </div>
-                    </div>
-                    """
-                
-                if lessons_cards_html:
-                    days_html += f"""
-                    <div class="day-container">
-                        <div class="day-title">{day_title}</div>
-                        {lessons_cards_html}
-                    </div>
-                    """
-            
-            if not days_html:
-                days_html = """
-                <div class="day-container">
-                    <div class="no-lessons">🗓 Тренировок на этой неделе пока нет.</div>
-                </div>
-                """
-                
-            disciplines_html += f"""
-            <div class="discipline-section">
-                <div class="discipline-title">🥋 {disc_name}</div>
-                {days_html}
-            </div>
-            """
 
-    html_content = f"""
-    <!DOCTYPE html>
-    <html lang="ru">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Расписание занятий</title>
-        <script src="https://telegram.org"></script>
-        <style>
-            :root {{
-                --tg-theme-bg-color: #181818;
-                --tg-theme-text-color: #ffffff;
-                --tg-theme-hint-color: #aaaaaa;
-                --tg-theme-button-color: #2481cc;
-                --tg-theme-button-text-color: #ffffff;
-            }}
-            body {{
-                background-color: var(--tg-theme-bg-color, #1c1c1e);
-                color: var(--tg-theme-text-color, #ffffff);
-                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-                margin: 0;
-                padding: 16px;
-                -webkit-user-select: none;
-            }}
-            h2 {{ margin-top: 0; color: var(--tg-theme-button-color); text-align: center; }}
-            .discipline-section {{ margin-bottom: 24px; }}
-            .discipline-title {{
-                font-size: 20px;
-                font-weight: bold;
-                color: var(--tg-theme-button-color);
-                margin-bottom: 12px;
-                border-bottom: 2px solid var(--tg-theme-button-color);
-                padding-bottom: 4px;
-            }}
-            .day-container {{
-                background: #2c2c2e;
-                border-radius: 12px;
-                padding: 12px;
-                margin-bottom: 12px;
-                border: 1px solid #3a3a3c;
-            }}
-            .day-title {{
-                font-size: 16px;
-                font-weight: bold;
-                margin-bottom: 8px;
-                color: #ff9f0a;
-            }}
-            .lesson-card {{
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-                background: #3a3a3c;
-                padding: 10px;
-                border-radius: 8px;
-                margin-bottom: 8px;
-            }}
-            .lesson-card:last-child {{ margin-bottom: 0; }}
-            .time {{
-                font-family: monospace;
-                font-size: 16px;
-                font-weight: bold;
-                background: var(--tg-theme-button-color);
-                color: var(--tg-theme-button-text-color);
-                padding: 4px 8px;
-                border-radius: 6px;
-            }}
-            .info {{ flex-grow: 1; margin-left: 12px; }}
-            .coach {{ font-size: 14px; color: #aeaeb2; }}
-            .slots {{ font-size: 12px; color: #30d158; text-align: right; }}
-            .no-lessons {{ color: #8e8e93; font-style: italic; font-size: 13px; }}
-        </style>
-    </head>
-    <body>
-        <h2>🏰 {club.name or 'Без названия'}</h2>
-        <div id="schedule-root">
-            {disciplines_html}
-        </div>
+                    parsed_lessons.append({
+                        "time": str(lesson.get("time", "00:00")),
+                        "coach": str(lesson.get("coach", "Инструктор")),
+                        "max_slots": max_slots,
+                        "free_slots": max(0, max_slots - taken_slots)
+                    })
 
-        <script>
-            if (window.Telegram && window.Telegram.WebApp) {{
-                const tg = window.Telegram.WebApp;
-                tg.ready();
-                tg.expand();
-            }}
-        </script>
-    </body>
-    </html>
-    """
+                if parsed_lessons:
+                    parsed_days.append({
+                        "title": day_title,
+                        "lessons": parsed_lessons
+                    })
 
-    return HTMLResponse(content=html_content, status_code=200)
+            parsed_disciplines.append({
+                "name": disc_name,
+                "days": parsed_days
+            })
 
-
-    
-
+    # Отдаем чистый контекст в шаблон
+    context = {
+        "request": request,
+        "club_name": club.name or 'Без названия',
+        "disciplines": parsed_disciplines
+    }
+    return templates.TemplateResponse("schedule.html", context)
 
 
 # --- Системные роуты (Для них защиту по API-ключу ОСТАВЛЯЕМ) ---
