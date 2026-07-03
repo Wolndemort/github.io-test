@@ -503,7 +503,7 @@ async def parse_qr_scan(
             await message.answer(f"❄️ Абонемент {student_name} РАЗМОРОЖЕН")
 
         # 4. Анти-флуд (5 минут)
-        if student.last_visit and (now - student.last_visit).total_seconds() < 300:
+        if student.last_visit and (now - student.last_visit).total_seconds() < 30:
             return await message.answer(f"⚠️ {student_name} уже в зале! (Повтор через 5 мин)")
 
         # 5. Проверка прав доступа (Срок и Баланс)
