@@ -24,7 +24,7 @@ def get_profile_keyboard(user, club_settings: dict, is_authorized: bool = False)
     builder.row(
         types.InlineKeyboardButton(
             text="🍏 Иконка на iPhone",
-            url="tg://resolve?domain=Testaemaykop_bot"  # Ссылка для iOS
+            url="https://www.icloud.com/shortcuts/124940b85ce8437191757a95b928c59c"  # Твоя проверенная ссылка iCloud
         ),
         types.InlineKeyboardButton(
             text="🤖 Иконка на Android",
