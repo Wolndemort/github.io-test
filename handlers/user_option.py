@@ -902,3 +902,21 @@ async def show_discipline_schedule(
     )
 
     await callback.answer()
+    
+    
+await message.answer(
+    text=(
+        "🚀 **Твой профиль успешно настроен!**\n\n"
+        "Чтобы открывать турникет за 1 секунду, вынеси бота на рабочий стол.\n\n"
+        "👉 **Если у тебя iPhone (iOS):**\n"
+        "1. Нажми кнопку **«🍏 Иконка на iPhone»**, скопируй открывшуюся ссылку.\n"
+        "2. Настрой команду по инструкции в заметках.\n"
+        "📸 *В качестве иконки можно просто заскринить логотип `AE` прямо из этого чата!*\n\n"
+        "👉 **Если у тебя Android:**\n"
+        "Нажми кнопку **«🤖 Иконка на Android»** и следуй инструкции."
+    ),
+    reply_markup=get_profile_keyboard(user, club_settings, is_authorized),
+    parse_mode="Markdown"
+)
+
+
