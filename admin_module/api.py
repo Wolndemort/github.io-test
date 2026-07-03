@@ -507,6 +507,10 @@ async def open_turnstile(payload: BiometricCheckIn, db: AsyncSession = Depends(g
 
     # Открываем СКУД Dingtian
     relay_config = club.club_settings.get("dingtian_config", {})
+
+    # Костыль-страховка: если твоя функция skud.py требует именно base_url, а в базе лежит ip
+    if "base_url" not in relay_config and "ip" in relay_config:
+        relay_config["base_url"] = f"http://{relay_config['ip']}"
     try:  # Импортируем твою функцию из skud.py
         is_opened = await trigger_dingtian_turnstile(relay_config)
     except Exception as e:
