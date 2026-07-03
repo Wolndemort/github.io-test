@@ -4,8 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Вход по биометрии</title>
-    <!-- Подключаем официальный скрипт Telegram Web App -->
-   <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <style>
         body { font-family: sans-serif; background: #f0f0f0; padding: 20px; text-align: center; }
         .btn { display: block; width: 100%; padding: 15px; margin: 10px 0; background: #0088cc; color: white; border: none; border-radius: 8px; font-size: 16px; cursor: pointer; }
@@ -17,11 +16,11 @@
     <h2>Пропускной пункт клуба</h2>
 
     <div id="setup-biometry-box" style="display: none; background: #ffeeba; padding: 15px; margin-bottom: 20px; border-radius: 8px;">
-        <p style="margin: 0 0 10px 0; color: #856404;">🔒 Для защиты прохода активируйте FaceID/TouchID</p>
-        <button class="btn" style="background: #28a745; margin: 0;" onclick="setupBiometrics()">Включить биометрию</button>
+        <p style="margin: 0 0 10px 0; color: #856404;">🔒 Для активации прохода необходимо связать FaceID с ботом</p>
+        <button class="btn" style="background: #28a745; margin: 0;" onclick="setupBiometrics()">Зарегистрировать FaceID</button>
     </div>
 
-    <p style="color: #666;">Выберите атлета для прохода:</p>
+    <p style="color: #666;" id="status-hint">Выберите атлета для прохода:</p>
     <div id="students-list">
         {% for student in students %}
         <div class="student-card" id="card-{{ student.id }}" onclick="selectStudent('{{ student.id }}', '{{ student.name }}')">
@@ -37,50 +36,69 @@
 
         const bm = tg.BiometricManager;
         let selectedStudentId = null;
+        let isBiometricReady = false;
 
-        // Инициализируем биометрию один раз при старте страницы
+        // Инициализируем биометрию при старте
         bm.init(() => {
-            if (bm.isBiometricSupported && !bm.isAccessGranted) {
+            isBiometricReady = true;
+            // ИСПРАВЛЕНО: Если доступ к биометрии в Телеграме для этого бота еще не выдан на устройстве
+            if (!bm.isAccessGranted) {
                 document.getElementById('setup-biometry-box').style.display = 'block';
+                document.getElementById('students-list').style.opacity = '0.5';
             }
         });
 
-        // Настройка биометрии (жёлтая плашка)
+        // Функция первой настройки биометрии (РЕГИСТРАЦИЯ ТОКЕНА НА АЙФОНЕ)
         function setupBiometrics() {
-            bm.requestAccess({ reason: "Активация FaceID" }, (accessGranted) => {
+            if (!isBiometricReady) return;
+
+            // Запрашиваем доступ. Айфон ОБЯЗАН выкинуть системное окно FaceID для создания ключа!
+            bm.requestAccess({ reason: "Создание безопасного ключа устройства для прохода" }, (accessGranted) => {
                 if (accessGranted) {
+                    // Активируем токен на бэкенде
                     fetch('/webapp/enable-biometry', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ init_data: tg.initData })
-                    }).then(() => { location.reload(); });
+                    })
+                    .then(res => res.json())
+                    .then(data => {
+                        tg.showAlert("Устройство успешно связано! Теперь вы можете проходить в клуб.");
+                        location.reload(); // Перезагружаем, чтобы открыть список детей
+                    });
+                } else {
+                    tg.showAlert("Доступ к FaceID отклонен. Без этого проход невозможен.");
                 }
             });
         }
 
-        // Выбор студента кликом по карточке
+        // Выбор студента
         function selectStudent(studentId, studentName) {
-            selectedStudentId = studentId;
+            // Если биометрия еще не привязана, не даем кликать по детям
+            if (!bm.isAccessGranted) {
+                tg.showAlert("Сначала активируйте FaceID по кнопке сверху!");
+                return;
+            }
 
-            // Снимаем выделение со всех карточек и выделяем текущую
+            selectedStudentId = studentId;
             document.querySelectorAll('.student-card').forEach(c => c.classList.remove('selected-card'));
             document.getElementById(`card-${studentId}`).classList.add('selected-card');
 
-            // Настраиваем и показываем НАТИВНУЮ кнопку Телеграма в самом низу
             tg.MainButton.text = `ПРОПУСТИТЬ: ${studentName.toUpperCase()}`;
             tg.MainButton.textColor = "#FFFFFF";
             tg.MainButton.color = "#0088cc";
             tg.MainButton.show();
         }
 
-        // СВЯЗЫВАЕМ КЛИК ПО НАТИВНОЙ КНОПКЕ ТЕЛЕГРАМА С ВЫЗОВОМ FACE ID!
+        // КЛИК ПО НАТИВНОЙ КНОПКЕ ТЕЛЕГРАМА
         tg.onEvent('mainButtonClicked', function() {
             if (!selectedStudentId) return;
 
-            tg.MainButton.disable(); // Защита от повторных кликов
-            tg.MainButton.text = "Сканирование FaceID...";
+            tg.MainButton.disable();
+            tg.MainButton.text = "Авторизация FaceID...";
 
-            // Вызываем аутентификацию из нативного контекста кнопки Telegram
+            // Теперь, когда токен устройства железно зарегистрирован через requestAccess,
+            // метод authenticate отработает на Айфоне мгновенно и без зависаний!
             bm.authenticate({ reason: "Подтвердите личность для прохода" }, (isAuthenticated, biometricToken) => {
                 if (isAuthenticated) {
                     tg.MainButton.text = "Открытие турникета...";
@@ -98,7 +116,7 @@
                     .then(data => {
                         if (data.success) {
                             tg.showAlert(data.message || "Турникет открыт! Проходите.");
-                            setTimeout(() => { tg.close(); }, 1500); // Закрываем приложение
+                            setTimeout(() => { tg.close(); }, 1500);
                         } else {
                             tg.showAlert("Ошибка СКУД: " + data.message);
                             tg.MainButton.enable();
