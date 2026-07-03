@@ -506,11 +506,13 @@ async def open_turnstile(payload: BiometricCheckIn, db: AsyncSession = Depends(g
         return {"success": False, "message": "Нет доступных занятий."}
 
     # Открываем СКУД Dingtian
-    relay_config = club.club_settings.get("dingtian_config", {})
+    relay_config = club.club_settings.get("turnstile", {})
 
-    # Костыль-страховка: если твоя функция skud.py требует именно base_url, а в базе лежит ip
-    if "base_url" not in relay_config and "ip" in relay_config:
-        relay_config["base_url"] = f"http://{relay_config['ip']}"
+    # 2. Железная страховка для KeenDNS домена: если протокол http:// забыли, принудительно добавляем
+    if "base_url" in relay_config:
+        url_val = str(relay_config["base_url"])
+        if not url_val.startswith("http"):
+            relay_config["base_url"] = f"http://{url_val}"
     try:  # Импортируем твою функцию из skud.py
         is_opened = await trigger_dingtian_turnstile(relay_config)
     except Exception as e:
