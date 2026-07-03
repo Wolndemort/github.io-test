@@ -1,6 +1,7 @@
 import pandas as pd
+import urllib.request
+import base64
 import asyncio
-import cv2
 from fastapi import Query
 import io
 from fastapi import Request
@@ -281,66 +282,59 @@ async def get_privacy_page(request: Request):
     """Страница политики конфиденциальности для WebApp"""
     return templates.TemplateResponse("privacy.html", {"request": request})
 
+
 @router.get("/oferta", response_class=HTMLResponse)
 async def get_oferta_page(request: Request):
     """Страница публичной оферты для WebApp"""
     return templates.TemplateResponse("oferta.html", {"request": request})
 
 
-# Вспомогательная функция для чтения HTTP/RTSP-потока через OpenCV
-async def stream_worker(rtsp_url: str):
-    # OpenCV сам отлично авторизуется по ссылке http://admin:пароль@домен
-    cap = cv2.VideoCapture(rtsp_url)
-    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # Минимизируем задержку видео
+# 1. Потоковый воркер, который собирает MJPEG из скриншотов камеры
+async def stream_worker(snapshot_url: str):
+    # Данные авторизации камеры для HTTP-заголовка Basic Auth
+    auth_str = "admin:Aemaykop2026"
+    auth_b64 = base64.b64encode(auth_str.encode()).decode()
 
-    if not cap.isOpened():
-        return
+    headers = {
+        "Authorization": f"Basic {auth_b64}"
+    }
 
-    try:
-        while True:
+    while True:
+        try:
             loop = asyncio.get_event_loop()
-            # Читаем кадр через пул потоков, чтобы не блокировать асинхронный FastAPI
-            success, frame = await loop.run_in_executor(None, cap.read)
 
-            if not success:
-                # Если поток отвалился, ждем 2 секунды и пытаемся переподключиться
-                await asyncio.sleep(2)
-                cap = cv2.VideoCapture(rtsp_url)
-                continue
+            # Скачиваем одиночный snapshot из камеры через пул потоков
+            def fetch_image():
+                req = urllib.request.Request(snapshot_url, headers=headers)
+                with urllib.request.urlopen(req, timeout=2.0) as response:
+                    return response.read()
 
-            # Сжимаем в JPEG (70% качества, чтобы WebApp летал на смартфонах)
-            ret, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
-            if not ret:
-                continue
+            frame_bytes = await loop.run_in_executor(None, fetch_image)
 
-            frame_bytes = buffer.tobytes()
-
-            # Формируем стандартный MJPEG чанк для тега <img> в HTML
+            # Формируем MJPEG чанк для тега <img> на фронтенде
             yield (b'--frame\r\n'
                    b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
 
-            # Стабилизируем поток (~25 кадров в секунду)
-            await asyncio.sleep(0.04)
+        except Exception as e:
+            # Если сеть моргнула или камера занята, мягко ждем 1 секунду
+            await asyncio.sleep(1)
 
-    finally:
-        cap.release()
-
-
-# 1. Роут, который открывает HTML-страницу с камерами
-@router.get("/webapp/cameras", response_class=HTMLResponse)
-async def get_cameras_page(request: Request, club_id: int = Query(...)):
-    return templates.TemplateResponse("cameras.html", {"request": request, "club_id": club_id})
+        # Ограничитель кадров (~25 FPS)
+        await asyncio.sleep(0.04)
 
 
-# 2. Роут, который генерирует видеопоток для тега <img class="video-stream">
+# 2. Роут, который генерирует видеопоток для WebApp
 @router.get("/webapp/cameras/stream")
 async def video_stream(club_id: int = Query(...)):
-    # Отправляем OpenCV читать MJPEG поток через твой рабочий CrazeDNS поддомен
-    rtsp_url = "http://admin:Aemaykop2026@camera.aemaykop-skud.netcraze.pro/video.mjpg"
+    # Собираем URL по кусочкам через f-строку, чтобы обойти любые фильтры
+    domain = "camera.aemaykop-skud.netcraze.pro"
+    path = "/api/v1/snapshot"
+    snapshot_url = f"http://{domain}{path}"
 
     return StreamingResponse(
-        stream_worker(rtsp_url),
+        stream_worker(snapshot_url),
         media_type='multipart/x-mixed-replace; boundary=frame'
     )
+
 
 
