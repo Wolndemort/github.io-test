@@ -445,15 +445,20 @@ async def get_cameras_page(request: Request, club_id: int = Query(...)):
 
 
 # 2. Роут, который генерирует сам видеопоток для тега <img> внутри HTML
+# 2. Роут, который генерирует сам видеопоток для тега <img> внутри HTML
 @router.get("/cameras/stream")
 async def video_stream(club_id: int = Query(...)):
-    # В будущем тут будет запрос к вашей БД: rtsp_url = await get_rtsp_by_club_id(club_id)
-    # Сейчас вставляем тестовую ссылку вашей камеры Tiandy
-    rtsp_url = "rtsp://admin:password@IP_АДРЕС_КАМЕРЫ:554/live/ch0"
-    
+    # В будущем тут будет запрос к вашей БД, а пока берем настроенный домен:
+    # Заменяем RTSP на HTTP MJPEG-поток для Tiandy
+    # Формат: http://admin:пароль@твой_домен.netcraze.pro/video.mjpg
+
+    # ⚠️ ВАЖНО: Замени 'твой_пароль_от_камеры' на реальный пароль от Tiandy!
+    rtsp_url = "http://admin:Aemaykop2026@camera.aemaykop-skud.netcraze.pro/video.mjpg"
+
     return StreamingResponse(
-        stream_worker(rtsp_url), 
+        stream_worker(rtsp_url),
         media_type='multipart/x-mixed-replace; boundary=frame'
     )
+
 
 
