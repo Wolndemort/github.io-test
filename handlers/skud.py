@@ -3,6 +3,7 @@ from aiogram import Router, types
 from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession
 from database.db import Club
+from sqlalchemy.orm.attributes import flag_modified
 
 router = Router()
 
@@ -72,13 +73,20 @@ async def save_and_test_turnstile(
         "pulse_time_seconds": 1,
         "timeout_seconds": 5
     }
+    if isinstance(club.club_settings, dict):
+        current_settings = club.club_settings.copy()
+    else:
+        current_settings = {}
 
-    # ИСПРАВЛЕНО: Заменили .settings на .club_settings
-    current_settings = dict(club.club_settings) if club.club_settings else {}
+        # 2. Записываем новые параметры турникета
     current_settings["turnstile"] = new_turnstile_config
+
     try:
         club.club_settings = current_settings
-        # ИСПРАВЛЕНО: используем merge вместо add, чтобы обновить, а не дублировать запись
+
+        # 3. ТОТ САМЫЙ ПИНГ: Говорим SQLAlchemy, что JSONB внутри обновился
+        flag_modified(club, "club_settings")
+
         await session.merge(club)
         await session.commit()
 
