@@ -360,9 +360,9 @@ async def video_stream(club_id: int = Query(...)):
 
     # Закидываем топ-3 неубиваемых пути для скриншотов этой линейки камер
     urls = [
-        f"http://{domain}/reallive/snapshot",
-        f"http://{domain}/tmpfs/auto.jpg",
-        f"http://{domain}/images/snapshot.jpg"
+        f"https://{domain}/reallive/snapshot",
+        f"https://{domain}/tmpfs/auto.jpg",
+        f"https://{domain}/images/snapshot.jpg"
     ]
 
     return StreamingResponse(
