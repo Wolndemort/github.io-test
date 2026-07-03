@@ -2,9 +2,7 @@ import pandas as pd
 import asyncio
 import cv2
 from fastapi import Query
-from fastapi.responses import StreamingResponse
 import io
-import json
 from fastapi import Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
@@ -16,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from starlette import status
 from starlette.responses import StreamingResponse
-from database.db import User, Student, Club
+from database.db import User, Student
 from database.db import get_session
 from config import fastapi_key
 
@@ -399,37 +397,43 @@ async def get_oferta_page(request: Request):
     return templates.TemplateResponse("oferta.html", {"request": request})
 
 
-# Вспомогательная функция для чтения RTSP-потока
-import httpx
+# Вспомогательная функция для чтения HTTP/RTSP-потока через OpenCV
+async def stream_worker(rtsp_url: str):
+    # OpenCV сам отлично авторизуется по ссылке http://admin:пароль@домен
+    cap = cv2.VideoCapture(rtsp_url)
+    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # Минимизируем задержку видео
 
+    if not cap.isOpened():
+        return
 
-async def stream_worker(snapshot_url: str):
-    # Данные авторизации (admin / пароль) для HTTP-запроса
-    # Замени на свои реальные данные
-    auth = httpx.BasicAuth("admin", "Aemaykop2026")
-
-    async with httpx.AsyncClient(auth=auth) as client:
+    try:
         while True:
-            try:
-                # Дергаем прямой скриншот из камеры
-                response = await client.get(snapshot_url, timeout=2.0)
+            loop = asyncio.get_event_loop()
+            # Читаем кадр через пул потоков, чтобы не блокировать асинхронный FastAPI
+            success, frame = await loop.run_in_executor(None, cap.read)
 
-                if response.status_code == 200:
-                    frame_bytes = response.content
+            if not success:
+                # Если поток отвалился, ждем 2 секунды и пытаемся переподключиться
+                await asyncio.sleep(2)
+                cap = cv2.VideoCapture(rtsp_url)
+                continue
 
-                    # Формируем стандартный MJPEG чанк для тега <img>
-                    yield (b'--frame\r\n'
-                           b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
-                else:
-                    # Если камера вернула ошибку (например, 401 или 404)
-                    await asyncio.sleep(2)
+            # Сжимаем в JPEG (70% качества, чтобы WebApp летал на смартфонах)
+            ret, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
+            if not ret:
+                continue
 
-            except Exception as e:
-                # Если сеть моргнула, ждем секунду и повторяем
-                await asyncio.sleep(1)
+            frame_bytes = buffer.tobytes()
 
-            # Стабилизируем до ~20-25 кадров в секунду
+            # Формируем стандартный MJPEG чанк для тега <img> в HTML
+            yield (b'--frame\r\n'
+                   b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+
+            # Стабилизируем поток (~25 кадров в секунду)
             await asyncio.sleep(0.04)
+
+    finally:
+        cap.release()
 
 
 # 1. Роут, который открывает HTML-страницу с камерами
@@ -439,18 +443,15 @@ async def get_cameras_page(request: Request, club_id: int = Query(...)):
     return templates.TemplateResponse("cameras.html", {"request": request, "club_id": club_id})
 
 
-# 2. Роут, который генерирует сам видеопоток для тега <img> внутри HTML
-# 2. Роут, который генерирует сам видеопоток для тега <img> внутри HTML
+# 2. Роут, который генерирует видеопоток для тега <img class="video-stream">
 @router.get("/cameras/stream")
 async def video_stream(club_id: int = Query(...)):
-    # Стучимся к камере по HTTP через твой рабочий поддомен на 80 порт
-    # Внутренний плеер OpenCV (cv2) сам разберется с потоком video.mjpg
+    # Отправляем OpenCV читать MJPEG поток через твой рабочий CrazeDNS поддомен
     rtsp_url = "http://admin:Aemaykop2026@camera.aemaykop-skud.netcraze.pro/video.mjpg"
 
     return StreamingResponse(
         stream_worker(rtsp_url),
         media_type='multipart/x-mixed-replace; boundary=frame'
     )
-
 
 
