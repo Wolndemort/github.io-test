@@ -400,41 +400,36 @@ async def get_oferta_page(request: Request):
 
 
 # Вспомогательная функция для чтения RTSP-потока
-async def stream_worker(rtsp_url: str):
-    cap = cv2.VideoCapture(rtsp_url)
-    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1) # Минимизируем задержку видео
-    
-    if not cap.isOpened():
-        return
+import httpx
 
-    try:
+
+async def stream_worker(snapshot_url: str):
+    # Данные авторизации (admin / пароль) для HTTP-запроса
+    # Замени на свои реальные данные
+    auth = httpx.BasicAuth("admin", "Aemaykop2026")
+
+    async with httpx.AsyncClient(auth=auth) as client:
         while True:
-            loop = asyncio.get_event_loop()
-            # Читаем кадр в пуле потоков, чтобы не блокировать асинхронный FastAPI
-            success, frame = await loop.run_in_executor(None, cap.read)
-            
-            if not success:
-                # Если камера отвалилась, ждем 2 секунды и пытаемся переподключиться
-                await asyncio.sleep(2)
-                cap = cv2.VideoCapture(rtsp_url)
-                continue
+            try:
+                # Дергаем прямой скриншот из камеры
+                response = await client.get(snapshot_url, timeout=2.0)
 
-            # Сжимаем в JPEG (70% качества, чтобы WebApp на смартфонах не лагал)
-            ret, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
-            if not ret:
-                continue
-                
-            frame_bytes = buffer.tobytes()
+                if response.status_code == 200:
+                    frame_bytes = response.content
 
-            # Формируем стандартный MJPEG чанк для браузера
-            yield (b'--frame\r\n'
-                   b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
-            
-            # Стабилизируем поток (~25 кадров в секунду)
+                    # Формируем стандартный MJPEG чанк для тега <img>
+                    yield (b'--frame\r\n'
+                           b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+                else:
+                    # Если камера вернула ошибку (например, 401 или 404)
+                    await asyncio.sleep(2)
+
+            except Exception as e:
+                # Если сеть моргнула, ждем секунду и повторяем
+                await asyncio.sleep(1)
+
+            # Стабилизируем до ~20-25 кадров в секунду
             await asyncio.sleep(0.04)
-            
-    finally:
-        cap.release()
 
 
 # 1. Роут, который открывает HTML-страницу с камерами
@@ -448,11 +443,8 @@ async def get_cameras_page(request: Request, club_id: int = Query(...)):
 # 2. Роут, который генерирует сам видеопоток для тега <img> внутри HTML
 @router.get("/cameras/stream")
 async def video_stream(club_id: int = Query(...)):
-    # В будущем тут будет запрос к вашей БД, а пока берем настроенный домен:
-    # Заменяем RTSP на HTTP MJPEG-поток для Tiandy
-    # Формат: http://admin:пароль@твой_домен.netcraze.pro/video.mjpg
-
-    # ⚠️ ВАЖНО: Замени 'твой_пароль_от_камеры' на реальный пароль от Tiandy!
+    # Стучимся к камере по HTTP через твой рабочий поддомен на 80 порт
+    # Внутренний плеер OpenCV (cv2) сам разберется с потоком video.mjpg
     rtsp_url = "http://admin:Aemaykop2026@camera.aemaykop-skud.netcraze.pro/video.mjpg"
 
     return StreamingResponse(
