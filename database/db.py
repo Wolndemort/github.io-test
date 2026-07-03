@@ -1,3 +1,4 @@
+import os
 from typing import Optional, List
 from sqlalchemy.ext.mutable import MutableDict
 from sqlalchemy.dialects.postgresql import JSONB
@@ -294,19 +295,27 @@ async def add_abon(
             logger.warning(f"⚠️ [Клуб {club_id}] Попытка доступа к чужому студенту ID: {student_id}")
             return None
 
-        now = datetime.now()
+        # ИСПРАВЛЕНО: Сбрасываем часы, минуты и микросекунды в 00:00:00
+        # Чтобы часовые пояса и микросекунды не ломали логику чекинов (last_visit)
+        now = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
 
         # 2. Расчет даты продления
-        # Если days_to_add передан (из тарифа) — берем его. Иначе берем дефолт из конфига (или 30 дней)
         if days_to_add is None:
             days_to_add = club_settings.get("limits", {}).get("subscription_days", 30)
 
-        # Если абонемент еще активен — плюсуем к дате окончания. Если просрочен — отсчет от сегодня.
         current_expire = student.expire_date
-        start_date = current_expire if (current_expire and current_expire > now) else now
+
+        # Если абонемент еще активен — плюсуем к дате окончания. Если просрочен — отсчет от сегодняшней полночи.
+        if current_expire and current_expire > now:
+            # ИСПРАВЛЕНО: Убедимся, что и старая дата тоже очищена от времени для точного расчета
+            start_date = current_expire.replace(hour=0, minute=0, second=0, microsecond=0)
+        else:
+            start_date = now
 
         new_expire = start_date + timedelta(days=days_to_add)
-        student.expire_date = new_expire
+
+        # Принудительно выставляем конец дня или чистую полночь
+        student.expire_date = new_expire.replace(hour=23, minute=59, second=59, microsecond=0)
 
         # 3. Логика занятий (Сверяем с маркером безлимита 999)
         if lessons_count == 999:

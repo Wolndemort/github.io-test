@@ -500,8 +500,6 @@ async def manual_add_process_birthday(message: types.Message, state: FSMContext)
         "Введите количество занятий для активации абонемента (0 для безлимита):"
     )
 
-    
-
 
 @router.message(AdminManualAdd.waiting_for_lessons)
 async def manual_add_finish(
