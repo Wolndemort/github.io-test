@@ -289,9 +289,12 @@ async def get_oferta_page(request: Request):
     return templates.TemplateResponse("oferta.html", {"request": request})
 
 
+import urllib.request
+import base64
+import asyncio
+
 # 1. Потоковый воркер, который собирает MJPEG из скриншотов камеры
 async def stream_worker(snapshot_url: str):
-    # Данные авторизации камеры для HTTP-заголовка Basic Auth
     auth_str = "admin:Aemaykop2026"
     auth_b64 = base64.b64encode(auth_str.encode()).decode()
 
@@ -303,7 +306,6 @@ async def stream_worker(snapshot_url: str):
         try:
             loop = asyncio.get_event_loop()
 
-            # Скачиваем одиночный snapshot из камеры через пул потоков
             def fetch_image():
                 req = urllib.request.Request(snapshot_url, headers=headers)
                 with urllib.request.urlopen(req, timeout=2.0) as response:
@@ -311,22 +313,25 @@ async def stream_worker(snapshot_url: str):
 
             frame_bytes = await loop.run_in_executor(None, fetch_image)
 
-            # Формируем MJPEG чанк для тега <img> на фронтенде
             yield (b'--frame\r\n'
                    b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
 
         except Exception as e:
-            # Если сеть моргнула или камера занята, мягко ждем 1 секунду
             await asyncio.sleep(1)
 
-        # Ограничитель кадров (~25 FPS)
         await asyncio.sleep(0.04)
 
 
-# 2. Роут, который генерирует видеопоток для WebApp
+# 2. Роут, который открывает саму HTML-страницу с камерами (ТОТ САМЫЙ ПОТЕРЯВШИЙСЯ)
+@router.get("/webapp/cameras", response_class=HTMLResponse)
+async def get_cameras_page(request: Request, club_id: int = Query(...)):
+    """Страница видеонаблюдения для WebApp"""
+    return templates.TemplateResponse("cameras.html", {"request": request, "club_id": club_id})
+
+
+# 3. Роут, который генерирует видеопоток для тега <img> внутри HTML
 @router.get("/webapp/cameras/stream")
 async def video_stream(club_id: int = Query(...)):
-    # Собираем точную ONVIF HTTP-ссылку для новой прошивки Tiandy
     domain = "camera.aemaykop-skud.netcraze.pro"
     path = "/CGI/Services/Video/Input/Channels/1/Features/Snapshot"
     snapshot_url = f"http://{domain}{path}"
@@ -335,6 +340,4 @@ async def video_stream(club_id: int = Query(...)):
         stream_worker(snapshot_url),
         media_type='multipart/x-mixed-replace; boundary=frame'
     )
-
-
 
