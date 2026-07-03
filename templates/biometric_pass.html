@@ -31,16 +31,17 @@
         {% endfor %}
     </div>
 
-    <script>
+        <script>
         const tg = window.Telegram.WebApp;
-        tg.expand();
+        tg.expand(); // Разворачиваем на весь экран
 
         const bm = tg.BiometricManager;
-        let isBiometricReady = false;
 
-        // Инициализируем биометрию один раз при старте страницы
+        // 1. Инициализируем биометрию ОДИН раз при старте страницы!
         bm.init(() => {
-            isBiometricReady = true;
+            console.log("Биометрия успешно инициализирована Telegram");
+
+            // Если устройство поддерживает FaceID, но доступ приложению еще не дан — показываем плашку активации
             if (bm.isBiometricSupported && !bm.isAccessGranted) {
                 document.getElementById('setup-biometry-box').style.display = 'block';
             }
@@ -73,8 +74,18 @@
         function passStudent(studentId) {
             const targetButton = document.getElementById(`btn-${studentId}`);
 
-            // ИСПРАВЛЕНО: Вызываем authenticate() НАПРЯМУЮ, игнорируя капризы флага ТГ!
-            tg.BiometricManager.authenticate({ reason: "Подтвердите личность для прохода" }, (isAuthenticated, biometricToken) => {
+            // ИСПРАВЛЕНО: Вызываем authenticate СТРОГО через проверку инициализации и контекст bm
+            if (!bm.isInited) {
+                // Если менеджер не успел прогрузиться, пинаем его еще раз быстро
+                bm.init(() => { executeAuth(studentId, targetButton); });
+            } else {
+                executeAuth(studentId, targetButton);
+            }
+        }
+
+        // Вынесенная функция вызова нативного окна FaceID
+        function executeAuth(studentId, targetButton) {
+            bm.authenticate({ reason: "Подтвердите личность для прохода" }, (isAuthenticated, biometricToken) => {
                 if (isAuthenticated) {
                     targetButton.disabled = true;
                     targetButton.innerText = "Открытие...";
@@ -84,7 +95,7 @@
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
                             student_id: parseInt(studentId),
-                            biometric_token: biometricToken || "verified_by_device", // Защита от пустой строки
+                            biometric_token: biometricToken || "verified_by_device",
                             init_data: tg.initData
                         })
                     })
@@ -108,7 +119,6 @@
             });
         }
     </script>
-
 </body>
 
 </html>
