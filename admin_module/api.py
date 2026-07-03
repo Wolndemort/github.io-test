@@ -327,9 +327,8 @@ async def stream_worker(rtsp_url: str):
 
 
 # 1. Роут, который открывает HTML-страницу с камерами
-@router.get("/cameras", response_class=HTMLResponse)
+@router.get("/webapp/cameras", response_class=HTMLResponse)
 async def get_cameras_page(request: Request, club_id: int = Query(...)):
-    """Страница видеонаблюдения для WebApp"""
     return templates.TemplateResponse("cameras.html", {"request": request, "club_id": club_id})
 
 
