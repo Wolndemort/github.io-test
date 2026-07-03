@@ -326,9 +326,9 @@ async def stream_worker(snapshot_url: str):
 # 2. Роут, который генерирует видеопоток для WebApp
 @router.get("/webapp/cameras/stream")
 async def video_stream(club_id: int = Query(...)):
-    # Собираем URL по кусочкам через f-строку, чтобы обойти любые фильтры
+    # Собираем точную ONVIF HTTP-ссылку для новой прошивки Tiandy
     domain = "camera.aemaykop-skud.netcraze.pro"
-    path = "/images/snapshot.jpg"
+    path = "/onvif-http/snapshot?Profile_1"
     snapshot_url = f"http://{domain}{path}"
 
     return StreamingResponse(
