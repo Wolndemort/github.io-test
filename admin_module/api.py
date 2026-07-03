@@ -328,7 +328,7 @@ async def stream_worker(snapshot_url: str):
 async def video_stream(club_id: int = Query(...)):
     # Собираем точную ONVIF HTTP-ссылку для новой прошивки Tiandy
     domain = "camera.aemaykop-skud.netcraze.pro"
-    path = "/onvif-http/snapshot?Profile_1"
+    path = "/CGI/Services/Video/Input/Channels/1/Features/Snapshot"
     snapshot_url = f"http://{domain}{path}"
 
     return StreamingResponse(
