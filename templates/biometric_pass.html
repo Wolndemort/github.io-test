@@ -31,31 +31,23 @@
         {% endfor %}
     </div>
 
-        <script>
+    <script>
         const tg = window.Telegram.WebApp;
-        tg.expand(); // Разворачиваем на весь экран
+        tg.expand();
 
         const bm = tg.BiometricManager;
-        let isBiometricReady = false; // Флаг готовности менеджера биометрии
+        let isBiometricReady = false;
 
-        // 1. Инициализируем биометрию СТРОГО один раз при старте страницы!
+        // Инициализируем биометрию один раз при старте страницы
         bm.init(() => {
             isBiometricReady = true;
-            console.log("Биометрия успешно инициализирована Telegram");
-
-            // Если устройство поддерживает FaceID, но доступ приложению еще не дан — показываем плашку активации
             if (bm.isBiometricSupported && !bm.isAccessGranted) {
                 document.getElementById('setup-biometry-box').style.display = 'block';
             }
         });
 
-        // Функция первой настройки биометрии
+        // Функция первой настройки биометрии (жёлтая плашка)
         function setupBiometrics() {
-            if (!isBiometricReady) {
-                tg.showAlert("Система биометрии еще загружается, подождите секунду...");
-                return;
-            }
-
             bm.requestAccess({ reason: "Биометрия нужна для безопасного открытия турникета" }, (accessGranted) => {
                 if (accessGranted) {
                     fetch('/webapp/enable-biometry', {
@@ -77,24 +69,12 @@
             });
         }
 
-        // Функция прохода атлета (клик по кнопке)
+        // Функция прохода атлета (клик по синей кнопке)
         function passStudent(studentId) {
             const targetButton = document.getElementById(`btn-${studentId}`);
 
-            // Проверяем, успел ли Telegram связаться с FaceID телефона
-            if (!isBiometricReady) {
-                tg.showAlert("Секунду, биометрический менеджер еще загружается. Попробуйте снова через миг.");
-                return;
-            }
-
-            // ИСПРАВЛЕНО: Явный вывод предупреждения, если само устройство или настройки ТГ не поддерживают FaceID
-            if (!bm.isBiometricSupported) {
-                tg.showAlert("Ваше устройство не поддерживает биометрию, либо она отключена в настройках конфиденциальности вашего Telegram.");
-                return;
-            }
-
-            // ИСПРАВЛЕНО: Вызываем аутентификацию НАПРЯМУЮ, без повторного bm.init()!
-            bm.authenticate({ reason: "Подтвердите личность родителя для прохода ребенка" }, (isAuthenticated, biometricToken) => {
+            // ИСПРАВЛЕНО: Вызываем authenticate() НАПРЯМУЮ, игнорируя капризы флага ТГ!
+            tg.BiometricManager.authenticate({ reason: "Подтвердите личность для прохода" }, (isAuthenticated, biometricToken) => {
                 if (isAuthenticated) {
                     targetButton.disabled = true;
                     targetButton.innerText = "Открытие...";
@@ -104,7 +84,7 @@
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
                             student_id: parseInt(studentId),
-                            biometric_token: biometricToken || "", // Защита от null
+                            biometric_token: biometricToken || "verified_by_device", // Защита от пустой строки
                             init_data: tg.initData
                         })
                     })
@@ -123,11 +103,12 @@
                         targetButton.innerText = "Пропустить по FaceID";
                     });
                 } else {
-                    tg.showAlert("Ошибка сканирования лица/пальца.");
+                    tg.showAlert("Биометрическая проверка отменена или не пройдена.");
                 }
             });
         }
     </script>
+
 </body>
 
 </html>

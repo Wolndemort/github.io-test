@@ -493,8 +493,9 @@ async def open_turnstile(payload: BiometricCheckIn, db: AsyncSession = Depends(g
     parent_user = user_res.scalar_one_or_none()
 
     # Защита от обхода FaceID
-    if parent_user and getattr(parent_user, 'is_biometric_enabled', False) and not payload.biometric_token:
-        raise HTTPException(status_code=400, detail="Необходимо биометрическое подтверждение")
+    if parent_user and getattr(parent_user, 'is_biometric_enabled', False):
+        if not payload.biometric_token:
+            raise HTTPException(status_code=400, detail="Необходимо биометрическое подтверждение")
 
     # Проверки абонемента
     if student.is_frozen == 1:
