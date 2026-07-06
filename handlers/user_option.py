@@ -857,69 +857,79 @@ async def process_user_contact(
 async def process_user_contact(
         message: types.Message,
         session: AsyncSession,
-        club: Club,  # Из мидлвари
-        club_settings: dict  # Из мидлвари
+        club: Club,
+        club_settings: dict
 ):
-    # 1. Очистка номера (берем последние 10 цифр для надежности)
-    raw_phone = message.contact.phone_number.replace("+", "")
-    clean_phone = raw_phone[-10:]
+    # Очищаем номер от плюсов и пробелов
+    raw_phone = message.contact.phone_number.replace("+", "").strip()
+    clean_phone_10 = raw_phone[-10:]  # Последние 10 цифр (9991112233)
     user_id = message.from_user.id
 
     try:
-        # 2. ИЗОЛЯЦИЯ: Ищем студентов по номеру ТОЛЬКО в этом клубе
-        # Чтобы не привязать атлетов из другого зала по ошибке
+        # Пытаемся импортировать модель User. Поправь путь, если она лежит в database.models или skud.py!
+        try:
+            from database.db import User
+        except ImportError:
+            # Если не нашел в db, импортируем из skud (судя по твоему дереву файлов)
+            from database.db import User
+
+        # Ищем студентов, у которых телефон содержит последние 10 цифр
         stmt = select(Student).where(
-            Student.parent_phone.contains(clean_phone),
-            Student.club_id == club.id  # <--- КЛЮЧЕВОЙ ФИЛЬТР ДЛЯ SAAS
+            Student.parent_phone.contains(clean_phone_10),
+            Student.club_id == club.id
         )
         result = await session.execute(stmt)
         students = result.scalars().all()
 
         if not students:
             return await message.answer(
-                f"❌ Атлеты с номером <code>...{clean_phone[-4:]}</code> не найдены в базе клуба <b>{club.name}</b>.\n\n"
+                f"❌ Атлеты с номером <code>...{clean_phone_10[-4:]}</code> не найдены в базе клуба <b>{club.name}</b>.\n\n"
                 "Свяжитесь с администратором, чтобы он внес ваш номер в систему.",
                 parse_mode="HTML",
                 reply_markup=types.ReplyKeyboardRemove()
             )
 
-        # 2.5 ЗАЩИТА ОТ ОШИБКИ FOREIGN KEY (parent_id)
-        # Гарантируем, что юзер существует в таблице users перед привязкой к нему студентов
+        # Проверяем, зарегистрирован ли уже этот user_id в таблице users
         user_stmt = select(User).where(User.user_id == user_id)
         user_exists = (await session.execute(user_stmt)).scalar_one_or_none()
 
         if not user_exists:
-            # Создаем запись для нового родителя, чтобы PostgreSQL разрешил связь таблиц
+            # Создаем запись для нового пользователя, передавая ВСЕ базовые поля,
+            # чтобы PostgreSQL не ругался на NOT NULL ограничения.
             new_user = User(
-                user_id=user_id
-                # Если в твоей модели User поле для телефона называется по-другому, поправь имя:
-                # phone=raw_phone
+                user_id=user_id,
+                phone=raw_phone,  # Поправь имя поля (телефон), если в твоей модели User оно называется по-другому
+                username=message.from_user.username  # Передаем юзернейм на всякий случай
             )
             session.add(new_user)
-            await session.flush()  # Фиксируем юзера в сессии, чтобы его ID стал валидным для Студента
+            await session.flush()  # Синхронизируем с базой, чтобы ID зафиксировался
 
-        # 3. Привязываем Telegram ID к найденным карточкам атлетов
+        # Привязываем Telegram ID ко всем найденным карточкам атлетов
         for student in students:
             student.parent_id = user_id
             session.add(student)
 
         await session.commit()
-
         names = ", ".join([f"<b>{s.name}</b>" for s in students])
 
-        # 4. Убираем "желтые" ошибки PyCharm: передаем конфиги в клавиатуру
         await message.answer(
             f"✅ Авторизация в <b>{club.name}</b> успешна!\n\n"
             f"Привязаны атлеты: {names}\n\n"
             "Теперь вам доступен личный кабинет и QR-пропуск.",
             parse_mode="HTML",
-            reply_markup=get_main_menu_keyboard(club_settings, club.id)  # <--- ФИКС ОШИБОК
+            reply_markup=get_main_menu_keyboard(club_settings, club.id)
         )
 
     except Exception as e:
         await session.rollback()
         logger.error(f"❌ Ошибка авторизации в клубе {club.id}: {e}")
-        await message.answer("⚠️ Ошибка привязки. Попробуйте позже.")
+        # Выводим точный текст ошибки в чат, чтобы мгновенно понять, если упал импорт или база данных
+        await message.answer(
+            f"⚠️ Произошла ошибка при привязке профиля.\n"
+            f"<b>Лог ошибки:</b> <code>{str(e)}</code>\n\n"
+            f"Перешлите это сообщение разработчику.",
+            parse_mode="HTML"
+        )
 
 
 @router.callback_query(F.data.startswith('schedule_'))
