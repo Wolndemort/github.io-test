@@ -134,7 +134,7 @@ async def start_handler(
     else:
         builder = ReplyKeyboardBuilder()
         builder.row(types.KeyboardButton(
-            text="📱 Войти по номеру телефона",
+            text="📱 Поделиться контактом",
             request_contact=True
         ))
 
@@ -154,68 +154,89 @@ async def start_handler(
 # ОБРАБОТЧИК ДЛЯ КНОПКИ СОГЛАСИЯ
 @router.callback_query(lambda c: c.data == "accept_legal_rules")
 async def accept_legal_handler(
-    callback: types.CallbackQuery,
-    session: AsyncSession,
-    club: Club,
-    club_id: int,
-    club_settings: dict,
-    is_super_admin: bool,
-    is_owner: bool
+        callback: types.CallbackQuery,
+        session: AsyncSession,
+        club: Club,
+        club_id: int,
+        club_settings: dict,
+        is_super_admin: bool,
+        is_owner: bool
 ):
     user_id = callback.from_user.id
 
-    # 1. Обновляем флаг в базе данных
-    await session.execute(
-        update(User).where(User.user_id == user_id).values(is_accepted=True)
-    )
-    await session.commit()
-
-    # 2. Уведомление и удаление сообщения с офертой
-    await callback.answer("Условия успешно приняты! Добро пожаловать.")
-    await callback.message.delete()
-
-    # 3. Отрисовка меню (используем отправку нового сообщения в чат)
-    welcome_text = club_settings.get("ui", {}).get("welcome_text") or "Добро пожаловать!"
-
-    if is_owner or is_super_admin:
-        return await callback.message.answer(
-            f"⚡ <b>Панель управления клуба «{club.name}»</b>\n\n{welcome_text}",
-            reply_markup=admin_keyboard(club_settings=club_settings, club_id=club_id),
-            parse_mode="HTML"
+    try:
+        # 1. Обновляем флаг в базе данных
+        await session.execute(
+            update(User).where(User.user_id == user_id).values(is_accepted=True)
         )
+        await session.commit()
 
-    stmt = select(Student).where(
-        Student.parent_id == user_id,
-        Student.club_id == club.id
-    )
-    student = (await session.execute(stmt)).scalar_one_or_none()
+        # 2. Уведомление и удаление сообщения с офертой
+        await callback.answer("Условия успешно приняты! Добро пожаловать.")
+        await callback.message.delete()
 
-    if student:
-        expire_str = student.expire_date.strftime('%d.%m.%Y') if student.expire_date else "не указано"
-        status_text = f"✅ Атлет: <b>{student.name}</b>\n📅 Абонемент до: <b>{expire_str}</b>"
+        # 3. Отрисовка меню (используем отправку нового сообщения в чат)
+        welcome_text = club_settings.get("ui", {}).get("welcome_text") or "Добро пожаловать!"
 
+        # Если зашел владелец или супер-админ — сразу открываем админку
+        if is_owner or is_super_admin:
+            return await callback.message.answer(
+                f"⚡ <b>Панель управления клуба «{club.name}»</b>\n\n{welcome_text}",
+                reply_markup=admin_keyboard(club_settings=club_settings, club_id=club_id),
+                parse_mode="HTML"
+            )
+
+        # Безопасный запрос: тянем ВСЕХ студентов родителя в этом клубе
+        stmt = select(Student).where(
+            Student.parent_id == user_id,
+            Student.club_id == club.id
+        ).order_by(Student.name)
+
+        result = await session.execute(stmt)
+        students = result.scalars().all()
+
+        # Если у пользователя уже есть привязанные атлеты
+        if students:
+            first_student = students[0]
+            expire_str = first_student.expire_date.strftime('%d.%m.%Y') if first_student.expire_date else "не указано"
+            status_text = f"✅ Атлет: <b>{first_student.name}</b>\n📅 Абонемент до: <b>{expire_str}</b>"
+
+            # Если детей несколько, вежливо дописываем об этом в интерфейс
+            if len(students) > 1:
+                status_text += f"\n<i>(Всего привязано профилей: {len(students)})</i>"
+
+            # Собираем контекст юзера для корректной генерации клавиатуры профиля
+            current_user = SimpleNamespace(user_id=user_id, club_id=club.id)
+
+            await callback.message.answer(
+                f"📍 <b>{club.name}</b>\n\n{welcome_text}\n\n{status_text}",
+                reply_markup=get_profile_keyboard(current_user, club_settings=club_settings, is_authorized=True),
+                parse_mode="HTML"
+            )
+        else:
+            # Если это абсолютно новый пользователь без привязанных карточек
+            builder = ReplyKeyboardBuilder()
+            builder.row(types.KeyboardButton(
+                text="📱 Поделиться контактом",  # Сделали текст один в один как в авторизации
+                request_contact=True
+            ))
+
+            status_text = (
+                "👋 Рады видеть вас!\n\n"
+                "Если администратор клуба уже внёс вас в базу данных, нажмите кнопку ниже, "
+                "чтобы подтвердить свой номер телефона и войти в личный кабинет."
+            )
+
+            # Отправляем сообщение в чат пользователя с нижней кнопкой шаринга контакта
+            await callback.bot.send_message(
+                chat_id=callback.message.chat.id,
+                text=f"📍 <b>{club.name}</b>\n\n{welcome_text}\n\n{status_text}",
+                reply_markup=builder.as_markup(resize_keyboard=True, one_time_keyboard=True),
+                parse_mode="HTML"
+            )
+
+    except Exception as e:
+        await session.rollback()
+        logger.error(f"❌ Ошибка в хендлере принятия оферты: {e}")
         await callback.message.answer(
-            f"📍 <b>{club.name}</b>\n\n{welcome_text}\n\n{status_text}",
-            reply_markup=get_profile_keyboard(club_settings=club_settings, is_authorized=True),
-            parse_mode="HTML"
-        )
-    else:
-        builder = ReplyKeyboardBuilder()
-        builder.row(types.KeyboardButton(
-            text="📱 Войти по номеру телефона",
-            request_contact=True
-        ))
-
-        status_text = (
-            "👋 Рады видеть вас!\n\n"
-            "Если администратор клуба уже внёс вас в базу данных, нажмите кнопку ниже, "
-            "чтобы подтвердить свой номер телефона и войти в личный кабинет."
-        )
-
-        # Отправляем сообщение в чат пользователя, прикрепляя нижнюю клавиатуру
-        await callback.bot.send_message(
-            chat_id=callback.message.chat.id,
-            text=f"📍 <b>{club.name}</b>\n\n{welcome_text}\n\n{status_text}",
-            reply_markup=builder.as_markup(resize_keyboard=True, one_time_keyboard=True),
-            parse_mode="HTML"
-        )
+            "⚠️ Произошла ошибка при обработке согласия. Попробуйте перезапустить бота через /start")

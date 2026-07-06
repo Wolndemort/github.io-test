@@ -2,14 +2,14 @@ from datetime import datetime
 from handlers.skud import trigger_dingtian_turnstile
 import pandas as pd
 import urllib.request
+import base64
+import asyncio
+import urllib.request
 from fastapi import Query
 import hmac
 import hashlib
 import json
 from urllib.parse import parse_qsl
-from pydantic import BaseModel
-from fastapi.responses import HTMLResponse
-from fastapi.templating import Jinja2Templates
 import io
 from fastapi import Request
 from fastapi.responses import HTMLResponse
@@ -296,12 +296,10 @@ async def get_oferta_page(request: Request):
     return templates.TemplateResponse("oferta.html", {"request": request})
 
 
-import urllib.request
-import base64
-import asyncio
 
-
+#CAMERAS CAMERAS CAMERAS
 # 1. Потоковый воркер, который автоматически найдет рабочий URL и соберет MJPEG
+
 async def stream_worker(snapshot_urls: list):
     auth_str = "admin:Aemaykop2026"
     auth_b64 = base64.b64encode(auth_str.encode()).decode()
@@ -363,19 +361,21 @@ async def get_cameras_page(request: Request, club_id: int = Query(...)):
 # 3. Роут генерации стрима
 @router.get("/webapp/cameras/stream")
 async def video_stream(club_id: int = Query(...)):
-    domain = "camera.aemaykop-skud.netcraze.pro"
+    # Точный IP со скриншота твоей админки Tiandy!
+    local_camera_ip = "192.168.1.2"
 
-    # Закидываем топ-3 неубиваемых пути для скриншотов этой линейки камер
+    # Заменяем на чистые локальные HTTP пути
     urls = [
-        f"https://{domain}/reallive/snapshot",
-        f"https://{domain}/tmpfs/auto.jpg",
-        f"https://{domain}/images/snapshot.jpg"
+        f"http://{local_camera_ip}/reallive/snapshot",
+        f"http://{local_camera_ip}/tmpfs/auto.jpg",
+        f"http://{local_camera_ip}/images/snapshot.jpg"
     ]
 
     return StreamingResponse(
         stream_worker(urls),
         media_type='multipart/x-mixed-replace; boundary=frame'
     )
+
 
 
 @router.get("/pass-app", response_class=HTMLResponse)
@@ -420,7 +420,6 @@ async def open_turnstile(payload: dict, db: AsyncSession = Depends(get_session))
 
 #BIOMETRIC BIOMETRIC
 
-
 class BiometricCheckIn(BaseModel):
     student_id: int
     biometric_token: str | None = None
@@ -460,6 +459,7 @@ async def get_biometric_page(request: Request, club_id: int, user_id: int, db: A
     return templates.TemplateResponse("biometric_pass.html", {"request": request, "students": students})
 
 # 2. РОУТ ДЛЯ ОБРАБОТКИ НАЖАТИЯ И ОТКРЫТИЯ ТУРНИКЕТА
+
 
 @router.post("/webapp/open-turnstile")
 async def open_turnstile(payload: BiometricCheckIn, db: AsyncSession = Depends(get_session)):
@@ -531,9 +531,7 @@ async def open_turnstile(payload: BiometricCheckIn, db: AsyncSession = Depends(g
     return {"success": False, "message": "Турникет не ответил. Попробуйте еще раз."}
 
 
-
 #Enabled biometri!!!!!
-
 
 class BiometricEnable(BaseModel):
     init_data: str

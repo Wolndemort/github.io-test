@@ -60,19 +60,19 @@ async def go_to_begin(
 @router.message(Command('profile', 'check_status_now'))
 @router.callback_query(F.data.in_(['profile', 'check_status_now']))
 async def universal_profile_handler(
-        event: types.Message | types.CallbackQuery,  # 1. Меняем callback на универсальный event
+        event: types.Message | types.CallbackQuery,
         session: AsyncSession,
-        club: Club,  # Из мидлвари
-        club_settings: dict  # Из мидлвари
+        club: Club,
+        club_settings: dict
 ):
     user_id = event.from_user.id
     now = datetime.now()
 
-    # 1. Изоляция: тянем студентов ТОЛЬКО этого родителя и ТОЛЬКО этого клуба
+    # ДОБАВЛЕНО .execution_options(populate_existing=True) — затирает старый кэш сессии свежими цифрами из базы
     stmt = select(Student).where(
         Student.parent_id == user_id,
         Student.club_id == club.id
-    ).order_by(Student.name)
+    ).order_by(Student.name).execution_options(populate_existing=True)
 
     result = await session.execute(stmt)
     students = result.scalars().all()
@@ -118,27 +118,23 @@ async def universal_profile_handler(
     reply_markup = get_profile_keyboard(current_user, club_settings=club_settings, is_authorized=is_auth)
 
     try:
-        # 2. Проверяем тип события для правильного ответа
         if isinstance(event, types.CallbackQuery):
-            # Если это кнопка — плавно редактируем старое сообщение
             await event.message.edit_text(
                 text=final_text,
                 reply_markup=reply_markup,
                 parse_mode="HTML"
             )
-            await event.answer()  # Гасим часики на кнопке
+            await event.answer()
         else:
-            # Если это текстовая команда — отправляем новое сообщение в ответ
             await event.answer(
                 text=final_text,
                 reply_markup=reply_markup,
                 parse_mode="HTML"
             )
-            
+
     except Exception as e:
         if "message is not modified" not in str(e):
             logger.error(f"❌ Ошибка в профиле: {e}")
-            # Безопасный ответ на случай падения внутри callback
             if isinstance(event, types.CallbackQuery):
                 await event.answer("Ошибка обновления данных")
 
