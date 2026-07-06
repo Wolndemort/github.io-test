@@ -1,6 +1,6 @@
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from sqlalchemy.ext.asyncio import AsyncSession
-from handlers.skud import trigger_dingtian_turnstile, save_and_test_turnstile
+from handlers.skud import save_and_test_turnstile
 from sqlalchemy.orm.attributes import flag_modified
 from handlers.states import AdminStates, AdminSettings, TurnstileSetup, AdminTariffStates,AdminScheduleStates
 from redis.asyncio import Redis
@@ -8,7 +8,6 @@ from sqlalchemy import update
 import pandas as pd
 import os
 from aiogram.types import FSInputFile
-import asyncio
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from database.db import get_all_users_count, get_active_subs_count, User, get_daily_stats, Student, \
     Club
@@ -19,7 +18,7 @@ from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from datetime import timedelta
 from aiogram import Router, F, types
-from datetime import datetime
+import asyncio
 from loguru import logger
 
 
@@ -1196,17 +1195,60 @@ async def admin_edit_tariff_menu(callback: types.CallbackQuery, club_settings: d
     )
 
 
+from datetime import datetime  # Убедитесь, что импорт есть вверху файла
 
 
 @router.callback_query(F.data.startswith("adm_tar_del_"))
-async def admin_delete_tariff(callback: types.CallbackQuery, club_settings: dict, session, redis: Redis, bot, club_id: int):
-    """Удаление тарифа из списка"""
+async def admin_delete_tariff(
+        callback: types.CallbackQuery,
+        club_settings: dict,
+        session,
+        redis: Redis,
+        bot,
+        club_id: int
+):
+    """Удаление тарифа из списка с защитой от поломки базы"""
     _, _, _, disc_id, tariff_idx = callback.data.split("_")
+    tariff_idx_int = int(tariff_idx)
+
     tariffs = club_settings["disciplines"].get(disc_id, {}).get("tariffs", [])
-    if 0 <= int(tariff_idx) < len(tariffs):
-        tariffs.pop(int(tariff_idx))
+
+    if 0 <= tariff_idx_int < len(tariffs):
+        target_tariff = tariffs[tariff_idx_int]
+        count = target_tariff.get("count", 0)  # Количество уроков в тарифе (например, 8, 12 или 999)
+
+        # ПРОВЕРКА В БД: Ищем активных спортсменов этого клуба, у которых совпадает баланс
+        # и абонемент еще не истек (действует прямо сейчас)
+        stmt = select(Student).where(
+            Student.club_id == club_id,
+            Student.balance_lessons == count,
+            Student.expire_date > datetime.now()
+        )
+        result = await session.execute(stmt)
+        active_students = result.scalars().all()
+
+        # Если нашли хотя бы одного человека — жестко прерываем удаление и предупреждаем админа!
+        if active_students:
+            # Собираем первые три имени для красивого вывода в чат
+            names = ", ".join([s.name for s in active_students[:3]])
+            if len(active_students) > 3:
+                names += " и др."
+
+            return await callback.message.answer(
+                f"❌ <b>Невозможно удалить тариф!</b>\n\n"
+                f"Этот тарифный план сейчас активирован у действующих спортсменов клуба:\n"
+                f"👤 <code>{names}</code>\n\n"
+                f"Сначала дождитесь окончания их абонементов или измените их баланс вручную, "
+                f"чтобы не нарушить работу CRM-системы.",
+                parse_mode="HTML"
+            )
+
+        # Если активных людей по этому тарифу нет — спокойно удаляем
+        tariffs.pop(tariff_idx_int)
         await save_club_settings(session, redis, bot.token, club_id, club_settings)
         await callback.answer("Тариф удален!")
+
+    # Возвращаем админа в меню тарифов этой секции
     callback.data = f"adm_tar_sect_{disc_id}"
     await admin_manage_section_tariffs(callback, club_settings)
 
@@ -1255,7 +1297,6 @@ async def admin_save_tariff_field(message: types.Message, state: FSMContext, clu
     await save_club_settings(session, redis, bot.token, s_data["club_id"], club_settings)
     await state.clear()
     await return_to_tariff_menu(message, club_settings, disc_id)
-
 
 
 #Создание Тарифов
@@ -1479,47 +1520,40 @@ async def admin_schedule_choose_day(callback: types.CallbackQuery, state: FSMCon
     await callback.answer()
 
 
+
 # =====================================================================
-# ХЕНДЛЕР УДАЛЕНИЯ (Вырезает занятие по индексу и сохраняет изменения)
-# =====================================================================
-# =====================================================================
-# ХЕНДЛЕР УДАЛЕНИЯ (Исправленный: answer() вызывается сразу)
+# ХЕНДЛЕР УДАЛЕНИЯ (Исправленный: answer() вызывается сразу + фоновое сохранение)
 # =====================================================================
 @router.callback_query(F.data.startswith("adm_sch_del_"))
-async def admin_delete_schedule_lesson(callback: types.CallbackQuery, state: FSMContext, club_settings: dict, session, redis: Redis, bot):
+async def admin_delete_schedule_lesson(callback: types.CallbackQuery, state: FSMContext, club_settings: dict, session,
+                                       redis: Redis, bot):
     # Отвечаем телеграму СРАЗУ, чтобы кнопка не зависала и не было таймаута
     await callback.answer()
-    
+
     _, _, _, disc_id, day, lesson_idx = callback.data.split("_")
     lesson_idx = int(lesson_idx)
     s_data = await state.get_data()
     club_id = s_data.get("club_id")
-    
+
     try:
         lessons_list = club_settings["disciplines"][disc_id]["schedule"][day]
         if 0 <= lesson_idx < len(lessons_list):
             removed_lesson = lessons_list.pop(lesson_idx)
-            
-            # Сохраняем чистый конфиг в PostgreSQL и Redis
-            await save_club_settings(session, redis, bot.token, club_id, club_settings)
-            
-            # Вместо всплывающего alert (который уже не показать после answer) 
-            # мы просто обновим интерфейс ниже
+
+            # Обернули твою же функцию в фоновый поток. Логика та же, но лаг ушел!
+            await asyncio.to_thread(save_club_settings, session, redis, bot.token, club_id, club_settings)
+
         else:
             logger.warning("Занятие не найдено, возможно уже удалено.")
-            
+
     except Exception as e:
         logger.error(f"Ошибка удаления расписания: {e}")
 
-    # Обновляем экран: заново вызываем отрисовку списка
+    # Твоя родная отрисовка экрана — полностью сохранена!
     callback.data = f"sch_day_{day}"
     await admin_schedule_choose_day(callback, state, club_settings)
 
 
-
-# =====================================================================
-# ПЕРЕХОД К ТВОЕМУ СТАРОМУ ШАГУ 2 (Ввод времени для нового занятия)
-# =====================================================================
 @router.callback_query(F.data == "adm_sch_start_input_time")
 async def admin_schedule_trigger_time_input(callback: types.CallbackQuery, state: FSMContext):
     await state.set_state(AdminScheduleStates.add_time)
@@ -1529,8 +1563,6 @@ async def admin_schedule_trigger_time_input(callback: types.CallbackQuery, state
         parse_mode="HTML"
     )
     await callback.answer()
-
-
 
 
 # ==========================================
