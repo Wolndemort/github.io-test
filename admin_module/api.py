@@ -350,21 +350,25 @@ async def get_cameras_page(request: Request, club_id: int = Query(...)):
 
 
 # 3. Роут генерации стрима
+from fastapi.responses import RedirectResponse
+
+
 @router.get("/webapp/cameras/stream")
 async def video_stream(club_id: int = Query(...)):
     """
-    Роут, который динамически подключает go2rtc к камере через KeenDNS
-    и мгновенно транслирует видеопоток в формате MJPEG/HLS прямо в WebApp
+    Финальный роут стриминга видео через облачный Keenetic и go2rtc
     """
-    # Твоя внешняя ссылка на камеру, которую мы настроили в Keenetic
-    # Так как Keenetic работает через облако, мы подключаемся к нему по протоколу RTSP
-    rtsp_url = "rtsp://admin:Aemaykop2026@rtsp.aemaykop-skud.netcraze.pro:554/1/1"
+    # Твой полностью рабочий HTTP-домен камеры, который идеально проходит через облако Keenetic
+    camera_domain = "camera.aemaykop-skud.netcraze.pro"
 
-    # Ссылка на локальный go2rtc, который мы только что подняли в докере на порту 1984
-    # Мы просим его забрать поток rtsp_url и выдать нам готовый mjpeg для Телеграма
+    # Заставляем go2rtc забирать живой поток через HTTP-туннель камеры Tiandy (кодек H.265)
+    # Это полностью обходит ограничения серого IP и 4G модема!
+    rtsp_url = f"http://admin:Aemaykop2026@{camera_domain}/asapi/v1/video/channels/1/stream"
+
+    # Ссылка на локальный go2rtc, который перегонит H.265 в легкий mjpeg для Telegram WebApp
     go2rtc_mjpeg_api = f"http://127.0.0{rtsp_url}"
 
-    # Просто перенаправляем (проксируем) этот поток в Telegram WebApp
+    # Отдаем готовый видеопоток в Telegram
     return RedirectResponse(url=go2rtc_mjpeg_api)
 
 
