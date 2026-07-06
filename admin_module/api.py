@@ -8,6 +8,7 @@ import urllib.request
 from fastapi import Query
 import hmac
 import hashlib
+from loguru import logger
 import json
 from urllib.parse import parse_qsl
 import io
@@ -308,7 +309,6 @@ async def stream_worker(snapshot_urls: list):
         "Authorization": f"Basic {auth_b64}"
     }
 
-    # Перебираем список адресов, чтобы найти тот, который отдаст 200 OK
     working_url = None
     for url in snapshot_urls:
         try:
@@ -316,28 +316,30 @@ async def stream_worker(snapshot_urls: list):
 
             def test_connect():
                 req = urllib.request.Request(url, headers=headers)
-                with urllib.request.urlopen(req, timeout=1.5) as response:
+                with urllib.request.urlopen(req, timeout=2.0) as response:
                     return response.getcode()
 
             status = await loop.run_in_executor(None, test_connect)
             if status == 200:
                 working_url = url
+                logger.success(f"🎥 Камера Tiandy успешно ответила на URL: {url}")
                 break
-        except Exception:
+        except Exception as conn_err:
+            # ТЕПЕРЬ мы увидим в консоли, почему камера сбрасывает соединение (404, 401 или таймаут)
+            logger.warning(f"⚠️ Путь не подошел {url}: {conn_err}")
             continue
 
-    # Если вдруг все выдали ошибку, берем первый как запасной
     if not working_url:
+        logger.error("❌ Ни один URL снапшота не вернул 200 OK! Камера сбрасывает запросы.")
         working_url = snapshot_urls[0]
 
-    # Запускаем бесконечный цикл трансляции найденного пути
     while True:
         try:
             loop = asyncio.get_event_loop()
 
             def fetch_image():
                 req = urllib.request.Request(working_url, headers=headers)
-                with urllib.request.urlopen(req, timeout=2.0) as response:
+                with urllib.request.urlopen(req, timeout=2.5) as response:
                     return response.read()
 
             frame_bytes = await loop.run_in_executor(None, fetch_image)
@@ -345,10 +347,11 @@ async def stream_worker(snapshot_urls: list):
             yield (b'--frame\r\n'
                    b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
 
-        except Exception:
+        except Exception as frame_err:
+            logger.error(f"❌ Ошибка получения кадра: {frame_err}")
             await asyncio.sleep(1)
 
-        await asyncio.sleep(0.05)
+        await asyncio.sleep(0.04)
 
 
 # 2. Роут открытия самой страницы WebApp
@@ -361,21 +364,20 @@ async def get_cameras_page(request: Request, club_id: int = Query(...)):
 # 3. Роут генерации стрима
 @router.get("/webapp/cameras/stream")
 async def video_stream(club_id: int = Query(...)):
-    # Точный IP со скриншота твоей админки Tiandy!
     local_camera_ip = "192.168.1.2"
 
-    # Заменяем на чистые локальные HTTP пути
+    # Топ-4 официальных и скрытых URL для получения кадра с камер Tiandy этой серии
     urls = [
-        f"http://{local_camera_ip}/reallive/snapshot",
-        f"http://{local_camera_ip}/tmpfs/auto.jpg",
-        f"http://{local_camera_ip}/images/snapshot.jpg"
+        f"http://{local_camera_ip}/asapi/v1/video/snapshot",               # Вариант 1 (Через слово video)
+        f"http://{local_camera_ip}/asapi/v1/video/channels/1/snapshot",    # Вариант 2 (С указанием канала)
+        f"http://{local_camera_ip}/asapi/v1/vision/snapshot",              # Вариант 3 (Через слово vision)
+        f"http://{local_camera_ip}/reallive/snapshot"                      # Вариант 4 (Старый базовый)
     ]
 
     return StreamingResponse(
         stream_worker(urls),
         media_type='multipart/x-mixed-replace; boundary=frame'
     )
-
 
 
 @router.get("/pass-app", response_class=HTMLResponse)
