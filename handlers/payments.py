@@ -479,20 +479,46 @@ async def process_cash_payment(
 
 
 # МИНИ-ХЕНДЛЕР: ловит выбор секции, если в клубе их несколько
+# МИНИ-ХЕНДЛЕР: ловит выбор секции, если в клубе их несколько
 @router.callback_query(F.data.startswith("select_sport_for_cash_"))
-async def select_sport_for_cash_callback(callback: types.CallbackQuery, state: FSMContext, session: AsyncSession,
-                                         club_settings: dict, club: Club):
+async def select_sport_for_cash_callback(
+        callback: types.CallbackQuery,
+        state: FSMContext,
+        session: AsyncSession,
+        club_settings: dict,
+        club: Club
+):
+    # Безопасно разбираем входящие данные из callback.data
     parts = callback.data.split("_")
     student_id = int(parts[-2])
     sport_type = parts[-1]
 
-    # Записываем выбранный спорт в стейт
-    await state.update_data(sport_type=sport_type)
+    # 1. Записываем выбор направления и ID в стейт для финальной оплаты
+    await state.update_data(
+        sport_type=sport_type,
+        cash_student_id=student_id,
+        cash_sport_type=sport_type
+    )
 
-    # Искусственно вызываем предыдущую функцию — теперь внутри нее sport_type определен!
-    # Подменяем callback.data, чтобы она выглядела как стандартный вызов
-    callback.data = f"cash_pay_{student_id}"
-    await process_cash_payment(callback, state, session, club_settings, club)
+    # 2. Достаем конфигурацию выбранной дисциплины из настроек
+    disciplines = club_settings.get("disciplines", {})
+    disc_cfg = disciplines.get(sport_type, {})
+
+    if not disc_cfg:
+        return await callback.answer(f"Ошибка: Направление '{sport_type}' не найдено 🛠", show_alert=True)
+
+    # 3. Напрямую выводим клавиатуру тарифов (БЕЗ мутации callback.data и вызова других хендлеров!)
+    try:
+        await callback.message.edit_text(
+            f"💰 <b>Прием наличных: {disc_cfg.get('name')}</b>\n"
+            f"Выберите тарифный план, который оплатил атлет:",
+            reply_markup=get_cash_options_kb(disc_cfg), # Генерирует тарифы по индексам
+            parse_mode="HTML"
+        )
+        await callback.answer()
+    except Exception as e:
+        logger.error(f"❌ Ошибка вывода тарифов в мини-хендлере: {e}")
+        await callback.answer("Ошибка генерации клавиатуры тарифов ❌", show_alert=True)
 
 
 @router.callback_query(F.data.startswith("confirm_cash_"))

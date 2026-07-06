@@ -642,7 +642,6 @@ async def confirm_manual_pay(callback: types.CallbackQuery, club: Club):
     await callback.answer("Оплата внесена ✔")
 
 
-
 @router.callback_query(F.data == "admin_cash_search")
 async def cash_search_start(
         callback: types.CallbackQuery,
