@@ -1,5 +1,6 @@
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from sqlalchemy.ext.asyncio import AsyncSession
+from aiogram.filters import StateFilter
 from handlers.skud import save_and_test_turnstile
 from sqlalchemy.orm.attributes import flag_modified
 from handlers.states import AdminStates, AdminSettings, TurnstileSetup, AdminTariffStates,AdminScheduleStates
@@ -1475,7 +1476,7 @@ async def admin_start_schedule_manage(callback: types.CallbackQuery, state: FSMC
 
 # ШАГ 1.5: ОТРИСОВКА ДНЯ И СПИСКА ЗАНЯТИЙ (Защищен от зависаний стейта)
 # =====================================================================
-@router.callback_query(F.data.startswith("sch_day_"), state="*")  # Поставили state="*", чтобы хендлер никогда не вис!
+@router.callback_query(F.data.startswith("sch_day_"), StateFilter("*"))
 async def admin_schedule_choose_day(callback: types.CallbackQuery, state: FSMContext, club_settings: dict):
     # Принудительно возвращаем админу рабочее состояние для этого экрана
     await state.set_state(AdminScheduleStates.choose_day)
