@@ -354,15 +354,21 @@ async def get_cameras_page(request: Request, club_id: int = Query(...)):
 # 3. Роут генерации стрима
 @router.get("/webapp/cameras/stream")
 async def video_stream(club_id: int = Query(...)):
-    # Твой реальный внешний KeenDNS домен, который проброшен до камеры!
     domain = "camera.aemaykop-skud.netcraze.pro"
 
-    # Теперь облачный сервер будет ходить по этим путям через интернет
+    # Точные пути для получения JPEG с камер Tiandy серии TC-C321N
     urls = [
-        f"https://{domain}/asapi/v1/video/snapshot",
-        f"https://{domain}/asapi/v1/video/channels/1/snapshot",
-        f"https://{domain}/asapi/v1/vision/snapshot",
-        f"https://{domain}/reallive/snapshot"
+        # Вариант 1: Официальный путь API для получения кадра с 1-го потока
+        f"https://{domain}/asapi/v1/video/snapshots?channel=1&stream=1",
+
+        # Вариант 2: Путь через подпоток (он легче и прогрузится быстрее)
+        f"https://{domain}/asapi/v1/video/snapshots?channel=1&stream=2",
+
+        # Вариант 3: Прямой путь, который использует сама админка Tiandy, когда ты смотришь на экран
+        f"https://{domain}/asapi/v1/video/snapshot?channel=1",
+
+        # Вариант 4: Системный путь сохранения логов картинок
+        f"https://{domain}/tmpfs/auto.jpg"
     ]
 
     return StreamingResponse(
