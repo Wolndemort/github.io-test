@@ -417,32 +417,82 @@ async def process_cash_payment(
         club_settings: dict,
         club: Club
 ):
+    # Достаем ID студента из callback_data кнопки общего списка
     student_id = int(callback.data.split("_")[-1])
 
-    # Получаем направление, которое админ выбрал на предыдущем шаге
-    data = await state.get_data()
-    sport_type = data.get('sport_type', 'default')
+    # Вытаскиваем все дисциплины, которые настроены для этого конкретного клуба
+    disciplines = club_settings.get("disciplines", {})
 
-    # Ищем конфигурацию этой дисциплины в настройках клуба
-    disc_cfg = club_settings.get("disciplines", {}).get(sport_type, {})
+    if not disciplines:
+        return await callback.answer("⚠️ В настройках вашего клуба еще не добавлено ни одного направления!",
+                                     show_alert=True)
+
+    # Забираем текущий стейт (если админ пришел по какому-то длинному пути, где секция уже была выбрана)
+    data = await state.get_data()
+    sport_type = data.get('sport_type')
+
+    # ЕСЛИ СЕКЦИЯ ЕЩЕ НЕ ВЫБРАНА (наш случай с общим списком):
+    if not sport_type:
+        # Вариант А: В клубе настроена только одна единственная секция
+        if len(disciplines) == 1:
+            sport_type = list(disciplines.keys())[0]
+            await state.update_data(sport_type=sport_type)  # Сохраняем её автоматический выбор
+
+        # Вариант Б: В клубе несколько разных секций. Показываем клавиатуру выбора направления
+        else:
+            builder = InlineKeyboardBuilder()
+            for d_code, d_data in disciplines.items():
+                builder.row(types.InlineKeyboardButton(
+                    text=f"🥋 {d_data.get('name', d_code)}",
+                    # При клике перезапустим этот же хендлер, но уже сохранив стейт!
+                    callback_data=f"select_sport_for_cash_{student_id}_{d_code}"
+                ))
+            builder.row(types.InlineKeyboardButton(text="⬅️ Назад", callback_data="admin_cash_list"))
+
+            return await callback.message.edit_text(
+                "🎯 У этого атлета можно активировать разные направления.\n"
+                "<b>Выберите секцию для внесения оплаты:</b>",
+                reply_markup=builder.as_markup(),
+                parse_mode="HTML"
+            )
+
+    # Ищем конфигурацию выбранной дисциплины
+    disc_cfg = disciplines.get(sport_type, {})
 
     if not disc_cfg:
-        return await callback.answer("Ошибка: Данное направление еще не настроено в клубе 🛠", show_alert=True)
+        return await callback.answer(f"Ошибка: Направление '{sport_type}' отсутствует в настройках 🛠", show_alert=True)
 
-    # ВАЖНО: Сохраняем и ID студента, и код дисциплины (sport_type) для хендлера подтверждения
+    # Сохраняем все маркеры для финального хендлера подтверждения cash_confirm_
     await state.update_data(
         cash_student_id=student_id,
-        cash_sport_type=sport_type  # Без этого хендлер подтверждения не найдет тариф!
+        cash_sport_type=sport_type
     )
 
-    # Показываем клавиатуру настроенных тарифов для ЛЮБОГО типа секции
+    # Выводим клавиатуру тарифов этой секции
     await callback.message.edit_text(
         f"💰 <b>Прием наличных: {disc_cfg.get('name')}</b>\n"
         f"Выберите тарифный план, который оплатил атлет:",
-        reply_markup=get_cash_options_kb(disc_cfg),  # Выведет и безлимиты, и уроки по индексам
+        reply_markup=get_cash_options_kb(disc_cfg),
         parse_mode="HTML"
     )
     await callback.answer()
+
+
+# МИНИ-ХЕНДЛЕР: ловит выбор секции, если в клубе их несколько
+@router.callback_query(F.data.startswith("select_sport_for_cash_"))
+async def select_sport_for_cash_callback(callback: types.CallbackQuery, state: FSMContext, session: AsyncSession,
+                                         club_settings: dict, club: Club):
+    parts = callback.data.split("_")
+    student_id = int(parts[-2])
+    sport_type = parts[-1]
+
+    # Записываем выбранный спорт в стейт
+    await state.update_data(sport_type=sport_type)
+
+    # Искусственно вызываем предыдущую функцию — теперь внутри нее sport_type определен!
+    # Подменяем callback.data, чтобы она выглядела как стандартный вызов
+    callback.data = f"cash_pay_{student_id}"
+    await process_cash_payment(callback, state, session, club_settings, club)
 
 
 @router.callback_query(F.data.startswith("confirm_cash_"))
