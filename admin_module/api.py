@@ -356,19 +356,19 @@ async def get_cameras_page(request: Request, club_id: int = Query(...)):
 async def video_stream(club_id: int = Query(...)):
     domain = "camera.aemaykop-skud.netcraze.pro"
 
-    # НОВЫЕ ПУТИ (Копируем строго этот массив! Предыдущие из логов не берем)
+    # Финальные URL-адреса, заточенные под новую прошивку Tiandy Web 5.0 (из res/ структуры)
     urls = [
-        # Вариант 1: Официальный путь к снапшоту основного видеосервиса Tiandy
-        f"https://{domain}/asapi/v1/video/snapshot",
+        # Вариант 1: Прямой веб-путь снапшота для новой операционной системы Tiandy
+        f"https://{domain}/res/snapshot.jpg",
 
-        # Вариант 2: Запрос снапшота с явным указанием 1-го канала (камеры)
-        f"https://{domain}/asapi/v1/video/channels/1/snapshot",
+        # Вариант 2: Базовый вызов кадра без расширения
+        f"https://{domain}/res/snapshot",
 
-        # Вариант 3: Запрос кадра через множественные эндпоинты (snapshots во множественном числе)
-        f"https://{domain}/asapi/v1/video/snapshots?channel=1&stream=1",
+        # Вариант 3: Резервный системный CGI-запрос видеосервиса
+        f"https://{domain}/asapi/v1/vision/video/snapshot",
 
-        # Вариант 4: Облегченный кадр со второго подпотока (stream=2)
-        f"https://{domain}/asapi/v1/video/snapshots?channel=1&stream=2"
+        # Вариант 4: Облегченный внутренний адрес стрима
+        f"https://{domain}/snapshot.jpg"
     ]
 
     return StreamingResponse(
