@@ -1,10 +1,8 @@
 from datetime import datetime
 from handlers.skud import trigger_dingtian_turnstile
 import pandas as pd
-import urllib.request
-import base64
 import asyncio
-import urllib.request
+from fastapi.responses import RedirectResponse
 from fastapi import Query
 import hmac
 import httpx
@@ -354,27 +352,20 @@ async def get_cameras_page(request: Request, club_id: int = Query(...)):
 # 3. Роут генерации стрима
 @router.get("/webapp/cameras/stream")
 async def video_stream(club_id: int = Query(...)):
-    domain = "camera.aemaykop-skud.netcraze.pro"
+    """
+    Роут, который динамически подключает go2rtc к камере через KeenDNS
+    и мгновенно транслирует видеопоток в формате MJPEG/HLS прямо в WebApp
+    """
+    # Твоя внешняя ссылка на камеру, которую мы настроили в Keenetic
+    # Так как Keenetic работает через облако, мы подключаемся к нему по протоколу RTSP
+    rtsp_url = "rtsp://admin:Aemaykop2026@rtsp.aemaykop-skud.netcraze.pro:554/1/1"
 
-    # Финальные URL-адреса, заточенные под новую прошивку Tiandy Web 5.0 (из res/ структуры)
-    urls = [
-        # Вариант 1: Прямой веб-путь снапшота для новой операционной системы Tiandy
-        f"https://{domain}/res/snapshot.jpg",
+    # Ссылка на локальный go2rtc, который мы только что подняли в докере на порту 1984
+    # Мы просим его забрать поток rtsp_url и выдать нам готовый mjpeg для Телеграма
+    go2rtc_mjpeg_api = f"http://127.0.0{rtsp_url}"
 
-        # Вариант 2: Базовый вызов кадра без расширения
-        f"https://{domain}/res/snapshot",
-
-        # Вариант 3: Резервный системный CGI-запрос видеосервиса
-        f"https://{domain}/asapi/v1/vision/video/snapshot",
-
-        # Вариант 4: Облегченный внутренний адрес стрима
-        f"https://{domain}/snapshot.jpg"
-    ]
-
-    return StreamingResponse(
-        stream_worker(urls),
-        media_type='multipart/x-mixed-replace; boundary=frame'
-    )
+    # Просто перенаправляем (проксируем) этот поток в Telegram WebApp
+    return RedirectResponse(url=go2rtc_mjpeg_api)
 
 
 @router.get("/pass-app", response_class=HTMLResponse)
