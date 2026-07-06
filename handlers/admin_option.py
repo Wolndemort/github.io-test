@@ -1474,14 +1474,22 @@ async def admin_start_schedule_manage(callback: types.CallbackQuery, state: FSMC
     await callback.answer()
 
 
-# ШАГ 1.5: ОТРИСОВКА ДНЯ И СПИСКА ЗАНЯТИЙ (Защищен от зависаний стейта)
-# =====================================================================
+from aiogram.filters import StateFilter
+
+
 @router.callback_query(F.data.startswith("sch_day_"), StateFilter("*"))
-async def admin_schedule_choose_day(callback: types.CallbackQuery, state: FSMContext, club_settings: dict):
+async def admin_schedule_choose_day(
+        callback: types.CallbackQuery,
+        state: FSMContext,
+        club_settings: dict,
+        manual_day: str = None  # Принимаем день напрямую при удалении
+):
     # Принудительно возвращаем админу рабочее состояние для этого экрана
     await state.set_state(AdminScheduleStates.choose_day)
 
-    day = callback.data.split("_")[-1]
+    # Если день передан вручную, берем его. Если нет — парсим из callback.data
+    day = manual_day if manual_day else callback.data.split("_")[-1]
+
     s_data = await state.get_data()
     disc_id = s_data.get("disc_id")
 
@@ -1533,9 +1541,16 @@ async def admin_schedule_choose_day(callback: types.CallbackQuery, state: FSMCon
 # ХЕНДЛЕР УДАЛЕНИЯ (Идеально последовательный, без конфликта сессий)
 # =====================================================================
 @router.callback_query(F.data.startswith("adm_sch_del_"))
-async def admin_delete_schedule_lesson(callback: types.CallbackQuery, state: FSMContext, club_settings: dict, session, redis: Redis, bot):
-    # Мгновенно тушим анимацию загрузки кнопки в ТГ
-    await callback.answer("Удалено")
+async def admin_delete_schedule_lesson(
+        callback: types.CallbackQuery,
+        state: FSMContext,
+        club_settings: dict,
+        session,
+        redis: Redis,
+        bot
+):
+    # Отвечаем Телеграму сразу
+    await callback.answer("Удалено!")
 
     _, _, _, disc_id, day, lesson_idx = callback.data.split("_")
     lesson_idx = int(lesson_idx)
@@ -1547,21 +1562,21 @@ async def admin_delete_schedule_lesson(callback: types.CallbackQuery, state: FSM
         if 0 <= lesson_idx < len(lessons_list):
             lessons_list.pop(lesson_idx)
 
-            # 1. СНАЧАЛА бесшовно перерисовываем интерфейс (занятие тут же исчезнет, лаг уйдет)
-            callback.data = f"sch_day_{day}"
-            await admin_schedule_choose_day(callback, state, club_settings)
+            # СНАЧАЛА перерисовываем интерфейс, передавая день в аргумент manual_day
+            await admin_schedule_choose_day(callback, state, club_settings, manual_day=day)
 
-            # 2. И ТОЛЬКО ПОТОМ, когда экран уже обновлен, спокойно пишем изменения в БД
+            # И ТОЛЬКО ПОСЛЕ ЭТОГО сохраняем изменения в БД и Redis
             await save_club_settings(session, redis, bot.token, club_id, club_settings)
-            logger.success(f"🗑 Изменения расписания сохранены в базу (Клуб {club_id})")
+            logger.success(f"🗑 Изменения расписания успешно сохранены в БД (Клуб {club_id})")
+
         else:
-            callback.data = f"sch_day_{day}"
-            await admin_schedule_choose_day(callback, state, club_settings)
+            logger.warning("Занятие не найдено, возможно уже удалено.")
+            await admin_schedule_choose_day(callback, state, club_settings, manual_day=day)
 
     except Exception as e:
         logger.error(f"Ошибка удаления расписания: {e}")
-        callback.data = f"sch_day_{day}"
-        await admin_schedule_choose_day(callback, state, club_settings)
+        # Аварийно вытаскиваем админа в меню дня, тоже используя аргумент manual_day
+        await admin_schedule_choose_day(callback, state, club_settings, manual_day=day)
 
 
 # ПЕРЕХОД К ВВОДУ ВРЕМЕНИ ДЛЯ НОВОГО ЗАНЯТИЯ
