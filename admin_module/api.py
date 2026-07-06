@@ -343,44 +343,33 @@ async def stream_worker(snapshot_urls: list):
 
 
 # 2. Роут открытия самой страницы WebApp
-@router.get("/webapp/cameras", response_class=HTMLResponse)
+@router.get("/webapp/live_cam", response_class=HTMLResponse)
 async def get_cameras_page(request: Request, club_id: int = Query(...)):
-    """Страница видеонаблюдения для WebApp"""
     return templates.TemplateResponse("cameras.html", {"request": request, "club_id": club_id})
 
 
+
 # 3. Роут генерации стрима
-from fastapi.responses import RedirectResponse
 
 import httpx
 from fastapi.responses import StreamingResponse
 
 
-@router.get("/webapp/cameras/stream")
+# 2. Путь стрима оставляем /webapp/live_cam/stream
+@router.get("/webapp/live_cam/stream")
 async def video_stream(club_id: int = Query(...)):
-    # 1. Внешний HTTP-адрес камеры через KeenDNS (облако Keenetic его пропускает)
     camera_domain = "camera.aemaykop-skud.netcraze.pro"
     rtsp_url = f"http://admin:Aemaykop2026@{camera_domain}/asapi/v1/video/channels/1/stream"
 
-    # 2. ИДЕАЛЬНАЯ СВЯЗЬ ЧЕРЕЗ DOCKER-СЕТЬ:
-    # Вместо IP пишем имя сервиса из compose файла — go2rtc!
+    # Стучимся к соседу по контейнеру go2rtc
     go2rtc_url = f"http://go2rtc:1984/api/stream.mjpeg?src={rtsp_url}"
 
     async def stream_generator():
-        # Отключаем таймауты для бесконечного видеопотока
         timeout = httpx.Timeout(None)
-
-        # Передаем limits, чтобы коннекты не рвались при долгой трансляции
         limits = httpx.Limits(max_keepalive_connections=5, max_connections=10)
-
         async with httpx.AsyncClient(timeout=timeout, limits=limits) as client:
             try:
                 async with client.stream("GET", go2rtc_url) as response:
-                    if response.status_code != 200:
-                        logger.error(f"❌ go2rtc вернул ошибку {response.status_code}")
-                        return
-
-                    # Потоково читаем байты от go2rtc и мгновенно плюем их в Telegram WebApp
                     async for chunk in response.aiter_bytes():
                         yield chunk
             except Exception as e:

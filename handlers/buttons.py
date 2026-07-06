@@ -160,11 +160,10 @@ def admin_keyboard(club_settings: dict, club_id: int, subscription_date: datetim
 
     # --- БЛОК 3: WebApps (Изоляция через club_id) ---
     base_url = f"https://{club_id}.speedycrm.ru"
-    nocache_url = f"{base_url}/webapp/cameras?club_id={club_id}&v={int(time.time())}"
 
     builder.row(types.InlineKeyboardButton(
         text="📹 Камеры (WebApp)",
-        web_app=types.WebAppInfo(url=nocache_url)
+        web_app=types.WebAppInfo(url=f"{base_url}/webapp/live_cam?club_id={club_id}")
     ))
 
     builder.row(types.InlineKeyboardButton(
