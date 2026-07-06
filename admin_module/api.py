@@ -7,6 +7,7 @@ import asyncio
 import urllib.request
 from fastapi import Query
 import hmac
+import httpx
 import hashlib
 from loguru import logger
 import json
@@ -297,61 +298,50 @@ async def get_oferta_page(request: Request):
     return templates.TemplateResponse("oferta.html", {"request": request})
 
 
-
 #CAMERAS CAMERAS CAMERAS
 # 1. Потоковый воркер, который автоматически найдет рабочий URL и соберет MJPEG
-
 async def stream_worker(snapshot_urls: list):
-    auth_str = "admin:Aemaykop2026"
-    auth_b64 = base64.b64encode(auth_str.encode()).decode()
-
-    headers = {
-        "Authorization": f"Basic {auth_b64}"
-    }
+    # Используем встроенный в httpx Digest-клиент для авторизации на камерах Tiandy
+    auth = httpx.DigestAuth("admin", "Aemaykop2026")
 
     working_url = None
-    for url in snapshot_urls:
-        try:
-            loop = asyncio.get_event_loop()
 
-            def test_connect():
-                req = urllib.request.Request(url, headers=headers)
-                with urllib.request.urlopen(req, timeout=2.0) as response:
-                    return response.getcode()
-
-            status = await loop.run_in_executor(None, test_connect)
-            if status == 200:
-                working_url = url
-                logger.success(f"🎥 Камера Tiandy успешно ответила на URL: {url}")
-                break
-        except Exception as conn_err:
-            # ТЕПЕРЬ мы увидим в консоли, почему камера сбрасывает соединение (404, 401 или таймаут)
-            logger.warning(f"⚠️ Путь не подошел {url}: {conn_err}")
-            continue
+    # Создаем асинхронный клиент для проверки путей
+    async with httpx.AsyncClient(auth=auth, timeout=3.0) as client:
+        for url in snapshot_urls:
+            try:
+                response = await client.get(url)
+                if response.status_code == 200:
+                    working_url = url
+                    logger.success(f"🎥 Успешное внешнее подключение к Tiandy по URL: {url}")
+                    break
+                else:
+                    logger.warning(f"⚠️ Камера вернула статус {response.status_code} для пути: {url}")
+            except Exception as e:
+                logger.warning(f"⚠️ Ошибка проверки внешнего пути {url}: {e}")
+                continue
 
     if not working_url:
-        logger.error("❌ Ни один URL снапшота не вернул 200 OK! Камера сбрасывает запросы.")
+        logger.error("❌ Ни один внешний URL KeenDNS не ответил. Проверьте проброс портов в Keenetic.")
+        # Если всё упало, берем первый как запасной
         working_url = snapshot_urls[0]
 
-    while True:
-        try:
-            loop = asyncio.get_event_loop()
+    # Бесконечный цикл трансляции кадров через HTTPX Digest
+    async with httpx.AsyncClient(auth=auth, timeout=3.0) as client:
+        while True:
+            try:
+                response = await client.get(working_url)
+                if response.status_code == 200:
+                    frame_bytes = response.content
+                    yield (b'--frame\r\n'
+                           b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+                else:
+                    await asyncio.sleep(1)
+            except Exception as frame_err:
+                logger.error(f"❌ Ошибка фонового кадра: {frame_err}")
+                await asyncio.sleep(1)
 
-            def fetch_image():
-                req = urllib.request.Request(working_url, headers=headers)
-                with urllib.request.urlopen(req, timeout=2.5) as response:
-                    return response.read()
-
-            frame_bytes = await loop.run_in_executor(None, fetch_image)
-
-            yield (b'--frame\r\n'
-                   b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
-
-        except Exception as frame_err:
-            logger.error(f"❌ Ошибка получения кадра: {frame_err}")
-            await asyncio.sleep(1)
-
-        await asyncio.sleep(0.04)
+            await asyncio.sleep(0.04)
 
 
 # 2. Роут открытия самой страницы WebApp
@@ -364,14 +354,15 @@ async def get_cameras_page(request: Request, club_id: int = Query(...)):
 # 3. Роут генерации стрима
 @router.get("/webapp/cameras/stream")
 async def video_stream(club_id: int = Query(...)):
-    local_camera_ip = "192.168.1.2"
+    # Твой реальный внешний KeenDNS домен, который проброшен до камеры!
+    domain = "camera.aemaykop-skud.netcraze.pro"
 
-    # Топ-4 официальных и скрытых URL для получения кадра с камер Tiandy этой серии
+    # Теперь облачный сервер будет ходить по этим путям через интернет
     urls = [
-        f"http://{local_camera_ip}/asapi/v1/video/snapshot",               # Вариант 1 (Через слово video)
-        f"http://{local_camera_ip}/asapi/v1/video/channels/1/snapshot",    # Вариант 2 (С указанием канала)
-        f"http://{local_camera_ip}/asapi/v1/vision/snapshot",              # Вариант 3 (Через слово vision)
-        f"http://{local_camera_ip}/reallive/snapshot"                      # Вариант 4 (Старый базовый)
+        f"https://{domain}/asapi/v1/video/snapshot",
+        f"https://{domain}/asapi/v1/video/channels/1/snapshot",
+        f"https://{domain}/asapi/v1/vision/snapshot",
+        f"https://{domain}/reallive/snapshot"
     ]
 
     return StreamingResponse(
