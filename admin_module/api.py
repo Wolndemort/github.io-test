@@ -356,19 +356,19 @@ async def get_cameras_page(request: Request, club_id: int = Query(...)):
 async def video_stream(club_id: int = Query(...)):
     domain = "camera.aemaykop-skud.netcraze.pro"
 
-    # Точные пути для получения JPEG с камер Tiandy серии TC-C321N
+    # НОВЫЕ ПУТИ (Копируем строго этот массив! Предыдущие из логов не берем)
     urls = [
-        # Вариант 1: Официальный путь API для получения кадра с 1-го потока
+        # Вариант 1: Официальный путь к снапшоту основного видеосервиса Tiandy
+        f"https://{domain}/asapi/v1/video/snapshot",
+
+        # Вариант 2: Запрос снапшота с явным указанием 1-го канала (камеры)
+        f"https://{domain}/asapi/v1/video/channels/1/snapshot",
+
+        # Вариант 3: Запрос кадра через множественные эндпоинты (snapshots во множественном числе)
         f"https://{domain}/asapi/v1/video/snapshots?channel=1&stream=1",
 
-        # Вариант 2: Путь через подпоток (он легче и прогрузится быстрее)
-        f"https://{domain}/asapi/v1/video/snapshots?channel=1&stream=2",
-
-        # Вариант 3: Прямой путь, который использует сама админка Tiandy, когда ты смотришь на экран
-        f"https://{domain}/asapi/v1/video/snapshot?channel=1",
-
-        # Вариант 4: Системный путь сохранения логов картинок
-        f"https://{domain}/tmpfs/auto.jpg"
+        # Вариант 4: Облегченный кадр со второго подпотока (stream=2)
+        f"https://{domain}/asapi/v1/video/snapshots?channel=1&stream=2"
     ]
 
     return StreamingResponse(
