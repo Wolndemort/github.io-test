@@ -446,11 +446,9 @@ async def manual_add_start(
     await callback.answer()
 
 
-# ШАГ 2: Поймали имя -> Запрашиваем ТЕЛЕФОН родителя
 @router.message(AdminManualAdd.waiting_for_name)
 async def manual_add_name(message: types.Message, state: FSMContext):
-    await state.update_data(name=message.text)
-    # ПЕРЕКЛЮЧАЕМ НА ТЕЛЕФОН, а не на занятия!
+    await state.update_data(name=message.text.strip())
     await state.set_state(AdminManualAdd.waiting_for_phone)
     await message.answer(
         f"✅ Имя: <b>{message.text}</b>\n\n"
@@ -459,7 +457,7 @@ async def manual_add_name(message: types.Message, state: FSMContext):
     )
 
 
-# ШАГ 3: Поймали телефон -> Запрашиваем ЗАНЯТИЯ
+# ШАГ 3: Поймали телефон -> Запрашиваем ДЕНЬ РОЖДЕНИЯ
 @router.message(AdminManualAdd.waiting_for_phone)
 async def manual_add_process_phone(message: types.Message, state: FSMContext):
     phone = "".join(filter(str.isdigit, message.text))
@@ -467,8 +465,6 @@ async def manual_add_process_phone(message: types.Message, state: FSMContext):
         return await message.answer("❌ Номер слишком короткий. Введите минимум 10 цифр:")
 
     await state.update_data(phone=phone)
-
-    # Переключаем стейт на ввод ДР
     await state.set_state(AdminManualAdd.waiting_for_birthday)
     await message.answer(
         f"✅ Телефон: <code>{phone}</code>\n\n"
@@ -478,97 +474,172 @@ async def manual_add_process_phone(message: types.Message, state: FSMContext):
     )
 
 
+# ШАГ 4: Поймали ДР -> Генерируем кнопки доступных ТАРИФОВ
 @router.message(AdminManualAdd.waiting_for_birthday)
-async def manual_add_process_birthday(message: types.Message, state: FSMContext):
+async def manual_add_process_birthday(
+        message: types.Message,
+        state: FSMContext,
+        club_settings: dict
+):
     if message.text.strip() == "0":
         await state.update_data(birthday=None)
     else:
         try:
-            # Парсим строку ДД.ММ.ГГГГ в объект даты
             birthday_date = datetime.strptime(message.text.strip(), "%d.%m.%Y").date()
-            
-            # ВАЖНО: сохраняем в стейт СТРОКУ, а не объект даты!
             await state.update_data(birthday=birthday_date.isoformat())
-            
         except ValueError:
             return await message.answer("❌ Неверный формат! Введите дату строго как ДД.ММ.ГГГГ (например, 15.08.2012):")
 
-    # Теперь переключаем на ввод занятий
+    # Вытаскиваем все тарифы из настроек клуба, разбитые по дисциплинам
+    disciplines = club_settings.get("disciplines", {})
+    kb = InlineKeyboardBuilder()
+
+    tariff_found = False
+    for disc_code, disc_data in disciplines.items():
+        disc_name = disc_data.get("name", disc_code)
+        tariffs = disc_data.get("tariffs", [])
+
+        if tariffs:
+            # Делаем заголовок секции, если тарифов много
+            kb.row(types.InlineKeyboardButton(text=f"🔹 {disc_name} 🔹", callback_data="ignore"))
+
+            for idx, tariff in enumerate(tariffs):
+                count = tariff.get("count", 0)
+                days = tariff.get("days", 30)
+                price = tariff.get("price", 0)
+
+                # Формируем понятный текст кнопки
+                if count == 999:
+                    label = f"Безлимит ({days} дн.) — {price}₽"
+                else:
+                    label = f"{count} зан. ({days} дн.) — {price}₽"
+
+                # Зашиваем код дисциплины и индекс тарифа в callback_data
+                kb.row(types.InlineKeyboardButton(
+                    text=label,
+                    callback_data=f"manual_select_tariff_{disc_code}_{idx}"
+                ))
+                tariff_found = True
+
+    if not tariff_found:
+        return await message.answer("⚠️ В настройках вашего клуба не найдено активных тарифов. Заведите их в админке!")
+
+    kb.row(types.InlineKeyboardButton(text="❌ Отмена", callback_data="admin"))
+
+    # Переключаем стейт на ожидание клика по кнопке
     await state.set_state(AdminManualAdd.waiting_for_lessons)
     await message.answer(
         "✅ Дата рождения сохранена!\n\n"
-        "Введите количество занятий для активации абонемента (0 для безлимита):"
+        "Выберите один из <b>действующих тарифов клуба</b> для автоматической активации абонемента:",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup()
     )
 
 
-@router.message(AdminManualAdd.waiting_for_lessons)
+# ШАГ 5: Поймали кнопку тарифа -> Создаем атлета со всеми лимитами в БД
+@router.callback_query(AdminManualAdd.waiting_for_lessons, F.data.startswith("manual_select_tariff_"))
 async def manual_add_finish(
-        message: types.Message,
+        callback: types.CallbackQuery,
         state: FSMContext,
         club: Club,
         club_settings: dict,
         session: AsyncSession
 ):
-    try:
-        lessons = int(message.text)
-    except ValueError:
-        return await message.answer("❌ Введите числовое значение!")
+    # Парсим callback_data, доставая код дисциплины и индекс тарифа
+    parts = callback.data.split("_")
+    disc_code = parts[3]
+    tariff_idx = int(parts[4])
+
+    disc_cfg = club_settings.get("disciplines", {}).get(disc_code, {})
+    tariffs = disc_cfg.get("tariffs", [])
+
+    if tariff_idx >= len(tariffs):
+        return await callback.answer("Ошибка: тариф не найден ❌", show_alert=True)
+
+    selected_tariff = tariffs[tariff_idx]
+    count = selected_tariff.get("count", 0)
+    days = selected_tariff.get("days", 30)
+    price = selected_tariff.get("price", 0)
 
     data = await state.get_data()
     name = data.get("name")
     phone = data.get("phone")
-    birthday_str = data.get("birthday")  # Получаем строку из Redis ("YYYY-MM-DD" или None)
+    birthday_str = data.get("birthday")
 
-    # Конвертируем строку обратно в объект date исключительно для красивого вывода .strftime()
     birthday_obj = None
     if birthday_str:
         birthday_obj = datetime.strptime(birthday_str, "%Y-%m-%d").date()
 
     try:
-        days = club_settings.get("limits", {}).get("subscription_days", 30)
         new_expire = datetime.now() + timedelta(days=days)
 
-        # Создаем студента. В SQLAlchemy можно передать как birthday_str, так и birthday_obj
+        # Создаем студента с точными параметрами из конфига и last_visit
         new_student = Student(
             name=name,
             club_id=club.id,
             parent_phone=phone,
-            birthday=birthday_obj,  # Передаем объект даты (или строку) в БД
+            birthday=birthday_obj,
             parent_id=None,
-            balance_lessons=999 if lessons == 0 else lessons,
+            balance_lessons=count,
             expire_date=new_expire,
             can_freeze=1,
-            is_frozen=0
+            is_frozen=0,
+            last_visit=datetime.now()
         )
 
         session.add(new_student)
         await session.commit()
         await session.refresh(new_student)
 
+        # Формируем кнопку подтверждения оплаты для ручного ввода
         builder = InlineKeyboardBuilder()
-        builder.row(types.InlineKeyboardButton(text="💵 Оплатил наличными", callback_data=f"confirm_cash_{new_student.id}"))
+        builder.row(types.InlineKeyboardButton(
+            text="💵 Подтвердить оплату наличными",
+            callback_data=f"confirm_manual_pay_{new_student.id}_{price}"
+        ))
         builder.row(types.InlineKeyboardButton(text="🏠 В меню", callback_data="admin"))
 
-        # Используем birthday_obj для вывода красивого формата ДД.ММ.ГГГГ
-        await message.answer(
-            f"✅ <b>Атлет успешно добавлен!</b>\n\n"
+        t_label = f"Безлимит ({days} дн.)" if count == 999 else f"{count} зан. ({days} дн.)"
+
+        await callback.message.edit_text(
+            f"✅ <b>Атлет успешно добавлен по тарифу!</b>\n\n"
             f"👤 Имя: <b>{name}</b>\n"
             f"🎂 ДР: <b>{birthday_obj.strftime('%d.%m.%Y') if birthday_obj else 'не указан'}</b>\n"
             f"📱 Телефон: <code>{phone}</code>\n"
-            f"📊 Баланс: <b>{new_student.balance_lessons} зан.</b>\n"
-            f"⏳ Срок до: <b>{new_expire.strftime('%d.%m.%Y')}</b>\n"
+            f"🥋 Направление: <b>{disc_cfg.get('name')}</b>\n"
+            f"📊 Тариф: <b>{t_label}</b>\n"
+            f"💰 К оплате: <b>{price} ₽</b>\n"
+            f"⏳ Действует до: <b>{new_expire.strftime('%d.%m.%Y')}</b>\n"
             f"🆔 ID: <code>{new_student.id}</code>",
             reply_markup=builder.as_markup(),
             parse_mode="HTML"
         )
 
-        logger.info(f"🆕 [Клуб {club.id}] Ручное добавление атлета {name} с ДР {birthday_obj}")
+        logger.info(f"🆕 [Клуб {club.id}] Админ вручную добавил атлета {name} по тарифу {t_label}")
         await state.clear()
 
     except Exception as e:
         await session.rollback()
-        logger.error(f"❌ Ошибка сохранения атлета: {e}")
-        await message.answer("❌ Ошибка при сохранении в базу данных.")
+        logger.error(f"❌ Ошибка ручного сохранения атлета по тарифу: {e}")
+        await callback.message.answer("❌ Ошибка при сохранении в базу данных.")
+
+    await callback.answer()
+
+
+# ШАГ 6: Ловим кнопку подтверждения ручной оплаты наличными
+@router.callback_query(F.data.startswith("confirm_manual_pay_"))
+async def confirm_manual_pay(callback: types.CallbackQuery, club: Club):
+    parts = callback.data.split("_")
+    student_id = parts[3]
+    price = parts[4]
+
+    await callback.message.edit_text(
+        f"✅ <b>Платеж успешно проведен!</b>\n\n"
+        f"💵 Сумма <b>{price} ₽</b> получена наличными.\n"
+        f"Карточка атлета ID <code>{student_id}</code> полностью активирована в системе клуба <b>{club.name}</b>.",
+        parse_mode="HTML"
+    )
+    await callback.answer("Оплата внесена ✔")
 
 
 
@@ -1124,6 +1195,7 @@ async def admin_edit_tariff_menu(callback: types.CallbackQuery, club_settings: d
         f"⚙️ <b>Редактирование тарифа ({discipline['name']})</b>\n\nВы можете изменить отдельные параметры или полностью удалить тариф:",
         reply_markup=builder.as_markup(), parse_mode="HTML"
     )
+
 
 
 

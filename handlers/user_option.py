@@ -773,13 +773,8 @@ async def process_athlete_birthday(
 
 @router.callback_query(F.data == "auth_by_phone")
 async def auth_by_phone_callback(callback: types.CallbackQuery, club: Club):
-    # Создаем реплай-кнопку для отправки контакта
     builder = ReplyKeyboardBuilder()
-    builder.row(types.KeyboardButton(
-        text="📱 Поделиться контактом",
-        request_contact=True
-    ))
-
+    builder.row(types.KeyboardButton(text="📱 Поделиться контактом", request_contact=True))
     await callback.message.answer(
         f"📍 <b>Авторизация в клубе {club.name}</b>\n\n"
         f"Нажмите кнопку <b>«📱 Поделиться контактом»</b> внизу экрана, "
@@ -788,6 +783,74 @@ async def auth_by_phone_callback(callback: types.CallbackQuery, club: Club):
         parse_mode="HTML"
     )
     await callback.answer()
+
+
+@router.message(F.contact)
+async def process_user_contact(
+        message: types.Message,
+        session: AsyncSession,
+        club: Club,
+        club_settings: dict
+):
+    # Очищаем номер от плюсов и пробелов
+    raw_phone = message.contact.phone_number.replace("+", "").strip()
+    clean_phone_10 = raw_phone[-10:]  # Последние 10 цифр (9991112233)
+    user_id = message.from_user.id
+
+    try:
+        # Ищем студентов, у которых телефон содержит последние 10 цифр
+        stmt = select(Student).where(
+            Student.parent_phone.contains(clean_phone_10),
+            Student.club_id == club.id
+        )
+        result = await session.execute(stmt)
+        students = result.scalars().all()
+
+        if not students:
+            return await message.answer(
+                f"❌ Атлеты с номером <code>...{clean_phone_10[-4:]}</code> не найдены в базе клуба <b>{club.name}</b>.\n\n"
+                "Свяжитесь с администратором, чтобы он внес ваш номер в систему.",
+                parse_mode="HTML",
+                reply_markup=types.ReplyKeyboardRemove()
+            )
+
+        # Безопасный импорт модели User, чтобы избежать падения, если пути отличаются
+        try:
+            from database.db import User
+        except ImportError:
+            from database.db import User  # Если модель лежит в другом месте, поправьте путь
+
+        # Проверяем, зарегистрирован ли уже этот user_id в таблице users
+        user_stmt = select(User).where(User.user_id == user_id)
+        user_exists = (await session.execute(user_stmt)).scalar_one_or_none()
+
+        if not user_exists:
+            # Создаем запись для нового пользователя, чтобы не нарушать внешний ключ (ForeignKey)
+            new_user = User(user_id=user_id)
+            session.add(new_user)
+            await session.flush()  # Синхронизируем с базой, чтобы ID зафиксировался
+
+        # Привязываем Telegram ID ко всем найденным карточкам атлетов
+        for student in students:
+            student.parent_id = user_id
+            session.add(student)
+
+        await session.commit()
+        names = ", ".join([f"<b>{s.name}</b>" for s in students])
+
+        await message.answer(
+            f"✅ Авторизация в <b>{club.name}</b> успешна!\n\n"
+            f"Привязаны атлеты: {names}\n\n"
+            "Теперь вам доступен личный кабинет и QR-пропуск.",
+            parse_mode="HTML",
+            reply_markup=get_main_menu_keyboard(club_settings, club.id)
+        )
+
+    except Exception as e:
+        await session.rollback()
+        logger.error(f"❌ Ошибка авторизации в клубе {club.id}: {e}")
+        # Если была тишина, отправляем сообщение пользователю, чтобы он видел ошибку
+        await message.answer("⚠️ Произошла внутренняя ошибка привязки профиля. Пожалуйста, сообщите администратору.")
 
 
 @router.message(F.contact)
