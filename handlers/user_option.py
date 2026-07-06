@@ -6,7 +6,7 @@ import io
 from aiogram.utils.keyboard import ReplyKeyboardBuilder
 from aiogram.filters import Command
 from sqlalchemy.ext.asyncio import AsyncSession
-from database.db import Student, process_student_freeze, Club
+from database.db import Student, process_student_freeze, Club, User
 from config import secret_key
 from sqlalchemy import select
 from handlers.buttons import get_main_menu_keyboard, get_profile_keyboard, get_section_menu_kb
@@ -14,7 +14,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import InlineKeyboardButton, BufferedInputFile
 from datetime import timedelta
 from aiogram import Router, F, types
-from datetime import datetime
+from datetime import datetime, date
 from loguru import logger
 import hashlib
 import hmac
@@ -221,10 +221,6 @@ async def detailed_status_handler(
     except Exception as e:
         logger.error(f"❌ Ошибка в детальном статусе: {e}")
         await callback.answer("Ошибка при загрузке подробных данных")
-
-
-
-
 
 
 @router.callback_query(F.data.startswith('section_'))
@@ -705,7 +701,6 @@ async def process_athlete_name(message: types.Message, state: FSMContext):
     )
 
 
-
 # ШАГ 3: Поймали ДР -> Валидируем и сохраняем в базу PostgreSQL
 @router.message(RegistrationStates.waiting_for_birthday)
 async def process_athlete_birthday(
@@ -730,12 +725,25 @@ async def process_athlete_birthday(
     user_id = message.from_user.id
 
     try:
-        # Создаем атлета со ВСЕМИ привязками и Днём Рождения!
+        # 1. ПРОВЕРКА / АВТОПРИСУТСТВИЕ РОДИТЕЛЯ В ТАБЛИЦЕ USERS
+        user_stmt = select(User).where(User.user_id == user_id)
+        user_exists = (await session.execute(user_stmt)).scalar_one_or_none()
+
+        if not user_exists:
+            # Если пользователя нет в БД, создаем его, чтобы избежать ForeignKeyViolationError
+            new_user = User(
+                user_id=user_id
+                # Если в модели User есть другие обязательные поля без default, добавьте их сюда
+            )
+            session.add(new_user)
+            await session.flush()  # Фиксируем изменения в текущей сессии базы данных
+
+        # 2. Создаем атлета со ВСЕМИ привязками и Днём Рождения!
         new_student = Student(
             parent_id=user_id,
             club_id=club_id,
             name=name,
-            birthday=birthday_date,  # <--- Передаем ОБЪЕКТ даты (birthday_date вместо birthday_str)
+            birthday=birthday_date,  # Передаем ОБЪЕКТ даты
             expire_date=None,
             balance_lessons=0,
             can_freeze=1,
@@ -761,7 +769,6 @@ async def process_athlete_birthday(
         await session.rollback()
         logger.error(f"❌ Ошибка при самостоятельном добавлении атлета: {e}")
         await message.answer("⚠️ Произошла ошибка при сохранении. Попробуйте позже.")
-
 
 
 @router.callback_query(F.data == "auth_by_phone")
@@ -812,6 +819,21 @@ async def process_user_contact(
                 parse_mode="HTML",
                 reply_markup=types.ReplyKeyboardRemove()
             )
+
+        # 2.5 ЗАЩИТА ОТ ОШИБКИ FOREIGN KEY (parent_id)
+        # Гарантируем, что юзер существует в таблице users перед привязкой к нему студентов
+        user_stmt = select(User).where(User.user_id == user_id)
+        user_exists = (await session.execute(user_stmt)).scalar_one_or_none()
+
+        if not user_exists:
+            # Создаем запись для нового родителя, чтобы PostgreSQL разрешил связь таблиц
+            new_user = User(
+                user_id=user_id
+                # Если в твоей модели User поле для телефона называется по-другому, поправь имя:
+                # phone=raw_phone
+            )
+            session.add(new_user)
+            await session.flush()  # Фиксируем юзера в сессии, чтобы его ID стал валидным для Студента
 
         # 3. Привязываем Telegram ID к найденным карточкам атлетов
         for student in students:
