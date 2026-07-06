@@ -79,6 +79,19 @@ services:
       - ./certbot/www:/var/www/certbot
     entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew; sleep 12d & wait $${!}; done;'"
 
+
+  go2rtc:
+    image: alexxit/go2rtc
+    container_name: gym_go2rtc
+    restart: always
+    networks:
+      - web_network
+    ports:
+      - "1984:1984"
+      - "8554:8554"
+
+
+
 volumes:
   pg_data:
 

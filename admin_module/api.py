@@ -352,24 +352,44 @@ async def get_cameras_page(request: Request, club_id: int = Query(...)):
 # 3. Роут генерации стрима
 from fastapi.responses import RedirectResponse
 
+import httpx
+from fastapi.responses import StreamingResponse
+
 
 @router.get("/webapp/cameras/stream")
 async def video_stream(club_id: int = Query(...)):
-    """
-    Финальный роут стриминга видео через облачный Keenetic и go2rtc
-    """
-    # Твой полностью рабочий HTTP-домен камеры, который идеально проходит через облако Keenetic
+    # 1. Внешний HTTP-адрес камеры через KeenDNS (облако Keenetic его пропускает)
     camera_domain = "camera.aemaykop-skud.netcraze.pro"
-
-    # Заставляем go2rtc забирать живой поток через HTTP-туннель камеры Tiandy (кодек H.265)
-    # Это полностью обходит ограничения серого IP и 4G модема!
     rtsp_url = f"http://admin:Aemaykop2026@{camera_domain}/asapi/v1/video/channels/1/stream"
 
-    # Ссылка на локальный go2rtc, который перегонит H.265 в легкий mjpeg для Telegram WebApp
-    go2rtc_mjpeg_api = f"http://127.0.0{rtsp_url}"
+    # 2. ИДЕАЛЬНАЯ СВЯЗЬ ЧЕРЕЗ DOCKER-СЕТЬ:
+    # Вместо IP пишем имя сервиса из compose файла — go2rtc!
+    go2rtc_url = f"http://go2rtc:1984/api/stream.mjpeg?src={rtsp_url}"
 
-    # Отдаем готовый видеопоток в Telegram
-    return RedirectResponse(url=go2rtc_mjpeg_api)
+    async def stream_generator():
+        # Отключаем таймауты для бесконечного видеопотока
+        timeout = httpx.Timeout(None)
+
+        # Передаем limits, чтобы коннекты не рвались при долгой трансляции
+        limits = httpx.Limits(max_keepalive_connections=5, max_connections=10)
+
+        async with httpx.AsyncClient(timeout=timeout, limits=limits) as client:
+            try:
+                async with client.stream("GET", go2rtc_url) as response:
+                    if response.status_code != 200:
+                        logger.error(f"❌ go2rtc вернул ошибку {response.status_code}")
+                        return
+
+                    # Потоково читаем байты от go2rtc и мгновенно плюем их в Telegram WebApp
+                    async for chunk in response.aiter_bytes():
+                        yield chunk
+            except Exception as e:
+                logger.error(f"❌ Ошибка трансляции потока внутри FastAPI: {e}")
+
+    return StreamingResponse(
+        stream_generator(),
+        media_type='multipart/x-mixed-replace; boundary=frame'
+    )
 
 
 @router.get("/pass-app", response_class=HTMLResponse)
