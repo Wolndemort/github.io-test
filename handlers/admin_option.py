@@ -1524,13 +1524,11 @@ async def admin_schedule_choose_day(callback: types.CallbackQuery, state: FSMCon
 # =====================================================================
 # ХЕНДЛЕР УДАЛЕНИЯ (Исправленный: answer() вызывается сразу + фоновое сохранение)
 # ====================================================================
-import asyncio
-
 
 @router.callback_query(F.data.startswith("adm_sch_del_"))
 async def admin_delete_schedule_lesson(callback: types.CallbackQuery, state: FSMContext, club_settings: dict, session,
                                        redis: Redis, bot):
-    # 1. Отвечаем Телеграму мгновенно, чтобы кнопка сразу отжалась
+    # 1. Отвечаем Телеграму сразу
     await callback.answer("Удалено!")
 
     _, _, _, disc_id, day, lesson_idx = callback.data.split("_")
@@ -1543,20 +1541,25 @@ async def admin_delete_schedule_lesson(callback: types.CallbackQuery, state: FSM
         if 0 <= lesson_idx < len(lessons_list):
             lessons_list.pop(lesson_idx)
 
-            # ЗАПУСКАЕМ СОХРАНЕНИЕ В ФОНОВОЙ ЗАДАЧЕ (Бот больше никогда не зависнет на этой кнопке!)
-            # Он не будет ждать ответа от базы данных, а сразу пойдет дальше
-            asyncio.create_task(save_club_settings(session, redis, bot.token, club_id, club_settings))
-            logger.info(f"🗑 Запущено фоновое сохранение расписания для клуба {club_id}")
+            # СНАЧАЛА обновляем интерфейс для админа, чтобы он видел моментальное удаление
+            callback.data = f"sch_day_{day}"
+            await admin_schedule_choose_day(callback, state, club_settings)
+
+            # И ТОЛЬКО ПОСЛЕ ЭТОГО, когда сессия свободна, сохраняем изменения в БД и Redis
+            await save_club_settings(session, redis, bot.token, club_id, club_settings)
+            logger.success(f"🗑 Изменения расписания успешно сохранены в БД (Клуб {club_id})")
 
         else:
             logger.warning("Занятие не найдено, возможно уже удалено.")
+            # Если не найдено, просто перерисовываем
+            callback.data = f"sch_day_{day}"
+            await admin_schedule_choose_day(callback, state, club_settings)
 
     except Exception as e:
         logger.error(f"Ошибка удаления расписания: {e}")
-
-    # 2. Моментально перерисовываем экран
-    callback.data = f"sch_day_{day}"
-    await admin_schedule_choose_day(callback, state, club_settings)
+        # Если всё упало, аварийно вытаскиваем админа в меню дня
+        callback.data = f"sch_day_{day}"
+        await admin_schedule_choose_day(callback, state, club_settings)
 
 
 @router.callback_query(F.data == "adm_sch_start_input_time")
