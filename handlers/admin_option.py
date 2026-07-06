@@ -1523,12 +1523,15 @@ async def admin_schedule_choose_day(callback: types.CallbackQuery, state: FSMCon
 
 # =====================================================================
 # ХЕНДЛЕР УДАЛЕНИЯ (Исправленный: answer() вызывается сразу + фоновое сохранение)
-# =====================================================================
+# ====================================================================
+import asyncio
+
+
 @router.callback_query(F.data.startswith("adm_sch_del_"))
 async def admin_delete_schedule_lesson(callback: types.CallbackQuery, state: FSMContext, club_settings: dict, session,
                                        redis: Redis, bot):
-    # Отвечаем телеграму СРАЗУ, чтобы кнопка не зависала и не было таймаута
-    await callback.answer()
+    # 1. Отвечаем Телеграму мгновенно, чтобы кнопка сразу отжалась
+    await callback.answer("Удалено!")
 
     _, _, _, disc_id, day, lesson_idx = callback.data.split("_")
     lesson_idx = int(lesson_idx)
@@ -1538,10 +1541,12 @@ async def admin_delete_schedule_lesson(callback: types.CallbackQuery, state: FSM
     try:
         lessons_list = club_settings["disciplines"][disc_id]["schedule"][day]
         if 0 <= lesson_idx < len(lessons_list):
-            removed_lesson = lessons_list.pop(lesson_idx)
+            lessons_list.pop(lesson_idx)
 
-            # Обернули твою же функцию в фоновый поток. Логика та же, но лаг ушел!
-            await asyncio.to_thread(save_club_settings, session, redis, bot.token, club_id, club_settings)
+            # ЗАПУСКАЕМ СОХРАНЕНИЕ В ФОНОВОЙ ЗАДАЧЕ (Бот больше никогда не зависнет на этой кнопке!)
+            # Он не будет ждать ответа от базы данных, а сразу пойдет дальше
+            asyncio.create_task(save_club_settings(session, redis, bot.token, club_id, club_settings))
+            logger.info(f"🗑 Запущено фоновое сохранение расписания для клуба {club_id}")
 
         else:
             logger.warning("Занятие не найдено, возможно уже удалено.")
@@ -1549,7 +1554,7 @@ async def admin_delete_schedule_lesson(callback: types.CallbackQuery, state: FSM
     except Exception as e:
         logger.error(f"Ошибка удаления расписания: {e}")
 
-    # Твоя родная отрисовка экрана — полностью сохранена!
+    # 2. Моментально перерисовываем экран
     callback.data = f"sch_day_{day}"
     await admin_schedule_choose_day(callback, state, club_settings)
 
