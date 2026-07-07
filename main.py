@@ -30,6 +30,7 @@ logger.add('logs/bot_log.log', rotation='1 MB', retention='10 days', compression
 # Инициализация Redis и FSM
 redis_client = Redis(host='redis', port=6379, db=0)
 storage = RedisStorage(redis=redis_client)
+BASE_URL = "https://speedycrm.ru"
 
 
 @asynccontextmanager
@@ -107,9 +108,6 @@ setup_admin(app, engine)
 # Глобальный маппинг ботов
 bots_dict = {}
 dp = Dispatcher(storage=storage)
-
-# Настройка путей вебхуков
-BASE_URL = "https://speedycrm.ru"
 
 
 async def send_backup_to_admin():

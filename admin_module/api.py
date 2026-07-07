@@ -147,8 +147,6 @@ async def export_students_to_excel(request: Request, session: AsyncSession = Dep
 
 
 
-from fastapi.responses import HTMLResponse
-
 
 @router.get("/webapp/schedule", response_class=HTMLResponse)
 async def webapp_schedule_page(
