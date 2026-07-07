@@ -98,4 +98,6 @@ volumes:
 
 networks:
   web_network:
+    name: web_network
     external: true
+
