@@ -1,18 +1,15 @@
 from datetime import datetime
 from handlers.skud import trigger_dingtian_turnstile
 import pandas as pd
-import asyncio
-from fastapi.responses import RedirectResponse
 from fastapi import Query
 import hmac
-import httpx
 import hashlib
 from loguru import logger
 import json
 from urllib.parse import parse_qsl
 import io
 from fastapi import Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from fastapi import Depends, HTTPException, APIRouter, Security
 from fastapi.security import APIKeyHeader
@@ -21,7 +18,6 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from starlette import status
-from starlette.responses import StreamingResponse
 from database.db import User, Student, Club
 from database.db import get_session
 from config import fastapi_key
