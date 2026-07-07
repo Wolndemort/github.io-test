@@ -25,10 +25,7 @@ services:
     build: .
     container_name: gym_crm_api
     networks:
-      web_network:
-        aliases:
-          - gym-api        # ХОСТ ДЛЯ ТВОЕГО NGINX
-          - gym_crm_api
+      - web_network
     restart: always
     command: >
       sh -c "alembic upgrade head && uvicorn main:app --host 0.0.0.0 --port 8000"
@@ -86,9 +83,7 @@ services:
     container_name: gym_go2rtc
     restart: always
     networks:
-      web_network:
-        aliases:
-          - gym_go2rtc
+      - web_network
     ports:
       - "1984:1984"
       - "8554:8554"
@@ -100,4 +95,3 @@ networks:
   web_network:
     name: web_network
     external: true
-
