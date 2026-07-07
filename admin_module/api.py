@@ -296,51 +296,6 @@ async def get_oferta_page(request: Request):
     return templates.TemplateResponse("oferta.html", {"request": request})
 
 
-#CAMERAS CAMERAS CAMERAS
-# 1. Потоковый воркер, который автоматически найдет рабочий URL и соберет MJPEG
-async def stream_worker(snapshot_urls: list):
-    # Используем встроенный в httpx Digest-клиент для авторизации на камерах Tiandy
-    auth = httpx.DigestAuth("admin", "Aemaykop2026")
-
-    working_url = None
-
-    # Создаем асинхронный клиент для проверки путей
-    async with httpx.AsyncClient(auth=auth, timeout=3.0) as client:
-        for url in snapshot_urls:
-            try:
-                response = await client.get(url)
-                if response.status_code == 200:
-                    working_url = url
-                    logger.success(f"🎥 Успешное внешнее подключение к Tiandy по URL: {url}")
-                    break
-                else:
-                    logger.warning(f"⚠️ Камера вернула статус {response.status_code} для пути: {url}")
-            except Exception as e:
-                logger.warning(f"⚠️ Ошибка проверки внешнего пути {url}: {e}")
-                continue
-
-    if not working_url:
-        logger.error("❌ Ни один внешний URL KeenDNS не ответил. Проверьте проброс портов в Keenetic.")
-        # Если всё упало, берем первый как запасной
-        working_url = snapshot_urls[0]
-
-    # Бесконечный цикл трансляции кадров через HTTPX Digest
-    async with httpx.AsyncClient(auth=auth, timeout=3.0) as client:
-        while True:
-            try:
-                response = await client.get(working_url)
-                if response.status_code == 200:
-                    frame_bytes = response.content
-                    yield (b'--frame\r\n'
-                           b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
-                else:
-                    await asyncio.sleep(1)
-            except Exception as frame_err:
-                logger.error(f"❌ Ошибка фонового кадра: {frame_err}")
-                await asyncio.sleep(1)
-
-            await asyncio.sleep(0.04)
-
 
 # 2. Роут открытия самой страницы WebApp
 @router.get("/webapp/live_cam", response_class=HTMLResponse)
