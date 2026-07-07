@@ -4,6 +4,7 @@ import pandas as pd
 from fastapi import Query
 import hmac
 import hashlib
+from fastapi.responses import StreamingResponse
 from loguru import logger
 import json
 from urllib.parse import parse_qsl
@@ -292,44 +293,23 @@ async def get_oferta_page(request: Request):
     return templates.TemplateResponse("oferta.html", {"request": request})
 
 
-
 # 2. Роут открытия самой страницы WebApp
 @router.get("/webapp/live_cam", response_class=HTMLResponse)
 async def get_cameras_page(request: Request, club_id: int = Query(...)):
     return templates.TemplateResponse("cameras.html", {"request": request, "club_id": club_id})
 
 
-
-# 3. Роут генерации стрима
-
-import httpx
-from fastapi.responses import StreamingResponse
-
-
 # 2. Путь стрима оставляем /webapp/live_cam/stream
+# 3. Роут генерации стрима
 @router.get("/webapp/live_cam/stream")
 async def video_stream(club_id: int = Query(...)):
-    camera_domain = "camera.aemaykop-skud.netcraze.pro"
-    rtsp_url = f"http://admin:Aemaykop2026@{camera_domain}/asapi/v1/video/channels/1/stream"
+    """
+    Роут транслирует видеопоток в формате MJPEG прямо в WebApp
+    """
+    # Ссылка на твой локальный контейнер go2rtc внутри сети Docker
+    go2rtc_mjpeg_api = "http://gym_go2rtc:1984/api/stream.mjpeg?src=camera1"
 
-    # Стучимся к соседу по контейнеру go2rtc
-    go2rtc_url = f"http://go2rtc:1984/api/stream.mjpeg?src={rtsp_url}"
-
-    async def stream_generator():
-        timeout = httpx.Timeout(None)
-        limits = httpx.Limits(max_keepalive_connections=5, max_connections=10)
-        async with httpx.AsyncClient(timeout=timeout, limits=limits) as client:
-            try:
-                async with client.stream("GET", go2rtc_url) as response:
-                    async for chunk in response.aiter_bytes():
-                        yield chunk
-            except Exception as e:
-                logger.error(f"❌ Ошибка трансляции потока внутри FastAPI: {e}")
-
-    return StreamingResponse(
-        stream_generator(),
-        media_type='multipart/x-mixed-replace; boundary=frame'
-    )
+    return RedirectResponse(url=go2rtc_mjpeg_api)
 
 
 @router.get("/pass-app", response_class=HTMLResponse)
