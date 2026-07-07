@@ -90,6 +90,7 @@ volumes:
   pg_data:
 
 networks:
-  default:
+  web_network:
     name: web_network
     external: true
+
