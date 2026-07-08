@@ -42,7 +42,9 @@ class TBankClient:
         async with httpx.AsyncClient() as client:
             try:
                 response = await client.post(url, json=payload, timeout=10.0)
-                return response.json()
+                res_json = response.json()
+                logger.info(f"👉 ОТВЕТ Т-БАНКА: {res_json}")
+                return res_json
             except Exception as e:
                 logger.error(f"🚨 Ошибка Init запроса: {e}")
                 return {"Success": False, "Message": str(e)}
