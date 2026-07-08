@@ -1,3 +1,5 @@
+import httpx
+
 from handlers.skud import trigger_dingtian_turnstile
 from fastapi import Query
 from services.analytics import calculate_club_metrics, generate_students_excel, calculate_admin_dashboard
@@ -297,23 +299,60 @@ async def get_oferta_page(request: Request):
     return templates.TemplateResponse("oferta.html", {"request": request})
 
 
-# 2. Роут открытия самой страницы WebApp
 @router.get("/webapp/live_cam", response_class=HTMLResponse)
 async def get_cameras_page(request: Request, club_id: int = Query(...)):
     return templates.TemplateResponse("cameras.html", {"request": request, "club_id": club_id})
 
 
-# 2. Путь стрима оставляем /webapp/live_cam/stream
-# 3. Роут генерации стрима
+# 2. Роут генерации стрима (ПОЛНОСТЬЮ ОБНОВЛЁННЫЙ ПРОКСИ-ВАРИАНТ)
 @router.get("/webapp/live_cam/stream")
-async def video_stream(club_id: int = Query(...)):
+async def video_stream(
+        club_id: int = Query(...),
+        session: AsyncSession = Depends(get_session)
+):
     """
-    Роут транслирует видеопоток в формате MJPEG прямо в WebApp
+    Проксирует MJPEG видеопоток из внутреннего контейнера Docker (go2rtc)
+    напрямую в WebApp смартфона, динамически подставляя камеру из настроек клуба.
     """
-    # Ссылка на твой локальный контейнер go2rtc внутри сети Docker
-    go2rtc_mjpeg_api = "http://gym_go2rtc:1984/api/stream.mjpeg?src=camera1"
+    # Вытаскиваем настройки именно этого клуба из БД для изоляции SaaS
+    result = await session.execute(select(Club).where(Club.id == club_id))
+    club = result.scalar_one_or_none()
 
-    return RedirectResponse(url=go2rtc_mjpeg_api)
+    if not club:
+        raise HTTPException(status_code=404, detail="Клуб не найден")
+
+    # Берем имя камеры из club_settings. Если там пусто, ставим дефолтное "camera1"
+    settings = club.club_settings or {}
+    camera_src = settings.get("turnstile", {}).get("camera_src", "camera1")
+
+    # Внутренний URL в сети Docker (смартфон его не видит, но FastAPI до него достучится)
+    go2rtc_mjpeg_api = f"http://gym_go2rtc:1984/api/stream.mjpeg?src={camera_src}"
+
+    # Асинхронный генератор-мост
+    async def stream_generator():
+        async with httpx.AsyncClient(timeout=None) as client:
+            try:
+                async with client.stream("GET", go2rtc_mjpeg_api) as response:
+                    if response.status_code != 200:
+                        return
+
+                    # Читаем байты по кусочкам из go2rtc и транслируем в телефон админа
+                    async for chunk in response.aiter_bytes():
+                        yield chunk
+            except httpx.RequestError:
+                return
+
+    # Отдаем поток с правильным MJPEG заголовком
+    return StreamingResponse(
+        stream_generator(),
+        media_type="multipart/x-mixed-replace; boundary=--frame"
+    )
+
+
+
+
+
+
 
 
 @router.get("/pass-app", response_class=HTMLResponse)

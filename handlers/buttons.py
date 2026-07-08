@@ -178,13 +178,13 @@ def admin_keyboard(club_settings: dict, club_id: int, subscription_date: datetim
     ))
     
     builder.row(types.InlineKeyboardButton(
-        text="📈 Отчет Pandas",
+        text="📈 Вся статистика клуба ",
         web_app=WebAppInfo(url=f"{base_url}/revenue?club_id={club_id}"))
     )
     builder.row(types.InlineKeyboardButton(
         text="📄 Выгрузка в Excel",
-        web_app=WebAppInfo(url=f"{base_url}/stats/export/excel?club_id={club_id}"))
-    )
+        url=f"{base_url}/stats/export/excel?club_id={club_id}"
+    ))
 
     builder.row(types.InlineKeyboardButton(text='🔙 Назад', callback_data='begin'))
 
