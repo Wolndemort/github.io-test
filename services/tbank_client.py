@@ -1,6 +1,7 @@
 import hashlib
 import httpx
 import logging
+from config import T_BANK_SECRET_KEY,T_BANK_TERMINAL_KEY,T_BANK_NOTIFICATION_URL
 
 logger = logging.getLogger("uvicorn.error")
 
@@ -64,3 +65,10 @@ class TBankClient:
             except Exception as e:
                 logger.error(f"🚨 Ошибка Charge запроса: {e}")
                 return {"Success": False, "Message": str(e)}
+
+
+tbank = TBankClient(
+    terminal_key=T_BANK_TERMINAL_KEY,
+    secret_key=T_BANK_SECRET_KEY,
+    notification_url=T_BANK_NOTIFICATION_URL
+)

@@ -4,7 +4,7 @@ import uuid
 from datetime import timedelta
 import logging as logging
 from database.db import Subscription,PaymentOrder
-from services.tbank_client import TBankClient
+from services.tbank_client import tbank
 import sys
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 from contextlib import asynccontextmanager
@@ -17,7 +17,7 @@ from fastapi import FastAPI
 from loguru import logger
 from sqlalchemy import select
 from admin_module.sqladmin import setup_admin
-from config import ADMIN_IDS,T_BANK_SECRET_KEY,T_BANK_TERMINAL_KEY,T_BANK_NOTIFICATION_URL
+from config import ADMIN_IDS
 from database.db import init_db, get_daily_stats, get_expire_students_grouped, create_db_backup, engine, \
     AsyncSessionLocal, Club, Student
 from handlers import start, user_option, buttons, payments, admin_option, super_admin_handlers,official_payment
@@ -336,12 +336,6 @@ async def saas_daily_morning_check():
 # добавил овнер айди для админ панели прокинул в мидлвер, я супер админ, добавил индексы,
 # добавил колонку ситинг и клуб, перебрал майн, старт,
 
-
-tbank = TBankClient(
-    terminal_key=T_BANK_TERMINAL_KEY,
-    secret_key=T_BANK_SECRET_KEY,
-    notification_url=T_BANK_NOTIFICATION_URL
-)
 
 async def saas_recurrent_payments_job():
     """Ночная задача (APScheduler) для автоматического списания денег по подпискам"""

@@ -3,13 +3,11 @@ from sqlalchemy import update
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from redis import Redis
 import uuid
-from main import tbank  # Наш готовый клиент из main.py
 from database.db import PaymentOrder
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from loguru import logger
-from aiogram.exceptions import TelegramForbiddenError, TelegramRetryAfter, TelegramAPIError
-
+from services.tbank_client import tbank
 from database.db import Student, Club
 from handlers.buttons import discipline, get_pay_options_kb, get_cash_options_kb
 from database.db import add_abon
