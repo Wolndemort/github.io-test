@@ -99,7 +99,7 @@ async def lifespan(app: FastAPI):
     scheduler.add_job(send_backup_to_admin, 'cron', hour=23, minute=0)
 
     scheduler.start()
-    logger.success(f"🔥 Все фоновые SaaS-задачи (ДР, Масс-майлинг, Отчеты, Бэкапы) успешно запущены!")
+    logger.info(f"🔥 Все фоновые SaaS-задачи (ДР, Масс-майлинг, Отчеты, Бэкапы) успешно запущены!")
     app.state.bots_dict = bots_dict
     yield # <--- МАГИЧЕСКАЯ СТРОКА: Здесь FastAPI запускается и ждет запросы
 
