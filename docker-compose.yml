@@ -43,9 +43,8 @@ services:
     volumes:
       - .:/app
       - ./logs:/app/logs
-    dns:
-      - 77.88.8.8
-      - 8.8.8.8
+    extra_hosts:
+      - "restapi.tinkoff.ru:91.194.226.15"
 
   redis:
     image: redis:7-alpine
