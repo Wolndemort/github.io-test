@@ -2,6 +2,9 @@ from datetime import datetime, timedelta
 from sqlalchemy import update
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from redis import Redis
+import uuid
+from main import tbank  # Наш готовый клиент из main.py
+from database.db import PaymentOrder
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from loguru import logger
@@ -102,14 +105,14 @@ async def athlete_chosen_handler(callback: types.CallbackQuery, state: FSMContex
 
 
 # Полностью заменяем хендлер set_limit_ на этот:
+# Заменяем старый хендлер set_tariff_ на этот:
 @router.callback_query(F.data.startswith('set_tariff_'))
 async def process_kids_limit(
         callback: types.CallbackQuery,
         state: FSMContext,
+        session: AsyncSession,  # Добавили сессию для проверки карты
         club_settings: dict
 ):
-    # 1. Извлекаем sport_type и индекс тарифа из нового callback_data
-    # Формат: set_tariff_[sport_type]_[tariff_idx] -> set_tariff_kickboxing_0
     parts = callback.data.split('_')
     try:
         sport_type = parts[2]
@@ -117,51 +120,171 @@ async def process_kids_limit(
     except (IndexError, ValueError):
         return await callback.answer("Ошибка обработки кнопки тарифа ❌", show_alert=True)
 
-    # 2. Подстраховка для FSM (если вдруг сбросился sport_type)
     await state.update_data(sport_type=sport_type)
 
-    # 3. Достаем конфиг конкретной секции
     discipline_cfg = club_settings.get("disciplines", {}).get(sport_type, {})
     if not discipline_cfg:
         return await callback.answer("Ошибка: секция не найдена 🛠", show_alert=True)
 
-    # 4. Достаем список тарифов и берем нужный строго по ИНДЕКСУ
     tariffs = discipline_cfg.get("tariffs", [])
     if tariff_idx >= len(tariffs):
         return await callback.answer("Ошибка: выбранный тариф больше не существует ❌", show_alert=True)
 
     selected_tariff = tariffs[tariff_idx]
-
-    # Извлекаем параметры из унифицированного тарифа
     price = selected_tariff.get('price')
     days = selected_tariff.get('days', 30)
-    count = selected_tariff.get('count', 0)  # Будет 999 для безлимита или число (8, 12) для уроков
-
-    d_type = discipline_cfg.get("type", "lessons")
+    count = selected_tariff.get('count', 0)
     display_name = discipline_cfg.get('name', 'Секция')
 
-    # Формируем красивый текст тарифа для вывода юзеру на экран
-    if d_type == "unlimited" or count == 999:
-        label = f"Безлимит на {days} дней"
-    else:
-        label = f"{count} зан. / {days} дн."
-
-    # 5. Сохраняем ВСЕ данные в FSM, включая точные дни действия тарифа
+    label = f"Безлимит на {days} дней" if count == 999 else f"{count} зан. / {days} дн."
     data = await state.get_data()
-    current_student_id = data.get('student_id') or callback.from_user.id
-
     await state.update_data(
-        student_id=current_student_id,
-        lesson_count=count,  # Сюда запишется либо 8/12, либо 999
-        days_to_add=days,  # <--- ВАЖНО: сохраняем дни, чтобы админ-хендлер их видел!
+        student_id=data.get('student_id') or callback.from_user.id,
+        lesson_count=count,
+        days_to_add=days,
         price=price,
-        discipline_name=display_name
+        discipline_name=display_name,
+        tariff_label=label
     )
 
-    # Переводим пользователя в состояние ожидания скриншота чека
+    # 🔍 ПРОВЕРКА: Есть ли у родителя сохраненная карта в нашей базе?
+    from database.db import Subscription
+    sub_res = await session.execute(
+        select(Subscription)
+        .where(Subscription.user_id == callback.from_user.id)
+        .where(Subscription.rebill_id.is_not(None))
+        .limit(1)
+    )
+    saved_card = sub_res.scalar_one_or_none()
+
+    # Формируем динамические кнопки
+    inline_keyboard = []
+
+    if saved_card:
+        # Если карта есть — предлагаем оплату в 1 клик
+        inline_keyboard.append([
+            types.InlineKeyboardButton(text="⚡️ Оплатить сохраненной картой", callback_data="pay_one_click")
+        ])
+        inline_keyboard.append([
+            types.InlineKeyboardButton(text="💳 Оплатить новой картой", callback_data="pay_method_official")
+        ])
+    else:
+        # Если карты нет — стандартная первая оплата
+        inline_keyboard.append([
+            types.InlineKeyboardButton(text="💳 Онлайн оплата картой", callback_data="pay_method_official")
+        ])
+
+    # Всегда оставляем твою серую схему по СБП внизу
+    inline_keyboard.append([
+        types.InlineKeyboardButton(text="↩️ Перевод по СБП (Вручную по чеку)", callback_data="pay_method_sbp")
+    ])
+
+    kb = types.InlineKeyboardMarkup(inline_keyboard=inline_keyboard)
+
+    text = (
+        f"🎯 <b>Выбран тариф: {display_name}</b>\n"
+        f"Условия: <b>{label} — {price}₽</b>\n\n"
+        f"Пожалуйста, выберите способ оплаты:"
+    )
+    await callback.message.edit_text(text=text, reply_markup=kb, parse_mode="HTML")
+    await callback.answer()
+
+
+@router.callback_query(F.data == 'pay_one_click')
+async def process_one_click_payment(callback: types.CallbackQuery, state: FSMContext, session: AsyncSession):
+    await callback.answer("Провожу платеж в 1 клик...", show_alert=False)
+
+    data = await state.get_data()
+    user_id = callback.from_user.id
+
+    # Достаем токен сохраненной карты
+    from database.db import Subscription, PaymentOrder, User
+    sub_res = await session.execute(select(Subscription).where(Subscription.user_id == user_id).limit(1))
+    saved_card = sub_res.scalar_one_or_none()
+
+    if not saved_card or not saved_card.rebill_id:
+        return await callback.message.answer("❌ Ошибка: Сохраненная карта не найдена. Оплатите заново для привязки.")
+
+    order_id = f"ONE_{uuid.uuid4().hex[:12].upper()}"
+    amount_kopecks = int(data['price']) * 100
+
+    user_res = await session.execute(select(User).where(User.user_id == user_id))
+    user = user_res.scalar_one_or_none()
+
+    # Фиксируем заказ со статусом NEW и типом RECURRENT (так как платим по токену карты)
+    new_order = PaymentOrder(
+        id=order_id,
+        user_id=user_id,
+        student_id=data['student_id'],
+        club_id=user.club_id,
+        amount_kopecks=amount_kopecks,
+        lesson_count=data['lesson_count'],
+        days_to_add=data['days_to_add'],
+        status="NEW",
+        type="RECURRENT"
+    )
+    session.add(new_order)
+    await session.commit()
+
+    # Вызываем фоновое списание по токену карты через наш клиент Т-Банка
+    from main import tbank
+    charge_res = await tbank.charge_payment(
+        order_id=order_id,
+        amount_kopecks=amount_kopecks,
+        rebill_id=saved_card.rebill_id
+    )
+
+    if charge_res.get("Success") and charge_res.get("Status") == "CONFIRMED":
+        # Платеж успешен! Нам даже не нужно ждать вебхук, мы можем обработать его прямо тут
+        new_order.status = "CONFIRMED"
+
+        # Вызываем твою родную функцию начисления абонемента
+        from handlers.payments import add_abon
+        from database.db import Club
+        club_res = await session.execute(select(Club).where(Club.id == user.club_id))
+        club = club_res.scalar_one_or_none()
+
+        abon_result = await add_abon(
+            student_id=data['student_id'],
+            lessons_count=data['lesson_count'],
+            session=session,
+            club_id=user.club_id,
+            club_settings=club.club_settings if club else {},
+            days_to_add=data['days_to_add']
+        )
+        await session.commit()
+
+        if abon_result:
+            new_expire, _ = abon_result
+            desc = "БЕЗЛИМИТ" if data['lesson_count'] == 999 else f"{data['lesson_count']} зан."
+            await callback.message.edit_text(
+                f"⚡️ <b>Оплата успешно проведена в 1 клик!</b>\n\n"
+                f"Списано: <b>{data['price']}₽</b> с вашей сохраненной карты.\n"
+                f"Абонемент (<b>{desc}</b>) успешно активирован и действует до: <b>{new_expire}</b>. 🔥"
+            )
+        await state.clear()
+    else:
+        new_order.status = "REJECTED"
+        await session.commit()
+        error_msg = charge_res.get("Message", "Недостаточно средств или карта заблокирована")
+        await callback.message.answer(
+            f"❌ Ошибка списания с сохраненной карты: {error_msg}. Попробуйте оплатить СБП или новой картой.")
+
+
+@router.callback_query(F.data == 'pay_method_sbp')
+async def process_sbp_payment_choice(
+        callback: types.CallbackQuery,
+        state: FSMContext,
+        club_settings: dict
+):
+    """Сценарий ручной оплаты по реквизитам СБП (твоя старая схема)"""
+    # Включаем твой родной стейт ожидания чека
     await state.set_state(PaymentStates.waiting_for_receipt)
 
-    # 6. UI часть (Вывод реквизитов СБП из конфига клуба)
+    # Достаем сохраненные на прошлом шаге данные из FSM
+    data = await state.get_data()
+
+    # UI часть (Вывод реквизитов СБП из конфига клуба)
     ui_cfg = club_settings.get("ui", {})
     payment_info = ui_cfg.get("payment_info")
 
@@ -169,11 +292,11 @@ async def process_kids_limit(
         payment_info = "⚠️ Реквизиты временно не указаны. Пожалуйста, свяжитесь с администратором."
 
     text = (
-        f"💰 <b>Оплата: {display_name}</b>\n"
-        f"Тариф: <b>{label} — {price}₽</b>\n\n"
+        f"💰 <b>Оплата по СБП: {data['discipline_name']}</b>\n"
+        f"Тариф: <b>{data['tariff_label']} — {data['price']}₽</b>\n\n"
         f"💳 <b>Реквизиты для перевода (СБП):</b>\n"
         f"<code>{payment_info}</code>\n\n"
-        f"<b>Шаг 1:</b> Переведите {price}₽ по указанным реквизитам.\n"
+        f"<b>Шаг 1:</b> Переведите {data['price']}₽ по указанным реквизитам.\n"
         f"<b>Шаг 2:</b> Пришлите <b>скриншот чека</b> сюда в ответ на это сообщение.\n\n"
         f"<i>После проверки админом абонемент активируется автоматически.</i>"
     )
@@ -254,6 +377,81 @@ async def handle_receipt_submission(
 
     # Очищаем стейт, чтобы юзер мог свободно нажимать другие кнопки в боте
     await state.clear()
+
+
+@router.callback_query(F.data == 'pay_method_official')
+async def process_official_card_payment(
+        callback: types.CallbackQuery,
+        state: FSMContext,
+        session: AsyncSession
+):
+    """Сценарий автоматической онлайн-оплаты через Т-Банк с привязкой карты"""
+    await callback.answer("Генерирую официальную ссылку...", show_alert=False)
+
+    data = await state.get_data()
+    user_id = callback.from_user.id
+
+    # Извлекаем все сохраненные параметры тарифа из FSM
+    student_id = data['student_id']
+    price = data['price']
+    amount_kopecks = int(price) * 100
+    lesson_count = data['lesson_count']
+    days_to_add = data['days_to_add']
+
+    # Достаем текущий club_id через модель User
+    from database.db import User
+    user_res = await session.execute(select(User).where(User.user_id == user_id))
+    user = user_res.scalar_one_or_none()
+
+    if not user or not user.club_id:
+        return await callback.message.answer("❌ Ошибка: Клуб не найден в вашей учетной записи.")
+
+    club_id = user.club_id
+    order_id = f"INIT_{uuid.uuid4().hex[:12].upper()}"
+
+    # Фиксируем новый заказ в таблице payment_orders
+    new_order = PaymentOrder(
+        id=order_id,
+        user_id=user_id,
+        student_id=student_id,
+        club_id=club_id,
+        amount_kopecks=amount_kopecks,
+        # Передаем параметры тарифа, чтобы FastAPI роут знал, сколько начислить
+        lesson_count=lesson_count,
+        days_to_add=days_to_add,
+        status="NEW",
+        type="FIRST"  # Маркер первой оплаты для создания рекуррента
+    )
+    session.add(new_order)
+    await session.commit()
+
+    # Делаем асинхронный запрос к API Т-Кассы
+    payment_data = await tbank.init_payment(
+        order_id=order_id,
+        amount_kopecks=amount_kopecks,
+        user_id=user_id
+    )
+
+    if payment_data.get("Success"):
+        payment_url = payment_data.get("PaymentURL")
+
+        kb = types.InlineKeyboardMarkup(inline_keyboard=[
+            [types.InlineKeyboardButton(text="💳 Перейти к оплате картой", url=payment_url)]
+        ])
+
+        await callback.message.edit_text(
+            f"💳 <b>Официальная оплата подписки</b>\n\n"
+            f"Вы выбрали тариф: <b>{data['tariff_label']} за {price}₽</b>\n\n"
+            f"После первой успешной оплаты ваша карта привяжется автоматически. "
+            f"Следующее продление абонемента спишется автоматически через 30 дней. "
+            f"Вы сможете отключить автопродление в любой момент прямо в меню бота.",
+            reply_markup=kb,
+            parse_mode="HTML"
+        )
+        await state.clear()  # Сбрасываем стейт диалога, так как ушли на оплату на внешний шлюз
+    else:
+        error_msg = payment_data.get("Message", "Ошибка банка")
+        await callback.message.answer(f"❌ Не удалось запустить эквайринг: {error_msg}")
 
 
 @router.callback_query(F.data.startswith('adm_confirm_'))

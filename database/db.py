@@ -66,6 +66,50 @@ class Club(Base):
     subscription_expire_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
 
 
+class Subscription(Base):
+    __tablename__ = 'subscriptions'
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    # Кто платит (Родитель)
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey('users.user_id'), index=True)
+    # За какого ребенка идет оплата
+    student_id: Mapped[int] = mapped_column(ForeignKey('students.id'), index=True)
+    # В какой клуб капают деньги
+    club_id: Mapped[int] = mapped_column(ForeignKey('clubs.id'), index=True)
+
+    # Тот самый токен привязанной карты от Т-Банка для автосписаний
+    rebill_id: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    # Сумма регулярного списания в копейках (например, 350000 для 3500 руб)
+    amount_kopecks: Mapped[int] = mapped_column(Integer)
+
+    # Активна ли подписка прямо сейчас
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="1")
+    # Дата и время следующего автоматического списания
+    next_charge_at: Mapped[datetime] = mapped_column(DateTime, index=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, server_default="now()")
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class PaymentOrder(Base):
+    __tablename__ = 'payment_orders'
+
+    # Уникальный ID платежа (будем генерировать UUID строку)
+    id: Mapped[str] = mapped_column(String(50), primary_key=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey('users.user_id'), index=True)
+    student_id: Mapped[int] = mapped_column(ForeignKey('students.id'), index=True)
+    club_id: Mapped[int] = mapped_column(ForeignKey('clubs.id'), index=True)
+
+    amount_kopecks: Mapped[int] = mapped_column(Integer)
+    # Статусы банка: NEW, CONFIRMED, REJECTED и т.д.
+    status: Mapped[str] = mapped_column(String(20), default="NEW")
+    # Тип платежа: "FIRST" (первый платеж с привязкой) или "RECURRENT" (автосписание по крону)
+    type: Mapped[str] = mapped_column(String(20))
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, server_default="now()")
+
+
+
 async def init_db():
     try:
         async with engine.begin() as conn:

@@ -1,11 +1,12 @@
-from datetime import datetime
 from handlers.skud import trigger_dingtian_turnstile
 import pandas as pd
 from fastapi import Query
 import hmac
+from datetime import datetime, timedelta
+from database.db import PaymentOrder, Subscription
+from database.db import add_abon
 import hashlib
 from fastapi.responses import StreamingResponse
-from loguru import logger
 import json
 from urllib.parse import parse_qsl
 import io
@@ -21,7 +22,7 @@ from sqlalchemy.orm import selectinload
 from starlette import status
 from database.db import User, Student, Club
 from database.db import get_session
-from config import fastapi_key
+from config import fastapi_key, T_BANK_SECRET_KEY
 
 # Убираем глобальный префикс /stats, чтобы роуты /admin и /revenue сидели на своем месте
 router = APIRouter(tags=["Analytics"])
@@ -505,3 +506,136 @@ async def enable_biometry(payload: BiometricEnable, db: AsyncSession = Depends(g
     await db.commit()
 
     return {"success": True, "message": "Биометрия успешно активирована в профиле!"}
+
+#PAYMENT PAYMENT
+
+
+
+
+# Используй существующий router из твоего api.py
+@router.post("/v1/payments/tbank/webhook")
+async def tbank_webhook(request: Request, session: AsyncSession = Depends(get_session)):
+    """Прием уведомлений об оплатах от Т-Банка (Т-Кассы)"""
+    payload = await request.json()
+
+    # 1. ЗАЩИТА: Проверяем SHA-256 подпись токена, чтобы исключить фейковые запросы
+    received_token = payload.get("Token")
+    sign_params = payload.copy()
+
+    # Секретный ключ вытаскиваем из переменных окружения
+    sign_params["Password"] = T_BANK_SECRET_KEY
+
+    # Эти блоки по регламенту банка удаляются из расчета токена вебхука
+    sign_params.pop("Token", None)
+    sign_params.pop("Receipt", None)
+    sign_params.pop("DATA", None)
+
+    # Сортируем параметры по алфавиту ключей и склеиваем их значения
+    sorted_values = [str(sign_params[key]) for key in sorted(sign_params.keys()) if sign_params[key] is not None]
+    local_token = hashlib.sha256("".join(sorted_values).encode("utf-8")).hexdigest()
+
+    if local_token != received_token:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid token signature")
+
+    status_payment = payload.get("Status")
+    order_id = payload.get("OrderId")
+
+    # 2. Если банк подтвердил успешную оплату (CONFIRMED)
+    if status_payment == "CONFIRMED":
+        # Ищем исходный заказ в нашей таблице заказов
+        order_result = await session.execute(select(PaymentOrder).where(PaymentOrder.id == order_id))
+        order = order_result.scalar_one_or_none()
+
+        # Если заказ нашли и он еще не был отмечен как оплаченный
+        if order and order.status != "CONFIRMED":
+            order.status = "CONFIRMED"
+
+            # Извлекаем RebillId (токен карты для будущих автосписаний)
+            rebill_id = payload.get("RebillId")
+
+            # Если это первая оплата (маркер "FIRST") и банк вернул токен карты
+            if rebill_id and order.type == "FIRST":
+                # Проверяем, нет ли уже созданной подписки на этого студента
+                sub_result = await session.execute(
+                    select(Subscription).where(
+                        Subscription.student_id == order.student_id,
+                        Subscription.club_id == order.club_id
+                    )
+                )
+                subscription = sub_result.scalar_one_or_none()
+
+                # Дата следующего списания — ровно через 30 дней
+                next_charge = datetime.utcnow() + timedelta(days=30)
+
+                if subscription:
+                    # Если запись почему-то уже была — обновляем токен карты и сумму
+                    subscription.rebill_id = str(rebill_id)
+                    subscription.next_charge_at = next_charge
+                    subscription.is_active = True
+                    subscription.amount_kopecks = order.amount_kopecks
+                else:
+                    # Если новая подписка — создаем чистую запись в БД
+                    new_sub = Subscription(
+                        user_id=order.user_id,
+                        student_id=order.student_id,
+                        club_id=order.club_id,
+                        rebill_id=str(rebill_id),
+                        amount_kopecks=order.amount_kopecks,
+                        next_charge_at=next_charge,
+                        is_active=True
+                    )
+                    session.add(new_sub)
+
+            # Достаем объект клуба для передачи в add_abon
+            club_result = await session.execute(select(Club).where(Club.id == order.club_id))
+            club = club_result.scalar_one_or_none()
+
+            # Достаем club_settings из объекта клуба
+            club_settings = club.club_settings if club else {}
+
+            # 3. ВЫЗЫВАЕМ ТВОЮ РОДНУЮ ФУНКЦИЮ НАЧИСЛЕНИЯ АБОНЕМЕНТА БЕЗ АДМИНА
+            # Она сама обновит баланс, сдвинет expire_date и вернет (new_expire, parent_id)
+            abon_result = await add_abon(
+                student_id=order.student_id,
+                lessons_count=order.lesson_count,  # Берем сохраненное из PaymentOrder
+                session=session,
+                club_id=order.club_id,
+                club_settings=club_settings,
+                days_to_add=order.days_to_add  # Берем сохраненное из PaymentOrder
+            )
+
+            await session.commit()
+
+            # 4. КРАСИВОЕ SaaS-УВЕДОМЛЕНИЕ ДЛЯ КЛИЕНТА (РОДИТЕЛЯ) ПРЯМО ИЗ ВЕБХУКА
+            if abon_result:
+                new_expire, parent_id = abon_result
+                try:
+                    from main import bots_dict  # Наш глобальный словарь запущенных ботов клубов
+
+                    bot = bots_dict.get(club.bot_token) if club else None
+                    if bot:
+                        desc = "БЕЗЛИМИТ" if order.lesson_count == 999 else f"{order.lesson_count} зан."
+                        club_name = club_settings.get("ui", {}).get("club_name", club.name)
+
+                        await bot.send_message(
+                            chat_id=parent_id,
+                            text=f"🥳 <b>Отличные новости!</b>\n\n"
+                                 f"Ваша официальная оплата в фитнес-клуб <b>{club_name}</b> успешно получена.\n"
+                                 f"Абонемент (<b>{desc}</b>) успешно активирован и действует до: <b>{new_expire}</b>. 🔥\n"
+                                 f"Карта привязана к системе автопродления. Следующее списание пройдет автоматически.\n\n"
+                                 f"<i>Ждем вас на тренировках!</i>",
+                            parse_mode="HTML"
+                        )
+                except Exception as e:
+                    print(f"Ошибка отправки уведомления родителю: {e}")
+
+    elif status_payment in ["REJECTED", "CANCELED"]:
+        # Если транзакция отклонена банком или отменена пользователем
+        order_result = await session.execute(select(PaymentOrder).where(PaymentOrder.id == order_id))
+        order = order_result.scalar_one_or_none()
+        if order and order.status == "NEW":
+            order.status = "REJECTED"
+            await session.commit()
+
+    # ВАЖНО: Т-Банк требует строго ответ строкой "OK" со статусом 200
+    return "OK"

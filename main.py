@@ -1,5 +1,10 @@
 import asyncio
 import os
+import uuid
+from datetime import timedelta
+import logging as logging
+from database.db import Subscription,PaymentOrder
+from services.tbank_client import TBankClient
 import sys
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 from contextlib import asynccontextmanager
@@ -12,10 +17,10 @@ from fastapi import FastAPI
 from loguru import logger
 from sqlalchemy import select
 from admin_module.sqladmin import setup_admin
-from config import ADMIN_IDS
+from config import ADMIN_IDS,T_BANK_SECRET_KEY,T_BANK_TERMINAL_KEY,T_BANK_NOTIFICATION_URL
 from database.db import init_db, get_daily_stats, get_expire_students_grouped, create_db_backup, engine, \
     AsyncSessionLocal, Club, Student
-from handlers import start, user_option, buttons, payments, admin_option, super_admin_handlers
+from handlers import start, user_option, buttons, payments, admin_option, super_admin_handlers,official_payment
 from handlers.buttons import get_profile_keyboard
 from middlewares.db_saas_midleware import ClubMiddleware
 from middlewares.main_middleware import DbSessionMiddleware
@@ -26,6 +31,8 @@ from aiogram.fsm.storage.redis import RedisStorage
 logger.remove()
 logger.add(sys.stderr, level='INFO')
 logger.add('logs/bot_log.log', rotation='1 MB', retention='10 days', compression="zip", enqueue=True)
+logger = logging.getLogger("uvicorn.error")
+
 
 # Инициализация Redis и FSM
 redis_client = Redis(host='redis', port=6379, db=0)
@@ -73,6 +80,7 @@ async def lifespan(app: FastAPI):
     dp.include_router(start.router)
     dp.include_router(admin_option.router)
     dp.include_router(payments.router)
+    dp.include_router(official_payment.router)
     dp.include_router(user_option.router)
     dp.include_router(buttons.router)
 
@@ -85,6 +93,7 @@ async def lifespan(app: FastAPI):
 
     # Вечерний блок (22:00) — Отчет по посещениям и абонементам для владельцев клубов
     scheduler.add_job(send_daily_report_to_admins, 'cron', hour=22, minute=0)
+    # scheduler.add_job(saas_recurrent_payments_job, 'cron', hour=1, minute=0) # Больше принудительно не списываем!
 
     # Ночной блок (23:00) — Полный бэкап всей базы данных тебе в личку
     scheduler.add_job(send_backup_to_admin, 'cron', hour=23, minute=0)
@@ -326,3 +335,106 @@ async def saas_daily_morning_check():
 # Уведомление тем кого не было 10 дней
 # добавил овнер айди для админ панели прокинул в мидлвер, я супер админ, добавил индексы,
 # добавил колонку ситинг и клуб, перебрал майн, старт,
+
+
+tbank = TBankClient(
+    terminal_key=T_BANK_TERMINAL_KEY,
+    secret_key=T_BANK_SECRET_KEY,
+    notification_url=T_BANK_NOTIFICATION_URL
+)
+
+async def saas_recurrent_payments_job():
+    """Ночная задача (APScheduler) для автоматического списания денег по подпискам"""
+    logger.info("⏳ Запуск проверки рекуррентных платежей...")
+
+    async with AsyncSessionLocal() as session:
+        # 1. Выбираем все активные подписки, у которых наступила или прошла дата списания
+        now = datetime.utcnow()
+        result = await session.execute(
+            select(Subscription)
+            .where(Subscription.is_active == True)
+            .where(Subscription.next_charge_at <= now)
+            .where(Subscription.rebill_id.is_not(None))
+        )
+        subscriptions = result.scalars().all()
+
+        if not subscriptions:
+            logger.info("✅ Нет подписок для списания на сегодня.")
+            return
+
+        for sub in subscriptions:
+            # Генерация уникального OrderId для этого месяца
+            order_id = f"REC_{uuid.uuid4().hex[:12].upper()}"
+
+            # Логируем попытку списания в базу
+            new_order = PaymentOrder(
+                id=order_id,
+                user_id=sub.user_id,
+                student_id=sub.student_id,
+                club_id=sub.club_id,
+                amount_kopecks=sub.amount_kopecks,
+                status="NEW",
+                type="RECURRENT"
+            )
+            session.add(new_order)
+            await session.commit()
+
+            try:
+                # 2. Стучимся в Т-Банк за автосписанием
+                charge_res = await tbank.charge_payment(
+                    order_id=order_id,
+                    amount_kopecks=sub.amount_kopecks,
+                    rebill_id=sub.rebill_id
+                )
+
+                # Ищем токен бота, чтобы отправить сообщение в правильный клуб
+                club_result = await session.execute(
+                    select(Club).where(Club.id == sub.club_id)
+                )
+                club = club_result.scalar_one_or_none()
+                bot = bots_dict.get(club.bot_token) if club else None
+
+                if charge_res.get("Success") and charge_res.get("Status") == "CONFIRMED":
+                    # Успешная оплата
+                    new_order.status = "CONFIRMED"
+
+                    # Сдвигаем дату следующего списания на месяц вперед
+                    sub.next_charge_at = now + timedelta(days=30)
+
+                    # Продлеваем абонемент студенту
+                    student_res = await session.execute(select(Student).where(Student.id == sub.student_id))
+                    student = student_res.scalar_one_or_none()
+                    if student:
+                        current_expire = student.expire_date or now
+                        base_date = current_expire if current_expire > now else now
+                        student.expire_date = base_date + timedelta(days=30)
+                        student.balance_lessons += 8  # добавляем дефолтные занятия
+
+                    await session.commit()
+                    logger.success(
+                        f"💰 Успешное автосписание {sub.amount_kopecks / 100} руб для пользователя {sub.user_id}")
+
+                    if bot:
+                        await bot.send_message(
+                            chat_id=sub.user_id,
+                            text=f"✨ <b>Подписка продлена!</b>\n\nСумма {sub.amount_kopecks / 100} руб. успешно списана. Абонемент обновлен на 30 дней."
+                        )
+                else:
+                    # Ошибка списания (нет денег, заблокирована карта)
+                    new_order.status = "REJECTED"
+                    sub.is_active = False  # Отключаем подписку, пока не перепривяжет карту
+                    await session.commit()
+
+                    logger.warning(f"❌ Отклонено автосписание для {sub.user_id}: {charge_res.get('Message')}")
+
+                    if bot:
+                        await bot.send_message(
+                            chat_id=sub.user_id,
+                            text="⚠️ <b>Ошибка автопродления подписки</b>\n\nНе удалось списать средства за абонемент. "
+                                 "Пожалуйста, проверьте баланс карты или выберите официальную оплату заново для привязки актуальной карты."
+                        )
+            except Exception as e:
+                logger.error(f"🚨 Ошибка при обработке рекуррента для sub_id {sub.id}: {e}")
+
+
+
