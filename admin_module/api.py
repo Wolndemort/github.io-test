@@ -98,18 +98,22 @@ async def get_revenue_stats(
 ):
     club_id = get_club_id_from_host(request)
 
-    # 1. Достаем студентов
-    result = await session.execute(select(Student).where(Student.club_id == club_id))
-    students = list(result.scalars().all())  # <-- Обернули в list(), теперь PyCharm будет счастлив
+    # Загружаем студентов
+    res_students = await session.execute(select(Student).where(Student.club_id == club_id))
+    students = list(res_students.scalars().all())
 
+    # Загружаем успешные платежи текущего месяца для точного расчета выручки
+    start_of_month = datetime.utcnow().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    res_payments = await session.execute(
+        select(PaymentOrder).where(
+            PaymentOrder.club_id == club_id,
+            PaymentOrder.status == "CONFIRMED",
+            PaymentOrder.created_at >= start_of_month
+        )
+    )
+    payments = list(res_payments.scalars().all())
 
-    # 2. Достаем конфиг этого конкретного клуба из базы
-    # (У тебя наверняка есть функция вроде get_club_config(club_id) или таблица Club)
-    # Для примера представим, что ты его откуда-то получаешь:
-    club_config = DEFAULT_CLUB_SETTINGS
-
-    # 3. Передаем и студентов, и конфиг в аналитику
-    metrics = calculate_club_metrics(students, club_config)
+    metrics = calculate_club_metrics(students, payments)
 
     return templates.TemplateResponse(
         "stats.html",

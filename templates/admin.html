@@ -121,6 +121,46 @@
             {% endfor %}
         </div>
     </div>
+    <!-- Вставь этот блок в admin.html прямо перед "Оперативным статусом" -->
+
+    <!-- 🎉 ИМЕНИННИКИ СЕГОДНЯ -->
+    {% if birthdays_today %}
+    <div class="card" style="background: linear-gradient(135deg, #ff9a9e 0%, #fecfef 100%); color: #fff;">
+        <div class="label" style="color: #fff; font-weight: bold;">🎉 Сегодня день рождения!</div>
+        <div style="font-weight: bold; font-size: 16px; margin-top: 5px;">
+            {% for student in birthdays_today %}
+                🎂 {{ student.name }} (Родитель: {{ student.username or 'Не указан' }})<br>
+            {% endfor %}
+        </div>
+        <div style="font-size: 12px; margin-top: 5px; opacity: 0.9;">Не забудьте поздравить атлета на ресепшене!</div>
+    </div>
+    {% endif %}
+<!-- Вставь этот блок прямо после карточки "Скоро закончатся (Осталось <= 3 зан.)" -->
+
+    <!-- Раздел: Спящие клиенты (Анализ оттока) -->
+    <div class="card">
+        <div class="label" style="color: #673ab7; font-weight: bold;">💤 Спящие клиенты (Не были > 14 дней)</div>
+        {% if sleeping_students %}
+        <details>
+            <summary>Показать список потеряшек ({{ sleeping_students|length }} чел.)</summary>
+            <div class="scroll-box">
+                {% for student in sleeping_students %}
+                <div class="list-item">
+                    <span>{{ student.name }}</span>
+                    <div>
+                        <span style="color: #673ab7; font-size: 13px; margin-right: 5px;">Проверить чат</span>
+                        {% if student.phone %}
+                        <a href="tel:{{ student.phone }}" class="tg-link" style="background: #4caf50;">📞 Звонок</a>
+                        {% endif %}
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </details>
+        {% else %}
+        <div style="font-size: 14px; color: #4caf50; padding-top: 5px;">Все клиенты регулярно посещают тренировки!</div>
+        {% endif %}
+    </div>
 
     <!-- Оперативный статус -->
     <div class="card">
