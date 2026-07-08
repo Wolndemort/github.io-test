@@ -106,6 +106,9 @@ class PaymentOrder(Base):
     # Тип платежа: "FIRST" (первый платеж с привязкой) или "RECURRENT" (автосписание по крону)
     type: Mapped[str] = mapped_column(String(20))
 
+    lesson_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    days_to_add: Mapped[int] = mapped_column(Integer, default=30, server_default="30")
+
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, server_default="now()")
 
 
