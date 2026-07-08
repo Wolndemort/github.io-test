@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <style>
+        body {
+            background-color: var(--tg-theme-bg-color, #f5f5f5);
+            color: var(--tg-theme-text-color, #222);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            margin: 0; padding: 15px;
+        }
+        h2 { color: var(--tg-theme-button-color, #3390ec); text-align: center; margin-top: 5px; margin-bottom: 2px; }
+        .welcome { text-align: center; font-size: 13px; color: #888; margin-bottom: 12px; }
+
+        .card {
+            background: var(--tg-theme-secondary-bg-color, #ffffff);
+            border-radius: 12px;
+            padding: 15px;
+            margin-bottom: 12px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+        }
+        .label { font-size: 13px; color: #888; margin-bottom: 5px; }
+        .value { font-size: 17px; font-weight: bold; }
+
+        /* Поисковая строка */
+        .search-input {
+            width: 100%;
+            padding: 12px;
+            border-radius: 10px;
+            border: 1px solid #ccc;
+            background: var(--tg-theme-bg-color, #f5f5f5);
+            color: var(--tg-theme-text-color, #222);
+            font-size: 15px;
+            box-sizing: border-box;
+            outline: none;
+        }
+        .search-input:focus {
+            border-color: var(--tg-theme-button-color, #3390ec);
+        }
+
+        /* Кнопки */
+        .btn {
+            display: block;
+            text-align: center;
+            background: var(--tg-theme-button-color, #3390ec);
+            color: var(--tg-theme-button-text-color, #ffffff);
+            text-decoration: none;
+            padding: 12px 0;
+            border-radius: 12px;
+            font-weight: bold;
+            font-size: 15px;
+            margin-top: 8px;
+            border: none;
+            cursor: pointer;
+        }
+        .btn-secondary {
+            background: transparent;
+            color: var(--tg-theme-button-color, #3390ec);
+            border: 1px solid var(--tg-theme-button-color, #3390ec);
+        }
+
+        .list-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 0;
+            border-bottom: 1px solid var(--tg-theme-bg-color, #f5f5f5);
+            font-size: 14px;
+        }
+        .list-item:last-child { border-bottom: none; }
+
+        /* Ссылка на чат */
+        .tg-link {
+            text-decoration: none;
+            background: #3390ec;
+            color: white;
+            padding: 4px 8px;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: bold;
+            margin-left: 10px;
+        }
+
+        details { margin-top: 5px; }
+        summary { font-size: 14px; color: var(--tg-theme-button-color, #3390ec); cursor: pointer; padding: 4px 0; }
+        .scroll-box { max-height: 160px; overflow-y: auto; margin-top: 8px; }
+
+        .frozen-badge { color: #f2a93b; font-size: 12px; font-weight: normal; margin-left: 5px; }
+    </style>
+</head>
+<body>
+    <h2>Панель Администратора</h2>
+    <div class="welcome">Клуб ID: {{ club_id }}</div>
+
+    {% if empty %}
+    <div class="card" style="text-align: center; color: #888; padding: 20px;">
+        В клубе пока нет атлетов.
+    </div>
+    {% else %}
+
+    <!-- 🔍 ИНТЕРАКТИВНЫЙ ПОИСК АТЛЕТОВ -->
+    <div class="card">
+        <div class="label">Быстрый поиск атлета по базе</div>
+        <input type="text" id="searchInput" class="search-input" placeholder="Введите имя атлета...">
+        <div class="scroll-box" id="searchResultBox" style="display: none; max-height: 200px; border-top: 1px solid #eee; margin-top: 10px;">
+            {% for student in all_athletes %}
+            <div class="list-item search-target-item" data-name="{{ student.name|lower }}">
+                <div>
+                    <strong>{{ student.name }}</strong>
+                    {% if student.is_frozen %}<span class="frozen-badge">(заморожен)</span>{% endif %}
+                </div>
+                <div>
+                    <span style="font-weight: bold;">{{ student.balance }} зан.</span>
+                    {% if student.username %}
+                    <a href="https://t.me{{ student.username }}" class="tg-link" target="_blank">💬 ЛС</a>
+                    {% endif %}
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+
+    <!-- Оперативный статус -->
+    <div class="card">
+        <div class="label">Текущий статус базы</div>
+        <div class="value">👥 Всего атлетов: {{ total_athletes }}</div>
+        <div class="value" style="margin-top: 5px;">🟢 Активных сейчас: {{ active_now_count }}</div>
+    </div>
+
+    <!-- Раздел: Срочно продлить (Баланс 0) -->
+    <div class="card">
+        <div class="label" style="color: #e53935; font-weight: bold;">❌ Закончились занятия (Баланс 0)</div>
+        {% if expired_students %}
+        <details>
+            <summary>Открыть список для обзвона ({{ expired_students|length }} чел.)</summary>
+            <div class="scroll-box">
+                {% for student in expired_students %}
+                <div class="list-item">
+                    <span>{{ student.name }}</span>
+                    <div>
+                        <span style="color: #e53935; font-weight: bold; margin-right: 5px;">0 зан.</span>
+                        {% if student.username %}
+                        <a href="https://t.me{{ student.username }}" class="tg-link" target="_blank">💬 Написать</a>
+                        {% endif %}
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </details>
+        {% else %}
+        <div style="font-size: 14px; color: #4caf50; padding-top: 5px;">Отличная работа! Клиентов с 0 балансом нет.</div>
+        {% endif %}
+    </div>
+
+    <!-- Раздел: Скоро закончатся (Баланс 1-3) -->
+    <div class="card">
+        <div class="label" style="color: #f2a93b; font-weight: bold;">⚠️ Скоро закончатся (Осталось ≤ 3 зан.)</div>
+        {% if burning_students %}
+        <details>
+            <summary>Показать список ({{ burning_students|length }} чел.)</summary>
+            <div class="scroll-box">
+                {% for student in burning_students %}
+                <div class="list-item">
+                    <span>{{ student.name }}</span>
+                    <div>
+                        <span style="color: #f2a93b; font-weight: bold; margin-right: 5px;">{{ student.balance }} зан.</span>
+                        {% if student.username %}
+                        <a href="https://t.me{{ student.username }}" class="tg-link" target="_blank">💬 Написать</a>
+                        {% endif %}
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </details>
+        {% else %}
+        <div style="font-size: 14px; color: #4caf50; padding-top: 5px;">У всех клиентов достаточный запас занятий.</div>
+        {% endif %}
+    </div>
+
+    {% endif %}
+
+    <!-- Секция навигации -->
+    <div class="card" style="margin-top: 15px;">
+        <div class="label">Другие разделы</div>
+        <a href="/stats/export/excel" class="btn">📊 Скачать Excel-отчет</a>
+        <a href="/revenue" class="btn btn-secondary">📈 Бизнес-аналитика и выручка</a>
+    </div>
+
+    <!-- ⚡️ СКРИПТ ЖИВОГО ПОИСКА -->
+    <script>
+        const tg = window.Telegram.WebApp;
+        tg.expand();
+
+        const searchInput = document.getElementById('searchInput');
+        const searchResultBox = document.getElementById('searchResultBox');
+        const searchItems = document.querySelectorAll('.search-target-item');
+
+        searchInput.addEventListener('input', function(e) {
+            const query = e.target.value.trim().toLowerCase();
+
+            // Если строка поиска пустая, скрываем блок результатов
+            if (query.length === 0) {
+                searchResultBox.style.display = 'none';
+                return;
+            }
+
+            searchResultBox.style.display = 'block';
+            let hasResults = false;
+
+            searchItems.forEach(item => {
+                const name = item.getAttribute('data-name');
+                if (name.includes(query)) {
+                    item.style.setProperty('display', 'flex', 'important');
+                    hasResults = true;
+                } else {
+                    item.style.setProperty('display', 'none', 'important');
+                }
+            });
+        });
+    </script>
+</body>
+</html>

@@ -1,6 +1,7 @@
 from handlers.skud import trigger_dingtian_turnstile
-import pandas as pd
 from fastapi import Query
+from services.analytics import calculate_club_metrics, generate_students_excel, calculate_admin_dashboard
+from database.constants import DEFAULT_CLUB_SETTINGS
 import hmac
 from datetime import datetime, timedelta
 from database.db import PaymentOrder, Subscription
@@ -62,19 +63,29 @@ def get_club_id_from_host(request: Request) -> int:
 # 1. Добавляем роут /admin, который просила кнопка в ТГ (убрали get_api_key!)
 @router.get("/admin", response_class=HTMLResponse)
 async def get_admin_dashboard(
-        request: Request,  # <--- ИСПРАВИЛИ ОПЕЧАТКУ ЗДЕСЬ!
+        request: Request,
         session: AsyncSession = Depends(get_session)
 ):
     club_id = get_club_id_from_host(request)
 
+    # 1. Загружаем из базы список студентов ТОЛЬКО этого клуба (Изоляция SaaS)
     result = await session.execute(
         select(Student).where(Student.club_id == club_id)
     )
-    students = result.scalars().all()
+    # Оборачиваем в list(), чтобы у линтера PyCharm не было претензий к типам
+    students = list(result.scalars().all())
 
+    # 2. Передаем список в наш аналитический сервис для обработки
+    admin_data = calculate_admin_dashboard(students)
+
+    # 3. Рендерим новый шаблон admin.html и распаковываем туда словарь с данными
     return templates.TemplateResponse(
-        "stats.html",  # Временно отдаем stats.html, пока не сверстаешь полноценную админку
-        {"request": request, "club_id": club_id, "students": students}
+        "admin.html",
+        {
+            "request": request,
+            "club_id": club_id,
+            **admin_data  # Распакует total_athletes, active_now_count, all_athletes и т.д.
+        }
     )
 
 
@@ -87,66 +98,56 @@ async def get_revenue_stats(
 ):
     club_id = get_club_id_from_host(request)
 
-    # ИЗОЛЯЦИЯ SAAS: Вытаскиваем студентов ТОЛЬКО этого конкретного клуба!
-    result = await session.execute(
-        select(Student).where(Student.club_id == club_id)
-    )
-    students = result.scalars().all()
-    if not students:
-        return HTMLResponse(content="<h1>Данных пока нет</h1>", status_code=200)
+    # 1. Достаем студентов
+    result = await session.execute(select(Student).where(Student.club_id == club_id))
+    students = list(result.scalars().all())  # <-- Обернули в list(), теперь PyCharm будет счастлив
 
-    # Безопасный сбор данных с защитой от None
-    data = [
-        {
-            "name": s.name or "Атлет",
-            "balance": s.balance_lessons if s.balance_lessons is not None else 0,
-            'is_frozen': s.is_frozen if s.is_frozen is not None else 0
-        }
-        for s in students
-    ]
-    df = pd.DataFrame(data)
 
-    # 1. Общий баланс занятий для турникета считаем по ВСЕМ в этом клубе
-    total_lessons = df["balance"].sum()
+    # 2. Достаем конфиг этого конкретного клуба из базы
+    # (У тебя наверняка есть функция вроде get_club_config(club_id) или таблица Club)
+    # Для примера представим, что ты его откуда-то получаешь:
+    club_config = DEFAULT_CLUB_SETTINGS
 
-    # 2. ФИКС ФИНАНСОВ: Для выручки отсекаем технический баланс 999
-    real_packages = df[df["balance"] < 500]
-
-    # Считаем реальную выручку на основе проданных пакетов занятий
-    estimated_revenue = real_packages["balance"].sum() * 500
-
-    frozen_count = df[df["is_frozen"] == 1].shape[0]
-
-    # Для Топа атлетов тоже отсекаем 999, чтобы там висели реальные люди
-    real_students_df = df[df["balance"] < 500]
-    top_students = real_students_df.nlargest(3, "balance")[["name", "balance"]].to_dict(orient="records")
+    # 3. Передаем и студентов, и конфиг в аналитику
+    metrics = calculate_club_metrics(students, club_config)
 
     return templates.TemplateResponse(
         "stats.html",
-        {"request": request,
-         "club_id": club_id,  # Передаем club_id в HTML, чтобы вывести на экран
-         "total_lessons": int(total_lessons),
-         "revenue": int(estimated_revenue),
-         "frozen": frozen_count,
-         "top_students": top_students}
+        {"request": request, "club_id": club_id, **metrics}
     )
 
 
 # 3. Выгрузка в Excel. Перенесли префикс /stats/export/excel прямо в декоратор
 @router.get("/stats/export/excel")
-async def export_students_to_excel(request: Request, session: AsyncSession = Depends(get_session)):
+async def export_students_to_excel(
+        request: Request,
+        session: AsyncSession = Depends(get_session)
+):
     club_id = get_club_id_from_host(request)
 
-    result = await session.execute(select(Student))
-    df = pd.DataFrame([{"Имя": s.name, "Баланс": s.balance_lessons} for s in result.scalars().all()])
-    output = io.BytesIO()
-    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-        df.to_excel(writer, index=False, sheet_name='Атлеты')
-    output.seek(0)
-    headers = {'Content-Disposition': f'attachment; filename="report_club_{club_id}.xlsx"'}
-    return StreamingResponse(output, headers=headers, media_type='application/vnd.ms-excel')
+    # ФИКС SAAS: Строго вытаскиваем студентов ТОЛЬКО этого конкретного клуба!
+    result = await session.execute(
+        select(Student).where(Student.club_id == club_id)
+    )
+    students = list(result.scalars().all())
 
+    if not students:
+        # Если выгружать некого, можно просто вернуть пустой ответ или обработать красиво
+        return StreamingResponse(io.BytesIO(), media_type="application/vnd.ms-excel")
 
+    # Генерируем Excel через изолированный сервис
+    excel_file = generate_students_excel(students)
+
+    # Правильные заголовки и современный media_type для .xlsx файлов
+    headers = {
+        "Content-Disposition": f'attachment; filename="report_club_{club_id}.xlsx"'
+    }
+
+    return StreamingResponse(
+        excel_file,
+        headers=headers,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
 
 
 @router.get("/webapp/schedule", response_class=HTMLResponse)
