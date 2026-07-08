@@ -100,7 +100,7 @@ async def lifespan(app: FastAPI):
 
     scheduler.start()
     logger.success(f"🔥 Все фоновые SaaS-задачи (ДР, Масс-майлинг, Отчеты, Бэкапы) успешно запущены!")
-
+    app.state.bots_dict = bots_dict
     yield # <--- МАГИЧЕСКАЯ СТРОКА: Здесь FastAPI запускается и ждет запросы
 
     # --- ЭТО БЫВШИЙ SHUTDOWN (сработает при выключении сервера) ---

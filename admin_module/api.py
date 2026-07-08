@@ -610,7 +610,7 @@ async def tbank_webhook(request: Request, session: AsyncSession = Depends(get_se
             if abon_result:
                 new_expire, parent_id = abon_result
                 try:
-                    from main import bots_dict  # Наш глобальный словарь запущенных ботов клубов
+                    bots_dict = getattr(request.app.state, "bots_dict", {}) # Наш глобальный словарь запущенных ботов клубов
 
                     bot = bots_dict.get(club.bot_token) if club else None
                     if bot:
