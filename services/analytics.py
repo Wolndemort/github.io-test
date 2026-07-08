@@ -54,75 +54,6 @@ def calculate_club_metrics(students_models: List[Any], confirmed_payments: List[
     }
 
 
-def calculate_admin_dashboard(students_models: List[Any]) -> Dict[str, Any]:
-    """
-    Оперативный пульт для роута /admin (Инструменты администратора).
-    """
-    if not students_models:
-        return {"empty": True}
-
-    now = datetime.utcnow()
-    today_date = date.today()
-
-    all_athletes_list = []
-    expired_students = []
-    burning_students = []
-    sleeping_students = []
-    birthdays_today = []
-    active_now_count = 0
-
-    for s in students_models:
-        # Исключаем технические безлимиты
-        balance = s.balance_lessons if s.balance_lessons is not None else 0
-        if balance >= 500:
-            continue
-
-        is_frozen = getattr(s, "is_frozen", 0) == 1
-        is_expired = s.expire_date < now if s.expire_date else False
-
-        student_data = {
-            "name": s.name or "Атлет",
-            "balance": balance,
-            "is_frozen": is_frozen,
-            "username": getattr(s, "parent", None).full_name if getattr(s, "parent", None) else None,
-            # привязка к имени родителя
-            "phone": s.parent_phone or ""
-        }
-        all_athletes_list.append(student_data)
-
-        # 1. Проверяем именинников (сравнение дня и месяца)
-        if s.birthday and s.birthday.month == today_date.month and s.birthday.day == today_date.day:
-            birthdays_today.append(student_data)
-
-        # 2. Логика статусов
-        if is_frozen:
-            continue
-
-        if balance > 0 and not is_expired:
-            active_now_count += 1
-            # Горящие: осталось мало занятий или меньше 5 дней до конца абонемента
-            days_left = (s.expire_date - now).days if s.expire_date else 99
-            if balance <= 3 or (0 <= days_left <= 5):
-                burning_students.append(student_data)
-
-            # Спящие: абонемент активен, но не был в зале больше 14 дней
-            if s.last_visit and (now - s.last_visit).days > 14:
-                sleeping_students.append(student_data)
-        else:
-            expired_students.append(student_data)
-
-    return {
-        "empty": False,
-        "total_athletes": len(all_athletes_list),
-        "active_now_count": active_now_count,
-        "expired_students": expired_students,
-        "burning_students": burning_students,
-        "sleeping_students": sleeping_students,
-        "birthdays_today": birthdays_today,
-        "all_athletes": all_athletes_list
-    }
-
-
 def generate_students_excel(students_models: List[Any]) -> io.BytesIO:
     """
     Генерирует Excel-файл на основе реальной модели Student.
@@ -191,3 +122,88 @@ def calculate_admin_dashboard(students_models: List[Any]) -> Dict[str, Any]:
         "all_athletes": all_athletes_list  # Отправляем полный список для поиска
     }
 
+
+def calculate_daily_business_report(students_models: List[Any], today_payments: List[Any],
+                                    yesterday_payments: List[Any]) -> dict:
+    """
+    Вычисляет расширенную бизнес-статистику за день,
+    сравнивает показатели со вчерашним днем и анализирует пиковые часы.
+    """
+    # 1. Расчет выручки
+    revenue_today = sum(p.amount_kopecks for p in today_payments if p.amount_kopecks) / 100
+    revenue_yesterday = sum(p.amount_kopecks for p in yesterday_payments if p.amount_kopecks) / 100
+
+    revenue_diff = revenue_today - revenue_yesterday
+    if revenue_yesterday > 0:
+        revenue_percent = round((revenue_diff / revenue_yesterday) * 100, 1)
+    else:
+        revenue_percent = 100.0 if revenue_today > 0 else 0.0
+
+    # Знаки для красивого вывода в ТГ
+    rev_sign = "📈 +" if revenue_diff >= 0 else "📉 "
+
+    # 2. Анализ студентов через Pandas
+    if not students_models:
+        return {
+            "revenue_today": int(revenue_today),
+            "revenue_diff_text": f"{rev_sign}{int(revenue_diff)} ₽ ({revenue_percent}%)",
+            "top_discipline": "Нет данных",
+            "peak_hours": "Нет данных",
+            "total_athletes": 0
+        }
+
+    data = [
+        {
+            "balance": s.balance_lessons if s.balance_lessons is not None else 0,
+            "discipline": getattr(s, "discipline", "unknown"),
+            "last_visit": s.last_visit
+        }
+        for s in students_models
+    ]
+    df = pd.DataFrame(data)
+    real_athletes = df[df["balance"] < 500]
+
+    # 3. Самая популярная дисциплина среди ВСЕХ клиентов клуба
+    if not real_athletes.empty and "discipline" in real_athletes.columns:
+        top_disc_series = real_athletes["discipline"].value_counts()
+        if not top_disc_series.empty:
+            # Берем ключ самой популярной дисциплины
+            top_discipline_key = top_disc_series.index[0]
+            top_discipline = str(top_discipline_key).upper()
+        else:
+            top_discipline = "НЕ ОПРЕДЕЛЕНА"
+    else:
+        top_discipline = "НЕТ АТЛЕТОВ"
+
+    # 4. Пиковые часы посещений на основе поля last_visit
+    # Смотрим на визиты, которые были СЕГОДНЯ
+    today_date = datetime.utcnow().date()
+
+    # Безопасно фильтруем строки, где есть дата визита и она сегодняшняя
+    today_visits = real_athletes[
+        (real_athletes["last_visit"].notna()) &
+        (real_athletes["last_visit"].apply(lambda x: x.date() == today_date if hasattr(x, 'date') else False))
+        ]
+
+    if not today_visits.empty:
+        # Извлекаем час визита
+        today_visits["hour"] = today_visits["last_visit"].apply(lambda x: x.hour)
+        hour_counts = today_visits["hour"].value_counts()
+
+        if not hour_counts.empty:
+            # Берем топ-2 самых популярных часа для посещения
+            peaks = hour_counts.head(2).index.tolist()
+            # Форматируем красиво, например: "18:00, 19:00"
+            peak_hours = ", ".join([f"{h}:00" for h in sorted(peaks)])
+        else:
+            peak_hours = "Равномерно"
+    else:
+        peak_hours = "Нет чекинов сегодня"
+
+    return {
+        "revenue_today": int(revenue_today),
+        "revenue_diff_text": f"{rev_sign}{int(revenue_diff)} ₽ ({revenue_percent}%)",
+        "top_discipline": top_discipline,
+        "peak_hours": peak_hours,
+        "total_athletes": len(real_athletes)
+    }

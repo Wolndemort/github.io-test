@@ -53,6 +53,7 @@ class Student(Base):
     last_visit: Mapped[Optional[datetime]] = mapped_column(DateTime)
     parent: Mapped["User"] = relationship(back_populates="students")
     parent_phone: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    discipline: Mapped[Optional[str]] = mapped_column(String(50), nullable=True, default="boxing")
 
 
 class Club(Base):

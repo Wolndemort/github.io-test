@@ -1,9 +1,10 @@
 import asyncio
 import os
 import uuid
-from datetime import timedelta
+from services.analytics import calculate_daily_business_report, calculate_admin_dashboard
+from datetime import timedelta,time
 import logging as logging
-from database.db import Subscription,PaymentOrder
+from database.db import Subscription, PaymentOrder, User
 from services.tbank_client import tbank
 import sys
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
@@ -155,45 +156,72 @@ async def send_backup_to_admin():
         logger.debug("🗑️ Временный файл бэкапа удален с диска")
 
 
+
 async def check_abon_mailing():
     """
     Рассылка уведомлений об истекающих абонементах.
-    Использует глобальный словарь bots_dict.
+    Использует глобальный словарь bots_dict и безопасную подгрузку данных родителей.
     """
     async with AsyncSessionLocal() as session:
+        # Получаем данные. Убедись, что в твоей функции get_expire_students_grouped
+        # модель Student идет в связке с загруженным parent, либо подгрузи ее здесь.
         data = await get_expire_students_grouped(session)
 
         logger.info(f"🚀 SaaS Рассылка: Найдено {len(data)} атлетов с истекающими абонементами.")
 
         for student, token in data:
             try:
-                # Берем бота напрямую из глобального маппинга
+                # 1. Проверяем наличие бота в глобальном маппинге
                 current_bot = bots_dict.get(token)
                 if not current_bot:
+                    logger.warning(f"⚠️ Бот с токеном ...{token[-8:]} не найден в bots_dict")
                     continue
 
-                # Достаем настройки конкретного клуба для красивой клавиатуры
-                result = await session.execute(
-                    select(Club.club_settings).where(Club.bot_token == token)
+                # 2. Достаем клуб и его настройки через явный запрос
+                # Используем scalar_one_or_none для безопасности
+                club_res = await session.execute(
+                    select(Club).where(Club.bot_token == token)
                 )
-                club_settings = result.scalar() or {}
+                club = club_res.scalar_one_or_none()
+                club_settings = club.club_settings if club else {}
 
+                # 3. Нам нужен объект User (родитель) для клавиатуры,
+                # чтобы прочитать его user_id и club_id
+                user_res = await session.execute(
+                    select(User).where(User.user_id == student.parent_id)
+                )
+                parent_user = user_res.scalar_one_or_none()
+
+                if not parent_user:
+                    logger.error(f"❌ Родтель с ID {student.parent_id} не найден в базе данных.")
+                    continue
+
+                # Формируем текст уведомления
+                expire_str = student.expire_date.strftime('%d.%m.%Y') if student.expire_date else "Не указана"
                 text = (
                     f"⚠️ <b>Внимание!</b>\n\n"
                     f"У атлета <b>{student.name}</b> скоро истекает абонемент.\n"
-                    f"Дата окончания: <code>{student.expire_date.strftime('%d.%m.%Y')}</code>\n\n"
+                    f"Дата окончания: <code>{expire_str}</code>\n\n"
                     f"Не забудьте продлить его в меню! 🥊"
+                )
+
+                # 4. ФИКС КЛАВИАТУРЫ: Передаем все обязательные параметры
+                # Так как это рассылка авторизованному родителю, ставим is_authorized=True
+                reply_markup = get_profile_keyboard(
+                    user=parent_user,
+                    club_settings=club_settings,
+                    is_authorized=True
                 )
 
                 await current_bot.send_message(
                     chat_id=student.parent_id,
                     text=text,
                     parse_mode="HTML",
-                    reply_markup=get_profile_keyboard(club_settings)
+                    reply_markup=reply_markup
                 )
 
                 logger.info(f"✅ [Клуб {student.club_id}] Отправлено родителю {student.parent_id}")
-                await asyncio.sleep(0.05) # Защита от лимитов Telegram API
+                await asyncio.sleep(0.05) # Защита от лимитов Telegram API (Anti-flood)
 
             except Exception as e:
                 logger.error(f"❌ Ошибка отправки (Student ID {student.id}): {e}")
@@ -201,41 +229,95 @@ async def check_abon_mailing():
 
 async def send_daily_report_to_admins():
     """
-    Рассылка вечерних отчетов владельцам каждого клуба.
-    Использует глобальный словарь bots_dict.
+    Рассылка продвинутых вечерних ИИ-бизнес-отчетов владельцам каждого клуба.
+    Сравнивает кассу со вчерашним днем, находит пиковые часы и лучшую дисциплину.
     """
-    from database.db import AsyncSessionLocal, Club, select  # Защита от циклических импортов
+    now = datetime.utcnow()
+
+    # Временные границы для фильтрации SQL
+    start_of_today = datetime.combine(now.date(), time.min)
+    start_of_yesterday = start_of_today - timedelta(days=1)
 
     async with AsyncSessionLocal() as session:
-        # 1. Берем все активные клубы
-        result = await session.execute(select(Club).where(Club.subscription_expire_at >= datetime.now()))
+        # 1. Загружаем все активные клубы, у которых не кончилась SaaS подписка
+        result = await session.execute(select(Club).where(Club.subscription_expire_at >= now))
         clubs = result.scalars().all()
 
     for club in clubs:
         try:
-            # 2. Берем бота напрямую из глобального маппинга по токену
             bot = bots_dict.get(club.bot_token)
-            if not bot:
+            if not bot or not club.owner_id:
                 continue
 
-            # 3. Считаем статистику именно для ЭТОГО клуба
             async with AsyncSessionLocal() as session:
-                visits, active = await get_daily_stats(club_id=club.id, session=session)
+                # 2. Твой базовый метод подсчета визитов за сегодня
+                visits, active_passes = await get_daily_stats(club_id=club.id, session=session)
 
+                # 3. Достаем студентов клуба
+                student_res = await session.execute(select(Student).where(Student.club_id == club.id))
+                students = list(student_res.scalars().all())
+
+                # 4. Достаем успешные платежи за СЕГОДНЯ
+                today_pay_res = await session.execute(
+                    select(PaymentOrder).where(
+                        PaymentOrder.club_id == club.id,
+                        PaymentOrder.status == "CONFIRMED",
+                        PaymentOrder.created_at >= start_of_today
+                    )
+                )
+                today_payments = list(today_pay_res.scalars().all())
+
+                # 5. Достаем успешные платежи за ВЧЕРА (между вчерашней полночью и сегодняшней)
+                yesterday_pay_res = await session.execute(
+                    select(PaymentOrder).where(
+                        PaymentOrder.club_id == club.id,
+                        PaymentOrder.status == "CONFIRMED",
+                        PaymentOrder.created_at >= start_of_yesterday,
+                        PaymentOrder.created_at < start_of_today
+                    )
+                )
+                yesterday_payments = list(yesterday_pay_res.scalars().all())
+
+            # Прогоняем данные через наши Pandas-сервисы
+            biz_metrics = calculate_daily_business_report(students, today_payments, yesterday_payments)
+            admin_metrics = calculate_admin_dashboard(students)
+
+            # Вытаскиваем проблемные зоны для админа
+            expired_count = len(admin_metrics.get("expired_students", [])) if not admin_metrics.get("empty") else 0
+            sleeping_count = len(admin_metrics.get("sleeping_students", [])) if not admin_metrics.get("empty") else 0
+
+            # Переводим технические ключи дисциплин в человеческие названия из настроек клуба
+            config_disciplines = club.club_settings.get("disciplines", {})
+            top_disc_key = biz_metrics["top_discipline"].lower()
+
+            # Ищем название дисциплины в конфиге, если не нашли — оставляем как есть
+            human_discipline_name = config_disciplines.get(top_disc_key, {}).get("name", biz_metrics["top_discipline"])
+
+            # 🚀 СБОРКА ИИ-ОТЧЕТА ДЛЯ БОССА
             report_text = (
-                f"🌙 <b>ВЕЧЕРНИЙ ОТЧЕТ: {club.name}</b>\n"
-                f"📅 Дата: <code>{datetime.now().strftime('%d.%m.%Y')}</code>\n\n"
-                f"👤 <b>Посещений сегодня:</b> <code>{visits}</code>\n"
-                f"💎 <b>Активных абонементов:</b> <code>{active}</code>\n"
+                f"📊 <b>ГЛУБОКИЙ БИЗНЕС-ОТЧЕТ: {club.name}</b>\n"
+                f"📅 Дата: <code>{now.strftime('%d.%m.%Y')}</code>\n\n"
+                f"💰 <b>Касса сегодня:</b> <code>{biz_metrics['revenue_today']} ₽</code>\n"
+                f"⚖️ <b>Динамика ко вчера:</b> <code>{biz_metrics['revenue_diff_text']}</code>\n"
+                f"👤 <b>Всего клиентов в базе:</b> <code>{biz_metrics['total_athletes']} чел.</code>\n\n"
+                f"📈 <b>ОПЕРАТИВНЫЙ АНАЛИЗ ЗА ДЕНЬ:</b>\n"
+                f"🚶‍♂️ Посещений зала: <code>{visits}</code>\n"
+                f"⚡️ Пиковые часы сегодня: <code>{biz_metrics['peak_hours']}</code>\n"
+                f"🥋 Главное направление: <code>{human_discipline_name}</code>\n"
+                f"💎 Действующих абонементов: <code>{active_passes}</code>\n\n"
+                f"🚨 <b>МЕНЕДЖМЕНТ (Проверить админа):</b>\n"
+                f"❌ Закончился баланс: <code>{expired_count} чел.</code> (ждут звонка)\n"
+                f"last_visit 💤 Спящие (>14 дней): <code>{sleeping_count} чел.</code>\n"
             )
 
-            # 4. Отправляем владельцу клуба (owner_id)
-            if club.owner_id:
-                await bot.send_message(club.owner_id, report_text, parse_mode="HTML")
-                logger.info(f"✅ Отчет клуба {club.id} отправлен владельцу {club.owner_id}")
+            # Отправляем инлайн-отчет напрямую директору клуба
+            await bot.send_message(club.owner_id, report_text, parse_mode="HTML")
+            logger.info(f"🔥 Комплексный ИИ-отчет для клуба {club.id} успешно отправлен боссу!")
+
+            await asyncio.sleep(0.05)  # Защита от лимитов (Anti-flood API)
 
         except Exception as e:
-            logger.error(f"❌ Ошибка отчета для клуба {club.id}: {e}")
+            logger.error(f"❌ Ошибка генерации ИИ-отчета для клуба {club.id}: {e}")
 
 
 @app.on_event("shutdown")
