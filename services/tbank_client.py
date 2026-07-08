@@ -12,7 +12,7 @@ class TBankClient:
         self.secret_key = secret_key
         self.notification_url = notification_url
         # КРИТИЧНО: Официальный URL Т-Кассы для API запросов всегда restapi.tinkoff.ru/v2
-        self.base_url = "https://tinkoff.ru"
+        self.base_url = "https://restapi.tinkoff.ru/v2"
 
     def _generate_token(self, params: dict) -> str:
         """Генерация подписи Token по правилам Т-Банка"""
