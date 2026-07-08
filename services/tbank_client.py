@@ -46,7 +46,7 @@ class TBankClient:
                 logger.info(f"👉 ОТВЕТ Т-БАНКА: {res_json}")
                 return res_json
             except Exception as e:
-                logger.error(f"🚨 Ошибка Init запроса: {e}")
+                logger.error(f"🚨 Ошибка Init запроса: {repr(e)}")
                 return {"Success": False, "Message": str(e)}
 
     async def charge_payment(self, order_id: str, amount_kopecks: int, rebill_id: str) -> dict:
