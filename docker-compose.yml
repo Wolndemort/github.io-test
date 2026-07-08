@@ -43,6 +43,9 @@ services:
     volumes:
       - .:/app
       - ./logs:/app/logs
+    dns:
+      - 77.88.8.8
+      - 8.8.8.8
 
   redis:
     image: redis:7-alpine
