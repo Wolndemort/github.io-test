@@ -44,7 +44,7 @@ services:
       - .:/app
       - ./logs:/app/logs
     extra_hosts:
-      - "restapi.tinkoff.ru:91.194.226.15"
+      - "restapi.tinkoff.ru:91.194.226.17"
 
   redis:
     image: redis:7-alpine
