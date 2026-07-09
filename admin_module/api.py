@@ -5,7 +5,7 @@ from fastapi import Query
 from services.analytics import calculate_club_metrics, generate_students_excel, calculate_admin_dashboard
 from database.constants import DEFAULT_CLUB_SETTINGS
 import hmac
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from database.db import PaymentOrder, Subscription
 from database.db import add_abon
 import hashlib
@@ -25,8 +25,7 @@ from sqlalchemy.orm import selectinload
 from starlette import status
 from database.db import User, Student, Club
 from database.db import get_session
-from config import fastapi_key, T_BANK_SECRET_KEY
-
+from config import fastapi_key
 # Убираем глобальный префикс /stats, чтобы роуты /admin и /revenue сидели на своем месте
 router = APIRouter(tags=["Analytics"])
 templates = Jinja2Templates(directory="templates")
@@ -557,49 +556,58 @@ async def enable_biometry(payload: BiometricEnable, db: AsyncSession = Depends(g
 
 
 # Используй существующий router из твоего api.py
-@router.post("/v1/payments/tbank/webhook")
-async def tbank_webhook(request: Request, session: AsyncSession = Depends(get_session)):
-    """Прием уведомлений об оплатах от Т-Банка (Т-Кассы)"""
+
+
+WEBHOOK_SECRET_TOKEN = "Speedycrmsaas2026"
+
+
+@router.post("/v1/payments/yookassa/webhook")
+async def yookassa_webhook(request: Request, session: AsyncSession = Depends(get_session)):
+    """
+    Прием уведомлений об оплатах (вебхуков) от ЮKassa.
+    Маршрут защищен токеном авторизации для безопасной пересылки РФ -> Вена.
+    """
+    # 1. ЗАЩИТА ЭНДПОИНТА
+    auth_header = request.headers.get("Authorization")
+    if not auth_header or not auth_header.startswith("Bearer "):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing or invalid auth header")
+
+    token = auth_header.split(" ")[1]
+    if token != WEBHOOK_SECRET_TOKEN:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden: Invalid webhook token")
+
+    # Читаем JSON от ЮKassa
     payload = await request.json()
 
-    # 1. ЗАЩИТА: Проверяем SHA-256 подпись токена, чтобы исключить фейковые запросы
-    received_token = payload.get("Token")
-    sign_params = payload.copy()
+    event = payload.get("event")  # Тип события, например: 'payment.succeeded'
+    object_data = payload.get("object", {})  # Данные самого платежа
 
-    # Секретный ключ вытаскиваем из переменных окружения
-    sign_params["Password"] = T_BANK_SECRET_KEY
+    # Извлекаем метаданные, которые мы зашивали при создании ссылки
+    metadata = object_data.get("metadata", {})
+    order_id = metadata.get("order_id")
 
-    # Эти блоки по регламенту банка удаляются из расчета токена вебхука
-    sign_params.pop("Token", None)
-    sign_params.pop("Receipt", None)
-    sign_params.pop("DATA", None)
+    if not order_id:
+        # Если это какой-то левый запрос без order_id в метаданных, просто тушим его
+        return {"status": "ignored"}
 
-    # Сортируем параметры по алфавиту ключей и склеиваем их значения
-    sorted_values = [str(sign_params[key]) for key in sorted(sign_params.keys()) if sign_params[key] is not None]
-    local_token = hashlib.sha256("".join(sorted_values).encode("utf-8")).hexdigest()
-
-    if local_token != received_token:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid token signature")
-
-    status_payment = payload.get("Status")
-    order_id = payload.get("OrderId")
-
-    # 2. Если банк подтвердил успешную оплату (CONFIRMED)
-    if status_payment == "CONFIRMED":
-        # Ищем исходный заказ в нашей таблице заказов
+    # 2. ЕСЛИ ОПЛАТА УСПЕШНО ПРОШЛА (payment.succeeded)
+    if event == "payment.succeeded":
+        # Ищем исходный заказ в нашей таблице по UUID-строке order_id
         order_result = await session.execute(select(PaymentOrder).where(PaymentOrder.id == order_id))
         order = order_result.scalar_one_or_none()
 
-        # Если заказ нашли и он еще не был отмечен как оплаченный
+        # Если заказ найден и он еще обрабатывается
         if order and order.status != "CONFIRMED":
             order.status = "CONFIRMED"
 
-            # Извлекаем RebillId (токен карты для будущих автосписаний)
-            rebill_id = payload.get("RebillId")
+            # Вытаскиваем токен сохраненной карты (Id метода оплаты)
+            payment_method = object_data.get("payment_method", {})
+            payment_method_id = payment_method.get("id")
+            saved_card_flag = object_data.get("saved", False)
 
-            # Если это первая оплата (маркер "FIRST") и банк вернул токен карты
-            if rebill_id and order.type == "FIRST":
-                # Проверяем, нет ли уже созданной подписки на этого студента
+            # Если это первая оплата (FIRST), метод оплаты сохранен для рекуррентов и нам пришел ID
+            if order.type == "FIRST" and payment_method_id and saved_card_flag:
+                # Проверяем, нет ли уже подписки на этого ребенка в этом клубе
                 sub_result = await session.execute(
                     select(Subscription).where(
                         Subscription.student_id == order.student_id,
@@ -608,58 +616,57 @@ async def tbank_webhook(request: Request, session: AsyncSession = Depends(get_se
                 )
                 subscription = sub_result.scalar_one_or_none()
 
-                # Дата следующего списания — ровно через 30 дней
-                next_charge = datetime.utcnow() + timedelta(days=30)
+                # Сдвигаем дату следующего списания на 30 дней вперед в UTC
+                next_charge = datetime.now(timezone.utc) + timedelta(days=30)
 
                 if subscription:
-                    # Если запись почему-то уже была — обновляем токен карты и сумму
-                    subscription.rebill_id = str(rebill_id)
+                    # Обновляем токен карты ЮKassa и параметры
+                    subscription.rebill_id = str(payment_method_id)
                     subscription.next_charge_at = next_charge
                     subscription.is_active = True
                     subscription.amount_kopecks = order.amount_kopecks
                 else:
-                    # Если новая подписка — создаем чистую запись в БД
+                    # Создаем чистую подписку под автосписания
                     new_sub = Subscription(
                         user_id=order.user_id,
                         student_id=order.student_id,
                         club_id=order.club_id,
-                        rebill_id=str(rebill_id),
+                        rebill_id=str(payment_method_id),  # Записываем payment_method_id в rebill_id
                         amount_kopecks=order.amount_kopecks,
                         next_charge_at=next_charge,
                         is_active=True
                     )
                     session.add(new_sub)
 
-            # Достаем объект клуба для передачи в add_abon
+            # Достаем объект клуба, чтобы передать настройки в функцию add_abon
             club_result = await session.execute(select(Club).where(Club.id == order.club_id))
             club = club_result.scalar_one_or_none()
-
-            # Достаем club_settings из объекта клуба
             club_settings = club.club_settings if club else {}
 
-            # 3. ВЫЗЫВАЕМ ТВОЮ РОДНУЮ ФУНКЦИЮ НАЧИСЛЕНИЯ АБОНЕМЕНТА БЕЗ АДМИНА
-            # Она сама обновит баланс, сдвинет expire_date и вернет (new_expire, parent_id)
+            # 3. НАЧИСЛЯЕМ АБОНЕМЕНТ УЧЕНИКУ
             abon_result = await add_abon(
                 student_id=order.student_id,
-                lessons_count=order.lesson_count,  # Берем сохраненное из PaymentOrder
+                lessons_count=order.lesson_count,
                 session=session,
                 club_id=order.club_id,
                 club_settings=club_settings,
-                days_to_add=order.days_to_add  # Берем сохраненное из PaymentOrder
+                days_to_add=order.days_to_add
             )
 
             await session.commit()
 
-            # 4. КРАСИВОЕ SaaS-УВЕДОМЛЕНИЕ ДЛЯ КЛИЕНТА (РОДИТЕЛЯ) ПРЯМО ИЗ ВЕБХУКА
+            # 4. ОТПРАВЛЯЕМ SaaS-УВЕДОМЛЕНИЕ РОДИТЕЛЮ ЧЕРЕЗ БОТА КЛУБА
             if abon_result:
                 new_expire, parent_id = abon_result
                 try:
-                    bots_dict = getattr(request.app.state, "bots_dict", {}) # Наш глобальный словарь запущенных ботов клубов
-
+                    # Вытаскиваем словарь запущенных ботов из стейта приложения FastAPI
+                    bots_dict = getattr(request.app.state, "bots_dict", {})
                     bot = bots_dict.get(club.bot_token) if club else None
+
                     if bot:
                         desc = "БЕЗЛИМИТ" if order.lesson_count == 999 else f"{order.lesson_count} зан."
-                        club_name = club_settings.get("ui", {}).get("club_name", club.name)
+                        ui_cfg = club_settings.get("ui", {})
+                        club_name = ui_cfg.get("club_name", club.name if club else "Фитнес-клуб")
 
                         await bot.send_message(
                             chat_id=parent_id,
@@ -671,15 +678,15 @@ async def tbank_webhook(request: Request, session: AsyncSession = Depends(get_se
                             parse_mode="HTML"
                         )
                 except Exception as e:
-                    print(f"Ошибка отправки уведомления родителю: {e}")
+                    print(f"Ошибка отправки сообщения родителю в бот: {e}")
 
-    elif status_payment in ["REJECTED", "CANCELED"]:
-        # Если транзакция отклонена банком или отменена пользователем
+    # 3. ЕСЛИ ПЛАТЕЖ ОТМЕНЕН ИЛИ ОТКЛОНЕН (payment.canceled)
+    elif event == "payment.canceled":
         order_result = await session.execute(select(PaymentOrder).where(PaymentOrder.id == order_id))
         order = order_result.scalar_one_or_none()
         if order and order.status == "NEW":
             order.status = "REJECTED"
             await session.commit()
 
-    # ВАЖНО: Т-Банк требует строго ответ строкой "OK" со статусом 200
-    return "OK"
+    # ЮKassa ждет в ответ пустой ответ со статусом HTTP 200 OK
+    return {"status": "success"}

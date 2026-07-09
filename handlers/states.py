@@ -64,3 +64,8 @@ class AdminScheduleStates(StatesGroup):
     add_time = State()           # Ожидание ввода времени (напр. 19:00)
     add_coach = State()          # Ожидание ввода тренера/группы
     add_slots = State()          # Ожидание ввода лимита мест (макс. мест)
+
+
+class YooKassaSetupStates(StatesGroup):
+    waiting_for_shop_id = State()      # Ожидание ввода Shop ID
+    waiting_for_secret_key = State()   # Ожидание ввода Секретного ключа

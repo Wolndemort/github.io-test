@@ -50,6 +50,11 @@ DEFAULT_CLUB_SETTINGS = {
         "freeze_days_step": 7,
         "subscription_days": 30
     },
+    "payments": {
+        "provider": "yookassa",
+        "yookassa_shop_id": "",       # Заполняется админом клуба
+        "yookassa_secret_key": ""     # Заполняется админом клуба (live_... или test_...)
+    },
     "turnstile": {
          "enabled": False,  #включение и выключение
          "type": "dingtian_http",   #тип реле (бренд)

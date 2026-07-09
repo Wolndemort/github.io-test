@@ -2,8 +2,9 @@ from datetime import datetime, timedelta
 from sqlalchemy import update
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from redis import Redis
+from services.yookassa_client import YooKassaClient
 import uuid
-from database.db import PaymentOrder
+from database.db import PaymentOrder, User
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from loguru import logger
@@ -195,8 +196,8 @@ async def process_one_click_payment(callback: types.CallbackQuery, state: FSMCon
     data = await state.get_data()
     user_id = callback.from_user.id
 
-    # Достаем токен сохраненной карты
-    from database.db import Subscription, PaymentOrder, User
+    # 1. Достаем токен сохраненной карты (rebill_id в ЮKassa — это payment_method_id)
+    from database.db import Subscription, PaymentOrder, User, Club
     sub_res = await session.execute(select(Subscription).where(Subscription.user_id == user_id).limit(1))
     saved_card = sub_res.scalar_one_or_none()
 
@@ -204,12 +205,29 @@ async def process_one_click_payment(callback: types.CallbackQuery, state: FSMCon
         return await callback.message.answer("❌ Ошибка: Сохраненная карта не найдена. Оплатите заново для привязки.")
 
     order_id = f"ONE_{uuid.uuid4().hex[:12].upper()}"
-    amount_kopecks = int(data['price']) * 100
+    amount_kopecks = int(float(data['price']) * 100)
 
     user_res = await session.execute(select(User).where(User.user_id == user_id))
     user = user_res.scalar_one_or_none()
 
-    # Фиксируем заказ со статусом NEW и типом RECURRENT (так как платим по токену карты)
+    if not user or not user.club_id:
+        return await callback.message.answer("❌ Ошибка: Не удалось определить ваш клуб.")
+
+    # 2. Нам нужны платежные ключи этого клуба для проведения автосписания
+    club_res = await session.execute(select(Club).where(Club.id == user.club_id))
+    club = club_res.scalar_one_or_none()
+
+    if not club:
+        return await callback.message.answer("❌ Ошибка: Клуб не найден в системе.")
+
+    pay_settings = club.club_settings.get("payments", {})
+    shop_id = pay_settings.get("yookassa_shop_id")
+    secret_key = pay_settings.get("yookassa_secret_key")
+
+    if not shop_id or not secret_key:
+        return await callback.message.answer("❌ Клуб еще не настроил онлайн-платежи. Оплата в 1 клик невозможна.")
+
+    # Фиксируем заказ со статусом NEW и типом RECURRENT
     new_order = PaymentOrder(
         id=order_id,
         user_id=user_id,
@@ -224,23 +242,27 @@ async def process_one_click_payment(callback: types.CallbackQuery, state: FSMCon
     session.add(new_order)
     await session.commit()
 
-    # Вызываем фоновое списание по токену карты через наш клиент Т-Банка
-    from main import tbank
-    charge_res = await tbank.charge_payment(
-        order_id=order_id,
-        amount_kopecks=amount_kopecks,
-        rebill_id=saved_card.rebill_id
+    # 3. Вызываем фоновое списание по токену карты через ЮKassa
+    from config import PROXY_URL
+    yookassa_node = YooKassaClient(
+        shop_id=shop_id,
+        secret_key=secret_key,
+        proxy_url=PROXY_URL
     )
 
-    if charge_res.get("Success") and charge_res.get("Status") == "CONFIRMED":
-        # Платеж успешен! Нам даже не нужно ждать вебхук, мы можем обработать его прямо тут
+    charge_res = await yookassa_node.charge_payment(
+        order_id=order_id,
+        amount_kopecks=amount_kopecks,
+        payment_method_id=saved_card.rebill_id,
+        club_name=club.name
+    )
+
+    # 4. Проверяем статус. Если 'succeeded' — моментально активируем абонемент
+    if charge_res.get("Success") and charge_res.get("Status") == "succeeded":
         new_order.status = "CONFIRMED"
 
-        # Вызываем твою родную функцию начисления абонемента
+        # Твоя родная функция начисления абонемента
         from handlers.payments import add_abon
-        from database.db import Club
-        club_res = await session.execute(select(Club).where(Club.id == user.club_id))
-        club = club_res.scalar_one_or_none()
 
         abon_result = await add_abon(
             student_id=data['student_id'],
@@ -266,7 +288,8 @@ async def process_one_click_payment(callback: types.CallbackQuery, state: FSMCon
         await session.commit()
         error_msg = charge_res.get("Message", "Недостаточно средств или карта заблокирована")
         await callback.message.answer(
-            f"❌ Ошибка списания с сохраненной карты: {error_msg}. Попробуйте оплатить СБП или новой картой.")
+            f"❌ Ошибка списания с сохраненной карты: {error_msg}.\n"
+            f"Попробуйте оплатить по СБП или выберите оплату новой картой заново.")
 
 
 @router.callback_query(F.data == 'pay_method_sbp')
@@ -304,6 +327,115 @@ async def process_sbp_payment_choice(
         parse_mode="HTML"
     )
     await callback.answer()
+
+
+@router.callback_query(F.data == 'pay_method_official')
+async def process_official_card_payment(
+        callback: types.CallbackQuery,
+        state: FSMContext,
+        session: AsyncSession
+):
+    """Сценарий автоматической онлайн-оплаты через ЮKassa с привязкой карты"""
+    await callback.answer("Генерирую официальную ссылку...", show_alert=False)
+
+    data = await state.get_data()
+    user_id = callback.from_user.id
+
+    # Извлекаем все сохраненные параметры тарифа из FSM
+    student_id = data['student_id']
+    price = data['price']
+
+    # Безопасно переводим в копейки (работаем через float на случай цен с копейками)
+    amount_kopecks = int(float(price) * 100)
+
+    lesson_count = data['lesson_count']
+    days_to_add = data['days_to_add']
+
+    # 1. Достаем текущий club_id через модель User
+    user_res = await session.execute(select(User).where(User.user_id == user_id))
+    user = user_res.scalar_one_or_none()
+
+    if not user or not user.club_id:
+        return await callback.message.answer("❌ Ошибка: Клуб не найден в вашей учетной записи.")
+
+    # 2. Достаем сам Клуб, чтобы забрать его платежные настройки из JSONB
+    club_res = await session.execute(select(Club).where(Club.id == user.club_id))
+    club = club_res.scalar_one_or_none()
+
+    if not club:
+        return await callback.message.answer("❌ Ошибка: Клуб не найден в базе данных платформы.")
+
+    # Вытаскиваем настройки эквайринга из твоего нового JSONB блока
+    pay_settings = club.club_settings.get("payments", {})
+    features = club.club_settings.get("features", {})
+
+    shop_id = pay_settings.get("yookassa_shop_id")
+    secret_key = pay_settings.get("yookassa_secret_key")
+
+    # Проверяем, настроил ли админ клуба интеграцию
+    if not features.get("online_payments") or not shop_id or not secret_key:
+        return await callback.message.answer(
+            "⚠️ Онлайн-оплата картой временно недоступна для этого клуба.\n"
+            "Пожалуйста, воспользуйтесь оплатой по СБП (вручную по чеку) или свяжитесь с администрацией."
+        )
+
+    order_id = f"INIT_{uuid.uuid4().hex[:12].upper()}"
+
+    # Фиксируем новый заказ в таблице payment_orders
+    new_order = PaymentOrder(
+        id=order_id,
+        user_id=user_id,
+        student_id=student_id,
+        club_id=user.club_id,
+        amount_kopecks=amount_kopecks,
+        lesson_count=lesson_count,
+        days_to_add=days_to_add,
+        status="NEW",
+        type="FIRST"  # Маркер первой оплаты для привязки карты
+    )
+    session.add(new_order)
+    await session.commit()
+
+    # 3. Получаем юзернейм текущего бота для формирования редиректа после оплаты
+    bot_info = await callback.bot.get_me()
+    bot_username = bot_info.username
+
+    # 4. Динамически создаем клиент ЮKassa с ключами ЭТОГО клуба и прокси для Вены
+    from config import PROXY_URL
+    yookassa_node = YooKassaClient(
+        shop_id=shop_id,
+        secret_key=secret_key,
+        proxy_url=PROXY_URL
+    )
+
+    # Запускаем инициализацию платежа в ЮKassa
+    payment_data = await yookassa_node.init_payment(
+        order_id=order_id,
+        amount_kopecks=amount_kopecks,
+        user_id=user_id,
+        bot_username=bot_username
+    )
+
+    if payment_data.get("Success"):
+        payment_url = payment_data.get("PaymentURL")
+
+        kb = types.InlineKeyboardMarkup(inline_keyboard=[
+            [types.InlineKeyboardButton(text="💳 Перейти к оплате картой", url=payment_url)]
+        ])
+
+        await callback.message.edit_text(
+            f"💳 <b>Официальная оплата подписки</b>\n\n"
+            f"Вы выбрали тариф: <b>{data['tariff_label']} за {price}₽</b>\n\n"
+            f"После первой успешной оплаты ваша карта привяжется автоматически. "
+            f"Следующее продление абонемента спишется автоматически через 30 дней. "
+            f"Вы сможете отключить автопродление в любой момент прямо в меню бота.",
+            reply_markup=kb,
+            parse_mode="HTML"
+        )
+        await state.clear()  # Сбрасываем стейт диалога
+    else:
+        error_msg = payment_data.get("Message", "Ошибка платежной системы")
+        await callback.message.answer(f"❌ Не удалось запустить эквайринг ЮKassa: {error_msg}")
 
 
 @router.message(PaymentStates.waiting_for_receipt, F.photo)
@@ -375,81 +507,6 @@ async def handle_receipt_submission(
 
     # Очищаем стейт, чтобы юзер мог свободно нажимать другие кнопки в боте
     await state.clear()
-
-
-@router.callback_query(F.data == 'pay_method_official')
-async def process_official_card_payment(
-        callback: types.CallbackQuery,
-        state: FSMContext,
-        session: AsyncSession
-):
-    """Сценарий автоматической онлайн-оплаты через Т-Банк с привязкой карты"""
-    await callback.answer("Генерирую официальную ссылку...", show_alert=False)
-
-    data = await state.get_data()
-    user_id = callback.from_user.id
-
-    # Извлекаем все сохраненные параметры тарифа из FSM
-    student_id = data['student_id']
-    price = data['price']
-    amount_kopecks = int(price) * 100
-    lesson_count = data['lesson_count']
-    days_to_add = data['days_to_add']
-
-    # Достаем текущий club_id через модель User
-    from database.db import User
-    user_res = await session.execute(select(User).where(User.user_id == user_id))
-    user = user_res.scalar_one_or_none()
-
-    if not user or not user.club_id:
-        return await callback.message.answer("❌ Ошибка: Клуб не найден в вашей учетной записи.")
-
-    club_id = user.club_id
-    order_id = f"INIT_{uuid.uuid4().hex[:12].upper()}"
-
-    # Фиксируем новый заказ в таблице payment_orders
-    new_order = PaymentOrder(
-        id=order_id,
-        user_id=user_id,
-        student_id=student_id,
-        club_id=club_id,
-        amount_kopecks=amount_kopecks,
-        # Передаем параметры тарифа, чтобы FastAPI роут знал, сколько начислить
-        lesson_count=lesson_count,
-        days_to_add=days_to_add,
-        status="NEW",
-        type="FIRST"  # Маркер первой оплаты для создания рекуррента
-    )
-    session.add(new_order)
-    await session.commit()
-
-    # Делаем асинхронный запрос к API Т-Кассы
-    payment_data = await tbank.init_payment(
-        order_id=order_id,
-        amount_kopecks=amount_kopecks,
-        user_id=user_id
-    )
-
-    if payment_data.get("Success"):
-        payment_url = payment_data.get("PaymentURL")
-
-        kb = types.InlineKeyboardMarkup(inline_keyboard=[
-            [types.InlineKeyboardButton(text="💳 Перейти к оплате картой", url=payment_url)]
-        ])
-
-        await callback.message.edit_text(
-            f"💳 <b>Официальная оплата подписки</b>\n\n"
-            f"Вы выбрали тариф: <b>{data['tariff_label']} за {price}₽</b>\n\n"
-            f"После первой успешной оплаты ваша карта привяжется автоматически. "
-            f"Следующее продление абонемента спишется автоматически через 30 дней. "
-            f"Вы сможете отключить автопродление в любой момент прямо в меню бота.",
-            reply_markup=kb,
-            parse_mode="HTML"
-        )
-        await state.clear()  # Сбрасываем стейт диалога, так как ушли на оплату на внешний шлюз
-    else:
-        error_msg = payment_data.get("Message", "Ошибка банка")
-        await callback.message.answer(f"❌ Не удалось запустить эквайринг: {error_msg}")
 
 
 @router.callback_query(F.data.startswith('adm_confirm_'))
