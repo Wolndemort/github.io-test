@@ -14,7 +14,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import InlineKeyboardButton, BufferedInputFile
 from datetime import timedelta, timezone
 from aiogram import Router, F, types
-from datetime import datetime, date
+from datetime import datetime
 from loguru import logger
 import hashlib
 import hmac

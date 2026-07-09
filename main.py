@@ -2,7 +2,7 @@ import asyncio
 import os
 import uuid
 from services.analytics import calculate_daily_business_report, calculate_admin_dashboard
-from datetime import timedelta, time, timezone
+from datetime import timedelta, time
 import logging as logging
 from database.db import Subscription, PaymentOrder, User
 import sys

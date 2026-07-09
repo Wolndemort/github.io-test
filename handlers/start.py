@@ -4,6 +4,8 @@ from aiogram.fsm.context import FSMContext
 from aiogram.utils.keyboard import ReplyKeyboardBuilder, InlineKeyboardBuilder
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update
+from types import SimpleNamespace
+from loguru import logger
 
 from handlers.buttons import admin_keyboard, get_profile_keyboard
 from database.db import User, Student, Club
