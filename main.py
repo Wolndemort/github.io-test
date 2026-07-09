@@ -2,10 +2,9 @@ import asyncio
 import os
 import uuid
 from services.analytics import calculate_daily_business_report, calculate_admin_dashboard
-from datetime import timedelta,time
+from datetime import timedelta, time, timezone
 import logging as logging
 from database.db import Subscription, PaymentOrder, User
-from services.tbank_client import tbank
 import sys
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 from contextlib import asynccontextmanager
@@ -101,7 +100,6 @@ async def lifespan(app: FastAPI):
 
     # Ночной блок (23:00) — Полный бэкап всей базы данных тебе в личку
     scheduler.add_job(send_backup_to_admin, 'cron', hour=23, minute=0)
-
     scheduler.start()
     logger.info(f"🔥 Все фоновые SaaS-задачи (ДР, Масс-майлинг, Отчеты, Бэкапы) успешно запущены!")
     app.state.bots_dict = bots_dict
@@ -536,7 +534,5 @@ async def saas_recurrent_payments_job():
             except Exception as e:
                 await session.rollback()
                 logger.error(f"🚨 Ошибка при обработке рекуррента для sub_id {sub.id}: {repr(e)}")
-
-
 
 

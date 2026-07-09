@@ -559,16 +559,12 @@ async def parse_qr_scan(
         # 6. Списание занятия / Формирование вывода баланса с учетом сессии
         if is_unlimited:
             display_balance = "♾ <b>Режим: Безлимит</b>"
+
         elif is_inside_session:
-            # 🔄 Логируем повторный проход в рамках активной сессии
+            # 🔄 Если человек зашел повторно в течение 2.5 часов — занятие сохраняется
             logger.info(f"🔄 Повторный проход по QR в рамках сессии для {student_name}. Занятие сохранено.")
 
-            # Рассчитываем точное время окончания сессии для вывода пользователю
-            last_visit_utc = student.last_visit.replace(
-                tzinfo=timezone.utc) if student.last_visit.tzinfo is None else student.last_visit
-            session_end = last_visit_utc + timedelta(minutes=timeout_minutes)
-
-            # Переводим в МСК (+3) или оставляем как есть для вывода времени (настроить под таймзону клуба по желанию)
+            session_end = student.last_visit + timedelta(minutes=timeout_minutes)
             session_end_str = session_end.strftime("%H:%M")
 
             display_balance = (
@@ -576,10 +572,32 @@ async def parse_qr_scan(
                 f"🔄 <b>Повторный проход (Сессия активна)</b>\n"
                 f"⚠️ <i>После <b>{session_end_str}</b> вход спишет новое занятие!</i>"
             )
+
         else:
-            # Для нового визита честно списываем 1 занятие
+            # 🚨 НАША ПОДСТРАХОВКА: Проверяем сверхдолгую тренировку ПЕРЕД списанием
+            if student.last_visit:
+                # Если прошлый вход был сегодня (меньше 6 часов назад)
+                if (now - student.last_visit).total_seconds() < 21600:  # 6 часов в секундах
+                    try:
+                        if club.owner_id:
+                            await message.bot.send_message(
+                                chat_id=int(club.owner_id),
+                                text=f"⚠️ <b>Алерт СКУД (Повторный визит по QR)</b>\n\n"
+                                     f"Атлет: <b>{student_name}</b>\n"
+                                     f"Прошлый вход: {student.last_visit.strftime('%H:%M')}\n"
+                                     f"Текущий вход: {now.strftime('%H:%M')}\n\n"
+                                     f"Система списала <b>второе занятие за сегодня</b>, так как прошлый вход был менее 6 часов назад.\n"
+                                     f"Проверьте, не забыл ли атлет отметься на выходе.",
+                                parse_mode="HTML"
+                            )
+                    except Exception as alert_err:
+                        logger.warning(f"Не удалось отправить алерт админу по QR: {alert_err}")
+
+            # Для нового визита (сессия закрылась) честно списываем 1 занятие
             student.balance_lessons -= 1
             display_balance = f"🔢 Осталось занятий: <b>{student.balance_lessons}</b>"
+
+
 
         # 7. Фиксация визита (Время обновляем, только если открылась НОВАЯ сессия)
         if not is_inside_session:
