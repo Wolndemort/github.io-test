@@ -48,7 +48,8 @@ DEFAULT_CLUB_SETTINGS = {
     },
     "limits": {
         "freeze_days_step": 7,
-        "subscription_days": 30
+        "subscription_days": 30,
+        "session_timeout_minutes": 150  # 👈 Добавили таймаут сессии визита в минутах
     },
     "payments": {
         "provider": "yookassa",

@@ -1,4 +1,5 @@
 import httpx
+from loguru import logger
 
 from handlers.skud import trigger_dingtian_turnstile
 from fastapi import Query
@@ -348,12 +349,6 @@ async def video_stream(
     )
 
 
-
-
-
-
-
-
 @router.get("/pass-app", response_class=HTMLResponse)
 async def get_web_app_page(request: Request, user_id: int, db: AsyncSession = Depends(get_session)):
     """
@@ -386,11 +381,67 @@ async def open_turnstile(payload: dict, db: AsyncSession = Depends(get_session))
     biometric_token = payload.get("biometric_token")
     init_data = payload.get("init_data")
 
-    # 1. Сюда добавляем валидацию init_data (чтобы проверить, что запрос не подделан)
-    # 2. Проверяем баланс занятий студента (student.balance_lessons)
-    # 3. Отправляем команду на реле Dingtian
+    # 1. Сюда добавляем валидацию init_data (твоя проверка подписи, если она есть)
+    # ... (твой код валидации) ...
 
-    return {"success": True, "message": "Реле сработало, турникет открыт"}
+    # Ищем студента и клуб в базе данных на Аэзе
+    from database.db import Student, Club
+
+    student_res = await db.execute(select(Student).where(Student.id == student_id))
+    student = student_res.scalar_one_or_none()
+    if not student:
+        return {"success": False, "message": "Студент не найден в базе данных"}
+
+    club_res = await db.execute(select(Club).where(Club.id == student.club_id))
+    club = club_res.scalar_one_or_none()
+    if not club:
+        return {"success": False, "message": "Клуб студента не найден"}
+
+    # Вытаскиваем настройки таймаута из JSONB (по умолчанию 150 минут = 2.5 часа)
+    club_settings = club.club_settings or {}
+    timeout_minutes = club_settings.get("limits", {}).get("session_timeout_minutes", 150)
+
+    # 2. ПРОВЕРЯЕМ БАЛАНС ЗАНЯТИЙ СУДЕНТА С УЧЕТОМ ТАЙМАУТА СЕССИИ
+    now = datetime.now(timezone.utc)
+    is_inside_session = False
+
+    if student.last_visit:
+        # Убираем таймзону для корректного сравнения дат из базы
+        last_visit_naive = student.last_visit.replace(tzinfo=None)
+        now_naive = now.replace(tzinfo=None)
+
+        # Если с момента последнего входа прошло меньше 2.5 часов
+        if now_naive - last_visit_naive < timedelta(minutes=timeout_minutes):
+            is_inside_session = True
+
+    if is_inside_session:
+        logger.info(f"🔄 Повторный проход. Атлет {student.name} зашел в рамках сессии. Занятие НЕ списываем.")
+
+        # Расчитываем время, когда сессия официально закроется
+        session_end = student.last_visit + timedelta(minutes=timeout_minutes)
+        # Форматируем в красивый вид ЧЧ:ММ
+        session_end_str = session_end.strftime("%H:%M")
+
+        message_text = (
+            f"Реле сработало, турникет открыт. Осталось занятий: {student.balance_lessons}. "
+            f"⚠️ Внимание: Повторный проход! Сессия активна до {session_end_str}. "
+            f"Следующий вход после этого времени спишет новое занятие!"
+        )
+    else:
+        logger.info(f"🎫 Новый визит. Атлет {student.name} начинает тренировку. Проверяем баланс.")
+        # ... твой старый код списания занятия ...
+        message_text = f"Реле сработало, турникет открыт. Осталось занятий: {student.balance_lessons}"
+
+    await db.commit()
+
+    # 3. Отправляем команду на реле Dingtian (Твой рабочий код открытия турникета)
+    # ... (Твоя отправка запросов на IP реле, которая уже идеально работает) ...
+
+
+    return {
+        "success": True,
+        "message": message_text
+    }
 
 
 

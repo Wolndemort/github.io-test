@@ -12,7 +12,7 @@ from sqlalchemy import select
 from handlers.buttons import get_main_menu_keyboard, get_profile_keyboard, get_section_menu_kb
 from aiogram.fsm.context import FSMContext
 from aiogram.types import InlineKeyboardButton, BufferedInputFile
-from datetime import timedelta
+from datetime import timedelta, timezone
 from aiogram import Router, F, types
 from datetime import datetime, date
 from loguru import logger
@@ -146,7 +146,9 @@ async def detailed_status_handler(
         club: Club
 ):
     user_id = callback.from_user.id
-    now = datetime.now()
+
+    # Так как сервер на Аэзе в Вене, работаем строго в UTC для честного сравнения дат
+    now = datetime.now(timezone.utc)
 
     # Запрашиваем студентов этого родителя для текущего клуба
     stmt = select(Student).where(
@@ -164,10 +166,18 @@ async def detailed_status_handler(
     # Заголовок нового экрана
     detail_text = f"📊 <b>Подробный статус абонементов</b>\n🏰 Клуб: <b>{club.name}</b>\n\n"
 
+    # Вытаскиваем таймаут сессии клуба из JSONB (дефолт 150 минут = 2.5 часа)
+    club_settings = club.club_settings or {}
+    timeout_minutes = club_settings.get("limits", {}).get("session_timeout_minutes", 150)
+
     for s in students:
         # 1. Расчет дней до окончания или сколько дней назад истек
         if s.expire_date:
-            days_left = (s.expire_date - now).days
+            # Убираем таймзону для корректного вычитания naive datetime
+            expire_naive = s.expire_date.replace(tzinfo=None)
+            now_naive = now.replace(tzinfo=None)
+
+            days_left = (expire_naive - now_naive).days
             if days_left >= 0:
                 time_info = f"⏳ Осталось дней: <b>{days_left}</b>"
             else:
@@ -175,11 +185,23 @@ async def detailed_status_handler(
         else:
             time_info = "⏳ Срок действия: <b>не установлен</b>"
 
-        # 2. Форматирование даты последнего визита
+        # 2. Форматирование даты последнего визита И РАСЧЕТ ТЕКУЩЕЙ СЕССИИ
+        session_status_str = ""
         if s.last_visit:
-            last_visit_str = f"<b>{s.last_visit.strftime('%d.%m.%Y в %H:%M')}</b>"
+            # Приводим к UTC
+            last_visit_utc = s.last_visit.replace(tzinfo=timezone.utc) if s.last_visit.tzinfo is None else s.last_visit
+            last_visit_str = f"<b>{last_visit_utc.strftime('%d.%m.%Y в %H:%M')}</b>"
+
+            # Проверяем, активна ли 2.5-часовая сессия прямо сейчас
+            if now - last_visit_utc < timedelta(minutes=timeout_minutes):
+                session_end = last_visit_utc + timedelta(minutes=timeout_minutes)
+                session_end_str = session_end.strftime("%H:%M")
+                session_status_str = f"🚪 Сессия входа: <b>🟢 Активна (до {session_end_str})</b>\n"
+            else:
+                session_status_str = f"🚪 Сессия входа: <b>⚫️ Завершена</b>\n"
         else:
             last_visit_str = "<i>еще не посещал занятия</i>"
+            session_status_str = f"🚪 Сессия входа: <b>⚫️ Нет активных сессий</b>\n"
 
         # 3. Форматирование дня рождения
         if s.birthday:
@@ -198,11 +220,11 @@ async def detailed_status_handler(
             f"{time_info}\n"
             f"❄️ Возможность заморозки: {freeze_status}\n"
             f"👟 Последний визит: {last_visit_str}\n"
+            f"{session_status_str}"  # 👈 Добавили вывод статуса текущей сессии
             f"───────────────────\n\n"
         )
 
-    # Кнопка «Назад», которая использует старый callback 'profile'
-    # При нажатии на неё сработает ваш universal_profile_handler и вернет главный экран ЛК
+    # Кнопка «Назад»
     back_keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="⬅️ Назад в Личный Кабинет", callback_data="profile")]
     ])
@@ -473,7 +495,8 @@ async def parse_qr_scan(
         if not hmac.compare_digest(signature, generate_signature(scanned_id, time_salt)):
             return await message.answer("🚨 ВНИМАНИЕ: QR-код подделан!")
 
-        now = datetime.now()
+        # Работаем в UTC, так как сервер на Аэзе в Вене
+        now = datetime.now(timezone.utc)
 
         # 2. Поиск атлета с проверкой клуба (КРИТИЧНО ДЛЯ SAAS)
         student = await session.get(Student, scanned_id)
@@ -489,7 +512,9 @@ async def parse_qr_scan(
             freeze_step = club_settings.get("limits", {}).get("freeze_days_step", 7)
 
             # Если размораживается раньше времени — корректируем дату
-            days_passed = (now - (student.last_visit or now)).days
+            last_visit_utc = student.last_visit.replace(
+                tzinfo=timezone.utc) if student.last_visit and student.last_visit.tzinfo is None else student.last_visit
+            days_passed = (now - (last_visit_utc or now)).days
             if days_passed < freeze_step:
                 diff = freeze_step - days_passed
                 if student.expire_date:
@@ -497,50 +522,80 @@ async def parse_qr_scan(
 
             await message.answer(f"❄️ Абонемент {student_name} РАЗМОРОЖЕН")
 
-        # 4. Анти-флуд (5 минут)
-        if student.last_visit and (now - student.last_visit).total_seconds() < 300:
-            return await message.answer(f"⚠️ {student_name} уже в зале! (Повтор через 5 мин)")
+        # 4. ОБНОВЛЕННАЯ ЛОГИКА СЕССИИ (Таймаут из JSONB)
+        timeout_minutes = club_settings.get("limits", {}).get("session_timeout_minutes", 150)
 
-        # 5. Проверка прав доступа (Срок и Баланс)
+        is_inside_session = False
+        if student.last_visit:
+            last_visit_utc = student.last_visit.replace(
+                tzinfo=timezone.utc) if student.last_visit.tzinfo is None else student.last_visit
+            # Если с момента последнего прохода прошло меньше заданных минут (например, 150 мин = 2.5 часа)
+            if (now - last_visit_utc).total_seconds() < (timeout_minutes * 60):
+                is_inside_session = True
+
+        # Анти-спам (чтобы реле не щелкало каждую секунду)
+        if student.last_visit:
+            last_visit_utc = student.last_visit.replace(
+                tzinfo=timezone.utc) if student.last_visit.tzinfo is None else student.last_visit
+            if (now - last_visit_utc).total_seconds() < 10:
+                return await message.answer("⏳ Не спамьте, турникет уже обрабатывает запрос.")
+
         # 5. Проверка прав доступа (Срок действия абонемента)
-        if not student.expire_date or student.expire_date < now:
+        # Убираем таймзоны для корректного сравнения naive datetime из базы
+        expire_naive = student.expire_date.replace(tzinfo=None) if student.expire_date else None
+        now_naive = now.replace(tzinfo=None)
+
+        if not expire_naive or expire_naive < now_naive:
             return await message.answer(f"🔴 ДОСТУП ЗАПРЕЩЕН\n👤 {student_name}\n❌ Срок действия абонемента истек")
 
-        # Проверяем, является ли абонемент безлимитным (используем ваш маркер 999)
+        # Проверяем, является ли абонемент безлимитным (маркер 999)
         is_unlimited = (student.balance_lessons == 999)
 
-        # Если абонемент НЕ безлимитный, проверяем остаток занятий
-        if not is_unlimited:
+        # Если абонемент НЕ безлимитный и сессия НОВАЯ, проверяем остаток занятий
+        if not is_unlimited and not is_inside_session:
             if (student.balance_lessons or 0) <= 0:
                 return await message.answer(f"🔴 ДОСТУП ЗАПРЕЩЕН\n👤 {student_name}\n❌ На балансе нет занятий")
 
-        # 6. Списание занятия / Формирование вывода баланса
+        # 6. Списание занятия / Формирование вывода баланса с учетом сессии
         if is_unlimited:
-            # Для безлимита ничего не вычитаем, баланс остается 999
             display_balance = "♾ <b>Режим: Безлимит</b>"
+        elif is_inside_session:
+            # 🔄 Логируем повторный проход в рамках активной сессии
+            logger.info(f"🔄 Повторный проход по QR в рамках сессии для {student_name}. Занятие сохранено.")
+
+            # Рассчитываем точное время окончания сессии для вывода пользователю
+            last_visit_utc = student.last_visit.replace(
+                tzinfo=timezone.utc) if student.last_visit.tzinfo is None else student.last_visit
+            session_end = last_visit_utc + timedelta(minutes=timeout_minutes)
+
+            # Переводим в МСК (+3) или оставляем как есть для вывода времени (настроить под таймзону клуба по желанию)
+            session_end_str = session_end.strftime("%H:%M")
+
+            display_balance = (
+                f"🔢 Осталось занятий: <b>{student.balance_lessons}</b>\n"
+                f"🔄 <b>Повторный проход (Сессия активна)</b>\n"
+                f"⚠️ <i>После <b>{session_end_str}</b> вход спишет новое занятие!</i>"
+            )
         else:
-            # Для обычного абонемента списываем 1 занятие
+            # Для нового визита честно списываем 1 занятие
             student.balance_lessons -= 1
             display_balance = f"🔢 Осталось занятий: <b>{student.balance_lessons}</b>"
 
-        # 7. Фиксация визита
-        student.last_visit = now
-        await session.commit()  # Сохраняем изменения в базе данных
+        # 7. Фиксация визита (Время обновляем, только если открылась НОВАЯ сессия)
+        if not is_inside_session:
+            student.last_visit = now
 
+        await session.commit()  # Сохраняем изменения в базу данных на Аэзе
 
-        #интеграция турникета
         # === ИНТЕГРАЦИЯ ТУРНИКЕТА ===
-        # ИСПРАВЛЕНО: Правильное имя ключа "turnstile"
         turnstile_config = club_settings.get("turnstile", {})
         turnstile_opened = False
         turnstile_status = ""
         status_emoji = "🔵"
 
-        # ИСПРАВЛЕНО: Проверяем правильный флаг "enabled"
         if turnstile_config.get("enabled", False):
             turnstile_opened = await trigger_dingtian_turnstile(turnstile_config)
 
-            # ИСПРАВЛЕНО: Исправлены HTML-теги </b> и логика сборки статуса
             if turnstile_opened:
                 turnstile_status = "\n✅ <b>Турникет открыт</b>"
                 status_emoji = "🟢"
@@ -548,7 +603,7 @@ async def parse_qr_scan(
                 turnstile_status = "\n⚠️ <b>Ошибка турникета. Пропустите вручную!</b>"
                 status_emoji = "⚠️"
 
-        # ИСПРАВЛЕНО: Переменная turnstile_status и status_emoji добавлены в итоговый текст
+        # Формируем итоговый красивый ответ
         await message.answer(
             f"{status_emoji} <b>ПРОХОДИТЕ</b>\n👤 Атлет: <b>{student_name}</b>\n"
             f"{display_balance}\n"
@@ -567,7 +622,6 @@ async def parse_qr_scan(
                 )
             except Exception as parent_err:
                 logger.warning(f"Не удалось отправить уведомление родителю {student.parent_id}: {parent_err}")
-
 
     except Exception as e:
         logger.error(f"❌ Ошибка сканера: {e}")
