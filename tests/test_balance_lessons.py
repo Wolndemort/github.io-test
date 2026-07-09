@@ -1,27 +1,34 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, patch, MagicMock
 import pytest
 from handlers.user_option import parse_qr_scan
 
+
 @pytest.mark.asyncio
 @patch("handlers.user_option.generate_signature")
 async def test_parse_qr_scan_no_lessons(mock_gen_sig):
-    """Проверяем блокировку лимитного атлета при балансе 0"""
+    """Проверяем блокировку лимитного атлета при балансе 0, если сессия закрыта (визит 5 часов назад)"""
     mock_gen_sig.return_value = 'valid_sig'
 
     session = AsyncMock()
     club = MagicMock()
     club.id = 1
     club.name = "Test Club"
-    club_settings = {"turnstile": {"enabled": False}} # Подстраховка для конфига
+
+    # Задаем дефолтные лимиты в конфиг для теста
+    club_settings = {
+        "limits": {"session_timeout_minutes": 150, "freeze_days_step": 7},
+        "turnstile": {"enabled": False}
+    }
 
     student = MagicMock()
     student.name = 'AdamTest'
     student.club_id = 1
-    student.balance_lessons = 0 # Лимитный абонемент закончился
+    student.balance_lessons = 0  # Лимитный абонемент закончился
     student.is_frozen = 0
-    student.last_visit = datetime.now() - timedelta(minutes=10)
-    student.expire_date = datetime.now() + timedelta(days=1)
+    # ИСПРАВЛЕНО: Ставим визит 5 часов назад в UTC, чтобы сессия гарантированно ЗАКРЫЛАСЬ
+    student.last_visit = datetime.now(timezone.utc) - timedelta(hours=5)
+    student.expire_date = datetime.now(timezone.utc) + timedelta(days=1)
 
     session.get.return_value = student
 
@@ -34,7 +41,6 @@ async def test_parse_qr_scan_no_lessons(mock_gen_sig):
     args, kwargs = message.answer.call_args
     actual_text = args[0] if args else kwargs.get('text', '')
 
-    # ИСПРАВЛЕНО под наш новый текст ошибки в parse_qr_scan
     assert "🔴 ДОСТУП ЗАПРЕЩЕН" in actual_text
     assert "❌ На балансе нет занятий" in actual_text
     assert student.balance_lessons == 0
@@ -43,22 +49,26 @@ async def test_parse_qr_scan_no_lessons(mock_gen_sig):
 @pytest.mark.asyncio
 @patch("handlers.user_option.generate_signature")
 async def test_parse_qr_scan_unlimited_success(mock_gen_sig):
-    """Проверяем, что безлимитного атлета (999) пускает в зал и баланс не списывается"""
+    """Проверяем, что безлимитного атлета (999) пускает в зал при открытии новой сессии"""
     mock_gen_sig.return_value = 'valid_sig'
 
     session = AsyncMock()
     club = MagicMock()
     club.id = 1
     club.name = "Test Club"
-    club_settings = {"turnstile": {"enabled": False}}
+    club_settings = {
+        "limits": {"session_timeout_minutes": 150, "freeze_days_step": 7},
+        "turnstile": {"enabled": False}
+    }
 
     student = MagicMock()
     student.name = 'AdamTest'
     student.club_id = 1
-    student.balance_lessons = 999 # МАРКЕР БЕЗЛИМИТА
+    student.balance_lessons = 999  # МАРКЕР БЕЗЛИМИТА
     student.is_frozen = 0
-    student.last_visit = datetime.now() - timedelta(minutes=10)
-    student.expire_date = datetime.now() + timedelta(days=30) # Срок активен
+    # ИСПРАВЛЕНО: Ставим визит в UTC
+    student.last_visit = datetime.now(timezone.utc) - timedelta(hours=5)
+    student.expire_date = datetime.now(timezone.utc) + timedelta(days=30)  # Срок активен
 
     session.get.return_value = student
 
@@ -71,7 +81,6 @@ async def test_parse_qr_scan_unlimited_success(mock_gen_sig):
     args, kwargs = message.answer.call_args
     actual_text = args[0] if args else kwargs.get('text', '')
 
-    # Проверяем, что безлимитчика пустило и текст корректный
     assert "ПРОХОДИТЕ" in actual_text
     assert "♾ <b>Режим: Безлимит</b>" in actual_text
-    assert student.balance_lessons == 999 # Баланс НЕ уменьшился!
+    assert student.balance_lessons == 999  # Баланс НЕ уменьшился!
