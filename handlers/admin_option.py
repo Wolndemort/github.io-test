@@ -3,7 +3,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from aiogram.filters import StateFilter
 from handlers.skud import save_and_test_turnstile
 from sqlalchemy.orm.attributes import flag_modified
-from handlers.states import AdminStates, AdminSettings, TurnstileSetup, AdminTariffStates, AdminScheduleStates, YooKassaSetupStates
+from handlers.states import AdminStates, AdminSettings, TurnstileSetup, AdminTariffStates, AdminScheduleStates, \
+    YooKassaSetupStates, AdminSettingsSG
 from redis.asyncio import Redis
 from sqlalchemy import update
 import pandas as pd
@@ -102,32 +103,32 @@ async def admin_settings_menu(callback: types.CallbackQuery, club_settings: dict
     features = club_settings.get("features", {})
     limits = club_settings.get("limits", {})
 
-    # Список системных кнопок
+    # Список системных кнопок переключателей модулей
     buttons = {
         "freeze": "Заморозка",
         "qr_checkin": "QR-вход",
         "manual_add": "Ручное добавление",
-        "online_payments": "Онлайн-платежи"  # 👈 Добавили переключатель платежей
+        "online_payments": "Онлайн-платежи"
     }
 
     for key, label in buttons.items():
-        status = "✅" if features.get(key, False) else "❌"  # По умолчанию False для платежей
+        status = "✅" if features.get(key, False) else "❌"
         builder.row(types.InlineKeyboardButton(
             text=f"{status} {label}",
             callback_data=f"toggle_feat_{key}")
         )
 
-    # 👈 Если онлайн-платежи включены, показываем кнопку для настройки ключей ЮKassa
+    # Если онлайн-платежи включены, показываем кнопку для настройки ключей ЮKassa
     if features.get("online_payments", False):
         builder.row(types.InlineKeyboardButton(
             text="🔑 Настройка ключей ЮKassa",
             callback_data="admin_setup_yookassa"
         ))
 
-    sub_days = limits.get("subscription_days", 30)
+    # ⚙️ НАША НОВАЯ КНОПКА: Переход в меню изменения сессий СКУД и шага заморозок
     builder.row(types.InlineKeyboardButton(
-        text=f"⏳ Срок абона: {sub_days} дн.",
-        callback_data="edit_sub_days"
+        text="⚙️ Настройка лимитов клуба",
+        callback_data="manage_club_limits"  # 👈 Тот самый колбэк, который ведёт на новое меню!
     ))
 
     builder.row(types.InlineKeyboardButton(
@@ -144,6 +145,7 @@ async def admin_settings_menu(callback: types.CallbackQuery, club_settings: dict
     t_status = "✅" if turnstile_config.get("enabled", False) else "❌"
     builder.row(types.InlineKeyboardButton(
         text=f"{t_status} СКУД(Турникет)", callback_data='admin_turnstile_main'))
+
     builder.row(types.InlineKeyboardButton(text="🥋 Управление секциями", callback_data="manage_disciplines"))
     builder.row(types.InlineKeyboardButton(text="⬅️ Назад", callback_data="admin_keyboard"))
 
@@ -153,56 +155,6 @@ async def admin_settings_menu(callback: types.CallbackQuery, club_settings: dict
         parse_mode="HTML"
     )
 
-
-@router.callback_query(F.data == "edit_sub_days")
-async def edit_sub_days_choice(callback: types.CallbackQuery):
-    builder = InlineKeyboardBuilder()
-    # Популярные пресеты
-    for days in [14, 30, 45, 60, 90]:
-        builder.button(text=f"{days} дн.", callback_data=f"set_sub_days_{days}")
-
-    builder.adjust(3)
-    builder.row(types.InlineKeyboardButton(text="⬅️ Назад", callback_data="admin_settings"))
-
-    await callback.message.edit_text(
-        "⏳ <b>Выберите срок действия абонемента:</b>\n"
-        "Это число дней будет добавляться при каждой оплате.",
-        reply_markup=builder.as_markup(),
-        parse_mode="HTML"
-    )
-
-
-@router.callback_query(F.data.startswith("set_sub_days_"))
-async def save_sub_days(
-        callback: types.CallbackQuery,
-        club: Club,  # <--- Достаем объект целиком, как в Middleware
-        club_settings: dict,
-        session: AsyncSession,
-        redis: Redis
-
-):
-    # 1. Парсим дни
-    try:
-        new_days = int(callback.data.split("_")[-1])
-    except (ValueError, IndexError):
-        return await callback.answer("Ошибка данных", show_alert=True)
-
-    # 2. Обновляем JSON (безопасно через setdefault)
-    club_settings.setdefault("limits", {})["subscription_days"] = new_days
-
-    # 3. Сохраняем в базу (используем club.id)
-    await session.execute(
-        update(Club)
-        .where(Club.id == club.id)
-        .values(club_settings=club_settings)
-    )
-    await session.commit()
-    await redis.delete(f"club_config:{callback.bot.token}")
-    await callback.answer(f"✅ Срок изменен на {new_days} дн.")
-
-    # Возвращаемся в меню настроек
-    # Важно: прокидываем обновленный club_settings, чтобы кнопка сразу показала новое число
-    await admin_settings_menu(callback, club_settings)
 
 
 @router.callback_query(F.data == "manage_disciplines")
@@ -1795,3 +1747,102 @@ async def process_secret_key(message: types.Message, state: FSMContext, club_id:
             )
         else:
             await message.answer("🚨 Произошла критическая ошибка: Клуб не найден в базе данных.")
+
+
+@router.callback_query(F.data == "manage_club_limits")
+async def manage_club_limits_handler(callback: types.CallbackQuery, club: Club):
+    """Экран управления лимитами клуба"""
+    club_settings = club.club_settings or {}
+    limits = club_settings.get("limits", {})
+
+    # Достаем текущие значения из JSONB или берем наши дефолты
+    timeout = limits.get("session_timeout_minutes", 150)
+    freeze_step = limits.get("freeze_days_step", 7)
+
+    text = f"⚙️ <b>Управление лимитами клуба «{club.name}»</b>\n\n" \
+           f"⏱ <b>Сессия визита (СКУД):</b> <code>{timeout} мин.</code> ({timeout / 60:.1f} ч.)\n" \
+           f"<i>В течение этого времени повторные проходы через турникет не списывают занятия.</i>\n\n" \
+           f"❄️ <b>Шаг заморозки абонемента:</b> <code>{freeze_step} дн.</code>\n" \
+           f"<i>Минимальный пакет дней, на который списывается заморозка.</i>\n\n" \
+           f"Выберите параметр для изменения:"
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⏱ Изменить время сессии", callback_data="change_limit_session")],
+        [InlineKeyboardButton(text="❄️ Изменить шаг заморозки", callback_data="change_limit_freeze")],
+        [InlineKeyboardButton(text="⬅️ Назад в настройки", callback_data="admin_settings")]
+    ])
+
+    await callback.message.edit_text(text=text, reply_markup=kb, parse_mode="HTML")
+    await callback.answer()
+
+
+# === ИЗМЕНЕНИЕ СЕССИИ ВИЗИТА ===
+@router.callback_query(F.data == "change_limit_session")
+async def change_limit_session(callback: types.CallbackQuery, state: FSMContext):
+    await state.set_state(AdminSettingsSG.waiting_for_session_timeout)
+    await callback.message.answer("⏱ <b>Введите новое время сессии визита в минутах</b> (например, 120 для 2 часов):",
+                                  parse_mode="HTML")
+    await callback.answer()
+
+
+@router.message(AdminSettingsSG.waiting_for_session_timeout)
+async def process_session_timeout(message: types.Message, state: FSMContext, session: AsyncSession, club: Club):
+    if not message.text.isdigit():
+        return await message.answer("❌ Ошибка: Введите целое число минут!")
+
+    minutes = int(message.text)
+    if minutes < 1 or minutes > 1440:
+        return await message.answer("❌ Ошибка: Время сессии должно быть в диапазоне от 1 до 1440 минут (24 часа)!")
+
+    # Записываем в JSONB
+    if not club.club_settings:
+        club.club_settings = {}
+    if "limits" not in club.club_settings:
+        club.club_settings["limits"] = {}
+
+    club.club_settings["limits"]["session_timeout_minutes"] = minutes
+
+    # Сигнализируем SQLAlchemy, что JSONB-поле изменилось
+    flag_modified(club, "club_settings")
+
+    session.add(club)
+    await session.commit()
+
+    await state.clear()
+    await message.answer(f"✅ <b>Время СКУД-сессии успешно изменено на {minutes} минут!</b>", parse_mode="HTML")
+
+
+# === ИЗМЕНЕНИЕ ШАГА ЗАМОРОЗКИ ===
+@router.callback_query(F.data == "change_limit_freeze")
+async def change_limit_freeze(callback: types.CallbackQuery, state: FSMContext):
+    await state.set_state(AdminSettingsSG.waiting_for_freeze_step)
+    await callback.message.answer("❄️ <b>Введите новый минимальный шаг заморозки в днях</b> (например, 7):",
+                                  parse_mode="HTML")
+    await callback.answer()
+
+
+@router.message(AdminSettingsSG.waiting_for_freeze_step)
+async def process_freeze_step(message: types.Message, state: FSMContext, session: AsyncSession, club: Club):
+    if not message.text.isdigit():
+        return await message.answer("❌ Ошибка: Введите целое число дней!")
+
+    days = int(message.text)
+    if days < 1 or days > 30:
+        return await message.answer("❌ Ошибка: Шаг заморозки должен быть от 1 до 30 дней!")
+
+    # Записываем в JSONB
+    if not club.club_settings:
+        club.club_settings = {}
+    if "limits" not in club.club_settings:
+        club.club_settings["limits"] = {}
+
+    club.club_settings["limits"]["freeze_days_step"] = days
+
+    # Сигнализируем SQLAlchemy, что JSONB-поле изменилось
+    flag_modified(club, "club_settings")
+
+    session.add(club)
+    await session.commit()
+
+    await state.clear()
+    await message.answer(f"✅ <b>Минимальный шаг заморозки успешно изменен на {days} дней!</b>", parse_mode="HTML")

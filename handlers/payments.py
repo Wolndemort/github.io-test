@@ -558,7 +558,15 @@ async def admin_confirm_payment(
 
         # 6. КРАСИВОЕ SaaS-УВЕДОМЛЕНИЕ ДЛЯ КЛИЕНТА (РОДИТЕЛЯ)
         try:
-            club_name = club_settings.get("ui", {}).get("club_name", club.name)
+            # Вытаскиваем имя из JSONB
+            ui_club_name = club_settings.get("ui", {}).get("club_name")
+
+            # Если имя пустое или совпадает с дефолтной заглушкой — берем железное имя из колонки club.name
+            if not ui_club_name or ui_club_name == "Новый фитнес-клуб":
+                club_name = club.name
+            else:
+                club_name = ui_club_name
+
             await callback.bot.send_message(
                 chat_id=parent_id,
                 text=f"🥳 <b>Отличные новости!</b>\n\n"

@@ -69,3 +69,11 @@ class AdminScheduleStates(StatesGroup):
 class YooKassaSetupStates(StatesGroup):
     waiting_for_shop_id = State()      # Ожидание ввода Shop ID
     waiting_for_secret_key = State()   # Ожидание ввода Секретного ключа
+
+
+
+
+class AdminSettingsSG(StatesGroup):
+    # Твои старые состояния (например, для ввода ключей ЮKassa)
+    waiting_for_session_timeout = State()  # Ждем ввод минут сессии
+    waiting_for_freeze_step = State()      # Ждем ввод дней заморозки
