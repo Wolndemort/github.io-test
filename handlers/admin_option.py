@@ -1790,7 +1790,13 @@ async def change_limit_session(callback: types.CallbackQuery, state: FSMContext)
 # ⏱ ИСПРАВЛЕННЫЙ ХЕНДЛЕР СЕССИИ ВИЗИТА (Строка 1808)
 # ==========================================
 @router.message(AdminSettingsSG.waiting_for_session_timeout)
-async def process_session_timeout(message: types.Message, state: FSMContext, session: AsyncSession, club: Club):
+async def process_session_timeout(
+        message: types.Message,
+        state: FSMContext,
+        session: AsyncSession,
+        club: Club,
+        redis: Redis
+):
     if not message.text.isdigit():
         return await message.answer("❌ Ошибка: Введите целое число минут!")
 
@@ -1798,7 +1804,6 @@ async def process_session_timeout(message: types.Message, state: FSMContext, ses
     if minutes < 1 or minutes > 1440:
         return await message.answer("❌ Ошибка: Время сессии должно быть в диапазоне от 1 до 1440 минут (24 часа)!")
 
-    # Безопасная инициализация вложенной JSONB-структуры
     if not club.club_settings or not isinstance(club.club_settings, dict):
         club.club_settings = {}
     if "limits" not in club.club_settings or not isinstance(club.club_settings["limits"], dict):
@@ -1807,16 +1812,15 @@ async def process_session_timeout(message: types.Message, state: FSMContext, ses
     club.club_settings["limits"]["session_timeout_minutes"] = minutes
 
     try:
-        # ✅ ИСПРАВЛЕНО: Привязываем объект к сессии для выполнения UPDATE, а не INSERT
         db_club = await session.merge(club)
-
-        # Сигнализируем SQLAlchemy, что JSONB-поле на привязанном объекте изменилось
         flag_modified(db_club, "club_settings")
-
         await session.commit()
+
+        # Полный сброс кэша в Redis для этого токена бота
+        await redis.delete(f"club_config:{message.bot.token}")
     except Exception as e:
         logger.error(f"Ошибка при сохранении таймаута СКУД: {e}")
-        await session.rollback()  # Откатываем битую транзакцию
+        await session.rollback()
         return await message.answer("❌ Не удалось сохранить изменения лимитов в БД.")
 
     await state.clear()
@@ -1835,7 +1839,13 @@ async def change_limit_freeze(callback: types.CallbackQuery, state: FSMContext):
 # ❄️ ИСПРАВЛЕННЫЙ ХЕНДЛЕР ШАГА ЗАМОРОЗКИ (Строка 1844)
 # ==========================================
 @router.message(AdminSettingsSG.waiting_for_freeze_step)
-async def process_freeze_step(message: types.Message, state: FSMContext, session: AsyncSession, club: Club):
+async def process_freeze_step(
+        message: types.Message,
+        state: FSMContext,
+        session: AsyncSession,
+        club: Club,
+        redis: Redis
+):
     if not message.text.isdigit():
         return await message.answer("❌ Ошибка: Введите целое число дней!")
 
@@ -1843,7 +1853,6 @@ async def process_freeze_step(message: types.Message, state: FSMContext, session
     if days < 1 or days > 30:
         return await message.answer("❌ Ошибка: Шаг заморозки должен быть от 1 до 30 дней!")
 
-    # Безопасная инициализация вложенной JSONB-структуры
     if not club.club_settings or not isinstance(club.club_settings, dict):
         club.club_settings = {}
     if "limits" not in club.club_settings or not isinstance(club.club_settings["limits"], dict):
@@ -1852,16 +1861,15 @@ async def process_freeze_step(message: types.Message, state: FSMContext, session
     club.club_settings["limits"]["freeze_days_step"] = days
 
     try:
-        # ✅ ИСПРАВЛЕНО: Привязываем объект к сессии для выполнения UPDATE, а не INSERT
         db_club = await session.merge(club)
-
-        # Сигнализируем SQLAlchemy, что JSONB-поле на привязанном объекте изменилось
         flag_modified(db_club, "club_settings")
-
         await session.commit()
+
+        # Полный сброс кэша в Redis для этого токена бота
+        await redis.delete(f"club_config:{message.bot.token}")
     except Exception as e:
         logger.error(f"Ошибка при сохранении шага заморозки: {e}")
-        await session.rollback()  # Откатываем битую транзакцию
+        await session.rollback()
         return await message.answer("❌ Не удалось сохранить изменения шага заморозки в БД.")
 
     await state.clear()

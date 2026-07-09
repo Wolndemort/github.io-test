@@ -3,7 +3,7 @@ from datetime import timedelta, datetime
 from aiogram.exceptions import TelegramUnauthorizedError, TelegramNetworkError
 from loguru import logger
 from redis.asyncio import Redis
-from sqlalchemy import update
+from sqlalchemy.orm.attributes import flag_modified
 from handlers.states import SuperAdminStates
 from aiogram import Router, types, F, Bot
 from aiogram.filters import Command
@@ -347,21 +347,48 @@ async def reload_all_system_configs(
         return await callback.answer("У вас нет прав суперадмина ⛔", show_alert=True)
 
     try:
-        # 1. Записываем пустой DEFAULT_CLUB_SETTINGS во все клубы
-        await session.execute(
-            update(Club).values(club_settings=DEFAULT_CLUB_SETTINGS)
-        )
-        await session.commit()
+        # 1. Вытаскиваем абсолютно все существующие клубы из базы данных
+        result = await session.execute(select(Club))
+        all_clubs = result.scalars().all()
 
-        # ВАЖНО: Намертво сбрасываем кэш текущей сессии SQLAlchemy!
-        # Это заставит бот принудительно перечитать пустой JSON из СУБД при следующем клике
-        session.expire_all()
+        updated_clubs_count = 0
+
+        for club in all_clubs:
+            current_settings = club.club_settings or {}
+            is_modified = False
+
+            # Безопасно мерджим структуру верхнего уровня (features, ui, limits, turnstile и т.д.)
+            for section_key, section_value in DEFAULT_CLUB_SETTINGS.items():
+                if section_key not in current_settings:
+                    # Если секции (например, 'turnstile') вообще нет в БД клуба, копируем целиком
+                    current_settings[section_key] = section_value
+                    is_modified = True
+                elif isinstance(section_value, dict) and isinstance(current_settings[section_key], dict):
+                    # Если секция есть и это словарь (например, 'limits'), проверяем вложенные поля
+                    for field_key, field_value in section_value.items():
+                        if field_key not in current_settings[section_key]:
+                            # 🎯 НАШЛИ! Поля (например, 'session_timeout_minutes') нет в БД клуба — аккуратно добавляем
+                            current_settings[section_key][field_key] = field_value
+                            is_modified = True
+
+            # Сохраняем изменения в базу только если реально нашли и добавили новые поля
+            if is_modified:
+                club.club_settings = current_settings
+                flag_modified(club, "club_settings")
+                session.add(club)
+                updated_clubs_count += 1
+
+        if updated_clubs_count > 0:
+            await session.commit()
+            # Очищаем кэш текущей сессии SQLAlchemy, чтобы принудительно перечитать свежий JSON из Postgres
+            session.expire_all()
 
     except Exception as e:
         await session.rollback()
+        logger.error(f"Ошибка при мердже дефолтных настроек в СУБД: {e}")
         return await callback.answer(f"Ошибка БД: {e}", show_alert=True)
 
-    # 2. Очищаем кэш всех ботов в Redis (твой идеальный рабочий цикл SCAN)
+    # 2. Очищаем кэш всех ботов в Redis, чтобы новые поля моментально стали доступны
     cursor = 0
     deleted_count = 0
     while True:
@@ -373,8 +400,9 @@ async def reload_all_system_configs(
             break
 
     await callback.answer(
-        f"🚀 Глобальное обновление!\n"
-        f"База обнулена. Кэш {deleted_count} ботов полностью сброшен.",
+        f"🚀 Структура JSONB синхронизирована!\n\n"
+        f"Добавлены новые поля в {updated_clubs_count} клубов.\n"
+        f"Боевые настройки не задеты. Кэш {deleted_count} ботов сброшен.",
         show_alert=True
     )
 
