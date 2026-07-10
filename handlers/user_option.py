@@ -484,7 +484,7 @@ async def parse_qr_scan(
     logger.info(f"🔍 Сканер клуба {club.name} (ID:{club.id}): {raw_data}")
 
     try:
-        # 1. Валидация формата и подписи
+        # 1. Валидация формата и подписи QR
         parts = raw_data.split(':')
         if len(parts) != 4 or parts[0] != 'student':
             return await message.answer("❌ Ошибка: Неверный формат QR")
@@ -495,26 +495,36 @@ async def parse_qr_scan(
         if not hmac.compare_digest(signature, generate_signature(scanned_id, time_salt)):
             return await message.answer("🚨 ВНИМАНИЕ: QR-код подделан!")
 
-        # Работаем в UTC, так как сервер на Аэзе в Вене
-        now = datetime.now(timezone.utc)
+        # Переводим всё в naive UTC (без таймзон), чтобы идеально сопоставить с базой Postgres на Аэзе
+        now_naive = datetime.now(timezone.utc).replace(tzinfo=None)
 
-        # 2. Поиск атлета с проверкой клуба (КРИТИЧНО ДЛЯ SAAS)
-        student = await session.get(Student, scanned_id)
+        # 2. Поиск атлета с проверкой клуба + ЗАЩИТА ROW-LEVEL LOCKING (with_for_update)
+        student_query = (
+            select(Student)
+            .where(Student.id == scanned_id)
+            .with_for_update()
+        )
+        student_res = await session.execute(student_query)
+        student = student_res.scalar_one_or_none()
+
         if not student or student.club_id != club.id:
             return await message.answer(f"❌ Атлет не найден в базе клуба {club.name}!")
 
         student_name = str(student.name)
 
+        # 🛑 АНТИ-СПАМ (Защищает реле от флуда до любых проверок баланса)
+        if student.last_visit:
+            last_visit_naive = student.last_visit.replace(tzinfo=None)
+            if (now_naive - last_visit_naive).total_seconds() < 10:
+                return await message.answer("⏳ Не спамьте, турникет уже обрабатывает предыдущий запрос.")
+
         # 3. Логика разморозки (Берем дни из конфига)
         if student.is_frozen == 1:
             student.is_frozen = 0
-            # Вычисляем шаг заморозки из конфига (по дефолту 7)
             freeze_step = club_settings.get("limits", {}).get("freeze_days_step", 7)
 
-            # Если размораживается раньше времени — корректируем дату
-            last_visit_utc = student.last_visit.replace(
-                tzinfo=timezone.utc) if student.last_visit and student.last_visit.tzinfo is None else student.last_visit
-            days_passed = (now - (last_visit_utc or now)).days
+            last_visit_naive = student.last_visit.replace(tzinfo=None) if student.last_visit else now_naive
+            days_passed = (now_naive - last_visit_naive).days
             if days_passed < freeze_step:
                 diff = freeze_step - days_passed
                 if student.expire_date:
@@ -527,23 +537,13 @@ async def parse_qr_scan(
 
         is_inside_session = False
         if student.last_visit:
-            last_visit_utc = student.last_visit.replace(
-                tzinfo=timezone.utc) if student.last_visit.tzinfo is None else student.last_visit
-            # Если с момента последнего прохода прошло меньше заданных минут (например, 150 мин = 2.5 часа)
-            if (now - last_visit_utc).total_seconds() < (timeout_minutes * 60):
+            last_visit_naive = student.last_visit.replace(tzinfo=None)
+            # Если с момента последнего прохода прошло меньше заданных минут
+            if (now_naive - last_visit_naive).total_seconds() < (timeout_minutes * 60):
                 is_inside_session = True
 
-        # Анти-спам (чтобы реле не щелкало каждую секунду)
-        if student.last_visit:
-            last_visit_utc = student.last_visit.replace(
-                tzinfo=timezone.utc) if student.last_visit.tzinfo is None else student.last_visit
-            if (now - last_visit_utc).total_seconds() < 10:
-                return await message.answer("⏳ Не спамьте, турникет уже обрабатывает запрос.")
-
-        # 5. Проверка прав доступа (Срок действия абонемента)
-        # Убираем таймзоны для корректного сравнения naive datetime из базы
+        # 5. Проверка права доступа (Срок действия абонемента)
         expire_naive = student.expire_date.replace(tzinfo=None) if student.expire_date else None
-        now_naive = now.replace(tzinfo=None)
 
         if not expire_naive or expire_naive < now_naive:
             return await message.answer(f"🔴 ДОСТУП ЗАПРЕЩЕН\n👤 {student_name}\n❌ Срок действия абонемента истек")
@@ -556,14 +556,48 @@ async def parse_qr_scan(
             if (student.balance_lessons or 0) <= 0:
                 return await message.answer(f"🔴 ДОСТУП ЗАПРЕЩЕН\n👤 {student_name}\n❌ На балансе нет занятий")
 
-        # 6. Списание занятия / Формирование вывода баланса с учетом сессии
+        # === 6. ИНТЕГРАЦИЯ ТУРНИКЕТА (СНАЧАЛА ДЕРГАЕМ ЖЕЛЕЗО) ===
+        turnstile_config = club_settings.get("turnstile", {})
+        turnstile_opened = False
+        turnstile_status = ""
+        status_emoji = "🔵"
+
+        if turnstile_config.get("enabled", False):
+            try:
+                base_url = str(turnstile_config.get("base_url", ""))
+                if base_url and not base_url.startswith("http"):
+                    turnstile_config["base_url"] = f"http://{base_url}"
+
+                # Физический запрос к реле
+                turnstile_opened = await trigger_dingtian_turnstile(turnstile_config)
+
+                if turnstile_opened:
+                    turnstile_status = "\n✅ <b>Турникет открыт</b>"
+                    status_emoji = "🟢"
+                else:
+                    # Железо ответило отказом — прерываемся, ничего не списываем в БД
+                    return await message.answer(
+                        "⚠️ <b>Ошибка турникета. Реле отклонило команду. Занятие НЕ списано!</b>"
+                    )
+
+            except Exception as sku_err:
+                # Если таймаут сети, но реле обычно успевает щелкнуть — пропускаем атлета
+                logger.warning(f"Сбой сети СКУД при QR-входе: {sku_err}. Пропускаем атлета в базе.")
+                turnstile_status = "\n⚠️ <b>Микросбой сети турникета. Проход разрешен.</b>"
+                status_emoji = "🟢"
+                turnstile_opened = True
+        else:
+            # СКУД выключен в настройках клуба — просто фиксируем посещение
+            status_emoji = "🟢"
+            turnstile_opened = True
+
+        # === 7. ТОЛЬКО ЕСЛИ ТУРНИКЕТ ОТКРЫЛСЯ — ПРИМЕНЯЕМ ЛОГИКУ СПИСАНИЯ ===
         if is_unlimited:
             display_balance = "♾ <b>Режим: Безлимит</b>"
 
         elif is_inside_session:
-            # 🔄 Если человек зашел повторно в течение 2.5 часов — занятие сохраняется
+            # Повторный проход в рамках сессии — занятие НЕ списываем, last_visit НЕ трогаем
             logger.info(f"🔄 Повторный проход по QR в рамках сессии для {student_name}. Занятие сохранено.")
-
             session_end = student.last_visit + timedelta(minutes=timeout_minutes)
             session_end_str = session_end.strftime("%H:%M")
 
@@ -574,63 +608,43 @@ async def parse_qr_scan(
             )
 
         else:
-            # 🚨 НАША ПОДСТРАХОВКА: Проверяем сверхдолгую тренировку ПЕРЕД списанием
+            # Новый визит — списываем занятие и отправляем алерты
             if student.last_visit:
-                # Если прошлый вход был сегодня (меньше 6 часов назад)
-                if (now - student.last_visit).total_seconds() < 21600:  # 6 часов в секундах
+                last_visit_naive = student.last_visit.replace(tzinfo=None)
+                if (now_naive - last_visit_naive).total_seconds() < 21600:  # 6 часов
                     try:
                         if club.owner_id:
                             await message.bot.send_message(
                                 chat_id=int(club.owner_id),
                                 text=f"⚠️ <b>Алерт СКУД (Повторный визит по QR)</b>\n\n"
                                      f"Атлет: <b>{student_name}</b>\n"
-                                     f"Прошлый вход: {student.last_visit.strftime('%H:%M')}\n"
-                                     f"Текущий вход: {now.strftime('%H:%M')}\n\n"
-                                     f"Система списала <b>второе занятие за сегодня</b>, так как прошлый вход был менее 6 часов назад.\n"
-                                     f"Проверьте, не забыл ли атлет отметься на выходе.",
+                                     f"Прошлый вход: {last_visit_naive.strftime('%H:%M')}\n"
+                                     f"Текущий вход: {now_naive.strftime('%H:%M')}\n\n"
+                                     f"Система зафиксировала проход спустя {timeout_minutes} мин. и списала <b>второе занятие за сегодня</b>.",
                                 parse_mode="HTML"
                             )
                     except Exception as alert_err:
                         logger.warning(f"Не удалось отправить алерт админу по QR: {alert_err}")
 
-            # Для нового визита (сессия закрылась) честно списываем 1 занятие
+            # Честно уменьшаем баланс и открываем новую сессию
             student.balance_lessons -= 1
+            student.last_visit = now_naive  # Фиксируем время новой сессии
             display_balance = f"🔢 Осталось занятий: <b>{student.balance_lessons}</b>"
 
+        # === 8. ФИКСИРУЕМ ИЗМЕНЕНИЯ В POSTGRES ===
+        await session.commit()
 
-
-        # 7. Фиксация визита (Время обновляем, только если открылась НОВАЯ сессия)
-        if not is_inside_session:
-            student.last_visit = now
-
-        await session.commit()  # Сохраняем изменения в базу данных на Аэзе
-
-        # === ИНТЕГРАЦИЯ ТУРНИКЕТА ===
-        turnstile_config = club_settings.get("turnstile", {})
-        turnstile_opened = False
-        turnstile_status = ""
-        status_emoji = "🔵"
-
-        if turnstile_config.get("enabled", False):
-            turnstile_opened = await trigger_dingtian_turnstile(turnstile_config)
-
-            if turnstile_opened:
-                turnstile_status = "\n✅ <b>Турникет открыт</b>"
-                status_emoji = "🟢"
-            else:
-                turnstile_status = "\n⚠️ <b>Ошибка турникета. Пропустите вручную!</b>"
-                status_emoji = "⚠️"
-
-        # Формируем итоговый красивый ответ
+        # Формируем итоговый красивый ответ на терминал / в чат бота
+        expire_str = student.expire_date.strftime('%d.%m.%Y') if student.expire_date else "Не указано"
         await message.answer(
             f"{status_emoji} <b>ПРОХОДИТЕ</b>\n👤 Атлет: <b>{student_name}</b>\n"
             f"{display_balance}\n"
-            f"📅 До: <b>{student.expire_date.strftime('%d.%m.%Y')}</b>"
+            f"📅 До: <b>{expire_str}</b>"
             f"{turnstile_status}",
             parse_mode='HTML'
         )
 
-        # 8. Уведомление родителю
+        # === 9. УВЕДОМЛЕНИЕ РОДИТЕЛЮ ===
         if student.parent_id:
             try:
                 await message.bot.send_message(
@@ -642,7 +656,8 @@ async def parse_qr_scan(
                 logger.warning(f"Не удалось отправить уведомление родителю {student.parent_id}: {parent_err}")
 
     except Exception as e:
-        logger.error(f"❌ Ошибка сканера: {e}")
+        logger.error(f"❌ Критическая ошибка сканера: {e}", exc_info=True)
+        await session.rollback()
         await message.answer("❌ Ошибка при обработке сканирования")
 
 

@@ -3,7 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from aiogram.filters import StateFilter
 from datetime import datetime, timezone, timedelta
 from sqlalchemy.orm.attributes import flag_modified
-from handlers.skud import save_and_test_turnstile
+from handlers.skud import save_and_test_turnstile, trigger_dingtian_turnstile
 from handlers.states import AdminStates, AdminSettings, TurnstileSetup, AdminTariffStates, AdminScheduleStates, \
     YooKassaSetupStates, AdminSettingsSG
 from redis.asyncio import Redis
@@ -770,20 +770,37 @@ async def process_manual_checkin(
         club: Club,
         club_settings: dict
 ):
-    # 1. 🛡️ ЗАЩИТА ОТ ДВОЙНОГО КЛИКА (Убивает Race Condition на корню)
-    if any(word in (callback.message.text or "") for word in ["✅ ВХОД ОТМЕЧЕН", "🔴 ДОСТУП ЗАПРЕЩЕН"]):
+    # 1. 🛡️ ЗАЩИТА ОТ ДВОЙНОГО КЛИКА (Проверка интерфейса)
+    if any(word in (callback.message.text or "") for word in
+           ["✅ ВХОД ОТМЕЧЕН", "🔴 ДОСТУП ЗАПРЕЩЕН", "Вход отмечен вручную"]):
         return await callback.answer("Этот запрос уже обработан! ⚠️", show_alert=True)
 
     student_id = int(callback.data.split("_")[-1])
-    now = datetime.now(timezone.utc)  # Работаем строго в UTC для синхронизации с автотестами
+
+    # Работаем строго в наивном формате UTC (как в базе данных на Аэзе) для защиты от TypeError
+    now_naive = datetime.now(timezone.utc).replace(tzinfo=None)
 
     try:
-        # 2. Загружаем студента из базы
-        student = await session.get(Student, student_id)
+        # 2. Загружаем студента из базы с row-level блокировкой (with_for_update) от Race Condition
+        student_query = (
+            select(Student)
+            .where(Student.id == student_id)
+            .with_for_update()
+        )
+        student_res = await session.execute(student_query)
+        student = student_res.scalar_one_or_none()
 
         # 3. ПРОВЕРКА: Существует ли и принадлежит ли ЭТОМУ клубу?
         if not student or student.club_id != club.id:
             return await callback.answer("❌ Ошибка: атлет не найден в вашем клубе!", show_alert=True)
+
+        student_name = str(student.name)
+
+        # 🛑 АНТИ-СПАМ (Защищает реле от флуда кликов админа)
+        if student.last_visit:
+            last_visit_naive = student.last_visit.replace(tzinfo=None)
+            if (now_naive - last_visit_naive).total_seconds() < 10:
+                return await callback.answer("⏳ Турникет уже обрабатывает предыдущий запрос.", show_alert=True)
 
         # 4. Логика разморозки
         msg_unfreeze = ""
@@ -791,66 +808,100 @@ async def process_manual_checkin(
             student.is_frozen = 0
             msg_unfreeze = "\n❄️ <b>Абонемент автоматически разморожен!</b>"
 
-        # 5. 🛡️ ИНТЕГРАЦИЯ УМНОГО СКУД (Проверка активной сессии 2.5 часа из JSONB)
+        # 5. ИНТЕГРАЦИЯ УМНОГО СКУД (Проверка активной сессии 2.5 часа из JSONB)
         limits = club_settings.get("limits", {})
         timeout_mins = limits.get("session_timeout_minutes", 150)
 
         is_inside_session = False
         if student.last_visit:
-            # Приводим к aware-формату, если в БД лежит naive дата
-            last_visit_utc = student.last_visit.replace(
-                tzinfo=timezone.utc) if student.last_visit.tzinfo is None else student.last_visit
-            if now - last_visit_utc < timedelta(minutes=timeout_mins):
+            last_visit_naive = student.last_visit.replace(tzinfo=None)
+            if (now_naive - last_visit_naive).total_seconds() < (timeout_mins * 60):
                 is_inside_session = True
 
-        # 6. Логика списания баланса с защитой от ухода в минус
-        balance = student.balance_lessons or 0
-        usage_info = ""
-        parent_text = ""
-
-        if is_inside_session:
-            # Повторный проход в рамках лимита клуба — занятие НЕ списываем!
-            usage_info = f"\n🔄 <b>Повторный визит сессии ({timeout_mins} мин).</b> Занятие сохранено.\n📊 Баланс: <b>{balance} зан.</b>"
-            parent_text = f"🔄 <b>Повторный вход в зал (в рамках сессии).</b>\n📊 Баланс: {balance} зан."
-        elif balance >= 900:
-            # Режим безлимита
-            usage_info = "\n♾ Режим: <b>Безлимит</b>"
-            parent_text = "♾ Режим: <b>Безлимит</b>"
-            student.last_visit = now  # Обновляем время сессии визита
-        elif balance > 0:
-            # Обычное честное списание занятия
-            student.balance_lessons -= 1
-            student.last_visit = now  # Обновляем время сессии визита
-            usage_info = f"\n📉 Списано 1 занятие.\n📦 Осталось: <b>{student.balance_lessons} зан.</b>"
-            parent_text = f"📉 Списано 1 занятие.\n📦 Осталось: {student.balance_lessons} зан."
-        else:
-            # Жесткий блок, если баланс равен 0 или ушел в минус
-            # Сразу меняем текст сообщения, чтобы сработал шаг 1 (защита от повторных кликов)
+        # 6. Проверка прав доступа (Срок действия абонемента)
+        expire_naive = student.expire_date.replace(tzinfo=None) if student.expire_date else None
+        if not expire_naive or expire_naive < now_naive:
             await callback.message.edit_text(
-                f"🔴 <b>ДОСТУП ЗАПРЕЩЕН</b>\n👤 Атлет: <b>{student.name}</b>\n❌ Занятия закончились! Нужно продлить абонемент.",
+                f"🔴 <b>ДОСТУП ЗАПРЕЩЕН</b>\n👤 Атлет: <b>{student_name}</b>\n❌ Срок действия абонемента истек!",
+                parse_mode="HTML"
+            )
+            await state.clear()
+            return await callback.answer("Срок действия абонемента истек! ❌", show_alert=True)
+
+        # Проверяем лимиты занятий перед физическим открытием
+        balance = student.balance_lessons or 0
+        is_unlimited = (balance == 999)
+
+        if not is_unlimited and not is_inside_session and balance <= 0:
+            await callback.message.edit_text(
+                f"🔴 <b>ДОСТУП ЗАПРЕЩЕН</b>\n👤 Атлет: <b>{student_name}</b>\n❌ Занятия закончились! Нужно продлить абонемент.",
                 parse_mode="HTML"
             )
             await state.clear()
             return await callback.answer("У атлета закончились занятия! ❌", show_alert=True)
 
-        # 7. Сохраняем изменения через merge, защищаясь от detached объекта (никаких IntegrityError)
-        db_student = await session.merge(student)
+        # === 7. ИНТЕГРАЦИЯ ТУРНИКЕТА (СНАЧАЛА ДЕРГАЕМ ЖЕЛЕЗО ДО КОММИТА БД) ===
+        turnstile_config = club_settings.get("turnstile", {})
+        turnstile_status = ""
+        status_emoji = "🔵"
+
+        if turnstile_config.get("enabled", False):
+            try:
+                base_url = str(turnstile_config.get("base_url", ""))
+                if base_url and not base_url.startswith("http"):
+                    turnstile_config["base_url"] = f"http://{base_url}"
+
+                # Физический запрос к реле ДингТиан
+                turnstile_opened = await trigger_dingtian_turnstile(turnstile_config)
+
+                if turnstile_opened:
+                    turnstile_status = "\n✅ <b>Турникет открыт</b>"
+                    status_emoji = "🟢"
+                else:
+                    return await callback.answer("⚠️ Железо СКУД отклонило команду. Занятие не списано!",
+                                                 show_alert=True)
+
+            except Exception as sku_err:
+                logger.warning(f"Сбой сети СКУД при ручном чекине: {sku_err}. Пропускаем атлета в базе.")
+                turnstile_status = "\n⚠️ <b>Микросбой сети турникета. Проход разрешен.</b>"
+                status_emoji = "🟢"
+        else:
+            status_emoji = "🟢"
+
+        # === 8. ТОЛЬКО ЕСЛИ ТУРНИКЕТ ОТКРЫЛСЯ — ПРИМЕНЯЕМ ЛОГИКУ СПИСАНИЯ ===
+        usage_info = ""
+        parent_text = ""
+
+        if is_unlimited:
+            usage_info = "\n♾ Режим: <b>Безлимит</b>"
+            parent_text = "♾ Режим: <b>Безлимит</b>"
+        elif is_inside_session:
+            usage_info = f"\n🔄 <b>Повторный визит сессии ({timeout_mins} мин).</b> Занятие сохранено.\n📊 Баланс: <b>{balance} зан.</b>"
+            parent_text = f"🔄 <b>Повторный вход в зал (в рамках сессии).</b>\n📊 Баланс: {balance} зан."
+        else:
+            # Обычный новый визит — списываем занятие и обновляем сессию визита
+            student.balance_lessons -= 1
+            student.last_visit = now_naive  # Фиксируем время новой сессии
+            usage_info = f"\n📉 Списано 1 занятие.\n📦 Осталось: <b>{student.balance_lessons} зан.</b>"
+            parent_text = f"📉 Списано 1 занятие.\n📦 Осталось: {student.balance_lessons} зан."
+
+        # Фиксируем все изменения в базе данных на Аэзе
         await session.commit()
 
-        # 8. КРАСИВОЕ SaaS-УВЕДОМЛЕНИЕ ДЛЯ КЛИЕНТА (РОДИТЕЛЯ)
-        if db_student.parent_id:
+        # 9. КРАСИВОЕ SaaS-УВЕДОМЛЕНИЕ ДЛЯ КЛИЕНТА (РОДИТЕЛЯ)
+        if student.parent_id:
             try:
                 await callback.bot.send_message(
-                    chat_id=db_student.parent_id,
-                    text=f"🔔 <b>Вход зафиксирован:</b> {db_student.name}\n{parent_text}\nПриятной тренировки! 💪",
+                    chat_id=int(student.parent_id),
+                    text=f"🔔 <b>Вход зафиксирован:</b> {student_name}\n{parent_text}\nПриятной тренировки! 💪",
                     parse_mode="HTML"
                 )
-            except Exception as e:
-                logger.warning(f"Не удалось уведомить родителя {db_student.parent_id}: {e}")
+            except Exception as parent_err:
+                logger.warning(f"Не удалось уведомить родителя {student.parent_id}: {parent_err}")
 
-        # 9. UI: Меняем текст сообщения админу, фиксируя успешный чекин и убирая кнопки
+        # 10. UI: Меняем текст сообщения админу, фиксируя успешный чекин и убирая кнопки
         await callback.message.edit_text(
-            f"✅ <b>Вход отмечен вручную</b>\n👤 Атлет: <b>{db_student.name}</b>\n{usage_info}{msg_unfreeze}",
+            f"{status_emoji} <b>Вход отмечен вручную</b>\n👤 Атлет: <b>{student_name}</b>\n{usage_info}{msg_unfreeze}{turnstile_status}",
             parse_mode="HTML"
         )
 
@@ -859,8 +910,8 @@ async def process_manual_checkin(
 
     except Exception as e:
         await session.rollback()
-        logger.error(f"❌ Ошибка ручного чекина (Клуб {club.id}): {e}")
-        await callback.answer("⚠️ Ошибка сохранения", show_alert=True)
+        logger.error(f"❌ Критическая ошибка ручного чекина (Клуб {club.id}): {e}", exc_info=True)
+        await callback.answer("⚠️ Критическая ошибка сохранения", show_alert=True)
 
 
 @router.callback_query(F.data == 'admin_edit_payments')

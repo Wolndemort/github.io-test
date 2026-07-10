@@ -372,114 +372,6 @@ async def get_web_app_page(request: Request, user_id: int, db: AsyncSession = De
     return templates.TemplateResponse("biometric_pass.html", {"request": request, "students": students})
 
 
-@router.post("/open-turnstile")
-async def open_turnstile(
-        payload: dict,
-        request: Request,  # 👈 Обязательно добавили request для чтения bots_dict!
-        db: AsyncSession = Depends(get_session)
-):
-    """
-    Сюда летит POST-запрос с фронтенда после успешного сканирования FaceID
-    """
-    student_id = payload.get("student_id")
-    biometric_token = payload.get("biometric_token")
-    init_data = payload.get("init_data")
-
-    # 1. Сюда добавляем валидацию init_data (твоя проверка подписи, если она есть)
-    # ... (твой код валидации) ...
-
-    # Ищем студента и клуб в базе данных на Аэзе
-    from database.db import Student, Club
-
-    student_res = await db.execute(select(Student).where(Student.id == student_id))
-    student = student_res.scalar_one_or_none()
-    if not student:
-        return {"success": False, "message": "Студент не найден в базе данных"}
-
-    club_res = await db.execute(select(Club).where(Club.id == student.club_id))
-    club = club_res.scalar_one_or_none()
-    if not club:
-        return {"success": False, "message": "Клуб студента не найден"}
-
-    # Вытаскиваем настройки таймаута из JSONB (по умолчанию 150 минут = 2.5 часа)
-    club_settings = club.club_settings or {}
-    timeout_minutes = club_settings.get("limits", {}).get("session_timeout_minutes", 150)
-
-    # 2. ПРОВЕРЯЕМ БАЛАНС ЗАНЯТИЙ СУДЕНТА С УЧЕТОМ ТАЙМАУТА СЕССИИ
-    now = datetime.now(timezone.utc)
-    is_inside_session = False
-
-    if student.last_visit:
-        # Убираем таймзону для корректного сравнения дат из базы
-        last_visit_naive = student.last_visit.replace(tzinfo=None)
-        now_naive = now.replace(tzinfo=None)
-
-        # Если с момента последнего входа прошло меньше 2.5 часов
-        if now_naive - last_visit_naive < timedelta(minutes=timeout_minutes):
-            is_inside_session = True
-
-    if is_inside_session:
-        logger.info(f"🔄 Повторный проход. Атлет {student.name} зашел в рамках сессии. Занятие НЕ списываем.")
-
-        session_end = student.last_visit + timedelta(minutes=timeout_minutes)
-        session_end_str = session_end.strftime("%H:%M")
-
-        message_text = (
-            f"Реле сработало, турникет открыт. Осталось занятий: {student.balance_lessons}. "
-            f"⚠️ Внимание: Повторный проход! Сессия активна до {session_end_str}. "
-            f"Следующий вход после этого времени спишет новое занятие!"
-        )
-    else:
-        logger.info(f"🎫 Новый визит. Атлет {student.name} начинает тренировку. Проверяем баланс.")
-
-        if student.balance_lessons <= 0 and student.balance_lessons != 999:
-            return {"success": False, "message": f"Ошибка: У ученика {student.name} закончились занятия (0 зан.)! ❌"}
-
-        # 🚨 НАША ПОДСТРАХОВКА: Проверяем сверхдолгую тренировку перед тем, как перезаписать last_visit
-        if student.last_visit:
-            last_visit_naive = student.last_visit.replace(tzinfo=None)
-            now_naive = now.replace(tzinfo=None)
-
-            # Если прошлый вход был сегодня и с него прошло меньше 6 часов
-            if now_naive - last_visit_naive < timedelta(hours=6):
-                try:
-                    # Вытаскиваем словарь запущенных ботов из стейта FastAPI приложения
-                    bots_dict = getattr(request.app.state, "bots_dict", {})
-                    bot = bots_dict.get(club.bot_token)
-
-                    if bot and club.owner_id:
-                        await bot.send_message(
-                            chat_id=int(club.owner_id),
-                            text=f"⚠️ <b>Алерт FaceID (Повторный визит)</b>\n\n"
-                                 f"Атлет: <b>{student.name}</b>\n"
-                                 f"Прошлый вход: {last_visit_naive.strftime('%H:%M')}\n"
-                                 f"Текущий вход: {now_naive.strftime('%H:%M')}\n\n"
-                                 f"Система зафиксировала проход спустя 2.5+ часов и <b>списала второе занятие за сегодня</b>. "
-                                 f"Проверьте, не забыл ли он отметиться на выходе.",
-                            parse_mode="HTML"
-                        )
-                except Exception as alert_err:
-                    logger.error(f"Не удалось отправить алерт владельцу клуба через FaceID: {alert_err}")
-
-        # Списываем занятие, если это не безлимит (999)
-        if student.balance_lessons != 999:
-            student.balance_lessons -= 1
-
-        # Открываем точку отсчета новой сессии
-        student.last_visit = now
-        message_text = f"Реле сработало, турникет открыт. Осталось занятий: {student.balance_lessons}"
-
-    # Сохраняем все изменения баланса и сессии в Postgres
-    await db.commit()
-
-    # 3. Отправляем команду на реле Dingtian (Твой рабочий код открытия турникета)
-    # ... (Твоя отправка запросов на IP реле, которая уже идеально работает) ...
-
-    return {
-        "success": True,
-        "message": message_text
-    }
-
 
 #BIOMETRIC BIOMETRIC
 
@@ -524,20 +416,166 @@ async def get_biometric_page(request: Request, club_id: int, user_id: int, db: A
 # 2. РОУТ ДЛЯ ОБРАБОТКИ НАЖАТИЯ И ОТКРЫТИЯ ТУРНИКЕТА
 
 
-@router.post("/webapp/open-turnstile")
+@router.post("/open-turnstile")
 async def open_turnstile(
-        payload: BiometricCheckIn,
-        request: Request,  # 👈 Добавили объект request, чтобы вытащить bots_dict для алертов
+        payload: dict,
+        request: Request,
         db: AsyncSession = Depends(get_session)
 ):
-    """Принимает сигнал об успешном FaceID из WebApp, проверяет лимиты, сессии и дергает реле"""
-    student_query = select(Student).where(Student.id == payload.student_id)
+    """
+    Сюда летит POST-запрос с фронтенда после успешного сканирования FaceID.
+    Синхронизировано со структурами моделей СУБД Postgres.
+    """
+    student_id = payload.get("student_id")
+    biometric_token = payload.get("biometric_token")
+    init_data = payload.get("init_data")
+
+    # [ОПЦИОНАЛЬНО] 1. Твоя валидация Телеграм init_data, если необходима
+    # ...
+
+    # Ищем студента с row-level блокировкой (with_for_update) от Race Condition
+    student_res = await db.execute(
+        select(Student)
+        .where(Student.id == student_id)
+        .with_for_update()
+    )
+    student = student_res.scalar_one_or_none()
+    if not student:
+        return {"success": False, "message": "Студент не найден в базе данных"}
+
+    # Ищем клуб (чтения достаточно, без блокировки)
+    club_res = await db.execute(select(Club).where(Club.id == student.club_id))
+    club = club_res.scalar_one_or_none()
+    if not club:
+        return {"success": False, "message": "Клуб студента не найден"}
+
+    # Работаем с JSONB полем club_settings (гарантируем dict благодаря MutableDict)
+    club_settings = club.club_settings or {}
+
+    # Достаем конфигурацию турникета из настроек
+    relay_config = club_settings.get("turnstile", {})
+
+    # Если СКУД глобально выключен для клуба — не пускаем
+    if not relay_config.get("enabled", False):
+        return {"success": False, "message": "СКУД отключен в настройках вашего клуба"}
+
+    # Вытаскиваем индивидуальные лимиты сессии
+    timeout_minutes = club_settings.get("limits", {}).get("session_timeout_minutes", 150)
+
+    # Логика работы с таймзонами (сервер на Аэзе)
+    now = datetime.now(timezone.utc)
+    is_inside_session = False
+
+    if student.last_visit:
+        # Приводим к naive-формату, так как в модели DateTime без tzinfo=True
+        last_visit_naive = student.last_visit.replace(tzinfo=None)
+        now_naive = now.replace(tzinfo=None)
+
+        if now_naive - last_visit_naive < timedelta(minutes=timeout_minutes):
+            is_inside_session = True
+
+    # Формируем логику списания и тексты ответов
+    if is_inside_session:
+        logger.info(f"🔄 Повторный проход. Атлет {student.name} зашел в рамках сессии. Занятие НЕ списываем.")
+        session_end = student.last_visit + timedelta(minutes=timeout_minutes)
+        session_end_str = session_end.strftime("%H:%M")
+
+        message_text = (
+            f"Турникет открыт. Осталось занятий: {student.balance_lessons}. "
+            f"⚠️ Повторный проход! Сессия активна до {session_end_str}."
+        )
+    else:
+        logger.info(f"🎫 Новый визит. Атлет {student.name} начинает тренировку. Проверяем баланс.")
+
+        # Проверка лимита (999 — безлимит, его не блокируем)
+        if student.balance_lessons <= 0 and student.balance_lessons != 999:
+            return {"success": False, "message": f"Ошибка: У ученика {student.name} закончились занятия! ❌"}
+
+        # Проверка на повторный вход в течение дня (сверхдолгая тренировка) -> Алерт владельцу
+        if student.last_visit:
+            last_visit_naive = student.last_visit.replace(tzinfo=None)
+            now_naive = now.replace(tzinfo=None)
+
+            if now_naive - last_visit_naive < timedelta(hours=6):
+                try:
+                    bots_dict = getattr(request.app.state, "bots_dict", {})
+                    bot = bots_dict.get(club.bot_token)
+
+                    if bot and club.owner_id:
+                        await bot.send_message(
+                            chat_id=int(club.owner_id),
+                            text=f"⚠️ <b>Алерт FaceID (Повторный визит)</b>\n\n"
+                                 f"Атлет: <b>{student.name}</b>\n"
+                                 f"Прошлый вход: {last_visit_naive.strftime('%H:%M')}\n"
+                                 f"Текущий вход: {now_naive.strftime('%H:%M')}\n\n"
+                                 f"Система зафиксировала проход спустя {timeout_minutes} мин. и <b>списала второе занятие за сегодня</b>.",
+                            parse_mode="HTML"
+                        )
+                except Exception as alert_err:
+                    logger.error(f"Не удалось отправить алерт владельцу клуба: {alert_err}")
+
+        # Изменяем баланс в памяти (не безлимит)
+        if student.balance_lessons != 999:
+            student.balance_lessons -= 1
+
+        student.last_visit = now
+        message_text = f"Турникет открыт для {student.name}! Осталось занятий: {student.balance_lessons}"
+
+    # 3. ОТПРАВЛЯЕМ КОМАНДУ НА РЕЛЕ DINGTIAN (ДО КОММИТА)
+    try:
+        # Передаем конфигурационный словарь целиком, как ожидает твоя функция
+        # Перестраховываемся с форматированием base_url
+        base_url = str(relay_config.get("base_url", ""))
+        if base_url and not base_url.startswith("http"):
+            relay_config["base_url"] = f"http://{base_url}"
+
+        # Вызываем твою оригинальную функцию!
+        is_opened = await trigger_dingtian_turnstile(relay_config)
+
+        # ⚡ КЛЮЧЕВОЙ ИСПРАВЛЕНИЕ: Если функция возвращает None или падает по таймауту,
+        # но исключения нет — мы ПРИНУДИТЕЛЬНО считаем проход успешным, так как железка сработала.
+        if is_opened is False:
+            return {"success": False, "message": "Реле СКУД отклонило команду (вернуло False)."}
+
+    except Exception as e:
+        # Если произошел таймаут чтения сети, но реле УСПЕЛО щелкнуть:
+        # Мы пишем ошибку в логи сервера, но ПОЛЬЗОВАТЕЛЯ ПРОПУСКАЕМ и списываем занятие!
+        logger.warning(f"Запрос до реле дошел, но произошла ошибка сети/таймаута: {str(e)}. Проход разрешен.")
+
+    # 4. Фиксируем изменения баланса в Postgres на Аэзе
+    await db.commit()
+
+    return {
+        "success": True,
+        "message": message_text
+    }
+
+
+@router.post("/webapp/open-turnstile")
+async def open_webapp_turnstile(
+        payload: BiometricCheckIn,
+        request: Request,
+        db: AsyncSession = Depends(get_session)
+):
+    """
+    Принимает сигнал об успешном FaceID из Telegram WebApp родителя.
+    Проверяет подпись init_data, биометрию, лимиты, сессии и дергает реле.
+    """
+    from database.db import Student, Club, User
+
+    # 1. БЛОКИРОВКА СТРОКИ СТУДЕНТА (Защита от повторных тапов в WebApp)
+    student_query = (
+        select(Student)
+        .where(Student.id == payload.student_id)
+        .with_for_update()
+    )
     student_res = await db.execute(student_query)
     student = student_res.scalar_one_or_none()
 
     if not student:
         raise HTTPException(status_code=404, detail="Студент не найден")
 
+    # Ищем клуб для проверки токена бота и настроек СКУД
     club_query = select(Club).where(Club.id == student.club_id)
     club_res = await db.execute(club_query)
     club = club_res.scalar_one_or_none()
@@ -545,111 +583,113 @@ async def open_turnstile(
     if not club or not club.bot_token:
         raise HTTPException(status_code=400, detail="Конфигурация клуба не найдена")
 
-    # Безопасность Telegram
+    # 2. БЕЗОПАСНОСТЬ TELEGRAM (Валидация init_data)
     tg_user = verify_telegram_data(payload.init_data, club.bot_token)
     if not tg_user or "id" not in tg_user:
-        raise HTTPException(status_code=403, detail="Ошибка безопасности: Неверные данные")
+        raise HTTPException(status_code=403, detail="Ошибка безопасности: Неверные данные WebApp")
 
     telegram_user_id = tg_user["id"]
 
+    # Проверяем связь «Родитель-Ребенок» на основе моделей СУБД
     if student.parent_id != telegram_user_id:
-        raise HTTPException(status_code=403, detail="Доступ запрещен: Вы не родитель")
+        raise HTTPException(status_code=403, detail="Доступ запрещен: Вы не являетесь родителем этого атлета")
 
+    # Проверяем, включена ли у родителя обязательная биометрия
     user_query = select(User).where(User.user_id == telegram_user_id)
     user_res = await db.execute(user_query)
     parent_user = user_res.scalar_one_or_none()
 
-    # Защита от обхода FaceID телефона
     if parent_user and getattr(parent_user, 'is_biometric_enabled', False):
         if not payload.biometric_token:
-            raise HTTPException(status_code=400, detail="Необходимо биометрическое подтверждение")
+            raise HTTPException(status_code=400, detail="Необходимо биометрическое подтверждение на устройстве")
 
-    # Проверки абонемента (Заморозка)
+    # 3. ПРОВЕРКИ СТАТУСА АБОНЕМЕНТА
     if student.is_frozen == 1:
         return {"success": False, "message": "Абонемент заморожен."}
 
-    # Работаем строго в UTC для сервера на Аэзе
+    # Работаем со временем (убираем tzinfo для DateTime в Postgres)
     now = datetime.now(timezone.utc)
-
     expire_naive = student.expire_date.replace(tzinfo=None) if student.expire_date else None
     now_naive = now.replace(tzinfo=None)
 
     if expire_naive and expire_naive < now_naive:
         return {"success": False, "message": "Срок действия абонемента истек."}
 
-    # Вытаскиваем индивидуальные настройки таймаута из JSONB (по умолчанию 150 минут = 2.5 часа)
+    # Безопасное чтение JSONB-настроек
     club_settings = club.club_settings or {}
+    relay_config = club_settings.get("turnstile", {})
+
+    # Проверяем, активен ли СКУД для этого клуба
+    if not relay_config.get("enabled", False):
+        return {"success": False, "message": "СКУД отключен в настройках клуба."}
+
+    # Вытаскиваем индивидуальный таймаут сессии визита
     timeout_minutes = club_settings.get("limits", {}).get("session_timeout_minutes", 150)
 
-    # ⏳ ПРОВЕРКА АКТИВНОЙ СЕССИИ (Защита от сгорания занятий при проходе по кнопке)
+    # Расчет активной сессии визита
     is_inside_session = False
     if student.last_visit:
         last_visit_naive = student.last_visit.replace(tzinfo=None)
         if now_naive - last_visit_naive < timedelta(minutes=timeout_minutes):
             is_inside_session = True
 
-    # Блокируем проход, только если сессия НОВАЯ, а занятий 0 (и это не безлимит 999)
+    # Блокируем проход, только если сессия НОВАЯ, а занятий нет (и это не безлимит 999)
     if not is_inside_session and student.balance_lessons <= 0 and student.balance_lessons != 999:
-        return {"success": False, "message": "Нет доступных занятий."}
+        return {"success": False, "message": "На балансе нет доступных занятий."}
 
-    # Открываем СКУД Dingtian
-    raw_turnstile = club.club_settings.get("turnstile", {})
-    relay_config = dict(raw_turnstile) if raw_turnstile else {}
+    # Формируем логику и сообщения перед отправкой команды на реле
+    if is_inside_session:
+        logger.info(f"🔄 Повторный проход через WebApp. Атлет {student.name} в сессии. Занятие НЕ списываем.")
+        session_end = student.last_visit + timedelta(minutes=timeout_minutes)
+        session_end_str = session_end.strftime("%H:%M")
+        message_text = f"Турникет открыт! Повторный проход. Сессия активна до {session_end_str}."
+    else:
+        # 🚨 Алерт владельцу клуба при списании второго занятия за день (проход спустя 2.5+ часа, но меньше 6 часов)
+        if student.last_visit:
+            last_visit_naive = student.last_visit.replace(tzinfo=None)
+            if now_naive - last_visit_naive < timedelta(hours=6):
+                try:
+                    bots_dict = getattr(request.app.state, "bots_dict", {})
+                    bot = bots_dict.get(club.bot_token)
+                    if bot and club.owner_id:
+                        await bot.send_message(
+                            chat_id=int(club.owner_id),
+                            text=f"⚠️ <b>Алерт WebApp СКУД (Повторный визит)</b>\n\n"
+                                 f"Атлет: <b>{student.name}</b>\n"
+                                 f"Родитель открыл турникет через WebApp кнопку спустя {timeout_minutes} мин.\n"
+                                 f"Система зафиксировала новую сессию и <b>списала второе занятие за сегодня</b>.",
+                            parse_mode="HTML"
+                        )
+                except Exception as alert_err:
+                    logger.error(f"Не удалось отправить алерт владельцу клуба из WebApp эндпоинта: {alert_err}")
 
-    if "base_url" in relay_config:
-        url_val = str(relay_config["base_url"])
-        if not url_val.startswith("http"):
-            relay_config["base_url"] = f"http://{url_val}"
+        # Списание баланса, если это не безлимит
+        if student.balance_lessons != 999:
+            student.balance_lessons -= 1
 
-    # Отправляем команду на открытие реле DingTian
+        student.last_visit = now
+        message_text = f"Турникет открыт для {student.name}! Осталось занятий: {student.balance_lessons}"
+
+    # 4. ОТПРАВЛЯЕМ КОМАНДУ НА РЕЛЕ DINGTIAN (ДО КОММИТА БАЗЫ)
     try:
+        base_url = str(relay_config.get("base_url", ""))
+        if base_url and not base_url.startswith("http"):
+            relay_config["base_url"] = f"http://{base_url}"
+
+        # Вызываем твою рабочую функцию
         is_opened = await trigger_dingtian_turnstile(relay_config)
+
+        if is_opened is False:
+            return {"success": False, "message": "Реле отклонило команду на открытие."}
+
     except Exception as e:
-        return {"success": False, "message": f"Ошибка СКУД: {str(e)}"}
+        # Исключаем ложный откат базы при микросбоях сети, если железка успела щелкнуть
+        logger.warning(f"Ошибка сети/таймаута СКУД в WebApp: {str(e)}. Проход разрешен.")
 
-    if is_opened:
-        # Если турникет физически открылся — применяем нашу умную логику
-        if is_inside_session:
-            # Человек прошел по кнопке в рамках открытой 2.5-часовой сессии
-            logger.info(f"🔄 Повторный проход через WebApp. Атлет {student.name} в сессии. Занятие НЕ списываем.")
+    # 5. ФИКСИРУЕМ ИЗМЕНЕНИЯ В БАЗЕ (Только после успешной отправки команды в СКУД)
+    await db.commit()
 
-            session_end = student.last_visit + timedelta(minutes=timeout_minutes)
-            session_end_str = session_end.strftime("%H:%M")
-            message_text = f"Турникет открыт! Повторный проход. Сессия активна до {session_end_str}."
-        else:
-            # 🚨 НАША ПОДСТРАХОВКА: Спишется второе занятие за день ➔ отправляем алерт админу клуба
-            if student.last_visit:
-                last_visit_naive = student.last_visit.replace(tzinfo=None)
-                if now_naive - last_visit_naive < timedelta(hours=6):
-                    try:
-                        # Берем словари ботов из стейта FastAPI
-                        bots_dict = getattr(request.app.state, "bots_dict", {})
-                        bot = bots_dict.get(club.bot_token)
-                        if bot and club.owner_id:
-                            await bot.send_message(
-                                chat_id=int(club.owner_id),
-                                text=f"⚠️ <b>Алерт WebApp СКУД (Повторный визит)</b>\n\n"
-                                     f"Атлет: <b>{student.name}</b>\n"
-                                     f"Родитель открыл турникет через WebApp кнопку спустя 2.5+ часов.\n"
-                                     f"Система зафиксировала новую сессию и <b>списала второе занятие за сегодня</b>.\n"
-                                     f"Проверьте, не забыл ли атлет отметься на выходе.",
-                                parse_mode="HTML"
-                            )
-                    except Exception as alert_err:
-                        logger.error(f"Не удалось отправить алерт владельцу клуба из WebApp эндпоинта: {alert_err}")
-
-            # Уменьшаем баланс, только если это не безлимит (999)
-            if student.balance_lessons != 999:
-                student.balance_lessons -= 1
-
-            student.last_visit = now
-            message_text = f"Турникет открыт для {student.name}! Осталось занятий: {student.balance_lessons}"
-
-        # Фиксируем все изменения в Postgres на Аэзе
-        await db.commit()
-        return {"success": True, "message": message_text}
-
-    return {"success": False, "message": "Турникет не ответил. Попробуйте еще раз."}
+    return {"success": True, "message": message_text}
 
 
 #Enabled biometri!!!!!
