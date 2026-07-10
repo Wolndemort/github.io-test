@@ -2,7 +2,7 @@ import asyncio
 import os
 import uuid
 from services.analytics import calculate_daily_business_report, calculate_admin_dashboard
-from datetime import timedelta, time
+from datetime import timedelta, time, timezone
 import logging as logging
 from database.db import Subscription, PaymentOrder, User
 import sys
@@ -96,7 +96,7 @@ async def lifespan(app: FastAPI):
     # Ночной блок (01:00) — Автоматические списания по подпискам ЮKassa
     # Пока оставляем закомментированным, как ты и хотел!
     # Как закончишь тесты в ЛК ЮKassa — просто убери решетку (#) в начале строки.
-    # scheduler.add_job(saas_recurrent_payments_job, 'cron', hour=1, minute=0)
+    #scheduler.add_job(saas_recurrent_payments_job, 'cron', hour=3, minute=0, args=[AsyncSessionLocal])
 
     # Ночной блок (23:00) — Полный бэкап всей базы данных тебе в личку
     scheduler.add_job(send_backup_to_admin, 'cron', hour=23, minute=0)
@@ -420,19 +420,23 @@ async def saas_daily_morning_check():
 # добавил колонку ситинг и клуб, перебрал майн, старт,
 
 
-async def saas_recurrent_payments_job():
-    """Ночная задача (APScheduler) для автоматического списания денег по подпискам ЮKassa"""
+async def saas_recurrent_payments_job(session_factory):
+    """
+    Ночная задача (APScheduler) для автоматического списания денег по подпискам ЮKassa.
+    Защищена от DetachedInstanceError, ошибок таймзон и конфликтов транзакций.
+    """
     logger.info("⏳ Запуск проверки рекуррентных платежей ЮKassa...")
 
-    # ЮKassa работает строго в UTC
-    now = datetime.utcnow()
+    # Работаем в наивном формате UTC (как в базе данных на Аэзе) для защиты от TypeError
+    now_naive = datetime.now(timezone.utc).replace(tzinfo=None)
 
-    async with AsyncSessionLocal() as session:
+    # Открываем одну сессию на всю крон-задачу
+    async with session_factory() as session:
         # 1. Выбираем все активные подписки, у которых наступила дата списания
         result = await session.execute(
             select(Subscription)
             .where(Subscription.is_active == True)
-            .where(Subscription.next_charge_at <= now)
+            .where(Subscription.next_charge_at <= now_naive)
             .where(Subscription.rebill_id.is_not(None))
         )
         subscriptions = result.scalars().all()
@@ -442,10 +446,10 @@ async def saas_recurrent_payments_job():
             return
 
         for sub in subscriptions:
-            # Генерация уникального OrderId для этого месяца
+            # Генерация уникального OrderId для этого месяца продления
             order_id = f"REC_{uuid.uuid4().hex[:12].upper()}"
 
-            # Подтягиваем конкретный клуб, чтобы достать его платежные ключи из JSONB
+            # Подтягиваем клуб, чтобы достать его платежные ключи из JSONB
             club_result = await session.execute(select(Club).where(Club.id == sub.club_id))
             club = club_result.scalar_one_or_none()
             if not club:
@@ -456,23 +460,36 @@ async def saas_recurrent_payments_job():
             shop_id = pay_settings.get("yookassa_shop_id")
             secret_key = pay_settings.get("yookassa_secret_key")
 
-            # Если онлайн-платежи в JSONB выключены или ключи не заполнены — пропускаем клуб
-            if not club.club_settings.get("features", {}).get("online_payments") or not shop_id or not secret_key:
-                logger.warning(f"⚠️ У клуба '{club.name}' отключены платежи или не заполнены ключи ЮKassa.")
+            # Проверяем, настроил ли клуб интеграцию и включена ли она
+            # ⚡ ИСПРАВЛЕНО:features.get("online_payments") убрали, так как проверяем ключи напрямую
+            if not shop_id or not secret_key:
+                logger.warning(f"⚠️ У клуба '{club.name}' не заполнены ключи ЮKassa для автосписания.")
                 continue
 
-            # Логируем попытку списания в базу
+            # Ищем студента, которому будем продлевать абонемент
+            student_result = await session.execute(select(Student).where(Student.id == sub.student_id))
+            student = student_result.scalar_one_or_none()
+            if not student:
+                logger.error(f"🚨 Атлет с ID {sub.student_id} подписки {sub.id} не найден!")
+                continue
+
+            # Фиксируем попытку списания в базу данных (внутри текущей транзакции, БЕЗ commit)
             new_order = PaymentOrder(
                 id=order_id,
                 user_id=sub.user_id,
                 student_id=sub.student_id,
                 club_id=sub.club_id,
                 amount_kopecks=sub.amount_kopecks,
+                # ⚡ ИСПРАВЛЕНО: Динамически берем баланс занятий из подписки, а не хардкодим 8 уроков
+                lesson_count=getattr(sub, 'lesson_count', 8),
+                days_to_add=30,
                 status="NEW",
                 type="RECURRENT"
             )
             session.add(new_order)
-            await session.commit()
+
+            # Делаем flush, чтобы SQLAlchemy отправила заказ в базу, но не закрывала транзакцию коммитом
+            await session.flush()
 
             try:
                 # 2. Инициализируем клиент ЮKassa ключами этого клуба и прокидываем прокси
@@ -481,7 +498,7 @@ async def saas_recurrent_payments_job():
 
                 yookassa_node = YooKassaClient(shop_id=shop_id, secret_key=secret_key, proxy_url=PROXY_URL)
 
-                # Стучимся в ЮKassa за автосписанием. rebill_id — это наш сохраненный payment_method_id
+                # Стучимся в ЮKassa за безакцептным автосписанием (rebill_id)
                 charge_res = await yookassa_node.charge_payment(
                     order_id=order_id,
                     amount_kopecks=sub.amount_kopecks,
@@ -489,50 +506,63 @@ async def saas_recurrent_payments_job():
                     club_name=club.name
                 )
 
-                # Ищем токен бота, чтобы отправить сообщение в правильный клуб
-                bot = bots_dict.get(club.bot_token) if club.bot_token else None
+                # Вытаскиваем бота (убедись, что bots_dict импортирован или доступен в глобальной области)
+                bot = bots_dict.get(club.bot_token) if 'bots_dict' in globals() or 'bots_dict' in locals() else None
 
-                # У ЮKassa признак успешной оплаты — это статус 'succeeded'
+                # 3. ЮKassa при успешном рекуррентном платеже возвращает статус 'succeeded' и код 200
                 if charge_res.get("Success") and charge_res.get("Status") == "succeeded":
                     new_order.status = "CONFIRMED"
 
-                    # Сдвигаем дату следующего списания на месяц вперед
-                    sub.next_charge_at = now + timedelta(days=30)
+                    # Сдвигаем дату следующего ночного списания на 30 дней вперед в naive UTC
+                    sub.next_charge_at = now_naive + timedelta(days=30)
 
-                    # Продлеваем абонемент студенту
-                    student_res = await session.execute(select(Student).where(Student.id == sub.student_id))
-                    student = student_res.scalar_one_or_none()
-                    if student:
-                        current_expire = student.expire_date or now
-                        base_date = current_expire if current_expire > now else now
-                        student.expire_date = base_date + timedelta(days=30)
-                        student.balance_lessons += 8  # добавляем дефолтные занятия
+                    # Продлеваем абонемент студенту в Postgres
+                    current_expire = student.expire_date.replace(tzinfo=None) if student.expire_date else now_naive
+                    base_date = current_expire if current_expire > now_naive else now_naive
 
-                    await session.commit()
-                    logger.success(
+                    student.expire_date = base_date + timedelta(days=30)
+
+                    # Зачисляем количество занятий, привязанных к этому тарифу подписки
+                    if student.balance_lessons != 999:
+                        student.balance_lessons += new_order.lesson_count
+
+                    logger.info(
                         f"💰 Успешное автосписание {sub.amount_kopecks / 100} руб для пользователя {sub.user_id}")
 
                     if bot:
-                        await bot.send_message(
-                            chat_id=sub.user_id,
-                            text=f"✨ <b>Подписка продлена!</b>\n\nСумма {sub.amount_kopecks / 100} руб. успешно списана. Абонемент обновлен на 30 дней."
-                        )
+                        try:
+                            await bot.send_message(
+                                chat_id=sub.user_id,
+                                text=f"✨ <b>Подписка успешно продлена!</b>\n\n"
+                                     f"Сумма <b>{sub.amount_kopecks / 100}₽</b> успешно списана с вашей карты.\n"
+                                     f"Абонемент атлета <b>{student.name}</b> обновлен на 30 дней.\n"
+                                     f"Зачислено занятий: <b>+{new_order.lesson_count} зан.</b>\n\n"
+                                     f"Приятных тренировок! 💪",
+                                parse_mode="HTML"
+                            )
+                        except Exception as b_err:
+                            logger.error(f"Не удалось отправить уведомление об автопродлении: {b_err}")
                 else:
-                    # Ошибка списания (нет денег, заблокирована карта)
+                    # Ошибка списания со стороны ЮKassa (нет денег на карте, карта заблокирована)
                     new_order.status = "REJECTED"
-                    sub.is_active = False  # Отключаем подписку, пока не перепривяжут карту
-                    await session.commit()
+                    sub.is_active = False  # Отключаем подписку, пока родитель не перепривяжет карту новой оплатой
 
                     logger.warning(f"❌ ЮKassa отклонила автосписание для {sub.user_id}: {charge_res.get('Message')}")
 
                     if bot:
-                        await bot.send_message(
-                            chat_id=sub.user_id,
-                            text="⚠️ <b>Ошибка автопродления подписки</b>\n\nНе удалось списать средства за абонемент. "
-                                 "Пожалуйста, проверьте баланс карты или выберите официальную оплату заново в боте для привязки актуальной карты."
-                        )
+                        try:
+                            await bot.send_message(
+                                chat_id=sub.user_id,
+                                text="⚠️ <b>Ошибка автопродления подписки</b>\n\n"
+                                     f"Не удалось автоматически списать средства за абонемент атлета <b>{student.name}</b>.\n"
+                                     "Пожалуйста, проверьте баланс карты или оплатите абонемент заново в меню бота, чтобы привязать актуальную карту."
+                            )
+                        except Exception as b_err:
+                            logger.error(f"Не удалось отправить уведомление об отказе рекуррента: {b_err}")
+
+                # Коммитим текущую итерацию цикла в Postgres на Аэзе
+                await session.commit()
+
             except Exception as e:
                 await session.rollback()
                 logger.error(f"🚨 Ошибка при обработке рекуррента для sub_id {sub.id}: {repr(e)}")
-
-
