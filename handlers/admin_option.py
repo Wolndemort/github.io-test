@@ -1802,28 +1802,27 @@ async def process_secret_key(
     club = result.scalar_one_or_none()
 
     if club:
-        # Гарантируем, что club_settings является словарем
-        if not club.club_settings:
-            club.club_settings = {}
+    if not club.club_settings:
+        club.club_settings = {}
 
-        if "payments" not in club.club_settings:
-            club.club_settings["payments"] = {}
+    if "payments" not in club.club_settings:
+        club.club_settings["payments"] = {}
 
-        # Записываем новые данные в JSONB структуру полей
-        club.club_settings["payments"]["provider"] = "yookassa"
-        club.club_settings["payments"]["yookassa_shop_id"] = shop_id
-        club.club_settings["payments"]["yookassa_secret_key"] = secret_key
+    # Записываем данные в JSONB
+    club.club_settings["payments"]["provider"] = "yookassa"
+    club.club_settings["payments"]["yookassa_shop_id"] = shop_id
+    club.club_settings["payments"]["yookassa_secret_key"] = secret_key
 
-        # ⚡ ИСПРАВЛЕНО: Автоматически активируем тумблер оплат при успешном вводе ключей
-        if "features" not in club.club_settings:
-            club.club_settings["features"] = {}
-        club.club_settings["features"]["online_payments"] = True
+    if "features" not in club.club_settings:
+        club.club_settings["features"] = {}
+    club.club_settings["features"]["online_payments"] = True
 
-        # Пересобираем словарь для вызова деформации MutableDict в SQLAlchemy
-        club.club_settings = dict(club.club_settings)
+    # ⚡ ВАЖНОЕ ИСПРАВЛЕНИЕ ТУТ:
+    # Принудительно ставим флаг, что JSONB внутри модели Клуба был изменен!
+    flag_modified(club, "club_settings")
 
-        # Коммитим изменения в Postgres на Аэзе
-        await session.commit()
+    # Теперь Postgres на Аэзе железно применит UPDATE
+    await session.commit()
 
         back_kb = InlineKeyboardBuilder()
         back_kb.row(types.InlineKeyboardButton(text="⚙️ Вернуться в настройки", callback_data="admin_settings"))
