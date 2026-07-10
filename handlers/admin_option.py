@@ -1734,16 +1734,12 @@ async def admin_finalize_schedule(
     )
 
 
-
 #FSM FSM FSM Youkassa Youkassa
-
-
 @router.callback_query(F.data == "admin_setup_yookassa")
 async def start_yookassa_setup(callback: types.CallbackQuery, state: FSMContext):
     """Начало настройки: запрашиваем Shop ID"""
     await state.set_state(YooKassaSetupStates.waiting_for_shop_id)
 
-    # Кнопка отмены, если админ передумал
     cancel_kb = InlineKeyboardBuilder()
     cancel_kb.row(types.InlineKeyboardButton(text="❌ Отмена", callback_data="admin_settings"))
 
@@ -1761,28 +1757,30 @@ async def process_shop_id(message: types.Message, state: FSMContext):
     """Принимаем Shop ID и запрашиваем Secret Key"""
     shop_id = message.text.strip()
 
-    # Базовая валидация: Shop ID должен состоять только из цифр
     if not shop_id.isdigit():
         return await message.answer("⚠️ Ошибка! Shop ID должен состоять только из цифр. Попробуйте еще раз:")
 
-    # Сохраняем во временный буфер FSM
     await state.update_data(shop_id=shop_id)
-
     await state.set_state(YooKassaSetupStates.waiting_for_secret_key)
+
     await message.answer(
         "🔑 Теперь введите ваш <b>Секретный ключ</b> (Секрет).\n\n"
-        "Его можно сгенерировать в ЛК ЮKassa в разделе <i>«Настройки» -> «Ключи API»</i>.\n"
+        "Его можно сгенерировать в ЛК ЮKassa в разделе <i>«Интеграция» -> «Ключи API»</i>.\n"
         "Он начинается на <code>test_...</code> (для тестового режима) или <code>live_...</code> (для боевого).",
         parse_mode="HTML"
     )
 
 
 @router.message(YooKassaSetupStates.waiting_for_secret_key)
-async def process_secret_key(message: types.Message, state: FSMContext, club_id: int):
+async def process_secret_key(
+        message: types.Message,
+        state: FSMContext,
+        session: AsyncSession,  # ⚡ ИСПРАВЛЕНО: Забираем готовую сессию из мидлвари!
+        club_id: int
+):
     """Принимаем Secret Key и сохраняем всё в JSONB поле базы данных"""
     secret_key = message.text.strip()
 
-    # Базовая валидация ключа
     if not (secret_key.startswith("test_") or secret_key.startswith("live_")):
         return await message.answer(
             "⚠️ Ошибка! Неверный формат ключа. Он должен начинаться с <code>test_</code> или <code>live_</code>.\n"
@@ -1790,47 +1788,51 @@ async def process_secret_key(message: types.Message, state: FSMContext, club_id:
             parse_mode="HTML"
         )
 
-    # Извлекаем сохраненный ранее shop_id из FSM
     user_data = await state.get_data()
     shop_id = user_data["shop_id"]
 
-    # Чистим стейт, чтобы админ вышел из режима ввода
     await state.clear()
 
-    # 💾 Сохраняем настройки в базу данных (в твой JSONB)
-    async with AsyncSessionLocal() as session:
-        result = await session.execute(select(Club).where(Club.id == club_id))
-        club = result.scalar_one_or_none()
+    # 💾 Используем with_for_update() для безопасной мутации JSONB настроек
+    result = await session.execute(
+        select(Club)
+        .where(Club.id == club_id)
+        .with_for_update()
+    )
+    club = result.scalar_one_or_none()
 
-        if club:
-            # Инициализируем словарь payments, если его там почему-то не было
-            if "payments" not in club.club_settings:
-                club.club_settings["payments"] = {}
+    if club:
+        # Гарантируем, что club_settings является словарем
+        if not club.club_settings:
+            club.club_settings = {}
 
-            # Записываем новые данные в JSONB структуру
-            club.club_settings["payments"]["provider"] = "yookassa"
-            club.club_settings["payments"]["yookassa_shop_id"] = shop_id
-            club.club_settings["payments"]["yookassa_secret_key"] = secret_key
+        if "payments" not in club.club_settings:
+            club.club_settings["payments"] = {}
 
-            # Принудительно помечаем JSONБ-поле как измененное для SQLAlchemy (флаг деформации)
-            club.club_settings = dict(club.club_settings)
+        # Записываем новые данные в JSONB структуру полей
+        club.club_settings["payments"]["provider"] = "yookassa"
+        club.club_settings["payments"]["yookassa_shop_id"] = shop_id
+        club.club_settings["payments"]["yookassa_secret_key"] = secret_key
 
-            await session.commit()
+        # Пересобираем словарь для вызова деформации MutableDict в SQLAlchemy
+        club.club_settings = dict(club.club_settings)
 
-            # Возвращаем админа обратно в меню настроек, отправляя обновленный вид
-            back_kb = InlineKeyboardBuilder()
-            back_kb.row(types.InlineKeyboardButton(text="⚙️ Вернуться в настройки", callback_data="admin_settings"))
+        # Коммитим изменения в Postgres на Аэзе
+        await session.commit()
 
-            await message.answer(
-                "✅ <b>Интеграция успешно настроена!</b>\n\n"
-                f"<b>Shop ID:</b> <code>{shop_id}</code>\n"
-                f"<b>Ключ:</b> <code>{secret_key[:8]}...****</code>\n\n"
-                "Теперь ваши клиенты смогут привязывать карты и оплачивать подписки онлайн.",
-                reply_markup=back_kb.as_markup(),
-                parse_mode="HTML"
-            )
-        else:
-            await message.answer("🚨 Произошла критическая ошибка: Клуб не найден в базе данных.")
+        back_kb = InlineKeyboardBuilder()
+        back_kb.row(types.InlineKeyboardButton(text="⚙️ Вернуться в настройки", callback_data="admin_settings"))
+
+        await message.answer(
+            "✅ <b>Интеграция успешно настроена!</b>\n\n"
+            f"<b>Shop ID:</b> <code>{shop_id}</code>\n"
+            f"<b>Ключ:</b> <code>{secret_key[:8]}...****</code>\n\n"
+            "Теперь ваши клиенты смогут привязывать карты и оплачивать подписки онлайн.",
+            reply_markup=back_kb.as_markup(),
+            parse_mode="HTML"
+        )
+    else:
+        await message.answer("🚨 Произошла критическая ошибка: Клуб не найден в базе данных.")
 
 
 @router.callback_query(F.data == "manage_club_limits")
