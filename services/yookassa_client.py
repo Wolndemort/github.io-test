@@ -70,7 +70,7 @@ class YooKassaClient:
                 res_json = response.json()
 
                 # ЮKassa при успешном создании платежа возвращает HTTP 201 Created
-                if response.status_code == 201:
+                if response.status_code in [200, 201]:
                     logger.info(f"✅ Ссылка на оплату создана. ID Платежа ЮKassa: {res_json['id']}")
                     return {
                         "Success": True,
