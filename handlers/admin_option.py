@@ -1,6 +1,7 @@
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from sqlalchemy.ext.asyncio import AsyncSession
 from aiogram.filters import StateFilter
+import copy
 from datetime import datetime, timezone, timedelta
 from sqlalchemy.orm.attributes import flag_modified
 from handlers.skud import save_and_test_turnstile, trigger_dingtian_turnstile
