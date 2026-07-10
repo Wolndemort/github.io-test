@@ -39,6 +39,12 @@ def get_profile_keyboard(user, club_settings: dict, is_authorized: bool = False)
         web_app=WebAppInfo(url=f"{base_url}/webapp/biometric-pass?club_id={user.club_id}&user_id={user.user_id}")
     ))
 
+    if features.get("online_payments", False):
+        builder.row(types.InlineKeyboardButton(text='Купить абонемент 💳', callback_data='choose_section'))
+        # 🔥 ДОБАВИЛИ КНОПКУ УПРАВЛЕНИЯ ПОДПИСКОЙ КРУПНЫМИ БУКВАМИ
+        builder.row(types.InlineKeyboardButton(text='💳 УПРАВЛЕНИЕ ПОДПИСКОЙ', callback_data='manage_subscription'))
+
+
     # 1. Всегда доступные кнопки
     builder.row(types.InlineKeyboardButton(text='➕ Добавить атлета', callback_data='add_athlete'))
     builder.row(types.InlineKeyboardButton(text='🔍 Подробно об атлетах', callback_data='detailed_status_info'))
