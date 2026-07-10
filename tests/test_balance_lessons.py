@@ -4,6 +4,13 @@ import pytest
 from handlers.user_option import parse_qr_scan
 
 
+def mock_sqlalchemy_result(student):
+    """Вспомогательная функция для создания мока ответа execute() в SQLAlchemy 2.0"""
+    mock_res = MagicMock()
+    mock_res.scalar_one_or_none.return_value = student
+    return mock_res
+
+
 @pytest.mark.asyncio
 @patch("handlers.user_option.generate_signature")
 async def test_parse_qr_scan_no_lessons(mock_gen_sig):
@@ -26,11 +33,13 @@ async def test_parse_qr_scan_no_lessons(mock_gen_sig):
     student.club_id = 1
     student.balance_lessons = 0  # Лимитный абонемент закончился
     student.is_frozen = 0
-    # ИСПРАВЛЕНО: Ставим визит 5 часов назад в UTC, чтобы сессия гарантированно ЗАКРЫЛАСЬ
-    student.last_visit = datetime.now(timezone.utc) - timedelta(hours=5)
-    student.expire_date = datetime.now(timezone.utc) + timedelta(days=1)
 
-    session.get.return_value = student
+    # Ставим визит 5 часов назад в UTC без таймзоны (как в реальной базе)
+    student.last_visit = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=5)
+    student.expire_date = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(days=1)
+
+    # ИСПРАВЛЕНО ПОД NEW АРХИТЕКТУРУ: Мокаем execute() вместо get()
+    session.execute.return_value = mock_sqlalchemy_result(student)
 
     message = AsyncMock()
     message.web_app_data.data = "student:1:salt:valid_sig"
@@ -66,11 +75,13 @@ async def test_parse_qr_scan_unlimited_success(mock_gen_sig):
     student.club_id = 1
     student.balance_lessons = 999  # МАРКЕР БЕЗЛИМИТА
     student.is_frozen = 0
-    # ИСПРАВЛЕНО: Ставим визит в UTC
-    student.last_visit = datetime.now(timezone.utc) - timedelta(hours=5)
-    student.expire_date = datetime.now(timezone.utc) + timedelta(days=30)  # Срок активен
 
-    session.get.return_value = student
+    # Ставим визит без таймзоны (naive), как требует новая архитектура на Аэзе
+    student.last_visit = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=5)
+    student.expire_date = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(days=30)
+
+    # ИСПРАВЛЕНО ПОД NEW АРХИТЕКТУРУ: Мокаем execute() вместо get()
+    session.execute.return_value = mock_sqlalchemy_result(student)
 
     message = AsyncMock()
     message.web_app_data.data = "student:1:salt:valid_sig"

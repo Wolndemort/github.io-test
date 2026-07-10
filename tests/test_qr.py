@@ -4,6 +4,13 @@ from datetime import datetime, timedelta, timezone
 from handlers.user_option import parse_qr_scan
 
 
+def mock_sqlalchemy_result(student):
+    """Вспомогательная функция для создания мока ответа execute() в SQLAlchemy 2.0"""
+    mock_res = MagicMock()
+    mock_res.scalar_one_or_none.return_value = student
+    return mock_res
+
+
 @pytest.mark.asyncio
 @patch("handlers.user_option.generate_signature")
 async def test_parse_qr_scan_new_session_success(mock_gen_sig):
@@ -35,13 +42,15 @@ async def test_parse_qr_scan_new_session_success(mock_gen_sig):
             self.club_id = 1
             self.balance_lessons = 10
             self.is_frozen = 0
-            # Ставим визит 5 часов назад (в UTC, как требует новый хендлер)
-            self.last_visit = datetime.now(timezone.utc) - timedelta(hours=5)
-            self.expire_date = datetime.now(timezone.utc) + timedelta(days=10)
+            # Переводим в naive UTC (без таймзоны), как требует СУБД Postgres на Аэзе
+            self.last_visit = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=5)
+            self.expire_date = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(days=10)
             self.parent_id = 12345
 
     student = MockStudent()
-    session.get.return_value = student
+
+    # ИСПРАВЛЕНО: Мокаем execute() вместо get() для поддержки новой row-level блокировки
+    session.execute.return_value = mock_sqlalchemy_result(student)
 
     message = AsyncMock()
     message.web_app_data.data = "student:1:salt:valid_sig"
@@ -86,12 +95,15 @@ async def test_parse_qr_scan_inside_session_success(mock_gen_sig):
             self.club_id = 1
             self.balance_lessons = 10
             self.is_frozen = 0
-            self.last_visit = datetime.now(timezone.utc) - timedelta(minutes=10)
-            self.expire_date = datetime.now(timezone.utc) + timedelta(days=10)
+            # Переводим в naive UTC (без таймзоны)
+            self.last_visit = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(minutes=10)
+            self.expire_date = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(days=10)
             self.parent_id = 12345
 
     student = MockStudent()
-    session.get.return_value = student
+
+    # ИСПРАВЛЕНО: Мокаем execute() вместо get() для поддержки новой row-level блокировки
+    session.execute.return_value = mock_sqlalchemy_result(student)
 
     message = AsyncMock()
     message.web_app_data.data = "student:1:salt:valid_sig"
