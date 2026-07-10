@@ -1770,12 +1770,11 @@ async def process_shop_id(message: types.Message, state: FSMContext):
         parse_mode="HTML"
     )
 
-
 @router.message(YooKassaSetupStates.waiting_for_secret_key)
 async def process_secret_key(
         message: types.Message,
         state: FSMContext,
-        session: AsyncSession,  # ⚡ ИСПРАВЛЕНО: Забираем готовую сессию из мидлвари!
+        session: AsyncSession,
         club_id: int
 ):
     """Принимаем Secret Key и сохраняем всё в JSONB поле базы данных"""
@@ -1802,27 +1801,29 @@ async def process_secret_key(
     club = result.scalar_one_or_none()
 
     if club:
-    if not club.club_settings:
-        club.club_settings = {}
+        # Для 100% надежности в асинхронной среде сделаем копию словаря
+        current_settings = copy.deepcopy(club.club_settings) if club.club_settings else {}
 
-    if "payments" not in club.club_settings:
-        club.club_settings["payments"] = {}
+        if "payments" not in current_settings:
+            current_settings["payments"] = {}
 
-    # Записываем данные в JSONB
-    club.club_settings["payments"]["provider"] = "yookassa"
-    club.club_settings["payments"]["yookassa_shop_id"] = shop_id
-    club.club_settings["payments"]["yookassa_secret_key"] = secret_key
+        # Записываем данные в JSONB структуру
+        current_settings["payments"]["provider"] = "yookassa"
+        current_settings["payments"]["yookassa_shop_id"] = shop_id
+        current_settings["payments"]["yookassa_secret_key"] = secret_key
 
-    if "features" not in club.club_settings:
-        club.club_settings["features"] = {}
-    club.club_settings["features"]["online_payments"] = True
+        if "features" not in current_settings:
+            current_settings["features"] = {}
+        current_settings["features"]["online_payments"] = True
 
-    # ⚡ ВАЖНОЕ ИСПРАВЛЕНИЕ ТУТ:
-    # Принудительно ставим флаг, что JSONB внутри модели Клуба был изменен!
-    flag_modified(club, "club_settings")
+        # Присваиваем обновленный словарь обратно модели
+        club.club_settings = current_settings
+        
+        # ⚡ Принудительно взводим флаг изменений для Алхимии, чтобы апдейт улетел в БД
+        flag_modified(club, "club_settings")
 
-    # Теперь Postgres на Аэзе железно применит UPDATE
-    await session.commit()
+        # Теперь Postgres на Аэзе железно применит UPDATE
+        await session.commit()
 
         back_kb = InlineKeyboardBuilder()
         back_kb.row(types.InlineKeyboardButton(text="⚙️ Вернуться в настройки", callback_data="admin_settings"))
