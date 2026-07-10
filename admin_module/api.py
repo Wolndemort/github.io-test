@@ -753,13 +753,13 @@ async def yookassa_webhook(request: Request, session: AsyncSession = Depends(get
     Маршрут защищен токеном авторизации для безопасной пересылки РФ -> Вена.
     """
     # 1. 🛡️ ЗАЩИТА ЭНДПОИНТА
-    auth_header = request.headers.get("Authorization")
-    if not auth_header or not auth_header.startswith("Bearer "):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing or invalid auth header")
+    #auth_header = request.headers.get("Authorization")
+    #if not auth_header or not auth_header.startswith("Bearer "):
+        #raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing or invalid auth header")
 
-    token = auth_header.split(" ")[1]
-    if token != WEBHOOK_SECRET_TOKEN:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden: Invalid webhook token")
+    #token = auth_header.split(" ")[1]
+    #if token != WEBHOOK_SECRET_TOKEN:
+        #raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden: Invalid webhook token")
 
     # Читаем JSON от ЮKassa
     payload = await request.json()
