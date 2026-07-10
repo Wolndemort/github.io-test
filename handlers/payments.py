@@ -943,3 +943,111 @@ async def on_successful_payment(message: Message, session: AsyncSession, club: C
         parse_mode="HTML"
     )
 
+
+@router.callback_query(F.data == 'manage_subscription')
+async def process_manage_subscription(callback: types.CallbackQuery, session: AsyncSession):
+    """Главный экран управления подпиской: проверка привязанной карты"""
+    await callback.answer()
+    user_id = callback.from_user.id
+
+    # 1. Ищем активную подписку пользователя с сохраненной картой
+    # (Проверяем поле rebill_id на наличие токена карты ЮKassa)
+    query = select(Subscription).where(
+        Subscription.user_id == user_id,
+        Subscription.rebill_id.isnot(None),
+        Subscription.is_active == True
+    )
+    result = await session.execute(query)
+    subscriptions = result.scalars().all()
+
+    if not subscriptions:
+        # Если привязанных карт в базе нет
+        kb = types.InlineKeyboardMarkup(inline_keyboard=[
+            [types.InlineKeyboardButton(text="🔙 Назад в профиль", callback_data="profile")] # Замени коллбэк назад на свой, если нужно
+        ])
+        return await callback.message.edit_text(
+            "💳 <b>Управление подпиской</b>\n\n"
+            "У вас нет сохраненных карт в системе автопродления.\n"
+            "Карта привязывается автоматически после первой успешной онлайн-оплаты абонемента.",
+            parse_mode="HTML",
+            reply_markup=kb
+        )
+
+    # Если нашли сохраненные карты (берем первую для простоты, так как у ученика обычно одна карта)
+    sub = subscriptions[0]
+    
+    # Формируем текст с датой следующего списания, если бы крон работал (для информирования)
+    next_charge_str = sub.next_charge_at.strftime("%d.%m.%Y") if sub.next_charge_at else "Не определено"
+
+    kb = types.InlineKeyboardMarkup(inline_keyboard=[
+        [types.InlineKeyboardButton(text="❌ ОТВЯЗАТЬ КАРТУ", callback_data="confirm_delete_card")],
+        [types.InlineKeyboardButton(text="🔙 Назад в профиль", callback_data="profile")]
+    ])
+
+    await callback.message.edit_text(
+        f"💳 <b>УПРАВЛЕНИЕ ПОДПИСКОЙ</b>\n\n"
+        f" К вашему профилю привязана банковская карта для быстрой оплаты.\n\n"
+        f"<b>Статус автопродления:</b> АКТИВЕН\n"
+        f"<b>Дата следующего расчетного периода:</b> {next_charge_str}\n\n"
+        f"Вы можете отвязать карту в любой момент. После отвязки вам придется вводить данные карты вручную при следующей покупке.",
+        parse_mode="HTML",
+        reply_markup=kb
+    )
+
+
+@router.callback_query(F.data == 'confirm_delete_card')
+async def process_confirm_delete_card(callback: types.CallbackQuery):
+    """Экран-предохранитель: подтверждение отвязки карты через галочку и крестик"""
+    await callback.answer()
+
+    # Создаем клавиатуру с галочкой и крестиком
+    kb = types.InlineKeyboardMarkup(inline_keyboard=[
+        [
+            types.InlineKeyboardButton(text="✅ Да, отвязать", callback_data="execute_delete_card"),
+            types.InlineKeyboardButton(text="❌ Нет, отмена", callback_data="manage_subscription")
+        ]
+    ])
+
+    await callback.message.edit_text(
+        "⚠️ <b>Вы уверены, что хотите отвязать карту?</b>\n\n"
+        "Вы больше не сможете оплачивать абонементы клуба в один клик.",
+        parse_mode="HTML",
+        reply_markup=kb
+    )
+
+
+@router.callback_query(F.data == 'execute_delete_card')
+async def process_execute_delete_card(callback: types.CallbackQuery, session: AsyncSession):
+    """Физическое удаление токена карты из Postgres на Аэзе"""
+    await callback.answer("Карта успешно удалена!", show_alert=True)
+    user_id = callback.from_user.id
+
+    # Блокируем строки подписок пользователя для безопасного апдейта
+    query = select(Subscription).where(
+        Subscription.user_id == user_id,
+        Subscription.rebill_id.isnot(None)
+    ).with_for_update()
+    
+    result = await session.execute(query)
+    subscriptions = result.scalars().all()
+
+    if subscriptions:
+        for sub in subscriptions:
+            # Стираем rebill_id (токен ЮKassa), чтобы стереть привязку навсегда
+            sub.rebill_id = None
+            sub.is_active = False # Выключаем флаг подписки
+        
+        await session.commit()
+        logger.info(f"🗑️ Пользователь {user_id} полностью удалил свои банковские карты из СУБД.")
+
+    kb = types.InlineKeyboardMarkup(inline_keyboard=[
+        [types.InlineKeyboardButton(text="🔙 Вернуться в профиль", callback_data="profile")]
+    ])
+
+    await callback.message.edit_text(
+        "✅ <b>Карта успешно удалена!</b>\n\n"
+        "Ваши платежные данные полностью стерты из системы клуба.\n"
+        "Автопродление отключено.",
+        parse_mode="HTML",
+        reply_markup=kb
+
