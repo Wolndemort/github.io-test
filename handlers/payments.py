@@ -329,117 +329,151 @@ async def process_sbp_payment_choice(
     await callback.answer()
 
 
-
 @router.callback_query(F.data == 'pay_method_official')
 async def process_official_card_payment(
         callback: types.CallbackQuery,
         state: FSMContext,
         session: AsyncSession
 ):
-    """Сценарий автоматической онлайн-оплаты через ЮKassa с привязкой карты"""
-    await callback.answer("Генерирую официальную ссылку...", show_alert=False)
+    """Сценарий онлайн-оплаты через ЮKassa: Ссылка (первый раз) ИЛИ 1 клик (если карта привязана)"""
+    await callback.answer("Обрабатываю запрос...", show_alert=False)
 
     data = await state.get_data()
     user_id = callback.from_user.id
 
-    # Извлекаем все сохраненные параметры тарифа из FSM
     student_id = data['student_id']
     price = data['price']
-
-    # Безопасно переводим в копейки (работаем через float на случай цен с копейками)
     amount_kopecks = int(float(price) * 100)
-
     lesson_count = data['lesson_count']
     days_to_add = data['days_to_add']
 
-    # 1. Достаем текущий club_id через модель User
+    # 1. Проверяем настройки клуба
     user_res = await session.execute(select(User).where(User.user_id == user_id))
     user = user_res.scalar_one_or_none()
 
     if not user or not user.club_id:
         return await callback.message.answer("❌ Ошибка: Клуб не найден в вашей учетной записи.")
 
-    # 2. Достаем сам Клуб, чтобы забрать его платежные настройки из JSONB
     club_res = await session.execute(select(Club).where(Club.id == user.club_id))
     club = club_res.scalar_one_or_none()
 
     if not club:
         return await callback.message.answer("❌ Ошибка: Клуб не найден в базе данных платформы.")
 
-    # Вытаскиваем настройки эквайринга из JSONB блока
-    pay_settings = club.club_settings.get("payments", {})
-
+    pay_settings = club.club_settings.get("payments", {}) if club.club_settings else {}
     shop_id = pay_settings.get("yookassa_shop_id")
     secret_key = pay_settings.get("yookassa_secret_key")
 
-    # Проверяем, настроил ли админ клуба интеграцию
     if not shop_id or not secret_key:
-        return await callback.message.answer(
-            "⚠️ Онлайн-оплата картой временно недоступна для этого клуба.\n"
-            "Пожалуйста, воспользуйтесь оплатой по СБП или свяжитесь с администрацией."
-        )
+        return await callback.message.answer("⚠️ Онлайн-оплата картой временно недоступна для этого клуба.")
 
-    # Формируем уникальный ID заказа для ЮKassa и нашей СУБД
+    # 2. 🔥 ПРОВЕРЯЕМ, ЕСТЬ ЛИ СОХРАНЕННАЯ КАРТА (Как у Velvet VPN)
+    sub_query = select(Subscription).where(
+        Subscription.user_id == user_id,
+        Subscription.club_id == user.club_id,
+        Subscription.rebill_id.isnot(None)
+    )
+    sub_res = await session.execute(sub_query)
+    saved_subscription = sub_res.scalar_one_or_none()
+
+    # Формируем уникальный ID заказа для нашей СУБД
     order_id = f"INIT_{uuid.uuid4().hex[:12].upper()}"
 
-    # Создаем черновик заказа в таблице payment_orders
+    # Инициализируем ноду ЮKassa
+    yookassa_node = YooKassaClient(shop_id=shop_id, secret_key=secret_key, proxy_url=PROXY_URL)
+
+    # =====================================================================
+    # СЦЕНАРИЙ Б: КАРТА ЕСТЬ -> СПИСЫВАЕМ В 1 КЛИК
+    # =====================================================================
+    if saved_subscription and saved_subscription.rebill_id:
+        # Создаем черновик заказа со статусом RECURRING (повторный)
+        new_order = PaymentOrder(
+            id=order_id, user_id=user_id, student_id=student_id, club_id=user.club_id,
+            amount_kopecks=amount_kopecks, lesson_count=lesson_count, days_to_add=days_to_add,
+            status="NEW", type="RECURRING"  # Маркер повторной оплаты
+        )
+        session.add(new_order)
+        await session.commit()
+
+        # Меняем текст на «прогресс-бар», чтобы юзер видел, что магия пошла
+        await callback.message.edit_text("⏳ <b>Оплата в 1 клик...</b>\n\nСписываем средства со связанной карты. Пожалуйста, подождите.", parse_mode="HTML")
+
+        ui_cfg = club.club_settings.get("ui", {}) if club.club_settings else {}
+        club_name = ui_cfg.get("club_name", club.name if club else "Фитнес-клуб")
+
+        # Вызываем скрытое списание по токену сохраненной карты
+        charge_data = await yookassa_node.charge_payment(
+            order_id=order_id,
+            amount_kopecks=amount_kopecks,
+            payment_method_id=saved_subscription.rebill_id,
+            club_name=club_name
+        )
+
+        if charge_data.get("Success"):
+            # Если статус 'succeeded' — ЮKassa списала деньги сразу в фоне!
+            if charge_data.get("Status") == "succeeded":
+                # Здесь можно сразу выдать сообщение об успехе, 
+                # но лучше дождаться вебхука, который начислит абонемент и пришлет уведомление.
+                await state.clear()
+                return
+            else:
+                # Если статус pending (например, банк проверяет), просто ждем вебхук
+                await state.clear()
+                return
+        else:
+            # Если списание по привязанной карте сорвалось (нет денег, карта просрочена)
+            new_order.status = "REJECTED"
+            await session.commit()
+            
+            # Предлагаем оплатить по старинке (ссылкой)
+            kb = types.InlineKeyboardMarkup(inline_keyboard=[
+                [types.InlineKeyboardButton(text="💳 Ввести данные карты вручную", callback_data="pay_method_official_force_new")]
+            ])
+            return await callback.message.edit_text(
+                f"❌ <b>Не удалось списать оплату со связанной карты.</b>\n\n"
+                f"Причина: {charge_data.get('Message', 'Отклонено банком')}.\n"
+                f"Вы можете оплатить тариф вручную, введя данные заново:",
+                parse_mode="HTML", reply_markup=kb
+            )
+
+    # =====================================================================
+    # СЦЕНАРИЙ А: КАРТЫ НЕТ -> ГЕНЕРИРУЕМ ССЫЛКУ (Твой стандартный код)
+    # =====================================================================
     new_order = PaymentOrder(
-        id=order_id,
-        user_id=user_id,
-        student_id=student_id,
-        club_id=user.club_id,
-        amount_kopecks=amount_kopecks,
-        lesson_count=lesson_count,
-        days_to_add=days_to_add,
-        status="NEW",
-        type="FIRST"  # Маркер первой оплаты для привязки карты
+        id=order_id, user_id=user_id, student_id=student_id, club_id=user.club_id,
+        amount_kopecks=amount_kopecks, lesson_count=lesson_count, days_to_add=days_to_add,
+        status="NEW", type="FIRST"
     )
     session.add(new_order)
     await session.commit()
 
-    # 3. Получаем юзернейм текущего бота для формирования редиректа после оплаты
     bot_info = await callback.bot.get_me()
-    bot_username = bot_info.username
+    clean_bot_username = bot_info.username.replace("@", "")
 
-    # 4. Динамически создаем клиент ЮKassa с ключами ЭТОГО клуба и прокси для Вены
-    yookassa_node = YooKassaClient(
-        shop_id=shop_id,
-        secret_key=secret_key,
-        proxy_url=PROXY_URL
-    )
-
-    # Запускаем инициализацию платежа в ЮKassa
     payment_data = await yookassa_node.init_payment(
-        order_id=order_id,
-        amount_kopecks=amount_kopecks,
-        user_id=user_id,
-        bot_username=bot_username
+        order_id=order_id, amount_kopecks=amount_kopecks, user_id=user_id, bot_username=clean_bot_username
     )
 
     if payment_data.get("Success"):
         payment_url = payment_data.get("PaymentURL")
-
         kb = types.InlineKeyboardMarkup(inline_keyboard=[
             [types.InlineKeyboardButton(text="💳 Перейти к оплате картой", url=payment_url)]
         ])
-
         await callback.message.edit_text(
             f"💳 <b>Официальная оплата подписки</b>\n\n"
             f"Вы выбрали тариф: <b>{data['tariff_label']} за {price}₽</b>\n\n"
-            f"После первой успешной оплаты ваша карта привяжется автоматически. "
-            f"Следующее продление абонемента спишется автоматически через 30 дней. "
-            f"Вы сможете отключить автопродление в любой момент прямо в меню бота.",
-            reply_markup=kb,
-            parse_mode="HTML"
+            f"После успешной оплаты ваша карта привяжется к системе для быстрой оплаты в 1 клик.",
+            reply_markup=kb, parse_mode="HTML"
         )
-        await state.clear()  # Сбрасываем стейт диалога
+        await state.clear()
     else:
-        # Если ЮKassa вернула ошибку, переводим заказ в статус REJECTED, чтобы не плодить мусор
         new_order.status = "REJECTED"
         await session.commit()
+        await callback.message.answer(f"❌ Ошибка создания платежа: {payment_data.get('Message')}")
 
-        error_msg = payment_data.get("Message", "Ошибка платежной системы")
-        await callback.message.answer(f"❌ Не удалось запустить эквайринг ЮKassa: {error_msg}")
+
+
+
 @router.message(PaymentStates.waiting_for_receipt, F.photo)
 async def handle_receipt_submission(
         message: types.Message,
