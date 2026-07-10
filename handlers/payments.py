@@ -4,6 +4,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from redis import Redis
 from services.yookassa_client import YooKassaClient
 import uuid
+from config import PROXY_URL
 from database.db import PaymentOrder, User
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -328,6 +329,7 @@ async def process_sbp_payment_choice(
     await callback.answer()
 
 
+
 @router.callback_query(F.data == 'pay_method_official')
 async def process_official_card_payment(
         callback: types.CallbackQuery,
@@ -364,23 +366,23 @@ async def process_official_card_payment(
     if not club:
         return await callback.message.answer("❌ Ошибка: Клуб не найден в базе данных платформы.")
 
-    # Вытаскиваем настройки эквайринга из твоего нового JSONB блока
+    # Вытаскиваем настройки эквайринга из JSONB блока
     pay_settings = club.club_settings.get("payments", {})
-    features = club.club_settings.get("features", {})
 
     shop_id = pay_settings.get("yookassa_shop_id")
     secret_key = pay_settings.get("yookassa_secret_key")
 
     # Проверяем, настроил ли админ клуба интеграцию
-    if not features.get("online_payments") or not shop_id or not secret_key:
+    if not shop_id or not secret_key:
         return await callback.message.answer(
             "⚠️ Онлайн-оплата картой временно недоступна для этого клуба.\n"
-            "Пожалуйста, воспользуйтесь оплатой по СБП (вручную по чеку) или свяжитесь с администрацией."
+            "Пожалуйста, воспользуйтесь оплатой по СБП или свяжитесь с администрацией."
         )
 
+    # Формируем уникальный ID заказа для ЮKassa и нашей СУБД
     order_id = f"INIT_{uuid.uuid4().hex[:12].upper()}"
 
-    # Фиксируем новый заказ в таблице payment_orders
+    # Создаем черновик заказа в таблице payment_orders
     new_order = PaymentOrder(
         id=order_id,
         user_id=user_id,
@@ -400,7 +402,6 @@ async def process_official_card_payment(
     bot_username = bot_info.username
 
     # 4. Динамически создаем клиент ЮKassa с ключами ЭТОГО клуба и прокси для Вены
-    from config import PROXY_URL
     yookassa_node = YooKassaClient(
         shop_id=shop_id,
         secret_key=secret_key,
@@ -433,10 +434,12 @@ async def process_official_card_payment(
         )
         await state.clear()  # Сбрасываем стейт диалога
     else:
+        # Если ЮKassa вернула ошибку, переводим заказ в статус REJECTED, чтобы не плодить мусор
+        new_order.status = "REJECTED"
+        await session.commit()
+
         error_msg = payment_data.get("Message", "Ошибка платежной системы")
         await callback.message.answer(f"❌ Не удалось запустить эквайринг ЮKassa: {error_msg}")
-
-
 @router.message(PaymentStates.waiting_for_receipt, F.photo)
 async def handle_receipt_submission(
         message: types.Message,

@@ -1814,6 +1814,11 @@ async def process_secret_key(
         club.club_settings["payments"]["yookassa_shop_id"] = shop_id
         club.club_settings["payments"]["yookassa_secret_key"] = secret_key
 
+        # ⚡ ИСПРАВЛЕНО: Автоматически активируем тумблер оплат при успешном вводе ключей
+        if "features" not in club.club_settings:
+            club.club_settings["features"] = {}
+        club.club_settings["features"]["online_payments"] = True
+
         # Пересобираем словарь для вызова деформации MutableDict в SQLAlchemy
         club.club_settings = dict(club.club_settings)
 
