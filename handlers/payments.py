@@ -9,7 +9,7 @@ from database.db import PaymentOrder, User
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from loguru import logger
-from database.db import Student, Club
+from database.db import Student, Club,Subscription 
 from handlers.buttons import discipline, get_pay_options_kb, get_cash_options_kb
 from database.db import add_abon
 from aiogram.fsm.context import FSMContext
