@@ -752,7 +752,7 @@ async def yookassa_webhook(request: Request, session: AsyncSession = Depends(get
     Прием уведомлений об оплатах (вебхуков) от ЮKassa.
     Маршрут защищен токеном авторизации для безопасной пересылки РФ -> Вена.
     """
-    # 1. ЗАЩИТА ЭНДПОИНТА
+    # 1. 🛡️ ЗАЩИТА ЭНДПОИНТА
     auth_header = request.headers.get("Authorization")
     if not auth_header or not auth_header.startswith("Bearer "):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing or invalid auth header")
@@ -764,66 +764,66 @@ async def yookassa_webhook(request: Request, session: AsyncSession = Depends(get
     # Читаем JSON от ЮKassa
     payload = await request.json()
 
-    event = payload.get("event")  # Тип события, например: 'payment.succeeded'
-    object_data = payload.get("object", {})  # Данные самого платежа
+    event = payload.get("event")  # 'payment.succeeded'
+    object_data = payload.get("object", {})  # Данные платежа
 
-    # Извлекаем метаданные, которые мы зашивали при создании ссылки
     metadata = object_data.get("metadata", {})
     order_id = metadata.get("order_id")
 
     if not order_id:
-        # Если это какой-то левый запрос без order_id в метаданных, просто тушим его
         return {"status": "ignored"}
 
-    # 2. ЕСЛИ ОПЛАТА УСПЕШНО ПРОШЛА (payment.succeeded)
+    # 2. 🔥 ЕСЛИ ОПЛАТА УСПЕШНО ПРОШЛА (payment.succeeded)
     if event == "payment.succeeded":
-        # Ищем исходный заказ в нашей таблице по UUID-строке order_id
-        order_result = await session.execute(select(PaymentOrder).where(PaymentOrder.id == order_id))
+        # Используем with_for_update() для защиты от двойного начисления (Бот + Вебхук одновременно)
+        order_query = select(PaymentOrder).where(PaymentOrder.id == order_id).with_for_update()
+        order_result = await session.execute(order_query)
         order = order_result.scalar_one_or_none()
 
         # Если заказ найден и он еще обрабатывается
         if order and order.status != "CONFIRMED":
             order.status = "CONFIRMED"
 
-            # Вытаскиваем токен сохраненной карты (Id метода оплаты)
+            # Вытаскиваем данные метода оплаты строго по структуре ЮKassa
             payment_method = object_data.get("payment_method", {})
             payment_method_id = payment_method.get("id")
-            saved_card_flag = object_data.get("saved", False)
 
-            # Если это первая оплата (FIRST), метод оплаты сохранен для рекуррентов и нам пришел ID
+            # ⚡ ИСПРАВЛЕНО: Флаг saved лежит ВНУТРИ объекта payment_method!
+            saved_card_flag = payment_method.get("saved", False)
+
+            # Если это первая оплата (FIRST) и карта успешно привязалась для рекуррентов
             if order.type == "FIRST" and payment_method_id and saved_card_flag:
-                # Проверяем, нет ли уже подписки на этого ребенка в этом клубе
-                sub_result = await session.execute(
-                    select(Subscription).where(
-                        Subscription.student_id == order.student_id,
-                        Subscription.club_id == order.club_id
-                    )
-                )
+                sub_query = select(Subscription).where(
+                    Subscription.student_id == order.student_id,
+                    Subscription.club_id == order.club_id
+                ).with_for_update()
+
+                sub_result = await session.execute(sub_query)
                 subscription = sub_result.scalar_one_or_none()
 
-                # Сдвигаем дату следующего списания на 30 дней вперед в UTC
-                next_charge = datetime.now(timezone.utc) + timedelta(days=30)
+                # Сдвигаем дату следующего списания на 30 дней вперед в наивном UTC для Postgres на Аэзе
+                next_charge_naive = (datetime.now(timezone.utc) + timedelta(days=30)).replace(tzinfo=None)
 
                 if subscription:
-                    # Обновляем токен карты ЮKassa и параметры
+                    # Обновляем токен сохраненной карты ЮKassa
                     subscription.rebill_id = str(payment_method_id)
-                    subscription.next_charge_at = next_charge
+                    subscription.next_charge_at = next_charge_naive
                     subscription.is_active = True
                     subscription.amount_kopecks = order.amount_kopecks
                 else:
-                    # Создаем чистую подписку под автосписания
+                    # Создаем чистую подписку под автосписания по крону
                     new_sub = Subscription(
                         user_id=order.user_id,
                         student_id=order.student_id,
                         club_id=order.club_id,
-                        rebill_id=str(payment_method_id),  # Записываем payment_method_id в rebill_id
+                        rebill_id=str(payment_method_id),  # Сохраняем ID карты
                         amount_kopecks=order.amount_kopecks,
-                        next_charge_at=next_charge,
+                        next_charge_at=next_charge_naive,
                         is_active=True
                     )
                     session.add(new_sub)
 
-            # Достаем объект клуба, чтобы передать настройки в функцию add_abon
+            # Достаем объект клуба для настроек
             club_result = await session.execute(select(Club).where(Club.id == order.club_id))
             club = club_result.scalar_one_or_none()
             club_settings = club.club_settings if club else {}
@@ -838,13 +838,13 @@ async def yookassa_webhook(request: Request, session: AsyncSession = Depends(get
                 days_to_add=order.days_to_add
             )
 
+            # Сохраняем транзакцию. Блокировка with_for_update снимется автоматически
             await session.commit()
 
             # 4. ОТПРАВЛЯЕМ SaaS-УВЕДОМЛЕНИЕ РОДИТЕЛЮ ЧЕРЕЗ БОТА КЛУБА
             if abon_result:
                 new_expire, parent_id = abon_result
                 try:
-                    # Вытаскиваем словарь запущенных ботов из стейта приложения FastAPI
                     bots_dict = getattr(request.app.state, "bots_dict", {})
                     bot = bots_dict.get(club.bot_token) if club else None
 
@@ -863,15 +863,15 @@ async def yookassa_webhook(request: Request, session: AsyncSession = Depends(get
                             parse_mode="HTML"
                         )
                 except Exception as e:
-                    print(f"Ошибка отправки сообщения родителю в бот: {e}")
+                    logger.error(f"Ошибка отправки сообщения родителю в бот: {e}")
 
-    # 3. ЕСЛИ ПЛАТЕЖ ОТМЕНЕН ИЛИ ОТКЛОНЕН (payment.canceled)
+    # 5. ЕСЛИ ПЛАТЕЖ ОТМЕНЕН ИЛИ ОТКЛОНЕН (payment.canceled)
     elif event == "payment.canceled":
-        order_result = await session.execute(select(PaymentOrder).where(PaymentOrder.id == order_id))
+        order_query = select(PaymentOrder).where(PaymentOrder.id == order_id).with_for_update()
+        order_result = await session.execute(order_query)
         order = order_result.scalar_one_or_none()
         if order and order.status == "NEW":
             order.status = "REJECTED"
             await session.commit()
 
-    # ЮKassa ждет в ответ пустой ответ со статусом HTTP 200 OK
     return {"status": "success"}
