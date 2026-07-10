@@ -340,9 +340,13 @@ async def handle_list_clubs(
 async def reload_all_system_configs(
         callback: types.CallbackQuery,
         redis: Redis,
-        session,
+        session: AsyncSession,
         is_super_admin: bool
 ):
+    """
+    Хендлер суперадмина: синхронизирует структуру JSONB настроек всех клубов с константой
+    и полностью сбрасывает кэш конфигураций в Redis.
+    """
     if not is_super_admin:
         return await callback.answer("У вас нет прав суперадмина ⛔", show_alert=True)
 
@@ -360,18 +364,23 @@ async def reload_all_system_configs(
             # Безопасно мерджим структуру верхнего уровня (features, ui, limits, turnstile и т.д.)
             for section_key, section_value in DEFAULT_CLUB_SETTINGS.items():
                 if section_key not in current_settings:
-                    # Если секции (например, 'turnstile') вообще нет в БД клуба, копируем целиком
+                    # Если секции вообще нет в БД клуба, копируем целиком
                     current_settings[section_key] = section_value
                     is_modified = True
                 elif isinstance(section_value, dict) and isinstance(current_settings[section_key], dict):
-                    # Если секция есть и это словарь (например, 'limits'), проверяем вложенные поля
+                    # Если секция есть и это словарь, проверяем вложенные поля
                     for field_key, field_value in section_value.items():
                         if field_key not in current_settings[section_key]:
-                            # 🎯 НАШЛИ! Поля (например, 'session_timeout_minutes') нет в БД клуба — аккуратно добавляем
+                            # ⚡ ИСПРАВЛЕНО: Пропускаем пустые поля авторизации ЮKassa и СКУД,
+                            # чтобы не забивать базу живых клубов пустыми строками ""
+                            if field_key in ["yookassa_shop_id", "yookassa_secret_key", "password", "base_url"]:
+                                continue
+
+                            # Аккуратно добавляем только новые полезные поля структуры
                             current_settings[section_key][field_key] = field_value
                             is_modified = True
 
-            # Сохраняем изменения в базу только если реально нашли и добавили новые поля
+            # Сохраняем изменения в базу только если реально нашли и добавили новые поля структуры
             if is_modified:
                 club.club_settings = current_settings
                 flag_modified(club, "club_settings")
@@ -380,7 +389,7 @@ async def reload_all_system_configs(
 
         if updated_clubs_count > 0:
             await session.commit()
-            # Очищаем кэш текущей сессии SQLAlchemy, чтобы принудительно перечитать свежий JSON из Postgres
+            # Очищаем кэш текущей сессии SQLAlchemy, чтобы принудительно перечитать свежий JSON
             session.expire_all()
 
     except Exception as e:
@@ -405,5 +414,3 @@ async def reload_all_system_configs(
         f"Боевые настройки не задеты. Кэш {deleted_count} ботов сброшен.",
         show_alert=True
     )
-
-
