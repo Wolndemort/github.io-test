@@ -1049,5 +1049,5 @@ async def process_execute_delete_card(callback: types.CallbackQuery, session: As
         "Ваши платежные данные полностью стерты из системы клуба.\n"
         "Автопродление отключено.",
         parse_mode="HTML",
-        reply_markup=kb
+        reply_markup=kb)
 
