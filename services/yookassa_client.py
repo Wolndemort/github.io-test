@@ -82,7 +82,8 @@ class YooKassaClient:
                     return {"Success": False, "Message": res_json.get("description", "Ошибка создания платежа")}
 
             except Exception as e:
-                logger.error(f"🚨 Ошибка Init запроса к ЮKassa: {repr(e)}")
+                # ⚡ ИСПРАВЛЕНО: logger.exception принудительно выведет в логи Docker глубокий трассировочный лог ошибки сети!
+                logger.exception(f"🚨 КРИТИЧЕСКИЙ СБОЙ NET IO ЗАПРОСА К ЮКАССЕ: {repr(e)}")
                 return {"Success": False, "Message": str(e)}
 
     async def charge_payment(self, order_id: str, amount_kopecks: int, payment_method_id: str, club_name: str) -> dict:
