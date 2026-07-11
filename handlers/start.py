@@ -1,3 +1,5 @@
+from datetime import timezone, datetime
+
 from aiogram import Router, types
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
@@ -6,7 +8,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update
 from types import SimpleNamespace
 from loguru import logger
-
 from handlers.buttons import admin_keyboard, get_profile_keyboard
 from database.db import User, Student, Club
 
@@ -45,6 +46,7 @@ async def _send_main_menu(
     # Чтобы код был максимально надежным, мы просто оставили вызов чистым.
 
 
+
 @router.message(Command('start'))
 async def start_handler(
         message: types.Message,
@@ -58,6 +60,20 @@ async def start_handler(
 ):
     await state.clear()
     user_id = message.from_user.id
+
+    # =========================================================================
+    # 🚨 КРИТИЧЕСКИЙ ПРОБИВ АСИНХРОННОГО КЭША И ИЗОЛЯЦИИ ТРАНЗАКЦИЙ ДЛЯ /START:
+    # Закрываем старую фоновую транзакцию сессии бота. Это заставит асинхронный
+    # драйвер Postgres на Аэзе отдать нам только свежие и актуальные цифры.
+    try:
+        await session.rollback()
+        session.expire_all()
+    except Exception as cache_err:
+        logger.warning(f"Ошибка принудительного сброса сессии в /start: {cache_err}")
+    # =========================================================================
+
+    # Накатываем наивное UTC-время
+    now_naive = datetime.now(timezone.utc).replace(tzinfo=None)
 
     # 1. Регистрация/Обновление пользователя
     db_user = await session.get(User, user_id)
@@ -82,7 +98,7 @@ async def start_handler(
 
         inline_builder = InlineKeyboardBuilder()
         inline_builder.row(types.InlineKeyboardButton(
-            text="📄 Политика конфиденциальности",
+            text="📄  Политика конфиденциальности",
             web_app=types.WebAppInfo(url=f"{base_url}/privacy")
         ))
         inline_builder.row(types.InlineKeyboardButton(
@@ -118,19 +134,37 @@ async def start_handler(
             parse_mode="HTML"
         )
 
+    # Запрашиваем студента с затиранием кэша сессии
     stmt = select(Student).where(
         Student.parent_id == user_id,
         Student.club_id == club.id
-    )
+    ).execution_options(populate_existing=True)
     student = (await session.execute(stmt)).scalar_one_or_none()
 
     if student:
-        expire_str = student.expire_date.strftime('%d.%m.%Y') if student.expire_date else "не указано"
-        status_text = f"✅ Атлет: <b>{student.name}</b>\n📅 Абонемент до: <b>{expire_str}</b>"
+        # Принудительно приводим к инту для точной и гибкой проверки
+        is_frozen_val = int(getattr(student, 'is_frozen', 0) or 0)
+
+        # Логика статуса даты (Синхронизировано с личным кабинетом)
+        if not student.expire_date:
+            status = "❌ <b>Не куплен</b>"
+        elif is_frozen_val == 1:
+            status = "❄️ <b>ЗАМОРОЖЕН</b>"
+        elif student.expire_date.replace(tzinfo=None) > now_naive:
+            status = f"✅ <b>Активен</b> до <code>{student.expire_date.strftime('%d.%m.%Y')}</code>"
+        else:
+            status = f"🔴 <b>ИСТЕК</b> (<code>{student.expire_date.strftime('%d.%m.%Y')}</code>)"
+
+        status_text = f"👤 Атлет: <b>{student.name}</b>\n📊 Статус абонемента: {status}"
+
+        # === 🚨 ФИКС ТИПОВОЙ ОШИБКИ TYPEERROR ===
+        # Собираем объект SimpleNamespace, который требует функция клавиатуры
+        current_user = SimpleNamespace(user_id=user_id, club_id=club.id)
 
         await message.answer(
             f"📍 <b>{club.name}</b>\n\n{welcome_text}\n\n{status_text}",
-            reply_markup=get_profile_keyboard(club_settings=club_settings, is_authorized=True),
+            # ПЕРЕДАЕМ ОБЪЕКТ ЮЗЕРА ПЕРВЫМ АРГУМЕНТОМ — ОШИБКА БОЛЬШЕ НЕ ВЫПЛЕВЕТСЯ!
+            reply_markup=get_profile_keyboard(current_user, club_settings=club_settings, is_authorized=True),
             parse_mode="HTML"
         )
     else:
