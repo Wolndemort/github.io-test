@@ -467,7 +467,6 @@ async def get_biometric_page(request: Request, club_id: int, user_id: int, db: A
 
 # 2. РОУТ ДЛЯ ОБРАБОТКИ НАЖАТИЯ И ОТКРЫТИЯ ТУРНИКЕТА
 
-
 @router.post("/open-turnstile")
 async def open_turnstile(
         payload: dict,
@@ -502,33 +501,33 @@ async def open_turnstile(
         return {"success": False, "message": "Клуб студента не найден"}
 
     # Работаем со временем (убираем tzinfo для DateTime в Postgres)
-    now = datetime.now(timezone.utc)
-    now_naive = now.replace(tzinfo=None)
+    now_naive = datetime.now(timezone.utc).replace(tzinfo=None)
+    club_settings = club.club_settings or {}
 
-    # === БЛОК АВТОМАТИЧЕСКОЙ РАЗМОРОЗКИ ===
+    # === ЛОГИКА ДОСРОЧНОЙ РАЗМОРОЗКИ С КОМПЕНСАЦИЕЙ ДНЕЙ ===
     if student.is_frozen and student.frozen_at:
         frozen_at_naive = student.frozen_at.replace(tzinfo=None)
 
-        # Считаем чистую разницу в днях по календарю
-        days_frozen = (now_naive.date() - frozen_at_naive.date()).days
-        days_to_add = max(0, days_frozen)
+        # Сколько чистых дней атлет РЕАЛЬНО пробыл в заморозке
+        days_passed = (now_naive.date() - frozen_at_naive.date()).days
+        days_passed = max(0, days_passed)
 
-        # Продлеваем дату окончания абонемента
-        if student.subscription_ends_at:
-            student.subscription_ends_at += timedelta(days=days_to_add)
+        # Достаем шаг заморозки из настроек лимитов клуба (дефолт 7)
+        freeze_step = club_settings.get("limits", {}).get("freeze_days_step", 7)
+
+        # Если вернулся досрочно — забираем лишние начисленные дни обратно
+        if days_passed < freeze_step:
+            diff = freeze_step - days_passed
+            if student.subscription_ends_at:
+                student.subscription_ends_at -= timedelta(days=diff)
+            logger.info(f"❄️ FaceID Досрочный выход: {student.name} недогулял {diff} дн. Срок уменьшен назад.")
 
         # Снимаем флаги заморозки
-        student.is_frozen = 0  # или False (в зависимости от типа поля в БД)
+        student.is_frozen = 0
         student.frozen_at = None
-
-        # Проталкиваем изменения в память транзакции
         await db.flush()
-        logger.info(
-            f"❄️ FaceID Авторазморозка: Атлет {student.name} разморожен. Абонемент продлен на {days_to_add} дн.")
-    # =====================================
 
-    # Работаем с JSONB полем club_settings
-    club_settings = club.club_settings or {}
+    # Работаем с конфигурацией реле
     relay_config = club_settings.get("turnstile", {})
 
     if not relay_config.get("enabled", False):
@@ -546,21 +545,26 @@ async def open_turnstile(
     if not is_inside_session and student.balance_lessons <= 0 and student.balance_lessons != 999:
         return {"success": False, "message": "На балансе нет доступных занятий."}
 
-    # Логика списания
+    # Логика списания и подготовка сообщения СТРОГО до коммита
     if is_inside_session:
         message_text = "Турникет открыт! Повторный проход, сессия активна."
     else:
         if student.balance_lessons != 999:
             student.balance_lessons -= 1
-        student.last_visit = now
-        message_text = f"Турникет открыт! Осталось занятий: {student.balance_lessons}"
+        student.last_visit = now_naive  # Пишем строго naive-время без таймзоны!
+
+        # Запоминаем текущее значение баланса в обычную переменную, отвязав от SQLAlchemy объекта
+        current_balance = student.balance_lessons
+        message_text = f"Турникет открыт! Осталось занятий: {current_balance}"
 
     # ФИКСИРУЕМ ИЗМЕНЕНИЯ В БАЗЕ (Освобождаем строку перед сетевым запросом к реле)
     try:
         await db.commit()
     except Exception as db_err:
-        logger.error(f"Ошибка коммита базы данных перед СКУД: {db_err}")
+        logger.error(f"Ошибка коммита базы данных перед СКУД (FaceID): {db_err}")
         return {"success": False, "message": "Ошибка сохранения данных визита."}
+
+    # ОБЪЕКТ student ПОСЛЕ СТРОКИ ВЫШЕ БОЛЬШЕ НЕ ТРОГАЕМ, ЧТОБЫ НЕ ВЫЗВАТЬ СЕТЕВУЮ ОШИБКУ ПОДДКЛЮЧЕНИЯ БАЗЫ
 
     # ОТПРАВЛЯЕМ КОМАНДУ НА РЕЛЕ DINGTIAN
     try:
@@ -572,7 +576,7 @@ async def open_turnstile(
         if is_opened is False:
             return {"success": False, "message": "Реле отклонило команду на открытие."}
     except Exception as e:
-        logger.warning(f"Ошибка сети/таймаута СКУД: {str(e)}. Проход разрешен.")
+        logger.warning(f"Ошибка сети/таймаута СКУД FaceID: {str(e)}. Проход разрешен.")
 
     return {"success": True, "message": message_text}
 
@@ -630,38 +634,39 @@ async def open_webapp_turnstile(
             raise HTTPException(status_code=400, detail="Необходимо биометрическое подтверждение на устройстве")
 
     # Работаем со временем (убираем tzinfo для DateTime в Postgres)
-    now = datetime.now(timezone.utc)
-    now_naive = now.replace(tzinfo=None)
+    now_naive = datetime.now(timezone.utc).replace(tzinfo=None)
+    club_settings = club.club_settings or {}
 
-    # 3. АВТОМАТИЧЕСКАЯ РАЗМОРОЗКА И ПРОВЕРКА СРОКА ДЕЙСТВИЯ
+    # === 3. ЛОГИКА ДОСРОЧНОЙ РАЗМОРОЗКИ С КОМПЕНСАЦИЕЙ ДНЕЙ ===
     if student.is_frozen and student.frozen_at:
         frozen_at_naive = student.frozen_at.replace(tzinfo=None)
 
-        # Вычисляем чистую разницу в днях между "сейчас" и датой заморозки
-        days_frozen = (now_naive.date() - frozen_at_naive.date()).days
-        days_to_add = max(0, days_frozen)
+        # Считаем чистые дни в заморозке
+        days_passed = (now_naive.date() - frozen_at_naive.date()).days
+        days_passed = max(0, days_passed)
 
-        # Продлеваем дату окончания абонемента в WebApp-модели
-        if student.expire_date:
-            student.expire_date += timedelta(days=days_to_add)
+        # Берем шаг заморозки из конфига клуба (дефолт 7)
+        freeze_step = club_settings.get("limits", {}).get("freeze_days_step", 7)
 
-        # Снимаем заморозку
-        student.is_frozen = 0  # или False
+        # Если вернулся досрочно — забираем лишние дни обратно
+        if days_passed < freeze_step:
+            diff = freeze_step - days_passed
+            if student.expire_date:
+                student.expire_date -= timedelta(days=diff)
+            logger.info(f"❄️ WebApp Досрочный выход: {student.name} недогулял {diff} дн. Срок уменьшен назад.")
+
+        # Снимаем флаги заморозки
+        student.is_frozen = 0
         student.frozen_at = None
-
-        # Проталкиваем изменения в сессию
         await db.flush()
-        logger.info(
-            f"❄️ WebApp Авторазморозка: Атлет {student.name} разморожен. Абонемент продлен на {days_to_add} дн.")
 
-    # Теперь проверяем срок действия (уже обновленный, если была разморозка)
+    # Проверяем срок действия (уже обновленный, если была разморозка)
     expire_naive = student.expire_date.replace(tzinfo=None) if student.expire_date else None
 
     if expire_naive and expire_naive < now_naive:
         return {"success": False, "message": "Срок действия абонемента истек."}
 
-    # Безопасное чтение JSONB-настроек
-    club_settings = club.club_settings or {}
+    # Чтение JSONB-настроек реле
     relay_config = club_settings.get("turnstile", {})
 
     if not relay_config.get("enabled", False):
@@ -679,14 +684,14 @@ async def open_webapp_turnstile(
     if not is_inside_session and student.balance_lessons <= 0 and student.balance_lessons != 999:
         return {"success": False, "message": "На балансе нет доступных занятий."}
 
-    # Формируем логику списаний и сообщений
+    # === ФОРМИРУЕМ ЛОГИКУ СПИСАНИЙ И ТЕКСТА (СТРОГО ДО КОММИТА) ===
     if is_inside_session:
         logger.info(f"🔄 Повторный проход через WebApp. Атлет {student.name} в сессии. Занятие НЕ списываем.")
         session_end = student.last_visit + timedelta(minutes=timeout_minutes)
         session_end_str = session_end.strftime("%H:%M")
         message_text = f"Турникет открыт! Повторный проход. Сессия активна до {session_end_str}."
     else:
-        # Алерт владельцу клуба при списании второго занятия за день (проход спустя 2.5+ часа, но меньше 6 часов)
+        # Алерт владельцу клуба при списании второго занятия за день
         if student.last_visit:
             last_visit_naive = student.last_visit.replace(tzinfo=None)
             if now_naive - last_visit_naive < timedelta(hours=6):
@@ -708,17 +713,24 @@ async def open_webapp_turnstile(
         if student.balance_lessons != 999:
             student.balance_lessons -= 1
 
-        student.last_visit = now
-        message_text = f"Турникет открыт для {student.name}! Осталось занятий: {student.balance_lessons}"
+        # Записываем строго naive UTC-время, чтобы Postgres не падал
+        student.last_visit = now_naive
 
-    # 5. ФИКСИРУЕМ ИЗМЕНЕНИЯ В БАЗЕ (Освобождаем row-level блокировку базы перед сетевым забросом)
+        # Полностью разрываем связь с SQLAlchemy-объектом: кэшируем в память примитивы
+        current_balance = student.balance_lessons
+        athlete_name = str(student.name)
+        message_text = f"Турникет открыт для {athlete_name}! Осталось занятий: {current_balance}"
+
+    # 4. ФИКСИРУЕМ ИЗМЕНЕНИЯ В БАЗЕ (Освобождаем row-level блокировку)
     try:
         await db.commit()
     except Exception as db_err:
         logger.error(f"Ошибка коммита базы данных перед СКУД в WebApp: {db_err}")
         return {"success": False, "message": "Ошибка сохранения данных визита."}
 
-    # 4. ОТПРАВЛЯЕМ КОМАНДУ НА РЕЛЕ DINGTIAN (БЕЗ блокировки базы данных)
+    # ОБЪЕКТ student ПОСЛЕ СТРОКИ ВЫШЕ БОЛЬШЕ НЕ ТРОГАЕМ!
+
+    # 5. ОТПРАВЛЯЕМ КОМАНДУ НА РЕЛЕ DINGTIAN (БЕЗ блокировки базы данных)
     try:
         base_url = str(relay_config.get("base_url", ""))
         if base_url and not base_url.startswith("http"):
