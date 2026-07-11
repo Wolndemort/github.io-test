@@ -505,24 +505,30 @@ async def open_turnstile(
     club_settings = club.club_settings or {}
 
     # === ЛОГИКА ДОСРОЧНОЙ РАЗМОРОЗКИ С КОМПЕНСАЦИЕЙ ДНЕЙ ===
-    if student.is_frozen and student.frozen_at:
-        frozen_at_naive = student.frozen_at.replace(tzinfo=None)
+    if student.is_frozen:  # Проверяем ТОЛЬКО флаг заморозки
+        # Если дата заморозки заполнена — делаем честную компенсацию дней
+        if student.frozen_at:
+            frozen_at_naive = student.frozen_at.replace(tzinfo=None)
 
-        # Сколько чистых дней атлет РЕАЛЬНО пробыл в заморозке
-        days_passed = (now_naive.date() - frozen_at_naive.date()).days
-        days_passed = max(0, days_passed)
+            # Сколько чистых дней атлет РЕАЛЬНО пробыл в заморозке
+            days_passed = (now_naive.date() - frozen_at_naive.date()).days
+            days_passed = max(0, days_passed)
 
-        # Достаем шаг заморозки из настроек лимитов клуба (дефолт 7)
-        freeze_step = club_settings.get("limits", {}).get("freeze_days_step", 7)
+            # Достаем шаг заморозки из настроек лимитов клуба (дефолт 7)
+            freeze_step = club_settings.get("limits", {}).get("freeze_days_step", 7)
 
-        # Если вернулся досрочно — забираем лишние начисленные дни обратно
-        if days_passed < freeze_step:
-            diff = freeze_step - days_passed
-            if student.subscription_ends_at:
-                student.subscription_ends_at -= timedelta(days=diff)
-            logger.info(f"❄️ FaceID Досрочный выход: {student.name} недогулял {diff} дн. Срок уменьшен назад.")
+            # Если вернулся досрочно — забираем лишние начисленные дни обратно
+            if days_passed < freeze_step:
+                diff = freeze_step - days_passed
+                if student.expire_date:
+                    student.expire_date -= timedelta(days=diff)
+                logger.info(f"❄️ FaceID Досрочный выход: {student.name} недогулял {diff} дн. Срок уменьшен назад.")
+        else:
+            # Если frozen_at равен NULL (старая заморозка) — просто логируем, дни не трогаем
+            logger.warning(
+                f"❄️ Разморозка без даты: у атлета {student.name} поле frozen_at было NULL. Сбрасываем флаг без пересчета дней.")
 
-        # Снимаем флаги заморозки
+        # Снимаем флаги заморозки ЖЕЛЕЗНО в любом случае!
         student.is_frozen = 0
         student.frozen_at = None
         await db.flush()
