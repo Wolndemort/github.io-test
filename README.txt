@@ -472,3 +472,6 @@ docker compose down && docker compose up -d
 
 
 https : // speedycrm . ru / v1 / payments / yookassa / webhook
+
+
+scanner_url = f"https://wolndemort.github.io/github.io-test/scanner.html{club_id}"

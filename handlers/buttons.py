@@ -1,5 +1,5 @@
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from aiogram import Router
 from aiogram.utils.keyboard import ReplyKeyboardBuilder
 from aiogram.types import WebAppInfo, KeyboardButton
@@ -131,19 +131,35 @@ def admin_keyboard(club_settings: dict, club_id: int, subscription_date: datetim
     # ⚙️ Достаем фичи из конфига
     features = club_settings.get("features", {})
 
+    # Наивное UTC-время сервера
+    now_naive = datetime.now(timezone.utc).replace(tzinfo=None)
+
+    is_crm_active = True
+    if subscription_date:
+        if subscription_date.replace(tzinfo=None) <= now_naive:
+            is_crm_active = False
+
+    # --- БЛОК 0: СКУД СКАНЕР (Внедряем на самый верх инлайн-меню) ---
+    if features.get("qr_checkin", True) and is_crm_active:
+        # ИСПРАВЛЕНО: Добавлен знак '?' для передачи GET-параметра без ошибки 404
+        scanner_url = f"https://wolndemort.github.io/github.io-test/scanner.html{club_id}"
+        builder.row(types.InlineKeyboardButton(
+            text="📸 ОТКРЫТЬ СКАНЕР (ВХОД)",
+            web_app=types.WebAppInfo(url=scanner_url)
+        ))
+
     # --- БЛОК 1: Управление (Всегда доступны владельцу) ---
     builder.row(types.InlineKeyboardButton(text='🛠 Настройки клуба', callback_data='admin_settings'))
     builder.row(types.InlineKeyboardButton(text="💵 Принять наличку", callback_data="admin_cash_list"))
 
     sub_text = "💳 Продлить подписку"
     if subscription_date:
-        days_left = (subscription_date - datetime.now()).days
+        days_left = (subscription_date.replace(tzinfo=None) - now_naive).days
         if days_left >= 0:
             sub_text = f"💳 Подписка: {days_left} дн. (Продлить)"
         else:
             sub_text = "❌ Подписка истекла (Оплатить)"
 
-    # --- БЛОК 0: Финансы SaaS (Новый блок) ---
     builder.row(types.InlineKeyboardButton(text=sub_text, callback_data='pay_menu'))
 
     # --- БЛОК 2: Динамические фичи (Проверка по конфигу) ---
@@ -156,11 +172,11 @@ def admin_keyboard(club_settings: dict, club_id: int, subscription_date: datetim
     if features.get("manual_add", True):
         builder.row(types.InlineKeyboardButton(text="🆕 Добавить (вручную)", callback_data="admin_add_manual"))
 
-    if features.get("qr_checkin", True):  # Посещения обычно связаны с QR или ручной отметкой
+    if features.get("qr_checkin", True):
         builder.row(types.InlineKeyboardButton(text="📝 Отметить посещение", callback_data="admin_manual_visit"))
-    
+
     builder.row(types.InlineKeyboardButton(text="📅 Расписание (Бот)", callback_data="admin_schedule_main"))
-    
+
     if features.get("export", True):
         builder.row(types.InlineKeyboardButton(text='📥 Выгрузка БД (CSV)', callback_data='export_db'))
 
@@ -176,13 +192,12 @@ def admin_keyboard(club_settings: dict, club_id: int, subscription_date: datetim
         text="📊 Таблица (WebApp)",
         web_app=WebAppInfo(url=f"{base_url}/admin?club_id={club_id}"))
     )
-    
-    # ИСПРАВЛЕНО: Убраны лишние пробелы в начале строки и добавлены )) в конце
+
     builder.row(types.InlineKeyboardButton(
         text="🗓 Расписание (WebApp)",
         web_app=WebAppInfo(url=f"{base_url}/webapp/schedule?club_id={club_id}")
     ))
-    
+
     builder.row(types.InlineKeyboardButton(
         text="📈 Вся статистика клуба ",
         web_app=WebAppInfo(url=f"{base_url}/revenue?club_id={club_id}"))
@@ -194,30 +209,10 @@ def admin_keyboard(club_settings: dict, club_id: int, subscription_date: datetim
 
     builder.row(types.InlineKeyboardButton(text='🔙 Назад', callback_data='begin'))
 
+    # Настраиваем сетку: кнопка сканера и основные блоки идут по 1 в ряд
+    builder.adjust(1)
+
     return builder.as_markup()
-
-
-
-def get_scanner_keyboard(club_settings: dict, club_id: int):
-    # 1. Проверяем, включен ли модуль QR в настройках этого клуба
-    features = club_settings.get("features", {})
-
-    if not features.get("qr_checkin", True):
-        # Если выключено — возвращаем пустую клавиатуру (или удаляем ее)
-        return types.ReplyKeyboardRemove()
-
-    builder = ReplyKeyboardBuilder()
-
-    # 2. Формируем URL с параметром club_id (чтобы сканер знал, чей это атлет)
-    # Если твой сканер на github.io умеет принимать параметры:
-    scanner_url = f"https://wolndemort.github.io/github.io-test/scanner.html{club_id}"
-
-    builder.row(KeyboardButton(
-        text="📸 ОТКРЫТЬ СКАНЕР (ВХОД)",
-        web_app=WebAppInfo(url=scanner_url)
-    ))
-
-    return builder.as_markup(resize_keyboard=True)
 
 
 def discipline(club_settings: dict):

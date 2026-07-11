@@ -129,7 +129,11 @@ async def start_handler(
     if is_owner or is_super_admin:
         return await message.answer(
             f"⚡ <b>Панель управления клуба «{club.name}»</b>\n\n{welcome_text}",
-            reply_markup=admin_keyboard(club_settings=club_settings, club_id=club_id),
+            reply_markup=admin_keyboard(
+                club_settings=club_settings,
+                club_id=club_id,
+                subscription_date=club.subscription_expire_at  # Передаем дату подписки
+            ),
             parse_mode="HTML"
         )
 

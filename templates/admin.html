@@ -6,7 +6,7 @@
     <title>Панель Администратора СКУД</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <!-- Подключаем внешние стили (измени путь, если статика лежит в другом месте) -->
-    <link rel="stylesheet" href="/static/css/admin.css">
+    <link rel="stylesheet" href="{{ request.url_for('static', path='css/admin.css') }}">
 </head>
 <body>
     <h2>Панель Администратора</h2>

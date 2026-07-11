@@ -40,47 +40,55 @@ async def admin_panel(
         is_super_admin: bool,
         session: AsyncSession
 ):
+    # 1. Жесткая SaaS-проверка прав доступа
     if not (is_owner or is_super_admin):
         return
 
+    # Извлекаем message в зависимости от типа события (текст или нажатие кнопки)
     message = event.message if isinstance(event, types.CallbackQuery) else event
+
+    # Отжимаем крутилку на инлайн-кнопке моментально
     if isinstance(event, types.CallbackQuery):
         await event.answer()
 
     try:
+        # 2. Агрегируем свежую оперативную статистику из базы данных
         all_users = await get_all_users_count(club_id=club.id, session=session)
         active_subs = await get_active_subs_count(club_id=club.id, session=session)
         club_name = club_settings.get("ui", {}).get("club_name") or club.name
 
-        # --- РАСЧЕТ ОСТАТКА ПОДПИСКИ ---
+        # --- РАСЧЕТ ОСТАТКА ПОДПИСКИ CRM ---
         sub_end = club.subscription_expire_at
         if sub_end:
-            days_left = (sub_end - datetime.now()).days
+            # Убираем таймзону для честного вычитания дат naive datetime на Аэзе
+            days_left = (sub_end.replace(tzinfo=None) - datetime.now().replace(tzinfo=None)).days
             sub_info = f"<code>до {sub_end.strftime('%d.%m.%Y')} ({max(0, days_left)} дн.)</code>"
         else:
             sub_info = "<code>не активна</code>"
-        # ------------------------------
+        # ----------------------------------
 
+        # 3. Формируем красивый итоговый текст для босса
         text = (
             f"📈 <b>Панель управления: {club_name}</b>\n\n"
-            f"🔐 Подписка CRM: {sub_info}\n"  # Выводим в текст
+            f"🔐 Подписка CRM: {sub_info}\n"
             f"👥 Всего пользователей: <code>{all_users}</code>\n"
             f"💳 Активных абонементов: <code>{active_subs}</code>\n\n"
             "Чего желаете, босс?"
         )
 
-        # Передаем дату в твою обновленную клавиатуру
+        # 4. Отправляем меню с ИСПРАВЛЕННЫМ порядком аргументов в клавиатуре
         await message.answer(
-            text,
+            text=text,
             reply_markup=admin_keyboard(
-                club_id=club.id,
-                club_settings=club_settings,
-                subscription_date=sub_end
-            )
+                club_settings=club_settings,  # Первым — словарь настроек
+                club_id=club.id,  # Вторым — числовой ID клуба
+                subscription_date=sub_end  # Третьим — дата окончания подписки
+            ),
+            parse_mode="HTML"
         )
 
     except Exception as e:
-        logger.error(f"❌ Ошибка в админ-панели клуба {club.id}: {e}")
+        logger.error(f"❌ Критическая ошибка в админ-панели клуба {club.id}: {e}", exc_info=True)
 
 
 @router.callback_query(F.data == "admin_keyboard")

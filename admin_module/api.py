@@ -1,10 +1,9 @@
 import httpx
 from loguru import logger
-
+from sqlalchemy import func
 from handlers.skud import trigger_dingtian_turnstile
 from fastapi import Query
 from services.analytics import calculate_club_metrics, generate_students_excel, calculate_admin_dashboard
-from database.constants import DEFAULT_CLUB_SETTINGS
 import hmac
 from datetime import datetime, timedelta, timezone
 from database.db import PaymentOrder, Subscription
@@ -143,8 +142,6 @@ async def get_admin_dashboard(
     )
 
 
-#
-# 2. Роут /revenue (убрали get_api_key, чтобы открывался в WebApp Телеграма)
 @router.get("/revenue", response_class=HTMLResponse)
 async def get_revenue_stats(
         request: Request,
@@ -152,28 +149,106 @@ async def get_revenue_stats(
 ):
     club_id = get_club_id_from_host(request)
 
-    # Загружаем студентов
-    res_students = await session.execute(select(Student).where(Student.club_id == club_id))
-    students = list(res_students.scalars().all())
+    # 1. Загружаем клуб для шапки и дисциплин
+    club_res = await session.execute(select(Club).where(Club.id == club_id))
+    club = club_res.scalar_one_or_none()
+    club_name = club.club_settings.get("ui", {}).get("club_name") or club.name if club else "Фитнес-клуб"
 
-    # Загружаем успешные платежи текущего месяца для точного расчета выручки
-    start_of_month = datetime.utcnow().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-    res_payments = await session.execute(
-        select(PaymentOrder).where(
+    # Работаем строго в наивном формате UTC (как на Аэзе)
+    now_naive = datetime.utcnow()
+
+    # Считаем точные границы временных периодов
+    today_start = now_naive.replace(hour=0, minute=0, second=0, microsecond=0)
+    week_start = today_start - timedelta(days=now_naive.weekday())
+    month_start = today_start.replace(day=1)
+
+    # 2. РАСЧЕТ РЕАЛЬНОЙ ВЫРУЧКИ ПО ПЕРИОДАМ (Строго CONFIRMED из amount_kopecks)
+
+    # Выручка за сегодня
+    today_res = await session.execute(
+        select(func.sum(PaymentOrder.amount_kopecks)).where(
             PaymentOrder.club_id == club_id,
             PaymentOrder.status == "CONFIRMED",
-            PaymentOrder.created_at >= start_of_month
+            PaymentOrder.created_at >= today_start
         )
     )
-    payments = list(res_payments.scalars().all())
+    revenue_today = (today_res.scalar() or 0) / 100
 
-    metrics = calculate_club_metrics(students, payments)
+    # Выручка за неделю
+    week_res = await session.execute(
+        select(func.sum(PaymentOrder.amount_kopecks)).where(
+            PaymentOrder.club_id == club_id,
+            PaymentOrder.status == "CONFIRMED",
+            PaymentOrder.created_at >= week_start
+        )
+    )
+    revenue_week = (week_res.scalar() or 0) / 100
 
-    return templates.TemplateResponse(
-        "stats.html",
-        {"request": request, "club_id": club_id, **metrics}
+    # Выручка за месяц
+    month_res = await session.execute(
+        select(func.sum(PaymentOrder.amount_kopecks)).where(
+            PaymentOrder.club_id == club_id,
+            PaymentOrder.status == "CONFIRMED",
+            PaymentOrder.created_at >= month_start
+        )
+    )
+    revenue_month = (month_res.scalar() or 0) / 100
+
+    # 3. ТОП ДИСЦИПЛИН ПО РЕАЛЬНЫМ ОПЛАТАМ
+    # Связываем PaymentOrder со Student через JOIN, чтобы вытащить секцию ребенка
+    disc_res = await session.execute(
+        select(Student.discipline, func.sum(PaymentOrder.amount_kopecks))
+        .join(Student, PaymentOrder.student_id == Student.id)
+        .where(
+            PaymentOrder.club_id == club_id,
+            PaymentOrder.status == "CONFIRMED"
+        )
+        .group_by(Student.discipline)
+        .order_by(func.sum(PaymentOrder.amount_kopecks).desc())
     )
 
+    discipline_names = {
+        "boxing": "🥊 Бокс (Дети)",
+        "kickboxing": "🤼‍♂️ Кикбоксинг",
+        "bjj": "🥋 Бразильское джиу-джитсу",
+        "yoga": "🧘‍♂️ Йога"
+    }
+
+    discipline_stats = []
+    for row in disc_res.all():
+        raw_disc = row[0] or "boxing"
+        total_kopecks = row[1] or 0
+        discipline_stats.append({
+            "name": discipline_names.get(raw_disc, f"🏃‍♂️ {raw_disc}"),
+            "amount": total_kopecks / 100
+        })
+
+    # 4. ПОДСЧЕТ РЕКУРРЕНТОВ (FIRST против RECURRENT)
+    type_res = await session.execute(
+        select(PaymentOrder.type, func.count(PaymentOrder.id))
+        .where(PaymentOrder.club_id == club_id, PaymentOrder.status == "CONFIRMED")
+        .group_by(PaymentOrder.type)
+    )
+
+    payment_types = {"FIRST": 0, "RECURRENT": 0}
+    for row in type_res.all():
+        if row[0] in payment_types:
+            payment_types[row[0]] = row[1]
+
+    # 5. ОТДАЕМ ОЧИЩЕННЫЕ ДАННЫЕ В ШАБЛОН РЕВЕНЬЮ
+    return templates.TemplateResponse(
+        "stats.html",  # Перенаправляем строго на наш новый красивый шаблон выручки
+        {
+            "request": request,
+            "club_id": club_id,
+            "club_name": club_name,
+            "revenue_today": revenue_today,
+            "revenue_week": revenue_week,
+            "revenue_month": revenue_month,
+            "discipline_stats": discipline_stats,
+            "payment_types": payment_types
+        }
+    )
 
 # 3. Выгрузка в Excel. Перенесли префикс /stats/export/excel прямо в декоратор
 @router.get("/stats/export/excel")
@@ -887,10 +962,31 @@ async def yookassa_webhook(request: Request, session: AsyncSession = Depends(get
                     bot = bots_dict.get(club.bot_token) if club else None
 
                     if bot:
+                        # === ДОБАВЛЕНО: Догружаем студента из базы для вывода его имени в алерте ===
+                        student_res = await session.execute(
+                            select(Student).where(Student.id == order.student_id)
+                        )
+                        student_obj = student_res.scalar_one_or_none()
+                        student_name = student_obj.name if student_obj else f"ID {order.student_id}"
+                        # =========================================================================
+
                         desc = "БЕЗЛИМИТ" if order.lesson_count == 999 else f"{order.lesson_count} зан."
                         ui_cfg = club_settings.get("ui", {})
                         club_name = ui_cfg.get("club_name", club.name if club else "Фитнес-клуб")
 
+                        # Переводим копейки из базы в рубли для красивого текста
+                        amount_rub = (order.amount_kopecks or 0) / 100
+                        discipline_raw = getattr(order, 'discipline', 'boxing')
+
+                        discipline_names = {
+                            "boxing": "🥊 Бокс",
+                            "kickboxing": "🤼‍♂️ Кикбоксинг",
+                            "bjj": "🥋 БЖЖ",
+                            "yoga": "🧘‍♂️ Йога"
+                        }
+                        disc_name = discipline_names.get(discipline_raw, f"🏃‍♂️ {discipline_raw}")
+
+                        # --- А) Сообщение Родителю ---
                         await bot.send_message(
                             chat_id=parent_id,
                             text=f"🥳 <b>Отличные новости!</b>\n\n"
@@ -900,16 +996,22 @@ async def yookassa_webhook(request: Request, session: AsyncSession = Depends(get
                                  f"<i>Ждем вас на тренировках!</i>",
                             parse_mode="HTML"
                         )
+
+                        # --- Б) Сообщение Владельцу Клуба (Тебе) ---
+                        if club.owner_id:
+                            await bot.send_message(
+                                chat_id=int(club.owner_id),
+                                text=f"💰 <b>НОВАЯ ОПЛАТА В СИСТЕМЕ!</b>\n\n"
+                                     f"🏰 Клуб: <b>{club_name}</b>\n"
+                                # ПРАВКА: Теперь выводим реальное имя, которое догрузили выше
+                                     f"👤 Атлет: <b>{student_name}</b>\n"
+                                     f"📦 Пакет: <b>{desc}</b>\n"
+                                     f"🏷 Направление: <b>{disc_name}</b>\n"
+                                     f"💳 Сумма: <code>{amount_rub:,.2f} ₽</code>\n"
+                                     f"📅 Действует до: <b>{new_expire}</b>\n\n"
+                                     f"📈 <i>Деньги зачислены на баланс, касса клуба обновлена автоматически.</i>",
+                                parse_mode="HTML"
+                            )
+
                 except Exception as e:
-                    logger.error(f"Ошибка отправки сообщения родителю в бот: {e}")
-
-    # 5. ЕСЛИ ПЛАТЕЖ ОТМЕНЕН ИЛИ ОТКЛОНЕН (payment.canceled)
-    elif event == "payment.canceled":
-        order_query = select(PaymentOrder).where(PaymentOrder.id == order_id).with_for_update()
-        order_result = await session.execute(order_query)
-        order = order_result.scalar_one_or_none()
-        if order and order.status == "NEW":
-            order.status = "REJECTED"
-            await session.commit()
-
-    return {"status": "success"}
+                    logger.error(f"Ошибка отправки сообщения родителю/owner в бот: {e}")
