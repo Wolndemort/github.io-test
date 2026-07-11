@@ -472,8 +472,6 @@ async def process_official_card_payment(
         await callback.message.answer(f"❌ Ошибка создания платежа: {payment_data.get('Message')}")
 
 
-
-
 @router.message(PaymentStates.waiting_for_receipt, F.photo)
 async def handle_receipt_submission(
         message: types.Message,
@@ -942,8 +940,6 @@ async def process_pre_checkout(pre_checkout_query: PreCheckoutQuery):
 
 
 # 3. Финальный этап: зачисление подписки после успешной оплаты
-
-
 @router.message(F.successful_payment)
 async def on_successful_payment(message: Message, session: AsyncSession, club: Club, redis: Redis):
     payload = message.successful_payment.invoice_payload

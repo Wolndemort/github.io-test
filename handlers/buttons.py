@@ -134,15 +134,18 @@ def admin_keyboard(club_settings: dict, club_id: int, subscription_date: datetim
     # Наивное UTC-время сервера
     now_naive = datetime.now(timezone.utc).replace(tzinfo=None)
 
+    # Если даты подписки нет вообще, считаем CRM не активной для безопасности
     is_crm_active = True
     if subscription_date:
         if subscription_date.replace(tzinfo=None) <= now_naive:
             is_crm_active = False
+    else:
+        is_crm_active = False
 
-    # --- БЛОК 0: СКУД СКАНЕР (Внедряем на самый верх инлайн-меню) ---
+        # --- БЛОК 0: СКУД СКАНЕР (Внедряем на самый верх инлайн-меню) ---
     if features.get("qr_checkin", True) and is_crm_active:
-        # ИСПРАВЛЕНО: Добавлен знак '?' для передачи GET-параметра без ошибки 404
-        scanner_url = f"https://wolndemort.github.io/github.io-test/scanner.html{club_id}"
+        # ИСПРАВЛЕНО: Сделан правильный GET-параметр query string (?club_id=) + соль для сброса кэша Телеги (&v=102)
+        scanner_url = f"https://wolndemort.github.io/github.io-test/scanner.html?club_id={club_id}&v=102"
         builder.row(types.InlineKeyboardButton(
             text="📸 ОТКРЫТЬ СКАНЕР (ВХОД)",
             web_app=types.WebAppInfo(url=scanner_url)
@@ -159,6 +162,8 @@ def admin_keyboard(club_settings: dict, club_id: int, subscription_date: datetim
             sub_text = f"💳 Подписка: {days_left} дн. (Продлить)"
         else:
             sub_text = "❌ Подписка истекла (Оплатить)"
+    else:
+        sub_text = "❌ Подписка не активна (Оплатить)"
 
     builder.row(types.InlineKeyboardButton(text=sub_text, callback_data='pay_menu'))
 
@@ -188,20 +193,22 @@ def admin_keyboard(club_settings: dict, club_id: int, subscription_date: datetim
         web_app=types.WebAppInfo(url=f"{base_url}/webapp/live_cam?club_id={club_id}")
     ))
 
+    # ИСПРАВЛЕНО: Везде добавлен префикс types. к WebAppInfo, чтобы код не падал в NameError
     builder.row(types.InlineKeyboardButton(
         text="📊 Таблица (WebApp)",
-        web_app=WebAppInfo(url=f"{base_url}/admin?club_id={club_id}"))
-    )
+        web_app=types.WebAppInfo(url=f"{base_url}/admin?club_id={club_id}")
+    ))
 
     builder.row(types.InlineKeyboardButton(
         text="🗓 Расписание (WebApp)",
-        web_app=WebAppInfo(url=f"{base_url}/webapp/schedule?club_id={club_id}")
+        web_app=types.WebAppInfo(url=f"{base_url}/webapp/schedule?club_id={club_id}")
     ))
 
     builder.row(types.InlineKeyboardButton(
         text="📈 Вся статистика клуба ",
-        web_app=WebAppInfo(url=f"{base_url}/revenue?club_id={club_id}"))
-    )
+        web_app=types.WebAppInfo(url=f"{base_url}/revenue?club_id={club_id}")
+    ))
+
     builder.row(types.InlineKeyboardButton(
         text="📄 Выгрузка в Excel",
         url=f"{base_url}/stats/export/excel?club_id={club_id}"
@@ -209,7 +216,7 @@ def admin_keyboard(club_settings: dict, club_id: int, subscription_date: datetim
 
     builder.row(types.InlineKeyboardButton(text='🔙 Назад', callback_data='begin'))
 
-    # Настраиваем сетку: кнопка сканера и основные блоки идут по 1 в ряд
+    # Настраиваем сетку
     builder.adjust(1)
 
     return builder.as_markup()

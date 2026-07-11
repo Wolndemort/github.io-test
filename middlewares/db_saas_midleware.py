@@ -1,6 +1,5 @@
 import json
 from datetime import datetime
-
 from aiogram import BaseMiddleware, types
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy import select
@@ -29,7 +28,6 @@ class ClubMiddleware(BaseMiddleware):
 
         if cached_club:
             club_data = json.loads(cached_club)
-            # ВАЖНО: Восстанавливаем дату из строки обратно в datetime
             sub_expire = None
             if club_data.get("sub_expire"):
                 sub_expire = datetime.fromisoformat(club_data["sub_expire"])
@@ -39,16 +37,22 @@ class ClubMiddleware(BaseMiddleware):
                 name=club_data["name"],
                 owner_id=club_data["owner_id"],
                 club_settings=club_data["settings"],
-                subscription_expire_at=sub_expire  # Добавили поле
+                subscription_expire_at=sub_expire
             )
         else:
             # 2. Идем в БД
             session = data["session"]
+
+            # ФИКС: Сбрасываем внутренний кэш сессии, чтобы гарантированно пробить старые данные
+            session.expire_all()
+
             result = await session.execute(select(Club).where(Club.bot_token == bot_token))
             club_obj = result.scalar_one_or_none()
+
             if not club_obj:
-                return
-                # Сохраняем в Redis (дату превращаем в ISO строку)
+                return  # Если клуба нет в базе — прерываем
+
+            # ФИКС: Код сохранения в Redis теперь выполнится (убран из-под if)
             club_to_cache = {
                 "id": club_obj.id,
                 "name": club_obj.name,
@@ -69,18 +73,21 @@ class ClubMiddleware(BaseMiddleware):
 
         if not is_super:
             if not is_sub_active:
-                # Если это не владелец - отсекаем
+                # Если это не владелец - жестко отсекаем
                 if not is_owner:
                     if isinstance(event, types.Message):
                         await event.answer("❌ Доступ к боту приостановлен.")
+                    elif isinstance(event, types.CallbackQuery):
+                        await event.answer("❌ Доступ приостановлен.", show_alert=True)
                     return
 
                 # Если это владелец - проверяем, не пытается ли он оплатить прямо сейчас
                 is_pay_action = False
-                if hasattr(event, "data") and (event.data == "pay_menu" or event.data.startswith("buy_sub")):
-                    is_pay_action = True
+                if hasattr(event, "data") and event.data:
+                    if event.data == "pay_menu" or event.data.startswith("buy_sub") or event.data == "admin":
+                        is_pay_action = True
 
-                # Если владелец просто пишет что-то другое - требуем оплату
+                # Если владелец просто пишет что-то другое или жмет другие кнопки — требуем оплату
                 if not is_pay_action:
                     kb = InlineKeyboardBuilder()
                     kb.row(types.InlineKeyboardButton(text="💳 Оплатить доступ", callback_data="pay_menu"))
