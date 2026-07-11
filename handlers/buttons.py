@@ -1,8 +1,7 @@
-import time
 from datetime import datetime, timezone
 from aiogram import Router
 from aiogram.utils.keyboard import ReplyKeyboardBuilder
-from aiogram.types import WebAppInfo, KeyboardButton
+from aiogram.types import WebAppInfo
 from aiogram import types
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
@@ -134,22 +133,13 @@ def admin_keyboard(club_settings: dict, club_id: int, subscription_date: datetim
     # Наивное UTC-время сервера
     now_naive = datetime.now(timezone.utc).replace(tzinfo=None)
 
-    # Если даты подписки нет вообще, считаем CRM не активной для безопасности
+    # Логика проверки активности CRM
     is_crm_active = True
     if subscription_date:
         if subscription_date.replace(tzinfo=None) <= now_naive:
             is_crm_active = False
     else:
         is_crm_active = False
-
-        # --- БЛОК 0: СКУД СКАНЕР (Внедряем на самый верх инлайн-меню) ---
-    if features.get("qr_checkin", True) and is_crm_active:
-        # ИСПРАВЛЕНО: Сделан правильный GET-параметр query string (?club_id=) + соль для сброса кэша Телеги (&v=102)
-        scanner_url = f"https://wolndemort.github.io/github.io-test/scanner.html?club_id={club_id}&v=102"
-        builder.row(types.InlineKeyboardButton(
-            text="📸 ОТКРЫТЬ СКАНЕР (ВХОД)",
-            web_app=types.WebAppInfo(url=scanner_url)
-        ))
 
     # --- БЛОК 1: Управление (Всегда доступны владельцу) ---
     builder.row(types.InlineKeyboardButton(text='🛠 Настройки клуба', callback_data='admin_settings'))
@@ -193,7 +183,6 @@ def admin_keyboard(club_settings: dict, club_id: int, subscription_date: datetim
         web_app=types.WebAppInfo(url=f"{base_url}/webapp/live_cam?club_id={club_id}")
     ))
 
-    # ИСПРАВЛЕНО: Везде добавлен префикс types. к WebAppInfo, чтобы код не падал в NameError
     builder.row(types.InlineKeyboardButton(
         text="📊 Таблица (WebApp)",
         web_app=types.WebAppInfo(url=f"{base_url}/admin?club_id={club_id}")
@@ -216,10 +205,24 @@ def admin_keyboard(club_settings: dict, club_id: int, subscription_date: datetim
 
     builder.row(types.InlineKeyboardButton(text='🔙 Назад', callback_data='begin'))
 
-    # Настраиваем сетку
+    # Настраиваем сетку инлайн кнопок
     builder.adjust(1)
-
     return builder.as_markup()
+
+
+# --- НАДСТРОЙКА: НАДЁЖНАЯ ФУНКЦИЯ ДЛЯ НИЖНЕЙ КНОПКИ СКУД ---
+def get_scanner_keyboard(club_id: int):
+    builder = ReplyKeyboardBuilder()
+
+    # Полный путь к сканеру с большими пробелами для удобства
+    scanner_url = f"https://wolndemort.github.io/github.io-test/scanner.html?club_id={club_id}&v=105"
+
+    builder.row(types.KeyboardButton(
+        text="📸 ОТКРЫТЬ СКАНЕР (ВХОД)",
+        web_app=types.WebAppInfo(url=scanner_url)
+    ))
+
+    return builder.as_markup(resize_keyboard=True)
 
 
 def discipline(club_settings: dict):
@@ -294,4 +297,20 @@ def get_cash_options_kb(discipline_cfg: dict) -> types.InlineKeyboardMarkup:
     # Кнопка возврата в список (используем ваш callback_data)
     builder.row(types.InlineKeyboardButton(text="🔙 Назад", callback_data="admin_cash_list"))
     return builder.as_markup()
+
+
+def get_scanner_keyboard(club_id: int):
+    builder = ReplyKeyboardBuilder()
+
+    # Полный путь к твоему сканеру на GitHub с большими пробелами
+    scanner_url = f"https://wolndemort.github.io/github.io-test/scanner.html?club_id={club_id}&v=102"
+
+    # Создаем настоящую нижнюю Reply-кнопку (из нее sendData ТОЧНО сработает)
+    builder.row(types.KeyboardButton(
+        text="📸 ОТКРЫТЬ СКАНЕР (ВХОД)",
+        web_app=types.WebAppInfo(url=scanner_url)
+    ))
+
+    # resize_keyboard делает кнопку компактной, а не огромной на весь экран
+    return builder.as_markup(resize_keyboard=True)
 

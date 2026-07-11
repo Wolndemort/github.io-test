@@ -11,10 +11,11 @@ from redis.asyncio import Redis
 from sqlalchemy import update
 import pandas as pd
 import os
+from handlers.buttons import get_scanner_keyboard
 from aiogram.types import FSInputFile
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from database.db import get_all_users_count, get_active_subs_count, User, get_daily_stats, Student, \
-    Club, AsyncSessionLocal
+    Club
 from sqlalchemy import select
 from handlers.buttons import admin_keyboard
 from handlers.states import AdminManualAdd
@@ -28,8 +29,6 @@ from loguru import logger
 
 router = Router()
 
-
-# Фильтр теперь пускает И тебя, И владельца конкретного клуба
 @router.message(Command('admin'))
 @router.callback_query(F.data == "admin")
 async def admin_panel(
@@ -76,7 +75,7 @@ async def admin_panel(
             "Чего желаете, босс?"
         )
 
-        # 4. Отправляем меню с ИСПРАВЛЕННЫМ порядком аргументов в клавиатуре
+        # 4. Отправляем инлайн-меню с настройками и статистикой
         await message.answer(
             text=text,
             reply_markup=admin_keyboard(
@@ -85,6 +84,12 @@ async def admin_panel(
                 subscription_date=sub_end  # Третьим — дата окончания подписки
             ),
             parse_mode="HTML"
+        )
+
+        # 5. ФИКС: Выкатываем нативную нижнюю панель СКУД-сканера, откуда сработает sendData
+        await message.answer(
+            text="📸 Нативная панель СКУД активирована внизу экрана.",
+            reply_markup=get_scanner_keyboard(club_id=club.id)
         )
 
     except Exception as e:
@@ -99,24 +104,30 @@ async def back_to_admin_main_menu(
         is_owner: bool,
         is_super_admin: bool
 ):
-    # Жесткая SaaS-проверка прав (чтобы обычные юзеры не могли нажать)
+    # Жесткая SaaS-проверка прав
     if not (is_owner or is_super_admin):
         await callback.answer("У вас нет доступа!", show_alert=True)
         return
 
     await callback.answer()  # Сразу гасим часики на кнопке
 
-    # Формируем текст (лучше выводить инфо о подписке и тут, чтобы интерфейс не прыгал)
     club_name = club_settings.get("ui", {}).get("club_name") or club.name
 
+    # 1. Изменяем старое сообщение — возвращаем инлайн-панель управления
     await callback.message.edit_text(
         text=f"🏠 <b>Панель управления: {club_name}</b>\nВыберите нужный раздел:",
         reply_markup=admin_keyboard(
             club_settings=club_settings,
             club_id=club.id,
-            subscription_date=club.subscription_expire_at  # ИСПРАВЛЕНО: Передаем дату подписки!
+            subscription_date=club.subscription_expire_at
         ),
         parse_mode="HTML"
+    )
+
+    # 2. ФИКС: Отправляем новое сообщение, которое выкатит нативную кнопку сканера снизу
+    await callback.message.answer(
+        text="📸 Панель СКУД активирована внизу экрана.",
+        reply_markup=get_scanner_keyboard(club_id=club.id)
     )
 
 
