@@ -67,10 +67,18 @@ async def universal_profile_handler(
 ):
     user_id = event.from_user.id
 
-    # ПРАВКА: Приводим время к наивному UTC, как в базе на Аэзе, для точного сопоставления дат
+    # ПРАВКА: Работаем строго в наивном формате UTC (без таймзон), как и вся СУБД
     now_naive = datetime.now(timezone.utc).replace(tzinfo=None)
 
-    # ДОБАВЛЕНО .execution_options(populate_existing=True) — затирает старый кэш сессии свежими цифрами из базы
+    # =========================================================================
+    # 🚨 КРИТИЧЕСКИЙ ФИКС КЭША: Принудительно очищаем всю оперативную память сессии.
+    # Это заставит SQLAlchemy забыть старые состояния объектов и сделать
+    # честный, свежий SELECT-запрос прямо в Postgres на Аэзе.
+    session.get_bind().engine.clear_compiled_cache()  # Сброс кэша компиляции query
+    session.expire_all()  # Сброс кэша объектов
+    # =========================================================================
+
+    # Запрашиваем студентов этого родителя для текущего клуба
     stmt = select(Student).where(
         Student.parent_id == user_id,
         Student.club_id == club.id
@@ -90,13 +98,13 @@ async def universal_profile_handler(
     else:
         status_text = f"🏰 Клуб: <b>{club.name}</b>\n🆔 <b>Ваши профили:</b>\n"
         for s in students:
-            # ПРАВКА: Делаем гибкую проверку заморозки (сработает и на 1, и на True, и защитит от багов кэша сессии)
-            is_frozen_status = getattr(s, 'is_frozen', 0)
+            # Принудительно приводим к инту для точной проверки
+            is_frozen_val = int(getattr(s, 'is_frozen', 0) or 0)
 
             # Логика статуса даты
             if not s.expire_date:
                 status = "❌ <b>Не куплен</b>"
-            elif is_frozen_status and is_frozen_status in [1, True]:
+            elif is_frozen_val == 1:
                 status = "❄️ <b>ЗАМОРОЖЕН</b>"
             elif s.expire_date.replace(tzinfo=None) > now_naive:
                 status = f"✅ <b>Активен</b> до <code>{s.expire_date.strftime('%d.%m.%Y')}</code>"
@@ -114,7 +122,7 @@ async def universal_profile_handler(
 
             status_text += f"\n• <b>{s.name}</b>: {status}\n  └ {lessons_info}"
 
-    # ... остальная UI-логика без изменений
+    # Формируем итоговый текст и клавиатуру
     final_text = (
         f"👤 <b>Личный кабинет</b>\n\n{status_text}\n\n"
         "<i>Используйте кнопки ниже для управления:</i>"
