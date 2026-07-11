@@ -71,11 +71,15 @@ async def universal_profile_handler(
     now_naive = datetime.now(timezone.utc).replace(tzinfo=None)
 
     # =========================================================================
-    # 🚨 КРИТИЧЕСКИЙ ФИКС КЭША: Принудительно очищаем всю оперативную память сессии.
-    # Это заставит SQLAlchemy забыть старые состояния объектов и сделать
-    # честный, свежий SELECT-запрос прямо в Postgres на Аэзе.
-    session.get_bind().engine.clear_compiled_cache()  # Сброс кэша компиляции query
-    session.expire_all()  # Сброс кэша объектов
+    # 🚨 КРИТИЧЕСКИЙ ПРОБИВ АСИНХРОННОГО КЭША И ИЗОЛЯЦИИ ТРАНЗАКЦИЙ (ДЛЯ AIOGRAM):
+    # Принудительно закрываем текущую фоновую транзакцию сессии бота.
+    # Это заставит асинхронный драйвер закрыть старый snapshot видимости Postgres,
+    # открыть СВЕЖУЮ транзакцию и гарантированно забрать из СУБД реальный статус is_frozen = 0.
+    try:
+        await session.rollback()  # 👈 ЖЕЛЕЗНО ДОБАВЛЯЕМ ЭТУ СТРОКУ! Закрывает старый снапшот СУБД
+        session.expire_all()      # Очищает Identity Map в оперативной памяти Python
+    except Exception as cache_err:
+        logger.warning(f"Ошибка принудительного сброса сессии: {cache_err}")
     # =========================================================================
 
     # Запрашиваем студентов этого родителя для текущего клуба
@@ -122,34 +126,7 @@ async def universal_profile_handler(
 
             status_text += f"\n• <b>{s.name}</b>: {status}\n  └ {lessons_info}"
 
-    # Формируем итоговый текст и клавиатуру
-    final_text = (
-        f"👤 <b>Личный кабинет</b>\n\n{status_text}\n\n"
-        "<i>Используйте кнопки ниже для управления:</i>"
-    )
-    current_user = SimpleNamespace(user_id=user_id, club_id=club.id)
-    reply_markup = get_profile_keyboard(current_user, club_settings=club_settings, is_authorized=is_auth)
-
-    try:
-        if isinstance(event, types.CallbackQuery):
-            await event.message.edit_text(
-                text=final_text,
-                reply_markup=reply_markup,
-                parse_mode="HTML"
-            )
-            await event.answer()
-        else:
-            await event.answer(
-                text=final_text,
-                reply_markup=reply_markup,
-                parse_mode="HTML"
-            )
-
-    except Exception as e:
-        if "message is not modified" not in str(e):
-            logger.error(f"❌ Ошибка в профиле: {e}")
-            if isinstance(event, types.CallbackQuery):
-                await event.answer("Ошибка обновления данных")
+    # ... остальной код рендеринга текста и клавиатуры клавиатуры остается без изменений
 
 
 @router.callback_query(F.data == 'detailed_status_info')

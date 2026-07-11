@@ -480,10 +480,8 @@ async def open_turnstile(
     student_id = payload.get("student_id")
     biometric_token = payload.get("biometric_token")
     init_data = payload.get("init_data")
-
     # [ОПЦИОНАЛЬНО] 1. Валидация Телеграм init_data, если необходима
     # ...
-
     # Ищем студента с row-level блокировкой (with_for_update) от Race Condition
     student_res = await db.execute(
         select(Student)
@@ -493,30 +491,24 @@ async def open_turnstile(
     student = student_res.scalar_one_or_none()
     if not student:
         return {"success": False, "message": "Студент не найден в базе данных"}
-
     # Ищем клуб (чтения достаточно, без блокировки)
     club_res = await db.execute(select(Club).where(Club.id == student.club_id))
     club = club_res.scalar_one_or_none()
     if not club:
         return {"success": False, "message": "Клуб студента не найден"}
-
     # Работаем со временем (убираем tzinfo для DateTime в Postgres)
     now_naive = datetime.now(timezone.utc).replace(tzinfo=None)
     club_settings = club.club_settings or {}
-
     # === ЛОГИКА ДОСРОЧНОЙ РАЗМОРОЗКИ С КОМПЕНСАЦИЕЙ ДНЕЙ ===
     if student.is_frozen:  # Проверяем ТОЛЬКО флаг заморозки
         # Если дата заморозки заполнена — делаем честную компенсацию дней
         if student.frozen_at:
             frozen_at_naive = student.frozen_at.replace(tzinfo=None)
-
             # Сколько чистых дней атлет РЕАЛЬНО пробыл в заморозке
             days_passed = (now_naive.date() - frozen_at_naive.date()).days
             days_passed = max(0, days_passed)
-
             # Достаем шаг заморозки из настроек лимитов клуба (дефолт 7)
             freeze_step = club_settings.get("limits", {}).get("freeze_days_step", 7)
-
             # Если вернулся досрочно — забираем лишние начисленные дни обратно
             if days_passed < freeze_step:
                 diff = freeze_step - days_passed
@@ -527,30 +519,23 @@ async def open_turnstile(
             # Если frozen_at равен NULL (старая заморозка) — просто логируем, дни не трогаем
             logger.warning(
                 f"❄️ Разморозка без даты: у атлета {student.name} поле frozen_at было NULL. Сбрасываем флаг без пересчета дней.")
-
         # Снимаем флаги заморозки ЖЕЛЕЗНО в любом случае!
         student.is_frozen = 0
         student.frozen_at = None
         await db.flush()
-
     # Работаем с конфигурацией реле
     relay_config = club_settings.get("turnstile", {})
-
     if not relay_config.get("enabled", False):
         return {"success": False, "message": "СКУД отключен в настройках вашего клуба"}
-
     timeout_minutes = club_settings.get("limits", {}).get("session_timeout_minutes", 150)
     is_inside_session = False
-
     if student.last_visit:
         last_visit_naive = student.last_visit.replace(tzinfo=None)
         if now_naive - last_visit_naive < timedelta(minutes=timeout_minutes):
             is_inside_session = True
-
     # Проверка баланса (если не безлимит 999)
     if not is_inside_session and student.balance_lessons <= 0 and student.balance_lessons != 999:
         return {"success": False, "message": "На балансе нет доступных занятий."}
-
     # Логика списания и подготовка сообщения СТРОГО до коммита
     if is_inside_session:
         message_text = "Турникет открыт! Повторный проход, сессия активна."
@@ -558,32 +543,26 @@ async def open_turnstile(
         if student.balance_lessons != 999:
             student.balance_lessons -= 1
         student.last_visit = now_naive  # Пишем строго naive-время без таймзоны!
-
         # Запоминаем текущее значение баланса в обычную переменную, отвязав от SQLAlchemy объекта
         current_balance = student.balance_lessons
         message_text = f"Турникет открыт! Осталось занятий: {current_balance}"
-
     # ФИКСИРУЕМ ИЗМЕНЕНИЯ В БАЗЕ (Освобождаем строку перед сетевым запросом к реле)
     try:
         await db.commit()
     except Exception as db_err:
         logger.error(f"Ошибка коммита базы данных перед СКУД (FaceID): {db_err}")
         return {"success": False, "message": "Ошибка сохранения данных визита."}
-
     # ОБЪЕКТ student ПОСЛЕ СТРОКИ ВЫШЕ БОЛЬШЕ НЕ ТРОГАЕМ, ЧТОБЫ НЕ ВЫЗВАТЬ СЕТЕВУЮ ОШИБКУ ПОДДКЛЮЧЕНИЯ БАЗЫ
-
     # ОТПРАВЛЯЕМ КОМАНДУ НА РЕЛЕ DINGTIAN
     try:
         base_url = str(relay_config.get("base_url", ""))
         if base_url and not base_url.startswith("http"):
             relay_config["base_url"] = f"http://{base_url}"
-
         is_opened = await trigger_dingtian_turnstile(relay_config)
         if is_opened is False:
             return {"success": False, "message": "Реле отклонило команду на открытие."}
     except Exception as e:
         logger.warning(f"Ошибка сети/таймаута СКУД FaceID: {str(e)}. Проход разрешен.")
-
     return {"success": True, "message": message_text}
 
 
