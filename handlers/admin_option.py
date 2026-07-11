@@ -93,16 +93,29 @@ async def admin_panel(
 
 @router.callback_query(F.data == "admin_keyboard")
 async def back_to_admin_main_menu(
-    callback: types.CallbackQuery,
-    club_settings: dict,
-    club: Club,           # Объект из мидлвари
-    is_owner: bool,
-    is_super_admin: bool
+        callback: types.CallbackQuery,
+        club_settings: dict,
+        club: Club,  # Объект из мидлвари
+        is_owner: bool,
+        is_super_admin: bool
 ):
+    # Жесткая SaaS-проверка прав (чтобы обычные юзеры не могли нажать)
+    if not (is_owner or is_super_admin):
+        await callback.answer("У вас нет доступа!", show_alert=True)
+        return
+
+    await callback.answer()  # Сразу гасим часики на кнопке
+
+    # Формируем текст (лучше выводить инфо о подписке и тут, чтобы интерфейс не прыгал)
+    club_name = club_settings.get("ui", {}).get("club_name") or club.name
+
     await callback.message.edit_text(
-        f"🏠 <b>Панель управления клуба {club.name}</b>\n"
-        f"Выберите нужный раздел:",
-        reply_markup=admin_keyboard(club_settings, club.id),
+        text=f"🏠 <b>Панель управления: {club_name}</b>\nВыберите нужный раздел:",
+        reply_markup=admin_keyboard(
+            club_settings=club_settings,
+            club_id=club.id,
+            subscription_date=club.subscription_expire_at  # ИСПРАВЛЕНО: Передаем дату подписки!
+        ),
         parse_mode="HTML"
     )
 

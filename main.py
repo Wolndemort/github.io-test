@@ -113,6 +113,7 @@ async def lifespan(app: FastAPI):
 # Инициализация FastAPI
 app = FastAPI(title="SpeedyCRM SaaS API", lifespan=lifespan)
 app.add_middleware(ProxyHeadersMiddleware, trusted_hosts=["*"])
+app.mount("/static", StaticFiles(directory="static"), name="static")
 app.include_router(router)
 setup_admin(app, engine)
 

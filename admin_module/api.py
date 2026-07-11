@@ -3,8 +3,11 @@ from loguru import logger
 from sqlalchemy import func
 from handlers.skud import trigger_dingtian_turnstile
 from fastapi import Query
+
+from main import app
 from services.analytics import calculate_club_metrics, generate_students_excel, calculate_admin_dashboard
 import hmac
+from fastapi.staticfiles import StaticFiles
 from datetime import datetime, timedelta, timezone
 from database.db import PaymentOrder, Subscription
 from database.db import add_abon

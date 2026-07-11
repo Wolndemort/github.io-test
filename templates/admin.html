@@ -4,9 +4,9 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Панель Администратора СКУД</title>
-    <script src="https://telegram.org/js/telegram-web-app.js"></script>
-    <!-- Подключаем внешние стили (измени путь, если статика лежит в другом месте) -->
-    <link rel="stylesheet" href="{{ request.url_for('static', path='css/admin.css') }}">
+     <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <!-- ФИКС: Убран request. и добавлена версия v=1.0.4 для жесткого сброса кэша Telegram -->
+    <link rel="stylesheet" href="{{ url_for('static', path='css/admin.css') }}?v=1.0.4">
 </head>
 <body>
     <h2>Панель Администратора</h2>
@@ -32,7 +32,8 @@
                 <div>
                     <span class="balance-span">{{ student.balance }} зан.</span>
                     {% if student.username %}
-                    <a href="https://t.me{{ student.username }}" class="tg-link" target="_blank">💬 ЛС</a>
+                    <!-- ФИКС: Безопасный URL для Telegram чата -->
+                    <a href="https://t.me{{ student.username|replace('@', '') }}" class="tg-link" target="_blank">💬 ЛС</a>
                     {% endif %}
                 </div>
             </div>
@@ -152,7 +153,8 @@
                     <div>
                         <span class="red-bold mr-5">0 зан.</span>
                         {% if student.username %}
-                        <a href="https://t.me{{ student.username }}" class="tg-link" target="_blank">💬 Написать</a>
+                        <!-- ФИКС: Безопасный URL для Telegram чата -->
+                        <a href="https://t.me{{ student.username|replace('@', '') }}" class="tg-link" target="_blank">💬 Написать</a>
                         {% endif %}
                     </div>
                 </div>
@@ -177,7 +179,8 @@
                     <div>
                         <span class="orange-bold mr-5">{{ student.balance }} зан.</span>
                         {% if student.username %}
-                        <a href="https://t.me{{ student.username }}" class="tg-link" target="_blank">💬 Написать</a>
+                        <!-- ФИКС: Безопасный URL для Telegram чата -->
+                        <a href="https://t.me{{ student.username|replace('@', '') }}" class="tg-link" target="_blank">💬 Написать</a>
                         {% endif %}
                     </div>
                 </div>
@@ -192,10 +195,11 @@
     {% endif %}
 
     <!-- СЕКЦИЯ НАВИГАЦИИ -->
-    <div class="card mt-15">
+    <div class="card mt-15" style="margin-bottom: 30px;"> <!-- Добавлен отступ для iOS -->
         <div class="label">Другие разделы</div>
-        <a href="/stats/export/excel" class="btn">📊 Скачать Excel-отчет</a>
-        <a href="/revenue" class="btn btn-secondary">📈 Бизнес-аналитика и выручка</a>
+        <!-- ФИКС: Явная передача контекста club_id для SaaS-изоляции -->
+        <a href="/stats/export/excel?club_id={{ club_id }}" class="btn">📊 Скачать Excel-отчет</a>
+        <a href="/revenue?club_id={{ club_id }}" class="btn btn-secondary">📈 Бизнес-аналитика и выручка</a>
     </div>
 
     <script>

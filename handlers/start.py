@@ -62,8 +62,6 @@ async def start_handler(
 
     # =========================================================================
     # 🚨 КРИТИЧЕСКИЙ ПРОБИВ АСИНХРОННОГО КЭША И ИЗОЛЯЦИИ ТРАНЗАКЦИЙ ДЛЯ /START:
-    # Закрываем старую фоновую транзакцию сессии бота. Это заставит асинхронный
-    # драйвер Postgres на Аэзе отдать нам только свежие и актуальные цифры.
     try:
         await session.rollback()
         session.expire_all()
@@ -71,8 +69,9 @@ async def start_handler(
         logger.warning(f"Ошибка принудительного сброса сессии в /start: {cache_err}")
     # =========================================================================
 
-    # Накатываем наивное UTC-время
-    now_naive = datetime.now(timezone.utc).replace(tzinfo=None)
+    # Исправлено: берем честное локальное время сервера без UTC сдвига,
+    # чтобы оно идеально совпадало с логикой дат в вашей админ-панели
+    now_naive = datetime.now().replace(tzinfo=None)
 
     # 1. Регистрация/Обновление пользователя
     db_user = await session.get(User, user_id)
@@ -132,7 +131,7 @@ async def start_handler(
             reply_markup=admin_keyboard(
                 club_settings=club_settings,
                 club_id=club_id,
-                subscription_date=club.subscription_expire_at  # Передаем дату подписки
+                subscription_date=club.subscription_expire_at
             ),
             parse_mode="HTML"
         )
@@ -145,10 +144,8 @@ async def start_handler(
     student = (await session.execute(stmt)).scalar_one_or_none()
 
     if student:
-        # Принудительно приводим к инту для точной и гибкой проверки
         is_frozen_val = int(getattr(student, 'is_frozen', 0) or 0)
 
-        # Логика статуса даты (Синхронизировано с личным кабинетом)
         if not student.expire_date:
             status = "❌ <b>Не куплен</b>"
         elif is_frozen_val == 1:
@@ -160,13 +157,11 @@ async def start_handler(
 
         status_text = f"👤 Атлет: <b>{student.name}</b>\n📊 Статус абонемента: {status}"
 
-        # === 🚨 ФИКС ТИПОВОЙ ОШИБКИ TYPEERROR ===
-        # Собираем объект SimpleNamespace, который требует функция клавиатуры
+        # === ФИКС ТИПОВОЙ ОШИБКИ TYPEERROR ===
         current_user = SimpleNamespace(user_id=user_id, club_id=club.id)
 
         await message.answer(
             f"📍 <b>{club.name}</b>\n\n{welcome_text}\n\n{status_text}",
-            # ПЕРЕДАЕМ ОБЪЕКТ ЮЗЕРА ПЕРВЫМ АРГУМЕНТОМ — ОШИБКА БОЛЬШЕ НЕ ВЫПЛЕВЕТСЯ!
             reply_markup=get_profile_keyboard(current_user, club_settings=club_settings, is_authorized=True),
             parse_mode="HTML"
         )
