@@ -48,6 +48,7 @@ class Student(Base):
     expire_date: Mapped[Optional[datetime]] = mapped_column(DateTime)
     can_freeze: Mapped[int] = mapped_column(Integer, default=1)
     is_frozen: Mapped[int] = mapped_column(Integer, default=0)
+    frozen_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     balance_lessons: Mapped[int] = mapped_column(default=0)
     birthday: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     last_visit: Mapped[Optional[datetime]] = mapped_column(DateTime)
