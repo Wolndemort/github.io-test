@@ -67,19 +67,17 @@ async def universal_profile_handler(
 ):
     user_id = event.from_user.id
 
-    # ПРАВКА: Работаем строго в наивном формате UTC (без таймзон), как и вся СУБД
+    # Приводим время к наивному UTC
     now_naive = datetime.now(timezone.utc).replace(tzinfo=None)
 
     # =========================================================================
-    # 🚨 КРИТИЧЕСКИЙ ПРОБИВ АСИНХРОННОГО КЭША И ИЗОЛЯЦИИ ТРАНЗАКЦИЙ (ДЛЯ AIOGRAM):
-    # Принудительно закрываем текущую фоновую транзакцию сессии бота.
-    # Это заставит асинхронный драйвер закрыть старый snapshot видимости Postgres,
-    # открыть СВЕЖУЮ транзакцию и гарантированно забрать из СУБД реальный статус is_frozen = 0.
+    # Безопасный пробив кэша без закрытия транзакции.
+    # Заставляем SQLAlchemy забыть старые слепки объектов и гарантированно
+    # перечитать свежие is_frozen и balance_lessons прямо из Postgres.
     try:
-        await session.rollback()  # 👈 ЖЕЛЕЗНО ДОБАВЛЯЕМ ЭТУ СТРОКУ! Закрывает старый снапшот СУБД
-        session.expire_all()      # Очищает Identity Map в оперативной памяти Python
+        session.expire_all()
     except Exception as cache_err:
-        logger.warning(f"Ошибка принудительного сброса сессии: {cache_err}")
+        logger.warning(f"Ошибка сброса кэша объектов: {cache_err}")
     # =========================================================================
 
     # Запрашиваем студентов этого родителя для текущего клуба
@@ -102,7 +100,6 @@ async def universal_profile_handler(
     else:
         status_text = f"🏰 Клуб: <b>{club.name}</b>\n🆔 <b>Ваши профили:</b>\n"
         for s in students:
-            # Принудительно приводим к инту для точной проверки
             is_frozen_val = int(getattr(s, 'is_frozen', 0) or 0)
 
             # Логика статуса даты
@@ -115,7 +112,7 @@ async def universal_profile_handler(
             else:
                 status = f"🔴 <b>ИСТЕК</b> (<code>{s.expire_date.strftime('%d.%m.%Y')}</code>)"
 
-            # Логика баланса (SaaS-friendly: 999 = Безлимит)
+            # Логика баланса
             balance = getattr(s, 'balance_lessons', 0)
             if balance >= 900:
                 lessons_info = "♾ <b>Безлимит</b>"
@@ -126,7 +123,41 @@ async def universal_profile_handler(
 
             status_text += f"\n• <b>{s.name}</b>: {status}\n  └ {lessons_info}"
 
-    # ... остальной код рендеринга текста и клавиатуры клавиатуры остается без изменений
+    final_text = (
+        f"👤 <b>Личный кабинет</b>\n\n{status_text}\n\n"
+        "<i>Используйте кнопки ниже для управления:</i>"
+    )
+    current_user = SimpleNamespace(user_id=user_id, club_id=club.id)
+    reply_markup = get_profile_keyboard(current_user, club_settings=club_settings, is_authorized=is_auth)
+
+    # Переносим event.answer() в самое начало блока отправки,
+    # чтобы кнопка отжималась моментально в 100% случаев, предотвращая зависание UI
+    if isinstance(event, types.CallbackQuery):
+        try:
+            await event.answer()
+        except Exception as ans_err:
+            logger.debug(f"Не удалось ответить на колбэк: {ans_err}")
+
+    try:
+        if isinstance(event, types.CallbackQuery):
+            await event.message.edit_text(
+                text=final_text,
+                reply_markup=reply_markup,
+                parse_mode="HTML"
+            )
+        else:
+            await event.answer(
+                text=final_text,
+                reply_markup=reply_markup,
+                parse_mode="HTML"
+            )
+
+    except Exception as e:
+        # Если вылез варнинг о том, что текст совпал — игнорируем, интерфейс уже стабилен
+        if "message is not modified" in str(e):
+            pass
+        else:
+            logger.error(f"❌ Ошибка рендеринга профиля: {e}", exc_info=True)
 
 
 @router.callback_query(F.data == 'detailed_status_info')

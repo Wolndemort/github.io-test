@@ -46,7 +46,6 @@ async def _send_main_menu(
     # Чтобы код был максимально надежным, мы просто оставили вызов чистым.
 
 
-
 @router.message(Command('start'))
 async def start_handler(
         message: types.Message,
