@@ -1,6 +1,9 @@
 import asyncio
 import os
 import uuid
+
+from starlette.staticfiles import StaticFiles
+
 from services.analytics import calculate_daily_business_report, calculate_admin_dashboard
 from datetime import timedelta, time, timezone
 import logging as logging
