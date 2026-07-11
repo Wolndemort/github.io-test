@@ -66,7 +66,9 @@ async def universal_profile_handler(
         club_settings: dict
 ):
     user_id = event.from_user.id
-    now = datetime.now()
+
+    # ПРАВКА: Приводим время к наивному UTC, как в базе на Аэзе, для точного сопоставления дат
+    now_naive = datetime.now(timezone.utc).replace(tzinfo=None)
 
     # ДОБАВЛЕНО .execution_options(populate_existing=True) — затирает старый кэш сессии свежими цифрами из базы
     stmt = select(Student).where(
@@ -88,12 +90,15 @@ async def universal_profile_handler(
     else:
         status_text = f"🏰 Клуб: <b>{club.name}</b>\n🆔 <b>Ваши профили:</b>\n"
         for s in students:
+            # ПРАВКА: Делаем гибкую проверку заморозки (сработает и на 1, и на True, и защитит от багов кэша сессии)
+            is_frozen_status = getattr(s, 'is_frozen', 0)
+
             # Логика статуса даты
             if not s.expire_date:
                 status = "❌ <b>Не куплен</b>"
-            elif getattr(s, 'is_frozen', 0) == 1:
+            elif is_frozen_status and is_frozen_status in [1, True]:
                 status = "❄️ <b>ЗАМОРОЖЕН</b>"
-            elif s.expire_date > now:
+            elif s.expire_date.replace(tzinfo=None) > now_naive:
                 status = f"✅ <b>Активен</b> до <code>{s.expire_date.strftime('%d.%m.%Y')}</code>"
             else:
                 status = f"🔴 <b>ИСТЕК</b> (<code>{s.expire_date.strftime('%d.%m.%Y')}</code>)"
@@ -109,7 +114,7 @@ async def universal_profile_handler(
 
             status_text += f"\n• <b>{s.name}</b>: {status}\n  └ {lessons_info}"
 
-    # Формируем итоговый текст и клавиатуру
+    # ... остальная UI-логика без изменений
     final_text = (
         f"👤 <b>Личный кабинет</b>\n\n{status_text}\n\n"
         "<i>Используйте кнопки ниже для управления:</i>"
