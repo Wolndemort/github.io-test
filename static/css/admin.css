@@ -1,0 +1,274 @@
+body {
+    background-color: var(--tg-theme-bg-color, #f5f5f5);
+    color: var(--tg-theme-text-color, #222);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    margin: 0;
+    padding: 15px;
+}
+
+h2 {
+    color: var(--tg-theme-button-color, #3390ec);
+    text-align: center;
+    margin-top: 5px;
+    margin-bottom: 2px;
+}
+
+.welcome {
+    text-align: center;
+    font-size: 13px;
+    color: #888;
+    margin-bottom: 12px;
+}
+
+.card {
+    background: var(--tg-theme-secondary-bg-color, #ffffff);
+    border-radius: 12px;
+    padding: 15px;
+    margin-bottom: 12px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+}
+
+.empty-card {
+    text-align: center;
+    color: #888;
+    padding: 20px;
+}
+
+.label {
+    font-size: 13px;
+    color: #888;
+    margin-bottom: 5px;
+}
+
+.value {
+    font-size: 17px;
+    font-weight: bold;
+}
+
+/* Поисковая строка */
+.search-input {
+    width: 100%;
+    padding: 12px;
+    border-radius: 10px;
+    border: 1px solid #ccc;
+    background: var(--tg-theme-bg-color, #f5f5f5);
+    color: var(--tg-theme-text-color, #222);
+    font-size: 15px;
+    box-sizing: border-box;
+    outline: none;
+}
+
+.search-input:focus {
+    border-color: var(--tg-theme-button-color, #3390ec);
+}
+
+/* Кнопки */
+.btn {
+    display: block;
+    text-align: center;
+    background: var(--tg-theme-button-color, #3390ec);
+    color: var(--tg-theme-button-text-color, #ffffff);
+    text-decoration: none;
+    padding: 12px 0;
+    border-radius: 12px;
+    font-weight: bold;
+    font-size: 15px;
+    margin-top: 8px;
+    border: none;
+    cursor: pointer;
+}
+
+.btn-secondary {
+    background: transparent;
+    color: var(--tg-theme-button-color, #3390ec);
+    border: 1px solid var(--tg-theme-button-color, #3390ec);
+}
+
+.list-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--tg-theme-bg-color, #f5f5f5);
+    font-size: 14px;
+}
+
+.list-item:last-child {
+    border-bottom: none;
+}
+
+/* Ссылки и бейджи */
+.tg-link {
+    text-decoration: none;
+    background: #3390ec;
+    color: white;
+    padding: 4px 8px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: bold;
+    margin-left: 10px;
+}
+
+.btn-call {
+    background: #4caf50;
+}
+
+details {
+    margin-top: 5px;
+}
+
+summary {
+    font-size: 14px;
+    color: var(--tg-theme-button-color, #3390ec);
+    cursor: pointer;
+    padding: 4px 0;
+}
+
+.scroll-box {
+    max-height: 160px;
+    overflow-y: auto;
+    margin-top: 8px;
+}
+
+.long-scroll {
+    max-height: 220px;
+}
+
+.frozen-badge {
+    color: #f2a93b;
+    font-size: 12px;
+    font-weight: normal;
+    margin-left: 5px;
+}
+
+/* Именинники */
+.birthday-card {
+    background: linear-gradient(135deg, #ff9a9e 0%, #fecfef 100%);
+    color: #fff;
+}
+
+.white-label {
+    color: #fff !important;
+    font-weight: bold;
+}
+
+.birthday-list {
+    font-weight: bold;
+    font-size: 16px;
+    margin-top: 5px;
+}
+
+.birthday-footer {
+    font-size: 12px;
+    margin-top: 5px;
+    opacity: 0.9;
+}
+
+/* Стили блоков СКУД и Списков */
+.flex-label {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.green-text {
+    font-weight: bold;
+    color: #4caf50;
+}
+
+.badge-count {
+    font-weight: bold;
+    color: var(--tg-theme-button-color, #3390ec);
+}
+
+.border-green {
+    border-left: 3px solid #4caf50;
+    padding-left: 8px;
+    margin-bottom: 4px;
+}
+
+.border-gray {
+    border-left: 3px solid #ccc;
+    padding-left: 8px;
+    margin-bottom: 4px;
+}
+
+.red-badge {
+    font-size: 11px;
+    color: #e53935;
+    background: rgba(229,57,53,0.1);
+    padding: 2px 5px;
+    border-radius: 4px;
+    font-weight: bold;
+}
+
+.purple-label {
+    color: #673ab7;
+    font-weight: bold;
+}
+
+.red-label {
+    color: #e53935;
+    font-weight: bold;
+}
+
+.orange-label {
+    color: #f2a93b;
+    font-weight: bold;
+}
+
+.green-success-text {
+    font-size: 14px;
+    color: #4caf50;
+    padding-top: 5px;
+}
+
+/* Вспомогательные классы */
+.balance-span {
+    font-weight: bold;
+}
+.sub-text {
+    font-size: 11px;
+    color: #888;
+}
+.text-right {
+    text-align: right;
+}
+.bold-text {
+    font-weight: bold;
+}
+.block-text {
+    display: block;
+}
+.gray-bold {
+    color: #666;
+    font-weight: bold;
+}
+.center-muted-text {
+    text-align: center;
+    color: #888;
+    font-size: 13px;
+    padding: 10px 0;
+}
+.check-chat-text {
+    color: #673ab7;
+    font-size: 13px;
+    margin-right: 5px;
+}
+.red-bold {
+    color: #e53935;
+    font-weight: bold;
+}
+.orange-bold {
+    color: #f2a93b;
+    font-weight: bold;
+}
+.mr-5 {
+    margin-right: 5px;
+}
+.mt-5 {
+    margin-top: 5px;
+}
+.mt-15 {
+    margin-top: 15px;
+}

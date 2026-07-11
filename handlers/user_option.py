@@ -495,10 +495,10 @@ async def parse_qr_scan(
         if not hmac.compare_digest(signature, generate_signature(scanned_id, time_salt)):
             return await message.answer("🚨 ВНИМАНИЕ: QR-код подделан!")
 
-        # Переводим всё в naive UTC (без таймзон), чтобы идеально сопоставить с базой Postgres на Аэзе
+        # Переводим всё в naive UTC (без таймзон), для Postgres
         now_naive = datetime.now(timezone.utc).replace(tzinfo=None)
 
-        # 2. Поиск атлета с проверкой клуба + ЗАЩИТА ROW-LEVEL LOCKING (with_for_update)
+        # 2. Поиск атлета с проверкой клуба + ЗАЩИТА ROW-LEVEL LOCKING
         student_query = (
             select(Student)
             .where(Student.id == scanned_id)
@@ -518,19 +518,37 @@ async def parse_qr_scan(
             if (now_naive - last_visit_naive).total_seconds() < 10:
                 return await message.answer("⏳ Не спамьте, турникет уже обрабатывает предыдущий запрос.")
 
-        # 3. Логика разморозки (Берем дни из конфига)
-        if student.is_frozen == 1:
-            student.is_frozen = 0
+        # === 3. ЛОГИКА ДОСРОЧНОЙ РАЗМОРОЗКИ С КОМПЕНСАЦИЕЙ ДНЕЙ ===
+        is_was_frozen = False
+        returned_early_days = 0
+
+        if student.is_frozen and student.frozen_at:
+            frozen_at_naive = student.frozen_at.replace(tzinfo=None)
+
+            # Сколько чистых дней атлет РЕАЛЬНО пробыл в заморозке
+            days_passed = (now_naive.date() - frozen_at_naive.date()).days
+            days_passed = max(0, days_passed)
+
+            # Получаем шаг заморозки, заложенный изначально (дефолт 7)
             freeze_step = club_settings.get("limits", {}).get("freeze_days_step", 7)
 
-            last_visit_naive = student.last_visit.replace(tzinfo=None) if student.last_visit else now_naive
-            days_passed = (now_naive - last_visit_naive).days
+            # Если чел пришел раньше, чем заложенный шаг заморозки
             if days_passed < freeze_step:
                 diff = freeze_step - days_passed
                 if student.expire_date:
                     student.expire_date -= timedelta(days=diff)
+                returned_early_days = diff
+                logger.info(
+                    f"❄️ QR Досрочный выход: {student_name} недогулял {diff} дн. Срок уменьшен назад на {diff} дн.")
+            else:
+                logger.info(
+                    f"❄️ Полноценный выход по QR: {student_name} перегулял лимит {freeze_step} дн. Ничего не вычитаем.")
 
-            await message.answer(f"❄️ Абонемент {student_name} РАЗМОРОЖЕН")
+            # Снимаем флаги заморозки
+            student.is_frozen = 0
+            student.frozen_at = None
+            is_was_frozen = True
+            await session.flush()
 
         # 4. ОБНОВЛЕННАЯ ЛОГИКА СЕССИИ (Таймаут из JSONB)
         timeout_minutes = club_settings.get("limits", {}).get("session_timeout_minutes", 150)
@@ -538,11 +556,10 @@ async def parse_qr_scan(
         is_inside_session = False
         if student.last_visit:
             last_visit_naive = student.last_visit.replace(tzinfo=None)
-            # Если с момента последнего прохода прошло меньше заданных минут
             if (now_naive - last_visit_naive).total_seconds() < (timeout_minutes * 60):
                 is_inside_session = True
 
-        # 5. Проверка права доступа (Срок действия абонемента)
+        # 5. Проверка права доступа (Срок действия абонемента — уже обновленный после разморозки)
         expire_naive = student.expire_date.replace(tzinfo=None) if student.expire_date else None
 
         if not expire_naive or expire_naive < now_naive:
@@ -556,57 +573,18 @@ async def parse_qr_scan(
             if (student.balance_lessons or 0) <= 0:
                 return await message.answer(f"🔴 ДОСТУП ЗАПРЕЩЕН\n👤 {student_name}\n❌ На балансе нет занятий")
 
-        # === 6. ИНТЕГРАЦИЯ ТУРНИКЕТА (СНАЧАЛА ДЕРГАЕМ ЖЕЛЕЗО) ===
-        turnstile_config = club_settings.get("turnstile", {})
-        turnstile_opened = False
-        turnstile_status = ""
-        status_emoji = "🔵"
-
-        if turnstile_config.get("enabled", False):
-            try:
-                base_url = str(turnstile_config.get("base_url", ""))
-                if base_url and not base_url.startswith("http"):
-                    turnstile_config["base_url"] = f"http://{base_url}"
-
-                # Физический запрос к реле
-                turnstile_opened = await trigger_dingtian_turnstile(turnstile_config)
-
-                if turnstile_opened:
-                    turnstile_status = "\n✅ <b>Турникет открыт</b>"
-                    status_emoji = "🟢"
-                else:
-                    # Железо ответило отказом — прерываемся, ничего не списываем в БД
-                    return await message.answer(
-                        "⚠️ <b>Ошибка турникета. Реле отклонило команду. Занятие НЕ списано!</b>"
-                    )
-
-            except Exception as sku_err:
-                # Если таймаут сети, но реле обычно успевает щелкнуть — пропускаем атлета
-                logger.warning(f"Сбой сети СКУД при QR-входе: {sku_err}. Пропускаем атлета в базе.")
-                turnstile_status = "\n⚠️ <b>Микросбой сети турникета. Проход разрешен.</b>"
-                status_emoji = "🟢"
-                turnstile_opened = True
-        else:
-            # СКУД выключен в настройках клуба — просто фиксируем посещение
-            status_emoji = "🟢"
-            turnstile_opened = True
-
-        # === 7. ТОЛЬКО ЕСЛИ ТУРНИКЕТ ОТКРЫЛСЯ — ПРИМЕНЯЕМ ЛОГИКУ СПИСАНИЯ ===
+        # === 6. ЛОГИКА СПИСАНИЯ ЗАНЯТИЙ И ПОДГОТОВКА ДАННЫХ ===
         if is_unlimited:
             display_balance = "♾ <b>Режим: Безлимит</b>"
-
         elif is_inside_session:
-            # Повторный проход в рамках сессии — занятие НЕ списываем, last_visit НЕ трогаем
             logger.info(f"🔄 Повторный проход по QR в рамках сессии для {student_name}. Занятие сохранено.")
             session_end = student.last_visit + timedelta(minutes=timeout_minutes)
             session_end_str = session_end.strftime("%H:%M")
-
             display_balance = (
                 f"🔢 Осталось занятий: <b>{student.balance_lessons}</b>\n"
                 f"🔄 <b>Повторный проход (Сессия активна)</b>\n"
                 f"⚠️ <i>После <b>{session_end_str}</b> вход спишет новое занятие!</i>"
             )
-
         else:
             # Новый визит — списываем занятие и отправляем алерты
             if student.last_visit:
@@ -626,13 +604,50 @@ async def parse_qr_scan(
                     except Exception as alert_err:
                         logger.warning(f"Не удалось отправить алерт админу по QR: {alert_err}")
 
-            # Честно уменьшаем баланс и открываем новую сессию
+            # Уменьшаем баланс и открываем новую сессию
             student.balance_lessons -= 1
-            student.last_visit = now_naive  # Фиксируем время новой сессии
+            student.last_visit = now_naive
             display_balance = f"🔢 Осталось занятий: <b>{student.balance_lessons}</b>"
 
-        # === 8. ФИКСИРУЕМ ИЗМЕНЕНИЯ В POSTGRES ===
-        await session.commit()
+        # === 7. ФИКСИРУЕМ ИЗМЕНЕНИЯ В POSTGRES (Освобождаем базу как можно быстрее!) ===
+        try:
+            await session.commit()
+        except Exception as db_err:
+            logger.error(f"Ошибка коммита базы данных перед СКУД (QR): {db_err}")
+            return await message.answer("❌ Ошибка сохранения данных визита в БД.")
+
+        # === 8. ИНТЕГРАЦИЯ ТУРНИКЕТА (БЕЗ блокировки транзакции базы) ===
+        turnstile_config = club_settings.get("turnstile", {})
+        turnstile_status = ""
+        status_emoji = "🟢"
+
+        if turnstile_config.get("enabled", False):
+            try:
+                base_url = str(turnstile_config.get("base_url", ""))
+                if base_url and not base_url.startswith("http"):
+                    turnstile_config["base_url"] = f"http://{base_url}"
+
+                turnstile_opened = await trigger_dingtian_turnstile(turnstile_config)
+                if turnstile_opened:
+                    turnstile_status = "\n✅ <b>Турникет открыт</b>"
+                else:
+                    return await message.answer(
+                        "⚠️ <b>Ошибка турникета. Реле отклонило команду на открытие. Обратитесь к администратору!</b>"
+                    )
+            except Exception as sku_err:
+                logger.warning(f"Сбой сети СКУД при QR-входе: {sku_err}. Пропускаем атлета.")
+                turnstile_status = "\n⚠️ <b>Микросбой сети турникета. Проход разрешен.</b>"
+        else:
+            turnstile_status = "\nℹ️ <i>СКУД отключен в настройках</i>"
+
+        # Красивое уведомление о компенсации дней досрочной разморозки
+        if is_was_frozen:
+            if returned_early_days > 0:
+                freeze_notice = f"\n❄️ <b>Досрочная разморозка!</b>\n⚠️ Сдвиг абонемента назад на <b>-{returned_early_days} дн.</b> за досрочный выход."
+            else:
+                freeze_notice = f"\n❄️ <b>Абонемент автоматически разморожен!</b>"
+        else:
+            freeze_notice = ""
 
         # Формируем итоговый красивый ответ на терминал / в чат бота
         expire_str = student.expire_date.strftime('%d.%m.%Y') if student.expire_date else "Не указано"
@@ -640,6 +655,7 @@ async def parse_qr_scan(
             f"{status_emoji} <b>ПРОХОДИТЕ</b>\n👤 Атлет: <b>{student_name}</b>\n"
             f"{display_balance}\n"
             f"📅 До: <b>{expire_str}</b>"
+            f"{freeze_notice}"
             f"{turnstile_status}",
             parse_mode='HTML'
         )

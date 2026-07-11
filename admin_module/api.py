@@ -15,7 +15,7 @@ import json
 from urllib.parse import parse_qsl
 import io
 from fastapi import Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from fastapi import Depends, HTTPException, APIRouter, Security
 from fastapi.security import APIKeyHeader
@@ -63,6 +63,7 @@ def get_club_id_from_host(request: Request) -> int:
 
 
 # 1. Добавляем роут /admin, который просила кнопка в ТГ (убрали get_api_key!)
+
 @router.get("/admin", response_class=HTMLResponse)
 async def get_admin_dashboard(
         request: Request,
@@ -70,23 +71,74 @@ async def get_admin_dashboard(
 ):
     club_id = get_club_id_from_host(request)
 
-    # 1. Загружаем из базы список студентов ТОЛЬКО этого клуба (Изоляция SaaS)
+    # 1. Загружаем клуб, чтобы достать индивидуальный таймаут сессии из club_settings
+    club_res = await session.execute(select(Club).where(Club.id == club_id))
+    club = club_res.scalar_one_or_none()
+
+    # Извлекаем таймаут сессии строго по твоей структуре DEFAULT_CLUB_SETTINGS
+    club_settings = club.club_settings or {} if club else {}
+    timeout_minutes = club_settings.get("limits", {}).get("session_timeout_minutes", 150)
+
+    # 2. Загружаем из базы список студентов ТОЛЬКО этого клуба (Изоляция SaaS)
     result = await session.execute(
         select(Student).where(Student.club_id == club_id)
     )
-    # Оборачиваем в list(), чтобы у линтера PyCharm не было претензий к типам
     students = list(result.scalars().all())
 
-    # 2. Передаем список в наш аналитический сервис для обработки
+    # Текущее наивное время UTC для точного сопоставления с базой на Аэзе
+    now_naive = datetime.now(timezone.utc).replace(tzinfo=None)
+
+    active_sessions = []
+    past_sessions = []
+
+    # 3. Фильтруем студентов по сессиям
+    for student in students:
+        if student.last_visit:
+            last_visit_naive = student.last_visit.replace(tzinfo=None)
+            time_passed = now_naive - last_visit_naive
+
+            # Расчет времени окончания текущей сессии
+            session_end = last_visit_naive + timedelta(minutes=timeout_minutes)
+
+            session_info = {
+                "student_id": student.id,
+                "name": student.name,
+                "balance": student.balance_lessons or 0,  # Выводим баланс, чтобы админ всё видел
+                "last_visit": last_visit_naive.strftime("%d.%m.%Y %H:%M"),
+                "session_end": session_end.strftime("%H:%M"),
+                "time_passed_mins": int(time_passed.total_seconds() // 60)
+            }
+
+            # Если уложились в лимит минут — сессия активна (чел сейчас тренируется)
+            if time_passed < timedelta(minutes=timeout_minutes):
+                # Считаем сколько минут осталось до закрытия сессии
+                mins_left = int((session_end - now_naive).total_seconds() // 60)
+                session_info["mins_left"] = max(0, mins_left)
+                active_sessions.append(session_info)
+            else:
+                past_sessions.append(session_info)
+
+    # Сортируем: активных — по свежести входа (кто зашел только что — вверху)
+    active_sessions.sort(key=lambda x: x["time_passed_mins"])
+    # Прошедших — по свежести выхода (кто ушел недавно — вверху)
+    past_sessions.sort(key=lambda x: x["time_passed_mins"])
+
+    # Ограничиваем историю прошедших сессий последними 20 записями
+    past_sessions = past_sessions[:20]
+
+    # 4. Передаем полный список студентов в аналитический сервис для сборки графиков
     admin_data = calculate_admin_dashboard(students)
 
-    # 3. Рендерим новый шаблон admin.html и распаковываем туда словарь с данными
+    # 5. Рендерим шаблон admin.html и передаем туда обработанные массивы
     return templates.TemplateResponse(
         "admin.html",
         {
             "request": request,
             "club_id": club_id,
-            **admin_data  # Распакует total_athletes, active_now_count, all_athletes и т.д.
+            "active_sessions": active_sessions,  # Массив активных сессий (в зале)
+            "past_sessions": past_sessions,  # Массив истории (последние 20 визитов)
+            "timeout_minutes": timeout_minutes,  # Сам лимит, если нужно вывести в UI
+            **admin_data  # Твои стандартные метрики (total_athletes, active_now_count и т.д.)
         }
     )
 
@@ -430,7 +482,7 @@ async def open_turnstile(
     biometric_token = payload.get("biometric_token")
     init_data = payload.get("init_data")
 
-    # [ОПЦИОНАЛЬНО] 1. Твоя валидация Телеграм init_data, если необходима
+    # [ОПЦИОНАЛЬНО] 1. Валидация Телеграм init_data, если необходима
     # ...
 
     # Ищем студента с row-level блокировкой (with_for_update) от Race Condition
@@ -449,106 +501,80 @@ async def open_turnstile(
     if not club:
         return {"success": False, "message": "Клуб студента не найден"}
 
-    # Работаем с JSONB полем club_settings (гарантируем dict благодаря MutableDict)
-    club_settings = club.club_settings or {}
+    # Работаем со временем (убираем tzinfo для DateTime в Postgres)
+    now = datetime.now(timezone.utc)
+    now_naive = now.replace(tzinfo=None)
 
-    # Достаем конфигурацию турникета из настроек
+    # === БЛОК АВТОМАТИЧЕСКОЙ РАЗМОРОЗКИ ===
+    if student.is_frozen and student.frozen_at:
+        frozen_at_naive = student.frozen_at.replace(tzinfo=None)
+
+        # Считаем чистую разницу в днях по календарю
+        days_frozen = (now_naive.date() - frozen_at_naive.date()).days
+        days_to_add = max(0, days_frozen)
+
+        # Продлеваем дату окончания абонемента
+        if student.subscription_ends_at:
+            student.subscription_ends_at += timedelta(days=days_to_add)
+
+        # Снимаем флаги заморозки
+        student.is_frozen = 0  # или False (в зависимости от типа поля в БД)
+        student.frozen_at = None
+
+        # Проталкиваем изменения в память транзакции
+        await db.flush()
+        logger.info(
+            f"❄️ FaceID Авторазморозка: Атлет {student.name} разморожен. Абонемент продлен на {days_to_add} дн.")
+    # =====================================
+
+    # Работаем с JSONB полем club_settings
+    club_settings = club.club_settings or {}
     relay_config = club_settings.get("turnstile", {})
 
-    # Если СКУД глобально выключен для клуба — не пускаем
     if not relay_config.get("enabled", False):
         return {"success": False, "message": "СКУД отключен в настройках вашего клуба"}
 
-    # Вытаскиваем индивидуальные лимиты сессии
     timeout_minutes = club_settings.get("limits", {}).get("session_timeout_minutes", 150)
-
-    # Логика работы с таймзонами (сервер на Аэзе)
-    now = datetime.now(timezone.utc)
     is_inside_session = False
 
     if student.last_visit:
-        # Приводим к naive-формату, так как в модели DateTime без tzinfo=True
         last_visit_naive = student.last_visit.replace(tzinfo=None)
-        now_naive = now.replace(tzinfo=None)
-
         if now_naive - last_visit_naive < timedelta(minutes=timeout_minutes):
             is_inside_session = True
 
-    # Формируем логику списания и тексты ответов
+    # Проверка баланса (если не безлимит 999)
+    if not is_inside_session and student.balance_lessons <= 0 and student.balance_lessons != 999:
+        return {"success": False, "message": "На балансе нет доступных занятий."}
+
+    # Логика списания
     if is_inside_session:
-        logger.info(f"🔄 Повторный проход. Атлет {student.name} зашел в рамках сессии. Занятие НЕ списываем.")
-        session_end = student.last_visit + timedelta(minutes=timeout_minutes)
-        session_end_str = session_end.strftime("%H:%M")
-
-        message_text = (
-            f"Турникет открыт. Осталось занятий: {student.balance_lessons}. "
-            f"⚠️ Повторный проход! Сессия активна до {session_end_str}."
-        )
+        message_text = "Турникет открыт! Повторный проход, сессия активна."
     else:
-        logger.info(f"🎫 Новый визит. Атлет {student.name} начинает тренировку. Проверяем баланс.")
-
-        # Проверка лимита (999 — безлимит, его не блокируем)
-        if student.balance_lessons <= 0 and student.balance_lessons != 999:
-            return {"success": False, "message": f"Ошибка: У ученика {student.name} закончились занятия! ❌"}
-
-        # Проверка на повторный вход в течение дня (сверхдолгая тренировка) -> Алерт владельцу
-        if student.last_visit:
-            last_visit_naive = student.last_visit.replace(tzinfo=None)
-            now_naive = now.replace(tzinfo=None)
-
-            if now_naive - last_visit_naive < timedelta(hours=6):
-                try:
-                    bots_dict = getattr(request.app.state, "bots_dict", {})
-                    bot = bots_dict.get(club.bot_token)
-
-                    if bot and club.owner_id:
-                        await bot.send_message(
-                            chat_id=int(club.owner_id),
-                            text=f"⚠️ <b>Алерт FaceID (Повторный визит)</b>\n\n"
-                                 f"Атлет: <b>{student.name}</b>\n"
-                                 f"Прошлый вход: {last_visit_naive.strftime('%H:%M')}\n"
-                                 f"Текущий вход: {now_naive.strftime('%H:%M')}\n\n"
-                                 f"Система зафиксировала проход спустя {timeout_minutes} мин. и <b>списала второе занятие за сегодня</b>.",
-                            parse_mode="HTML"
-                        )
-                except Exception as alert_err:
-                    logger.error(f"Не удалось отправить алерт владельцу клуба: {alert_err}")
-
-        # Изменяем баланс в памяти (не безлимит)
         if student.balance_lessons != 999:
             student.balance_lessons -= 1
-
         student.last_visit = now
-        message_text = f"Турникет открыт для {student.name}! Осталось занятий: {student.balance_lessons}"
+        message_text = f"Турникет открыт! Осталось занятий: {student.balance_lessons}"
 
-    # 3. ОТПРАВЛЯЕМ КОМАНДУ НА РЕЛЕ DINGTIAN (ДО КОММИТА)
+    # ФИКСИРУЕМ ИЗМЕНЕНИЯ В БАЗЕ (Освобождаем строку перед сетевым запросом к реле)
     try:
-        # Передаем конфигурационный словарь целиком, как ожидает твоя функция
-        # Перестраховываемся с форматированием base_url
+        await db.commit()
+    except Exception as db_err:
+        logger.error(f"Ошибка коммита базы данных перед СКУД: {db_err}")
+        return {"success": False, "message": "Ошибка сохранения данных визита."}
+
+    # ОТПРАВЛЯЕМ КОМАНДУ НА РЕЛЕ DINGTIAN
+    try:
         base_url = str(relay_config.get("base_url", ""))
         if base_url and not base_url.startswith("http"):
             relay_config["base_url"] = f"http://{base_url}"
 
-        # Вызываем твою оригинальную функцию!
         is_opened = await trigger_dingtian_turnstile(relay_config)
-
-        # ⚡ КЛЮЧЕВОЙ ИСПРАВЛЕНИЕ: Если функция возвращает None или падает по таймауту,
-        # но исключения нет — мы ПРИНУДИТЕЛЬНО считаем проход успешным, так как железка сработала.
         if is_opened is False:
-            return {"success": False, "message": "Реле СКУД отклонило команду (вернуло False)."}
-
+            return {"success": False, "message": "Реле отклонило команду на открытие."}
     except Exception as e:
-        # Если произошел таймаут чтения сети, но реле УСПЕЛО щелкнуть:
-        # Мы пишем ошибку в логи сервера, но ПОЛЬЗОВАТЕЛЯ ПРОПУСКАЕМ и списываем занятие!
-        logger.warning(f"Запрос до реле дошел, но произошла ошибка сети/таймаута: {str(e)}. Проход разрешен.")
+        logger.warning(f"Ошибка сети/таймаута СКУД: {str(e)}. Проход разрешен.")
 
-    # 4. Фиксируем изменения баланса в Postgres на Аэзе
-    await db.commit()
-
-    return {
-        "success": True,
-        "message": message_text
-    }
+    return {"success": True, "message": message_text}
 
 
 @router.post("/webapp/open-turnstile")
@@ -590,11 +616,11 @@ async def open_webapp_turnstile(
 
     telegram_user_id = tg_user["id"]
 
-    # Проверяем связь «Родитель-Ребенок» на основе моделей СУБД
+    # Проверяем связь «Родитель-Ребенок»
     if student.parent_id != telegram_user_id:
         raise HTTPException(status_code=403, detail="Доступ запрещен: Вы не являетесь родителем этого атлета")
 
-    # Проверяем, включена ли у родителя обязательная биометрия
+    # Проверяем биометрию родителя
     user_query = select(User).where(User.user_id == telegram_user_id)
     user_res = await db.execute(user_query)
     parent_user = user_res.scalar_one_or_none()
@@ -603,14 +629,33 @@ async def open_webapp_turnstile(
         if not payload.biometric_token:
             raise HTTPException(status_code=400, detail="Необходимо биометрическое подтверждение на устройстве")
 
-    # 3. ПРОВЕРКИ СТАТУСА АБОНЕМЕНТА
-    if student.is_frozen == 1:
-        return {"success": False, "message": "Абонемент заморожен."}
-
     # Работаем со временем (убираем tzinfo для DateTime в Postgres)
     now = datetime.now(timezone.utc)
-    expire_naive = student.expire_date.replace(tzinfo=None) if student.expire_date else None
     now_naive = now.replace(tzinfo=None)
+
+    # 3. АВТОМАТИЧЕСКАЯ РАЗМОРОЗКА И ПРОВЕРКА СРОКА ДЕЙСТВИЯ
+    if student.is_frozen and student.frozen_at:
+        frozen_at_naive = student.frozen_at.replace(tzinfo=None)
+
+        # Вычисляем чистую разницу в днях между "сейчас" и датой заморозки
+        days_frozen = (now_naive.date() - frozen_at_naive.date()).days
+        days_to_add = max(0, days_frozen)
+
+        # Продлеваем дату окончания абонемента в WebApp-модели
+        if student.expire_date:
+            student.expire_date += timedelta(days=days_to_add)
+
+        # Снимаем заморозку
+        student.is_frozen = 0  # или False
+        student.frozen_at = None
+
+        # Проталкиваем изменения в сессию
+        await db.flush()
+        logger.info(
+            f"❄️ WebApp Авторазморозка: Атлет {student.name} разморожен. Абонемент продлен на {days_to_add} дн.")
+
+    # Теперь проверяем срок действия (уже обновленный, если была разморозка)
+    expire_naive = student.expire_date.replace(tzinfo=None) if student.expire_date else None
 
     if expire_naive and expire_naive < now_naive:
         return {"success": False, "message": "Срок действия абонемента истек."}
@@ -619,11 +664,9 @@ async def open_webapp_turnstile(
     club_settings = club.club_settings or {}
     relay_config = club_settings.get("turnstile", {})
 
-    # Проверяем, активен ли СКУД для этого клуба
     if not relay_config.get("enabled", False):
         return {"success": False, "message": "СКУД отключен в настройках клуба."}
 
-    # Вытаскиваем индивидуальный таймаут сессии визита
     timeout_minutes = club_settings.get("limits", {}).get("session_timeout_minutes", 150)
 
     # Расчет активной сессии визита
@@ -633,18 +676,17 @@ async def open_webapp_turnstile(
         if now_naive - last_visit_naive < timedelta(minutes=timeout_minutes):
             is_inside_session = True
 
-    # Блокируем проход, только если сессия НОВАЯ, а занятий нет (и это не безлимит 999)
     if not is_inside_session and student.balance_lessons <= 0 and student.balance_lessons != 999:
         return {"success": False, "message": "На балансе нет доступных занятий."}
 
-    # Формируем логику и сообщения перед отправкой команды на реле
+    # Формируем логику списаний и сообщений
     if is_inside_session:
         logger.info(f"🔄 Повторный проход через WebApp. Атлет {student.name} в сессии. Занятие НЕ списываем.")
         session_end = student.last_visit + timedelta(minutes=timeout_minutes)
         session_end_str = session_end.strftime("%H:%M")
         message_text = f"Турникет открыт! Повторный проход. Сессия активна до {session_end_str}."
     else:
-        # 🚨 Алерт владельцу клуба при списании второго занятия за день (проход спустя 2.5+ часа, но меньше 6 часов)
+        # Алерт владельцу клуба при списании второго занятия за день (проход спустя 2.5+ часа, но меньше 6 часов)
         if student.last_visit:
             last_visit_naive = student.last_visit.replace(tzinfo=None)
             if now_naive - last_visit_naive < timedelta(hours=6):
@@ -661,33 +703,32 @@ async def open_webapp_turnstile(
                             parse_mode="HTML"
                         )
                 except Exception as alert_err:
-                    logger.error(f"Не удалось отправить алерт владельцу клуба из WebApp эндпоинта: {alert_err}")
+                    logger.error(f"Не удалось отправить алерт владельцу клуба: {alert_err}")
 
-        # Списание баланса, если это не безлимит
         if student.balance_lessons != 999:
             student.balance_lessons -= 1
 
         student.last_visit = now
         message_text = f"Турникет открыт для {student.name}! Осталось занятий: {student.balance_lessons}"
 
-    # 4. ОТПРАВЛЯЕМ КОМАНДУ НА РЕЛЕ DINGTIAN (ДО КОММИТА БАЗЫ)
+    # 5. ФИКСИРУЕМ ИЗМЕНЕНИЯ В БАЗЕ (Освобождаем row-level блокировку базы перед сетевым забросом)
+    try:
+        await db.commit()
+    except Exception as db_err:
+        logger.error(f"Ошибка коммита базы данных перед СКУД в WebApp: {db_err}")
+        return {"success": False, "message": "Ошибка сохранения данных визита."}
+
+    # 4. ОТПРАВЛЯЕМ КОМАНДУ НА РЕЛЕ DINGTIAN (БЕЗ блокировки базы данных)
     try:
         base_url = str(relay_config.get("base_url", ""))
         if base_url and not base_url.startswith("http"):
             relay_config["base_url"] = f"http://{base_url}"
 
-        # Вызываем твою рабочую функцию
         is_opened = await trigger_dingtian_turnstile(relay_config)
-
         if is_opened is False:
             return {"success": False, "message": "Реле отклонило команду на открытие."}
-
     except Exception as e:
-        # Исключаем ложный откат базы при микросбоях сети, если железка успела щелкнуть
         logger.warning(f"Ошибка сети/таймаута СКУД в WebApp: {str(e)}. Проход разрешен.")
-
-    # 5. ФИКСИРУЕМ ИЗМЕНЕНИЯ В БАЗЕ (Только после успешной отправки команды в СКУД)
-    await db.commit()
 
     return {"success": True, "message": message_text}
 

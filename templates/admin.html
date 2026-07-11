@@ -1,106 +1,24 @@
 <!DOCTYPE html>
-<html>
+<html lang="ru">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Панель Администратора СКУД</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
-    <style>
-        body {
-            background-color: var(--tg-theme-bg-color, #f5f5f5);
-            color: var(--tg-theme-text-color, #222);
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            margin: 0; padding: 15px;
-        }
-        h2 { color: var(--tg-theme-button-color, #3390ec); text-align: center; margin-top: 5px; margin-bottom: 2px; }
-        .welcome { text-align: center; font-size: 13px; color: #888; margin-bottom: 12px; }
-
-        .card {
-            background: var(--tg-theme-secondary-bg-color, #ffffff);
-            border-radius: 12px;
-            padding: 15px;
-            margin-bottom: 12px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
-        }
-        .label { font-size: 13px; color: #888; margin-bottom: 5px; }
-        .value { font-size: 17px; font-weight: bold; }
-
-        /* Поисковая строка */
-        .search-input {
-            width: 100%;
-            padding: 12px;
-            border-radius: 10px;
-            border: 1px solid #ccc;
-            background: var(--tg-theme-bg-color, #f5f5f5);
-            color: var(--tg-theme-text-color, #222);
-            font-size: 15px;
-            box-sizing: border-box;
-            outline: none;
-        }
-        .search-input:focus {
-            border-color: var(--tg-theme-button-color, #3390ec);
-        }
-
-        /* Кнопки */
-        .btn {
-            display: block;
-            text-align: center;
-            background: var(--tg-theme-button-color, #3390ec);
-            color: var(--tg-theme-button-text-color, #ffffff);
-            text-decoration: none;
-            padding: 12px 0;
-            border-radius: 12px;
-            font-weight: bold;
-            font-size: 15px;
-            margin-top: 8px;
-            border: none;
-            cursor: pointer;
-        }
-        .btn-secondary {
-            background: transparent;
-            color: var(--tg-theme-button-color, #3390ec);
-            border: 1px solid var(--tg-theme-button-color, #3390ec);
-        }
-
-        .list-item {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 10px 0;
-            border-bottom: 1px solid var(--tg-theme-bg-color, #f5f5f5);
-            font-size: 14px;
-        }
-        .list-item:last-child { border-bottom: none; }
-
-        /* Ссылка на чат */
-        .tg-link {
-            text-decoration: none;
-            background: #3390ec;
-            color: white;
-            padding: 4px 8px;
-            border-radius: 6px;
-            font-size: 12px;
-            font-weight: bold;
-            margin-left: 10px;
-        }
-
-        details { margin-top: 5px; }
-        summary { font-size: 14px; color: var(--tg-theme-button-color, #3390ec); cursor: pointer; padding: 4px 0; }
-        .scroll-box { max-height: 160px; overflow-y: auto; margin-top: 8px; }
-
-        .frozen-badge { color: #f2a93b; font-size: 12px; font-weight: normal; margin-left: 5px; }
-    </style>
+    <!-- Подключаем внешние стили (измени путь, если статика лежит в другом месте) -->
+    <link rel="stylesheet" href="/static/css/admin.css">
 </head>
 <body>
     <h2>Панель Администратора</h2>
     <div class="welcome">Клуб ID: {{ club_id }}</div>
 
     {% if empty %}
-    <div class="card" style="text-align: center; color: #888; padding: 20px;">
+    <div class="card empty-card">
         В клубе пока нет атлетов.
     </div>
     {% else %}
 
-    <!-- 🔍 ИНТЕРАКТИВНЫЙ ПОИСК АТЛЕТОВ -->
+    <!-- 🔍 1. ИНТЕРАКТИВНЫЙ ПОИСК АТЛЕТОВ -->
     <div class="card">
         <div class="label">Быстрый поиск атлета по базе</div>
         <input type="text" id="searchInput" class="search-input" placeholder="Введите имя атлета...">
@@ -112,7 +30,7 @@
                     {% if student.is_frozen %}<span class="frozen-badge">(заморожен)</span>{% endif %}
                 </div>
                 <div>
-                    <span style="font-weight: bold;">{{ student.balance }} зан.</span>
+                    <span class="balance-span">{{ student.balance }} зан.</span>
                     {% if student.username %}
                     <a href="https://t.me{{ student.username }}" class="tg-link" target="_blank">💬 ЛС</a>
                     {% endif %}
@@ -121,25 +39,77 @@
             {% endfor %}
         </div>
     </div>
-    <!-- Вставь этот блок в admin.html прямо перед "Оперативным статусом" -->
 
-    <!-- 🎉 ИМЕНИННИКИ СЕГОДНЯ -->
+    <!-- 🎉 2. ИМЕНИННИКИ СЕГОДНЯ -->
     {% if birthdays_today %}
-    <div class="card" style="background: linear-gradient(135deg, #ff9a9e 0%, #fecfef 100%); color: #fff;">
-        <div class="label" style="color: #fff; font-weight: bold;">🎉 Сегодня день рождения!</div>
-        <div style="font-weight: bold; font-size: 16px; margin-top: 5px;">
+    <div class="card birthday-card">
+        <div class="label white-label">🎉 Сегодня день рождения!</div>
+        <div class="birthday-list">
             {% for student in birthdays_today %}
                 🎂 {{ student.name }} (Родитель: {{ student.username or 'Не указан' }})<br>
             {% endfor %}
         </div>
-        <div style="font-size: 12px; margin-top: 5px; opacity: 0.9;">Не забудьте поздравить атлета на ресепшене!</div>
+        <div class="birthday-footer">Не забудьте поздравить атлета на ресепшене!</div>
     </div>
     {% endif %}
-<!-- Вставь этот блок прямо после карточки "Скоро закончатся (Осталось <= 3 зан.)" -->
 
-    <!-- Раздел: Спящие клиенты (Анализ оттока) -->
+    <!-- 🟢 3. СКУД: КТО СЕЙЧАС В ЗАЛЕ (АКТИВНЫЕ СЕССИИ) -->
     <div class="card">
-        <div class="label" style="color: #673ab7; font-weight: bold;">💤 Спящие клиенты (Не были > 14 дней)</div>
+        <div class="label flex-label">
+            <span class="green-text">🟢 Сейчас в зале (Активные сессии)</span>
+            <span class="badge-count">{{ active_sessions|length }} чел.</span>
+        </div>
+        <div class="scroll-box long-scroll">
+            {% for session in active_sessions %}
+            <div class="list-item border-green">
+                <div>
+                    <strong>{{ session.name }}</strong><br>
+                    <span class="sub-text">Вошел: {{ session.last_visit }}</span>
+                </div>
+                <div class="text-right">
+                    <span class="bold-text block-text">
+                        {% if session.balance == 999 %}♾ Безлимит{% else %}{{ session.balance }} зан.{% endif %}
+                    </span>
+                    <span class="red-badge">
+                        осталось {{ session.mins_left }} мин
+                    </span>
+                </div>
+            </div>
+            {% else %}
+            <div class="center-muted-text">
+                В зале сейчас никого нет 🤷‍♂️
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+
+    <!-- 📜 4. СКУД: ПОСЛЕДНИЕ ПОСЕЩЕНИЯ (ИСТОРИЯ СЕССИЙ) -->
+    <div class="card">
+        <details>
+            <summary>📜 История последних посещений (Топ-20)</summary>
+            <div class="scroll-box long-scroll">
+                {% for session in past_sessions %}
+                <div class="list-item border-gray">
+                    <div>
+                        <strong>{{ session.name }}</strong><br>
+                        <span class="sub-text">Дата входа: {{ session.last_visit }}</span>
+                    </div>
+                    <div class="text-right gray-bold">
+                        {% if session.balance == 999 %}♾ Безлимит{% else %}{{ session.balance }} зан.{% endif %}
+                    </div>
+                </div>
+                {% else %}
+                <div class="center-muted-text">
+                    История посещений пуста
+                </div>
+                {% endfor %}
+            </div>
+        </details>
+    </div>
+
+    <!-- 💤 5. СПЯЩИЕ КЛИЕНТЫ (АНАЛИЗ ОТТОКА) -->
+    <div class="card">
+        <div class="label purple-label">💤 Спящие клиенты (Не были > 14 дней)</div>
         {% if sleeping_students %}
         <details>
             <summary>Показать список потеряшек ({{ sleeping_students|length }} чел.)</summary>
@@ -148,9 +118,9 @@
                 <div class="list-item">
                     <span>{{ student.name }}</span>
                     <div>
-                        <span style="color: #673ab7; font-size: 13px; margin-right: 5px;">Проверить чат</span>
+                        <span class="check-chat-text">Проверить чат</span>
                         {% if student.phone %}
-                        <a href="tel:{{ student.phone }}" class="tg-link" style="background: #4caf50;">📞 Звонок</a>
+                        <a href="tel:{{ student.phone }}" class="tg-link btn-call">📞 Звонок</a>
                         {% endif %}
                     </div>
                 </div>
@@ -158,20 +128,20 @@
             </div>
         </details>
         {% else %}
-        <div style="font-size: 14px; color: #4caf50; padding-top: 5px;">Все клиенты регулярно посещают тренировки!</div>
+        <div class="green-success-text">Все клиенты регулярно посещают тренировки!</div>
         {% endif %}
     </div>
 
-    <!-- Оперативный статус -->
+    <!-- 👥 6. ОПЕРАТИВНЫЙ СТАТУС -->
     <div class="card">
         <div class="label">Текущий статус базы</div>
         <div class="value">👥 Всего атлетов: {{ total_athletes }}</div>
-        <div class="value" style="margin-top: 5px;">🟢 Активных сейчас: {{ active_now_count }}</div>
+        <div class="value mt-5">🟢 Активных сейчас: {{ active_now_count }}</div>
     </div>
 
-    <!-- Раздел: Срочно продлить (Баланс 0) -->
+    <!-- ❌ 7. ЗАКОНЧИЛИСЬ ЗАНЯТИЯ (БАЛАНС 0) -->
     <div class="card">
-        <div class="label" style="color: #e53935; font-weight: bold;">❌ Закончились занятия (Баланс 0)</div>
+        <div class="label red-label">❌ Закончились занятия (Баланс 0)</div>
         {% if expired_students %}
         <details>
             <summary>Открыть список для обзвона ({{ expired_students|length }} чел.)</summary>
@@ -180,7 +150,7 @@
                 <div class="list-item">
                     <span>{{ student.name }}</span>
                     <div>
-                        <span style="color: #e53935; font-weight: bold; margin-right: 5px;">0 зан.</span>
+                        <span class="red-bold mr-5">0 зан.</span>
                         {% if student.username %}
                         <a href="https://t.me{{ student.username }}" class="tg-link" target="_blank">💬 Написать</a>
                         {% endif %}
@@ -190,13 +160,13 @@
             </div>
         </details>
         {% else %}
-        <div style="font-size: 14px; color: #4caf50; padding-top: 5px;">Отличная работа! Клиентов с 0 балансом нет.</div>
+        <div class="green-success-text">Отличная работа! Клиентов с 0 балансом нет.</div>
         {% endif %}
     </div>
 
-    <!-- Раздел: Скоро закончатся (Баланс 1-3) -->
+    <!-- ⚠️ 8. СКОРО ЗАКОНЧАТСЯ ЗАНЯТИЯ (БАЛАНС 1-3) -->
     <div class="card">
-        <div class="label" style="color: #f2a93b; font-weight: bold;">⚠️ Скоро закончатся (Осталось ≤ 3 зан.)</div>
+        <div class="label orange-label">⚠️ Скоро закончатся (Осталось ≤ 3 зан.)</div>
         {% if burning_students %}
         <details>
             <summary>Показать список ({{ burning_students|length }} чел.)</summary>
@@ -205,7 +175,7 @@
                 <div class="list-item">
                     <span>{{ student.name }}</span>
                     <div>
-                        <span style="color: #f2a93b; font-weight: bold; margin-right: 5px;">{{ student.balance }} зан.</span>
+                        <span class="orange-bold mr-5">{{ student.balance }} зан.</span>
                         {% if student.username %}
                         <a href="https://t.me{{ student.username }}" class="tg-link" target="_blank">💬 Написать</a>
                         {% endif %}
@@ -215,22 +185,22 @@
             </div>
         </details>
         {% else %}
-        <div style="font-size: 14px; color: #4caf50; padding-top: 5px;">У всех клиентов достаточный запас занятий.</div>
+        <div class="green-success-text">У всех клиентов достаточный запас занятий.</div>
         {% endif %}
     </div>
 
     {% endif %}
 
-    <!-- Секция навигации -->
-    <div class="card" style="margin-top: 15px;">
+    <!-- СЕКЦИЯ НАВИГАЦИИ -->
+    <div class="card mt-15">
         <div class="label">Другие разделы</div>
         <a href="/stats/export/excel" class="btn">📊 Скачать Excel-отчет</a>
         <a href="/revenue" class="btn btn-secondary">📈 Бизнес-аналитика и выручка</a>
     </div>
 
-    <!-- ⚡️ СКРИПТ ЖИВОГО ПОИСКА -->
     <script>
         const tg = window.Telegram.WebApp;
+        tg.ready();
         tg.expand();
 
         const searchInput = document.getElementById('searchInput');
@@ -240,7 +210,6 @@
         searchInput.addEventListener('input', function(e) {
             const query = e.target.value.trim().toLowerCase();
 
-            // Если строка поиска пустая, скрываем блок результатов
             if (query.length === 0) {
                 searchResultBox.style.display = 'none';
                 return;
@@ -258,6 +227,10 @@
                     item.style.setProperty('display', 'none', 'important');
                 }
             });
+
+            if (!hasResults) {
+                searchResultBox.style.display = 'none';
+            }
         });
     </script>
 </body>

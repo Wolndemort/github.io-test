@@ -797,19 +797,45 @@ async def process_manual_checkin(
 
         student_name = str(student.name)
 
-        # 🛑 АНТИ-СПАМ (Защищает реле от флуда кликов админа)
+        # 🛑 АНТИ-ФРОД / АНТИ-СПАМ (Защищает реле и базу от бешеного флуда кликов админа)
         if student.last_visit:
             last_visit_naive = student.last_visit.replace(tzinfo=None)
             if (now_naive - last_visit_naive).total_seconds() < 10:
-                return await callback.answer("⏳ Турникет уже обрабатывает предыдущий запрос.", show_alert=True)
+                return await callback.answer("⏳ Не спамьте, турникет уже обрабатывает предыдущий запрос.",
+                                             show_alert=True)
 
-        # 4. Логика разморозки
+        # === 4. ЛОГИКА ДОСРОЧНОЙ РАЗМОРОЗКИ С КОМПЕНСАЦИЕЙ ДНЕЙ ===
         msg_unfreeze = ""
-        if student.is_frozen == 1:
-            student.is_frozen = 0
-            msg_unfreeze = "\n❄️ <b>Абонемент автоматически разморожен!</b>"
+        is_was_frozen = False
+        returned_early_days = 0
 
-        # 5. ИНТЕГРАЦИЯ УМНОГО СКУД (Проверка активной сессии 2.5 часа из JSONB)
+        if student.is_frozen and student.frozen_at:
+            frozen_at_naive = student.frozen_at.replace(tzinfo=None)
+
+            # Сколько чистых дней атлет РЕАЛЬНО пробыл в заморозке
+            days_passed = (now_naive.date() - frozen_at_naive.date()).days
+            days_passed = max(0, days_passed)
+
+            # Получаем шаг заморозки из настроек лимитов клуба (дефолт 7)
+            freeze_step = club_settings.get("limits", {}).get("freeze_days_step", 7)
+
+            # Если чел пришел раньше, чем заложенный шаг заморозки — вычитаем разницу назад
+            if days_passed < freeze_step:
+                diff = freeze_step - days_passed
+                if student.expire_date:
+                    student.expire_date -= timedelta(days=diff)
+                returned_early_days = diff
+                logger.info(f"❄️ Админ Досрочный выход: {student_name} недогулял {diff} дн. Срок уменьшен назад.")
+            else:
+                logger.info(f"❄️ Полноценный выход через админку: {student_name} перегулял лимит {freeze_step} дн.")
+
+            # Снимаем флаги заморозки
+            student.is_frozen = 0
+            student.frozen_at = None
+            is_was_frozen = True
+            await session.flush()
+
+        # === 5. КОНТРОЛЬ СЕССИИ (Таймаут прохода из JSONB настроек) ===
         limits = club_settings.get("limits", {})
         timeout_mins = limits.get("session_timeout_minutes", 150)
 
@@ -819,7 +845,7 @@ async def process_manual_checkin(
             if (now_naive - last_visit_naive).total_seconds() < (timeout_mins * 60):
                 is_inside_session = True
 
-        # 6. Проверка прав доступа (Срок действия абонемента)
+        # 6. Проверка права доступа (Срок действия абонемента — уже обновленный после разморозки)
         expire_naive = student.expire_date.replace(tzinfo=None) if student.expire_date else None
         if not expire_naive or expire_naive < now_naive:
             await callback.message.edit_text(
@@ -829,7 +855,7 @@ async def process_manual_checkin(
             await state.clear()
             return await callback.answer("Срок действия абонемента истек! ❌", show_alert=True)
 
-        # Проверяем лимиты занятий перед физическим открытием
+        # Проверяем лимиты занятий (маркер 999 — безлимит)
         balance = student.balance_lessons or 0
         is_unlimited = (balance == 999)
 
@@ -841,35 +867,7 @@ async def process_manual_checkin(
             await state.clear()
             return await callback.answer("У атлета закончились занятия! ❌", show_alert=True)
 
-        # === 7. ИНТЕГРАЦИЯ ТУРНИКЕТА (СНАЧАЛА ДЕРГАЕМ ЖЕЛЕЗО ДО КОММИТА БД) ===
-        turnstile_config = club_settings.get("turnstile", {})
-        turnstile_status = ""
-        status_emoji = "🔵"
-
-        if turnstile_config.get("enabled", False):
-            try:
-                base_url = str(turnstile_config.get("base_url", ""))
-                if base_url and not base_url.startswith("http"):
-                    turnstile_config["base_url"] = f"http://{base_url}"
-
-                # Физический запрос к реле ДингТиан
-                turnstile_opened = await trigger_dingtian_turnstile(turnstile_config)
-
-                if turnstile_opened:
-                    turnstile_status = "\n✅ <b>Турникет открыт</b>"
-                    status_emoji = "🟢"
-                else:
-                    return await callback.answer("⚠️ Железо СКУД отклонило команду. Занятие не списано!",
-                                                 show_alert=True)
-
-            except Exception as sku_err:
-                logger.warning(f"Сбой сети СКУД при ручном чекине: {sku_err}. Пропускаем атлета в базе.")
-                turnstile_status = "\n⚠️ <b>Микросбой сети турникета. Проход разрешен.</b>"
-                status_emoji = "🟢"
-        else:
-            status_emoji = "🟢"
-
-        # === 8. ТОЛЬКО ЕСЛИ ТУРНИКЕТ ОТКРЫЛСЯ — ПРИМЕНЯЕМ ЛОГИКУ СПИСАНИЯ ===
+        # === 7. ПРИМЕНЯЕМ ЛОГИКУ СПИСАНИЯ ЗАНЯТИЙ ===
         usage_info = ""
         parent_text = ""
 
@@ -877,19 +875,58 @@ async def process_manual_checkin(
             usage_info = "\n♾ Режим: <b>Безлимит</b>"
             parent_text = "♾ Режим: <b>Безлимит</b>"
         elif is_inside_session:
+            # Повторный визит — занятие НЕ списываем, время визита НЕ обновляем
+            session_end = student.last_visit + timedelta(minutes=timeout_mins)
+            session_end_str = session_end.strftime("%H:%M")
             usage_info = f"\n🔄 <b>Повторный визит сессии ({timeout_mins} мин).</b> Занятие сохранено.\n📊 Баланс: <b>{balance} зан.</b>"
             parent_text = f"🔄 <b>Повторный вход в зал (в рамках сессии).</b>\n📊 Баланс: {balance} зан."
         else:
-            # Обычный новый визит — списываем занятие и обновляем сессию визита
+            # Обычный новый визит — списываем занятие и открываем новую сессию
             student.balance_lessons -= 1
             student.last_visit = now_naive  # Фиксируем время новой сессии
             usage_info = f"\n📉 Списано 1 занятие.\n📦 Осталось: <b>{student.balance_lessons} зан.</b>"
             parent_text = f"📉 Списано 1 занятие.\n📦 Осталось: {student.balance_lessons} зан."
 
-        # Фиксируем все изменения в базе данных на Аэзе
-        await session.commit()
+        # === 8. ФИКСИРУЕМ ИЗМЕНЕНИЯ В БАЗЕ (Освобождаем row-level блокировку ДО сетевого запроса к реле) ===
+        try:
+            await session.commit()
+        except Exception as db_err:
+            logger.error(f"Ошибка коммита базы данных перед СКУД (Админ ручной чекин): {db_err}")
+            return await callback.answer("❌ Ошибка сохранения данных визита в БД.", show_alert=True)
 
-        # 9. КРАСИВОЕ SaaS-УВЕДОМЛЕНИЕ ДЛЯ КЛИЕНТА (РОДИТЕЛЯ)
+        # === 9. ИНТЕГРАЦИЯ ТУРНИКЕТА (БЕЗ блокировки транзакции базы данных) ===
+        turnstile_config = club_settings.get("turnstile", {})
+        turnstile_status = ""
+        status_emoji = "🟢"
+
+        if turnstile_config.get("enabled", False):
+            try:
+                base_url = str(turnstile_config.get("base_url", ""))
+                if base_url and not base_url.startswith("http"):
+                    turnstile_config["base_url"] = f"http://{base_url}"
+
+                # Физический запрос к реле ДингТиан (база уже свободна)
+                turnstile_opened = await trigger_dingtian_turnstile(turnstile_config)
+
+                if turnstile_opened:
+                    turnstile_status = "\n✅ <b>Турникет открыт</b>"
+                else:
+                    return await callback.answer("⚠️ Железо СКУД отклонило команду ручного открытия!", show_alert=True)
+
+            except Exception as sku_err:
+                logger.warning(f"Сбой сети СКУД при ручном чекине: {sku_err}. Пропускаем атлета в базе.")
+                turnstile_status = "\n⚠️ <b>Микросбой сети турникета. Проход зафиксирован.</b>"
+        else:
+            turnstile_status = "\nℹ️ <i>СКУД отключен в настройках</i>"
+
+        # Красивый текст уведомления о компенсации дней досрочной разморозки
+        if is_was_frozen:
+            if returned_early_days > 0:
+                msg_unfreeze = f"\n❄️ <b>Досрочная разморозка!</b>\n⚠️ Сдвиг абонемента назад на <b>-{returned_early_days} дн.</b> за досрочный выход."
+            else:
+                msg_unfreeze = f"\n❄️ <b>Абонемент автоматически разморожен!</b>"
+
+        # 10. КРАСИВОЕ SaaS-УВЕДОМЛЕНИЕ ДЛЯ КЛИЕНТА (РОДИТЕЛЯ)
         if student.parent_id:
             try:
                 await callback.bot.send_message(
@@ -900,9 +937,14 @@ async def process_manual_checkin(
             except Exception as parent_err:
                 logger.warning(f"Не удалось уведомить родителя {student.parent_id}: {parent_err}")
 
-        # 10. UI: Меняем текст сообщения админу, фиксируя успешный чекин и убирая кнопки
+        # 11. UI: Меняем текст сообщения админу, фиксируя успешный чекин и убирая инлайн-кнопки
+        expire_str = student.expire_date.strftime('%d.%m.%Y') if student.expire_date else "Не указано"
         await callback.message.edit_text(
-            f"{status_emoji} <b>Вход отмечен вручную</b>\n👤 Атлет: <b>{student_name}</b>\n{usage_info}{msg_unfreeze}{turnstile_status}",
+            f"{status_emoji} <b>Вход отмечен вручную</b>\n👤 Атлет: <b>{student_name}</b>"
+            f"{usage_info}"
+            f"\n📅 Действует до: <b>{expire_str}</b>"
+            f"{msg_unfreeze}"
+            f"{turnstile_status}",
             parse_mode="HTML"
         )
 
