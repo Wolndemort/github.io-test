@@ -6,7 +6,7 @@ from sqlalchemy.orm import Mapped, DeclarativeBase, mapped_column, relationship
 from sqlalchemy import BigInteger, DateTime, String, func, Integer, ForeignKey,Boolean
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from config import db_file
-from datetime import datetime, date
+from datetime import datetime, date, timezone
 from sqlalchemy import Date
 from loguru import logger
 import asyncio
@@ -248,10 +248,12 @@ async def process_student_freeze(
             logger.info(f"🚫 В клубе {club_id} заморозка отключена в настройках")
             return "disabled"
 
-        now = datetime.now()
+        # ПРАВКА: Работаем строго в наивном формате UTC (без таймзон) для защиты от TypeError
+        now_naive = datetime.now(timezone.utc).replace(tzinfo=None)
 
         # 3. Проверяем, активен ли абонемент и не заморожен ли он уже прямо сейчас
-        if not student.expire_date or student.expire_date < now:
+        expire_naive = student.expire_date.replace(tzinfo=None) if student.expire_date else None
+        if not expire_naive or expire_naive < now_naive:
             logger.info(f"🚫 У студента ID {student_id} абонемент уже просрочен")
             return None
 
@@ -262,14 +264,15 @@ async def process_student_freeze(
         # 4. Проверяем лимит доступных заморозок у самого студента
         if student.can_freeze > 0:
             # Сдвигаем дату окончания на точное количество дней из аргумента тарифа
-            student.expire_date += timedelta(days=days)
+            if student.expire_date:
+                student.expire_date += timedelta(days=days)
 
-            # 🚨 ИСПРАВЛЕНО: УБРАЛИ student.last_visit = datetime.now(),
-            # чтобы логика автоматической разморозки в QR-сканере не воровала дни у клиента!
-
-            # Списываем право на заморозку и ставим флаг
-            student.can_freeze = 0
+            # Списываем 1 право на заморозку и ставим флаг
+            student.can_freeze -= 1  # ПРАВКА: Уменьшаем на 1, а не обнуляем в 0
             student.is_frozen = 1
+
+            # ❄️ ПРАВКА: Записываем текущую дату начала заморозки в твою новую колонку из Alembic!
+            student.frozen_at = now_naive
 
             # 🚨 ПОДСТРАХОВКА ДЛЯ БЕЗЛИМИТА: Защищаем маркер 999 на балансе
             if student.balance_lessons == 999:
@@ -278,7 +281,8 @@ async def process_student_freeze(
             await session.commit()
 
             logger.info(
-                f"❄️ Клуб {club_id}: Студент {student.name} заморожен на {days} дней. До: {student.expire_date.strftime('%d.%m.%Y')}")
+                f"❄️ Клуб {club_id}: Студент {student.name} заморожен на {days} дней. До: {student.expire_date.strftime('%d.%m.%Y')}"
+            )
             return student.expire_date
 
         return None
