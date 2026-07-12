@@ -1,8 +1,7 @@
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from sqlalchemy.ext.asyncio import AsyncSession
-from aiogram.filters import StateFilter
 import copy
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from sqlalchemy.orm.attributes import flag_modified
 from handlers.skud import save_and_test_turnstile, trigger_dingtian_turnstile
 from handlers.states import AdminStates, AdminSettings, TurnstileSetup, AdminTariffStates, AdminScheduleStates, \
@@ -1175,12 +1174,20 @@ async def save_club_settings(session, redis:Redis, bot_token: str, club_id: int,
 
 
 async def return_to_tariff_menu(message: types.Message, club_settings: dict, disc_id: str):
-    """Генерирует актуальное меню тарифов конкретной дисциплины после любых изменений"""
+    """Генерирует актуальное меню тарифов конкретной дисциплины после любых изменений в FSM"""
     discipline = club_settings.get("disciplines", {}).get(disc_id, {})
     tariffs = discipline.get("tariffs", [])
     d_type = discipline.get("type", "lessons")
 
     builder = InlineKeyboardBuilder()
+
+    # ФИКС: Возвращаем тумблер типа секции, иначе после ввода цены он пропадал из меню!
+    type_label = "Безлимитная (♾)" if d_type == "unlimited" else "По занятиям (🔢)"
+    builder.row(
+        types.InlineKeyboardButton(text=f"🔄 Тип секции: {type_label}", callback_data=f"adm_tar_toggle_{disc_id}")
+    )
+
+    # Генерируем кнопки тарифов по их строгому индексу idx
     for idx, tariff in enumerate(tariffs):
         if d_type == "unlimited":
             t_text = f"💳 {tariff.get('days')} дн. — {tariff.get('price')} руб."
@@ -1191,10 +1198,13 @@ async def return_to_tariff_menu(message: types.Message, club_settings: dict, dis
     builder.row(types.InlineKeyboardButton(text="➕ Добавить тариф", callback_data=f"adm_tar_add_{disc_id}"))
     builder.row(types.InlineKeyboardButton(text="⬅️ Назад", callback_data="admin_tariffs_sections"))
 
+    # Жестко настраиваем сетку кнопок strictly по одной в ряд
+    builder.adjust(1)
+
     await message.answer(
-        f"🥋 <b>Секция: {discipline.get('name')}</b>\n"
-        f"Режим работы: <u>{'Безлимит ♾' if d_type == 'unlimited' else 'Лимитированные занятия 🔢'}</u>\n\n"
-        f"Выберите тариф для управления или нажмите кнопку добавления:",
+        text=f"🥋 <b>Направление: {discipline.get('name')}</b>\n"
+             f"Текущий режим: <u>{'Безлимитные абонементы' if d_type == 'unlimited' else 'Списание занятий'}</u>\n\n"
+             f"Управление существующей тарифной сеткой:",
         reply_markup=builder.as_markup(),
         parse_mode="HTML"
     )
@@ -1225,39 +1235,55 @@ async def admin_tariffs_sections_list(callback: types.CallbackQuery, club_settin
 
 @router.callback_query(F.data.startswith("adm_tar_sect_"))
 async def admin_manage_section_tariffs(callback: types.CallbackQuery, club_settings: dict):
-    disc_id = callback.data.split("_")[-1]
+    """Меню управления тарифами конкретной секции с защитой от сломанных возвратов"""
+
+    # ИСПРАВЛЕНО: Безопасный разбор строки. Забираем ID дисциплины по четкому индексу,
+    # даже если в callback.data прилетел сложный префикс от кнопки возврата или удаления!
+    parts = callback.data.split("_")
+    if len(parts) < 4:
+        return await callback.answer("❌ Ошибка формата данных секции!", show_alert=True)
+
+    disc_id = parts[3]  # Строго 4-й элемент (например, 'boxing') после 'adm', 'tar', 'sect'
+
     discipline = club_settings.get("disciplines", {}).get(disc_id)
     if not discipline:
-        return await callback.answer("Указанная секция не найдена!", show_alert=True)
+        return await callback.answer("❌ Указанная секция не найдена!", show_alert=True)
 
     builder = InlineKeyboardBuilder()
     d_type = discipline.get("type", "lessons")
 
     type_label = "Безлимитная (♾)" if d_type == "unlimited" else "По занятиям (🔢)"
     builder.row(
-        types.InlineKeyboardButton(text=f"🔄 Тип секции: {type_label}", callback_data=f"adm_tar_toggle_{disc_id}"))
+        types.InlineKeyboardButton(text=f"🔄 Тип секции: {type_label}", callback_data=f"adm_tar_toggle_{disc_id}")
+    )
 
     tariffs = discipline.get("tariffs", [])
 
-    # Генерируем кнопки, только если тарифы есть
+    # Генерируем кнопки существующих тарифов по их строгому индексу idx
     for idx, tariff in enumerate(tariffs):
-        t_text = f"💳 {tariff.get('days')} дн. — {tariff.get('price')} руб." if d_type == "unlimited" else f"💳 {tariff.get('count')} зан. / {tariff.get('days')} дн. — {tariff.get('price')} руб."
+        if d_type == "unlimited":
+            t_text = f"💳 {tariff.get('days')} дн. — {tariff.get('price')} руб."
+        else:
+            t_text = f"💳 {tariff.get('count')} зан. / {tariff.get('days')} дн. — {tariff.get('price')} руб."
+
         builder.row(types.InlineKeyboardButton(text=t_text, callback_data=f"adm_tar_edit_{disc_id}_{idx}"))
 
     builder.row(types.InlineKeyboardButton(text="➕ Добавить тариф", callback_data=f"adm_tar_add_{disc_id}"))
     builder.row(types.InlineKeyboardButton(text="⬅️ Назад", callback_data="admin_tariffs_sections"))
+    builder.adjust(1)  # Выстраиваем всё строго в один вертикальный ряд
 
-    # ДИНАМИЧЕСКИЙ ТЕКСТ ПОДСКАЗКИ
+    # Динамический текст подсказки
     if not tariffs:
         tariffs_info = "⚠️ <b>Ни одного тарифного плана еще не создано!</b>\nНажмите кнопку ниже, чтобы добавить первый тариф."
     else:
         tariffs_info = "Управление существующей тарифной сеткой:"
 
     await callback.message.edit_text(
-        f"🥋 <b>Направление: {discipline.get('name')}</b>\n"
-        f"Текущий режим: <u>{'Безлимитные абонементы' if d_type == 'unlimited' else 'Списание занятий'}</u>\n\n"
-        f"{tariffs_info}",
-        reply_markup=builder.as_markup(), parse_mode="HTML"
+        text=f"🥋 <b>Направление: {discipline.get('name')}</b>\n"
+             f"Текущий режим: <u>{'Безлимитные абонементы' if d_type == 'unlimited' else 'Списание занятий'}</u>\n\n"
+             f"{tariffs_info}",
+        reply_markup=builder.as_markup(),
+        parse_mode="HTML"
     )
 
 
@@ -1270,54 +1296,96 @@ async def admin_toggle_section_type(
         bot,
         club_id: int
 ):
-    disc_id = callback.data.split("_")[-1]
+    """Переключение режима секции (Списание занятий 🔢 <-> Безлимит ♾)"""
 
-    if disc_id in club_settings["disciplines"]:
+    # ИСПРАВЛЕНО: Безопасный разбор строки по жесткому индексу шага
+    parts = callback.data.split("_")
+    if len(parts) < 4:
+        return await callback.answer("❌ Ошибка формата данных тумблера!", show_alert=True)
+
+    disc_id = parts[3]  # Строго 4-й элемент после 'adm', 'tar', 'toggle'
+
+    if disc_id in club_settings.get("disciplines", {}):
         cur = club_settings["disciplines"][disc_id].get("type", "lessons")
         new_type = "unlimited" if cur == "lessons" else "lessons"
 
         # 1. Меняем тип локально в словаре
         club_settings["disciplines"][disc_id]["type"] = new_type
 
-        # Если переключили в безлимит — принудительно ставим маркер 999 во все существующие тарифы
+        # Если переключили в безлимит — принудительно ставим маркер 999 во все тарифы секции
         if new_type == "unlimited":
             for t in club_settings["disciplines"][disc_id].get("tariffs", []):
                 t["count"] = 999
+        else:
+            # Если вернули на занятия — убираем 999 и ставим базовый дефолт (например, 8)
+            for t in club_settings["disciplines"][disc_id].get("tariffs", []):
+                if t.get("count") == 999:
+                    t["count"] = 8
 
         # 2. Пишем изменения в БД и чистим Redis
         await save_club_settings(session, redis, bot.token, club_id, club_settings)
         await callback.answer("Тип направления изменен! ✨")
 
-        # ================= ИСПРАВЛЕНИЕ ТУТ =================
-        # Принудительно вызываем хендлер отрисовки меню этой же секции.
-        # Передаем уже МОДИФИЦИРОВАННЫЙ club_settings, чтобы бот сразу прочитал новые данные!
+        # 🔥 КРИТИЧЕСКИЙ ФИКС: Явно подменяем callback.data на префикс секции перед вызовом!
+        # Теперь функция admin_manage_section_tariffs отработает идеально, и кнопка "Назад" не отвалится
+        callback.data = f"adm_tar_sect_{disc_id}"
+
         await admin_manage_section_tariffs(callback, club_settings)
 
 
 @router.callback_query(F.data.startswith("adm_tar_edit_"))
 async def admin_edit_tariff_menu(callback: types.CallbackQuery, club_settings: dict):
-    """Экран изменения конкретного выбранного тарифа"""
-    _, _, _, disc_id, tariff_idx = callback.data.split("_")
-    tariff_idx = int(tariff_idx)
-    discipline = club_settings["disciplines"][disc_id]
-    tariff = discipline["tariffs"][tariff_idx]
+    """Экран изменения конкретного выбранного тарифа с защитой от сдвига индексов"""
+
+    # ИСПРАВЛЕНО: Безопасный разбор динамической строки без риска поймать пустую строку ""
+    parts = callback.data.split("_")
+    if len(parts) < 5:
+        return await callback.answer("❌ Ошибка формата данных меню тарифа!", show_alert=True)
+
+    disc_id = parts[3]  # Строго 4-й элемент (например, 'boxing')
+    tariff_idx = parts[4]    # Строго 5-й элемент (индекс тарифа, например, '0')
+
+    try:
+        tariff_idx_int = int(tariff_idx)
+    except ValueError:
+        return await callback.answer("❌ Некорректный индекс тарифа!", show_alert=True)
+
+    discipline = club_settings.get("disciplines", {}).get(disc_id)
+    if not discipline:
+        return await callback.answer("❌ Секция не найдена в настройках!", show_alert=True)
+
+    tariffs = discipline.get("tariffs", [])
+    if not (0 <= tariff_idx_int < len(tariffs)):
+        return await callback.answer("❌ Выбранный тариф больше не существует!", show_alert=True)
+
+    tariff = tariffs[tariff_idx_int]
 
     builder = InlineKeyboardBuilder()
-    builder.row(types.InlineKeyboardButton(text=f"💰 Цена: {tariff['price']} руб.", callback_data=f"input_tar_price_{disc_id}_{tariff_idx}"))
-    builder.row(types.InlineKeyboardButton(text=f"⏳ Срок: {tariff['days']} дней", callback_data=f"input_tar_days_{disc_id}_{tariff_idx}"))
-    if discipline.get("type") == "lessons":
-        builder.row(types.InlineKeyboardButton(text=f"🔢 Занятий: {tariff['count']}", callback_data=f"input_tar_count_{disc_id}_{tariff_idx}"))
 
-    builder.row(types.InlineKeyboardButton(text="❌ Удалить тариф", callback_data=f"adm_tar_del_{disc_id}_{tariff_idx}"))
+    # Генерируем чистые callback_data для кнопок ввода параметров
+    builder.row(types.InlineKeyboardButton(text=f"💰 Цена: {tariff.get('price')} руб.",
+                                           callback_data=f"input_tar_price_{disc_id}_{tariff_idx_int}"))
+    builder.row(types.InlineKeyboardButton(text=f"⏳ Срок: {tariff.get('days')} дней",
+                                           callback_data=f"input_tar_days_{disc_id}_{tariff_idx_int}"))
+
+    if discipline.get("type") == "lessons":
+        builder.row(types.InlineKeyboardButton(text=f"🔢 Занятий: {tariff.get('count')}",
+                                               callback_data=f"input_tar_count_{disc_id}_{tariff_idx_int}"))
+
+    # Кнопка удаления и возврата теперь шлют четкие, безопасные индексы
+    builder.row(
+        types.InlineKeyboardButton(text="❌ Удалить тариф", callback_data=f"adm_tar_del_{disc_id}_{tariff_idx_int}"))
     builder.row(types.InlineKeyboardButton(text="⬅️ Назад", callback_data=f"adm_tar_sect_{disc_id}"))
 
+    builder.adjust(1)  # Выстраиваем кнопки строго в один вертикальный ряд
+
     await callback.message.edit_text(
-        f"⚙️ <b>Редактирование тарифа ({discipline['name']})</b>\n\nВы можете изменить отдельные параметры или полностью удалить тариф:",
-        reply_markup=builder.as_markup(), parse_mode="HTML"
+        text=f"⚙️ <b>Редактирование тарифа ({discipline.get('name')})</b>\n\n"
+             f"Вы можете изменить отдельные параметры или полностью удалить тариф:",
+        reply_markup=builder.as_markup(),
+        parse_mode="HTML"
     )
 
-
-from datetime import datetime  # Убедитесь, что импорт есть вверху файла
 
 
 @router.callback_query(F.data.startswith("adm_tar_del_"))
