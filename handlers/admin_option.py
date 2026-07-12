@@ -1287,6 +1287,8 @@ async def admin_manage_section_tariffs(callback: types.CallbackQuery, club_setti
     )
 
 
+# БЛОК 3: ТУМБЛЕР ПЕРЕКЛЮЧЕНИЯ ТИПА СЕКЦИИ (БЕЗЛИМИТ / ЗАНЯТИЯ)
+# =========================================================================
 @router.callback_query(F.data.startswith("adm_tar_toggle_"))
 async def admin_toggle_section_type(
         callback: types.CallbackQuery,
@@ -1297,40 +1299,33 @@ async def admin_toggle_section_type(
         club_id: int
 ):
     """Переключение режима секции (Списание занятий 🔢 <-> Безлимит ♾)"""
-
-    # ИСПРАВЛЕНО: Безопасный разбор строки по жесткому индексу шага
     parts = callback.data.split("_")
     if len(parts) < 4:
         return await callback.answer("❌ Ошибка формата данных тумблера!", show_alert=True)
 
-    disc_id = parts[3]  # Строго 4-й элемент после 'adm', 'tar', 'toggle'
+    disc_id = parts[3]
 
     if disc_id in club_settings.get("disciplines", {}):
         cur = club_settings["disciplines"][disc_id].get("type", "lessons")
         new_type = "unlimited" if cur == "lessons" else "lessons"
 
-        # 1. Меняем тип локально в словаре
         club_settings["disciplines"][disc_id]["type"] = new_type
 
-        # Если переключили в безлимит — принудительно ставим маркер 999 во все тарифы секции
+        # Если переключили в безлимит — принудительно ставим маркер 999
         if new_type == "unlimited":
             for t in club_settings["disciplines"][disc_id].get("tariffs", []):
                 t["count"] = 999
         else:
-            # Если вернули на занятия — убираем 999 и ставим базовый дефолт (например, 8)
             for t in club_settings["disciplines"][disc_id].get("tariffs", []):
                 if t.get("count") == 999:
                     t["count"] = 8
 
-        # 2. Пишем изменения в БД и чистим Redis
         await save_club_settings(session, redis, bot.token, club_id, club_settings)
         await callback.answer("Тип направления изменен! ✨")
 
-        # 🔥 КРИТИЧЕСКИЙ ФИКС: Явно подменяем callback.data на префикс секции перед вызовом!
-        # Теперь функция admin_manage_section_tariffs отработает идеально, и кнопка "Назад" не отвалится
-        callback.data = f"adm_tar_sect_{disc_id}"
-
-        await admin_manage_section_tariffs(callback, club_settings)
+        # 🔥 ИСПРАВЛЕНО: Безопасный обход заморозки Pydantic v2 через создание копии объекта
+        new_callback = callback.model_copy(update={"data": f"adm_tar_sect_{disc_id}"})
+        await admin_manage_section_tariffs(new_callback, club_settings)
 
 
 @router.callback_query(F.data.startswith("adm_tar_edit_"))
@@ -1387,7 +1382,9 @@ async def admin_edit_tariff_menu(callback: types.CallbackQuery, club_settings: d
     )
 
 
-
+# =========================================================================
+# БЛОК 5: САМО ТОЧЕЧНОЕ УДАЛЕНИЕ ТАРИФА ИЗ БАЗЫ
+# =========================================================================
 @router.callback_query(F.data.startswith("adm_tar_del_"))
 async def admin_delete_tariff(
         callback: types.CallbackQuery,
@@ -1398,16 +1395,13 @@ async def admin_delete_tariff(
         club_id: int
 ):
     """Удаление конкретного тарифа по индексу с жесткой защитой"""
-    # ИСПРАВЛЕНО: Безопасный разбор строки по индексам элементов списка
     parts = callback.data.split("_")
     if len(parts) < 5:
-        await callback.answer("❌ Ошибка структуры кнопки удаления", show_alert=True)
+        await callback.answer("❌ Ошибка структуры данных кнопки удаления", show_alert=True)
         return
 
-    # Пример для "adm_tar_del_boxing_0":
-    # parts[0]='adm', parts[1]='tar', parts[2]='del', parts[3]='boxing', parts[4]='0'
-    disc_id = parts[3]  # Получаем чистый ID секции ('boxing')
-    tariff_idx = parts[4]  # Получаем индекс тарифа ('0')
+    disc_id = parts[3]
+    tariff_idx = parts[4]
 
     try:
         tariff_idx_int = int(tariff_idx)
@@ -1415,27 +1409,23 @@ async def admin_delete_tariff(
         await callback.answer("❌ Некорректный индекс тарифа", show_alert=True)
         return
 
-    # Достаем блок конкретной дисциплины и ее тарифы
     discipline_block = club_settings.get("disciplines", {}).get(disc_id, {})
     tariffs = discipline_block.get("tariffs", [])
 
-    # Проверяем, что индекс не вылетает за границы массива тарифов
     if 0 <= tariff_idx_int < len(tariffs):
         target_tariff = tariffs[tariff_idx_int]
-        count = target_tariff.get("count", 0)  # Количество занятий в тарифе
+        count = target_tariff.get("count", 0)
 
-        # ПРОВЕРКА В БД: Ищем активных атлетов ЭТОГО клуба, у которых
-        # совпадает баланс И они ходят строго на ЭТУ дисциплину (disc_id)!
+        # Проверка активных спортсменов строго в этой дисциплине
         stmt = select(Student).where(
             Student.club_id == club_id,
-            Student.discipline == disc_id,  # ФИКС: Жесткая привязка к дисциплине
+            Student.discipline == disc_id,
             Student.balance_lessons == count,
             Student.expire_date > datetime.now()
         )
         result = await session.execute(stmt)
         active_students = result.scalars().all()
 
-        # Если нашли людей именно с этим тарифом в этой секции — блокируем удаление
         if active_students:
             names = ", ".join([s.name for s in active_students[:3]])
             if len(active_students) > 3:
@@ -1445,25 +1435,22 @@ async def admin_delete_tariff(
                 f"❌ <b>Невозможно удалить тариф!</b>\n\n"
                 f"Этот тарифный план сейчас активирован у действующих атлетов секции:\n"
                 f"👤 <code>{names}</code>\n\n"
-                f"Сначала измените их баланс вручную или дождитесь окончания абонементов.",
+                f"Сначала измените их баланс или дождитесь окончания абонементов.",
                 parse_mode="HTML"
             )
 
-        # 🔥 ФИКС: Удаляем строго ОДИН тариф по его точному индексу из массива
+        # Удаляем строго один тариф по его индексу из массива
         tariffs.pop(tariff_idx_int)
 
-        # Перезаписываем обновленный массив обратно в структуру настроек клуба
+        # Перезаписываем чистый массив обратно в общую структуру настроек
         club_settings["disciplines"][disc_id]["tariffs"] = tariffs
 
-        # Сохраняем чистые настройки в Postgres и сбрасываем кэш Redis
         await save_club_settings(session, redis, bot.token, club_id, club_settings)
         await callback.answer("Тариф успешно удален! 👌")
 
-    # Перенаправляем админа назад в меню тарифов этой секции
-    # ИСПРАВЛЕНО: Явно подменяем callback.data, чтобы отрисовщик не запутался
-    callback.data = f"adm_tar_sect_{disc_id}"
-    await admin_manage_section_tariffs(callback, club_settings)
-
+    # 🔥 ИСПРАВЛЕНО: Безопасный обход заморозки Pydantic v2 через создание копии объекта
+    new_callback = callback.model_copy(update={"data": f"adm_tar_sect_{disc_id}"})
+    await admin_manage_section_tariffs(new_callback, club_settings)
 
 # ================= РАБОТА С ТЕКСТОВЫМ ВВОДОМ ЧЕРЕЗ FSM =================
 
