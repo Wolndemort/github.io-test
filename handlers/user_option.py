@@ -766,8 +766,11 @@ async def handle_gen_qr(
     photo = BufferedInputFile(io_bytes.getvalue(), filename=f"qr_{student_id}.png")
 
     # 4. Красивый ответ с кнопкой "Назад"
+    # В блоке 4 подменяем callback_data
     kb = InlineKeyboardBuilder()
-    kb.row(types.InlineKeyboardButton(text="🔙 Назад в профиль", callback_data="profile"))
+    # Зашиваем префикс del_photo и возвращаем админа/родителя в профиль
+    kb.row(types.InlineKeyboardButton(text="🔙 Назад в профиль", callback_data="back_profile_del"))
+
 
     await callback.message.answer_photo(
         photo=photo,
@@ -781,6 +784,21 @@ async def handle_gen_qr(
         parse_mode="HTML"
     )
     await callback.answer()
+
+
+@router.callback_query(F.data == "back_profile_del")
+async def back_to_profile_and_delete_qr(callback: types.CallbackQuery, handler, data):
+    await callback.answer()
+
+    # 1. Жестко удаляем сообщение с картинкой QR-кода
+    try:
+        await callback.message.delete()
+    except Exception:
+        pass
+
+    # 2. Перенаправляем управление в хэндлер "profile"
+    new_callback = callback.model_copy(update={"data": "profile"})
+    return await handler(new_callback, data)
 
 
 @router.callback_query(F.data == "add_athlete")
