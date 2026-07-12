@@ -84,8 +84,8 @@ async def get_admin_dashboard(
     )
     students = list(result.scalars().all())
 
-    tz_moscow = timezone(timedelta(hours=3))
-    now_local = datetime.now(tz_moscow).replace(tzinfo=None)
+
+    now_local = datetime.now(timezone.utc).replace(tzinfo=None)
 
     active_sessions = []
     past_sessions = []
@@ -145,8 +145,8 @@ async def get_revenue_stats(
     club_name = club.club_settings.get("ui", {}).get("club_name") or club.name if club else "Фитнес-клуб"
 
     # Настройка честного времени (МСК)
-    tz_moscow = timezone(timedelta(hours=3))
-    now_local = datetime.now(tz_moscow).replace(tzinfo=None)
+
+    now_local = datetime.now(timezone.utc).replace(tzinfo=None)
 
     today_start = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
     week_start = today_start - timedelta(days=now_local.weekday())

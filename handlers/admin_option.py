@@ -810,8 +810,8 @@ async def process_manual_checkin(
     student_id = int(callback.data.split("_")[-1])
 
     # НАСТРОЙКА ВРЕМЕНИ: Принудительно переводим время на МСК, чтобы сойтись с кроном и админкой!
-    tz_moscow = timezone(timedelta(hours=3))
-    now_naive = datetime.now(tz_moscow).replace(tzinfo=None)
+
+    now_naive = datetime.now(timezone.utc).replace(tzinfo=None)
 
     try:
         # 2. Загружаем студента из базы с row-level блокировкой (with_for_update) от Race Condition

@@ -577,13 +577,12 @@ async def saas_recurrent_payments_job(session_factory):
 async def auto_close_sessions_job():
     """
     Фоновая задача для APScheduler. Запускается каждую минуту.
-    Проверяет таймауты сессий, списывает уроки и шлет уведомления.
+    Сравнивает UTC время базы с UTC сервера. Смещение +3 делает только для ТГ-сообщений.
     """
     global bots_dict
 
     async with AsyncSessionLocal() as db:
         try:
-            # 1. Загружаем все клубы
             clubs_res = await db.execute(select(Club))
             clubs = clubs_res.scalars().all()
 
@@ -598,11 +597,9 @@ async def auto_close_sessions_job():
                     "club_name": club.name
                 }
 
-            # ЧЕСТНОЕ ВРЕМЯ: Приводим UTC сервера к Московскому времени
-            tz_moscow = timezone(timedelta(hours=3))
-            now_local = datetime.now(tz_moscow).replace(tzinfo=None)
+            # СЕРВЕРНОЕ ВРЕМЯ: Берем чистый наивный UTC (как и хендлеры прохода в базу)
+            now_server_utc = datetime.now(timezone.utc).replace(tzinfo=None)
 
-            # 2. Ищем студентов «в зале» (last_visit не NULL)
             query = select(Student).where(Student.last_visit != None).with_for_update()
             res = await db.execute(query)
             students_in_gym = res.scalars().all()
@@ -614,11 +611,11 @@ async def auto_close_sessions_job():
 
                 timeout_minutes = config["timeout"]
 
-                # Безопасное чтение даты: если вдруг None, берем текущее время
-                last_visit_naive = student.last_visit.replace(tzinfo=None) if student.last_visit else now_local
-                time_passed = now_local - last_visit_naive
+                # Читаем UTC из базы и сравниваем с UTC сервера. Разница будет идеальной!
+                last_visit_naive = student.last_visit.replace(tzinfo=None) if student.last_visit else now_server_utc
+                time_passed = now_server_utc - last_visit_naive
 
-                # ЕСЛИ ВРЕМЯ СЕССИИ ИСТЕКЛО (чел потренировался и ушел):
+                # ЕСЛИ ВРЕМЯ СЕССИИ ИСТЕКЛО:
                 if time_passed >= timedelta(minutes=timeout_minutes):
                     logger.info(f"⏱ Время сессии истекло ({timeout_minutes} мин) для атлета {student.name}")
 
@@ -630,10 +627,13 @@ async def auto_close_sessions_job():
                     student_name = student.name
                     parent_id = student.parent_id
 
-                    # Сбрасываем сессию в базе визитов
+                    # Закрываем сессию визита в базе
                     student.last_visit = None
 
-                    # 3. ОТПРАВКА УВЕДОМЛЕНИЙ ЧЕРЕЗ СЛОВАРЬ БОТОВ
+                    # КРАСИВОЕ ВРЕМЯ ДЛЯ ТГ: Прибавляем +3 часа к UTC базы только для вывода текста людям!
+                    visit_moscow = last_visit_naive + timedelta(hours=3)
+                    visit_str = visit_moscow.strftime("%H:%M")
+
                     bot = bots_dict.get(config["bot_token"])
                     if bot:
                         balance_text = "♾ Безлимит" if is_unlimited else f"{current_balance} зан."
@@ -643,8 +643,9 @@ async def auto_close_sessions_job():
                             try:
                                 await bot.send_message(
                                     chat_id=int(parent_id),
-                                    text=f"🏁 <b>Таймаут сессии тренировки!</b>\n\n"
+                                    text=f"🏁 <b>Тренировка завершена!</b>\n\n"
                                          f"Атлет <b>{student_name}</b> покинул зал.\n"
+                                         f"⏱ Вход был в: {visit_str} (МСК)\n"
                                          f"⏱ Длительность сессии: {timeout_minutes} мин.\n"
                                          f"📉 Списано: 1 занятие.\n"
                                          f"🔢 Остаток на балансе: <b>{balance_text}</b>",
@@ -653,7 +654,7 @@ async def auto_close_sessions_job():
                             except Exception as e_msg:
                                 logger.warning(f"Не удалось отправить ТГ-уведомление родителю {parent_id}: {e_msg}")
 
-                        # Б) Уведомление владельцу клуба (админу)
+                        # Б) Уведомление владельцу клуба
                         if config["owner_id"]:
                             try:
                                 await bot.send_message(
@@ -661,6 +662,7 @@ async def auto_close_sessions_job():
                                     text=f"📝 <b>Автозакрытие сессии визита</b>\n\n"
                                          f"Клуб: <b>{config['club_name']}</b>\n"
                                          f"Атлет: <b>{student_name}</b>\n"
+                                         f"Вход зафиксирован в: {visit_str}\n"
                                          f"Сессия закрыта автоматически через {timeout_minutes} мин.\n"
                                          f"Баланс в базе успешно обновлен: <b>{balance_text}</b>",
                                     parse_mode="HTML"
@@ -668,11 +670,11 @@ async def auto_close_sessions_job():
                             except Exception as e_adm:
                                 logger.warning(f"Не удалось отправить ТГ-алерт админу {config['owner_id']}: {e_adm}")
 
-            # Сохраняем списания в базу
             await db.commit()
 
         except Exception as cron_err:
             logger.error(f"❌ Ошибка в кроне автосписаний: {cron_err}", exc_info=True)
             await db.rollback()
+
 
 

@@ -32,8 +32,8 @@ async def test_parse_qr_scan_new_session_success(mock_gen_sig):
     }
 
     # Синхронизируем генерацию времени с Московским часовым поясом, как в новом хендлере
-    tz_moscow = timezone(timedelta(hours=3))
-    now_local = datetime.now(tz_moscow).replace(tzinfo=None)
+
+    now_local = datetime.now(timezone.utc).replace(tzinfo=None)
 
     # 2. Создаем студента, у которого прошлый визит был 5 часов назад
     class MockStudent:
@@ -85,8 +85,7 @@ async def test_parse_qr_scan_inside_session_success(mock_gen_sig):
         "turnstile": {"enabled": False}
     }
 
-    tz_moscow = timezone(timedelta(hours=3))
-    now_local = datetime.now(tz_moscow).replace(tzinfo=None)
+    now_local = datetime.now(timezone.utc).replace(tzinfo=None)
 
     # Создаем студента, у которого прошлый визит был всего 10 минут назад
     class MockStudent:

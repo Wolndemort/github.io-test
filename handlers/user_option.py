@@ -515,8 +515,8 @@ async def parse_qr_scan(
             return await message.answer("🚨 ВНИМАНИЕ: QR-код подделан!")
 
         # НАСТРОЙКА ВРЕМЕНИ: Переводим в МСК наивное время, чтобы сойтись с кроном и админкой!
-        tz_moscow = timezone(timedelta(hours=3))
-        now_naive = datetime.now(tz_moscow).replace(tzinfo=None)
+
+        now_naive = datetime.now(timezone.utc).replace(tzinfo=None)
 
         # 2. Поиск атлета с проверкой клуба + ЗАЩИТА ROW-LEVEL LOCKING
         student_query = (
