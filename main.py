@@ -23,7 +23,8 @@ from admin_module.sqladmin import setup_admin
 from config import ADMIN_IDS
 from database.db import init_db, get_daily_stats, get_expire_students_grouped, create_db_backup, engine, \
     AsyncSessionLocal, Club, Student
-from handlers import start, user_option, buttons, payments, admin_option, super_admin_handlers,official_payment
+from handlers import start, user_option, buttons, payments, admin_option, super_admin_handlers,official_payment,\
+    super_admin_payment
 from handlers.buttons import get_profile_keyboard
 from middlewares.db_saas_midleware import ClubMiddleware
 from middlewares.main_middleware import DbSessionMiddleware
@@ -86,6 +87,7 @@ async def lifespan(app: FastAPI):
     dp.include_router(official_payment.router)
     dp.include_router(user_option.router)
     dp.include_router(buttons.router)
+    dp.include_router(super_admin_payment.router)
 
     # 4. Фоновые SaaS-задачи (APScheduler)
     scheduler = AsyncIOScheduler()

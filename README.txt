@@ -475,3 +475,8 @@ https : // speedycrm . ru / v1 / payments / yookassa / webhook
 
 
 scanner_url = f"https://wolndemort.github.io/github.io-test/scanner.html{club_id}"
+
+* Добавил оф продление подписки через юкасса суперу
+* подклчил статические файлы в майн пай
+* удалил все лишние кнопки
+*
