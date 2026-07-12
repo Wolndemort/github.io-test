@@ -1329,48 +1329,70 @@ async def admin_delete_tariff(
         bot,
         club_id: int
 ):
-    """Удаление тарифа из списка с защитой от поломки базы"""
-    _, _, _, disc_id, tariff_idx = callback.data.split("_")
-    tariff_idx_int = int(tariff_idx)
+    """Удаление конкретного тарифа по индексу с жесткой защитой"""
+    # ИСПРАВЛЕНО: Безопасный разбор строки по индексам элементов списка
+    parts = callback.data.split("_")
+    if len(parts) < 5:
+        await callback.answer("❌ Ошибка структуры кнопки удаления", show_alert=True)
+        return
 
-    tariffs = club_settings["disciplines"].get(disc_id, {}).get("tariffs", [])
+    # Пример для "adm_tar_del_boxing_0":
+    # parts[0]='adm', parts[1]='tar', parts[2]='del', parts[3]='boxing', parts[4]='0'
+    disc_id = parts[3]  # Получаем чистый ID секции ('boxing')
+    tariff_idx = parts[4]  # Получаем индекс тарифа ('0')
 
+    try:
+        tariff_idx_int = int(tariff_idx)
+    except ValueError:
+        await callback.answer("❌ Некорректный индекс тарифа", show_alert=True)
+        return
+
+    # Достаем блок конкретной дисциплины и ее тарифы
+    discipline_block = club_settings.get("disciplines", {}).get(disc_id, {})
+    tariffs = discipline_block.get("tariffs", [])
+
+    # Проверяем, что индекс не вылетает за границы массива тарифов
     if 0 <= tariff_idx_int < len(tariffs):
         target_tariff = tariffs[tariff_idx_int]
-        count = target_tariff.get("count", 0)  # Количество уроков в тарифе (например, 8, 12 или 999)
+        count = target_tariff.get("count", 0)  # Количество занятий в тарифе
 
-        # ПРОВЕРКА В БД: Ищем активных спортсменов этого клуба, у которых совпадает баланс
-        # и абонемент еще не истек (действует прямо сейчас)
+        # ПРОВЕРКА В БД: Ищем активных атлетов ЭТОГО клуба, у которых
+        # совпадает баланс И они ходят строго на ЭТУ дисциплину (disc_id)!
         stmt = select(Student).where(
             Student.club_id == club_id,
+            Student.discipline == disc_id,  # ФИКС: Жесткая привязка к дисциплине
             Student.balance_lessons == count,
             Student.expire_date > datetime.now()
         )
         result = await session.execute(stmt)
         active_students = result.scalars().all()
 
-        # Если нашли хотя бы одного человека — жестко прерываем удаление и предупреждаем админа!
+        # Если нашли людей именно с этим тарифом в этой секции — блокируем удаление
         if active_students:
-            # Собираем первые три имени для красивого вывода в чат
             names = ", ".join([s.name for s in active_students[:3]])
             if len(active_students) > 3:
                 names += " и др."
 
             return await callback.message.answer(
                 f"❌ <b>Невозможно удалить тариф!</b>\n\n"
-                f"Этот тарифный план сейчас активирован у действующих спортсменов клуба:\n"
+                f"Этот тарифный план сейчас активирован у действующих атлетов секции:\n"
                 f"👤 <code>{names}</code>\n\n"
-                f"Сначала дождитесь окончания их абонементов или измените их баланс вручную, "
-                f"чтобы не нарушить работу CRM-системы.",
+                f"Сначала измените их баланс вручную или дождитесь окончания абонементов.",
                 parse_mode="HTML"
             )
 
-        # Если активных людей по этому тарифу нет — спокойно удаляем
+        # 🔥 ФИКС: Удаляем строго ОДИН тариф по его точному индексу из массива
         tariffs.pop(tariff_idx_int)
-        await save_club_settings(session, redis, bot.token, club_id, club_settings)
-        await callback.answer("Тариф удален!")
 
-    # Возвращаем админа в меню тарифов этой секции
+        # Перезаписываем обновленный массив обратно в структуру настроек клуба
+        club_settings["disciplines"][disc_id]["tariffs"] = tariffs
+
+        # Сохраняем чистые настройки в Postgres и сбрасываем кэш Redis
+        await save_club_settings(session, redis, bot.token, club_id, club_settings)
+        await callback.answer("Тариф успешно удален! 👌")
+
+    # Перенаправляем админа назад в меню тарифов этой секции
+    # ИСПРАВЛЕНО: Явно подменяем callback.data, чтобы отрисовщик не запутался
     callback.data = f"adm_tar_sect_{disc_id}"
     await admin_manage_section_tariffs(callback, club_settings)
 
