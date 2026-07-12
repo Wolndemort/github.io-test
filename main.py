@@ -102,7 +102,7 @@ async def lifespan(app: FastAPI):
     # Пока оставляем закомментированным, как ты и хотел!
     # Как закончишь тесты в ЛК ЮKassa — просто убери решетку (#) в начале строки.
     #scheduler.add_job(saas_recurrent_payments_job, 'cron', hour=3, minute=0, args=[AsyncSessionLocal])
-
+    scheduler.add_job(auto_close_sessions_job, 'interval', minutes=1)
     # Ночной блок (23:00) — Полный бэкап всей базы данных тебе в личку
     scheduler.add_job(send_backup_to_admin, 'cron', hour=23, minute=0)
     scheduler.start()
@@ -425,7 +425,6 @@ async def saas_daily_morning_check():
 # добавил овнер айди для админ панели прокинул в мидлвер, я супер админ, добавил индексы,
 # добавил колонку ситинг и клуб, перебрал майн, старт,
 
-
 async def saas_recurrent_payments_job(session_factory):
     """
     Ночная задача (APScheduler) для автоматического списания денег по подпискам ЮKassa.
@@ -572,3 +571,107 @@ async def saas_recurrent_payments_job(session_factory):
             except Exception as e:
                 await session.rollback()
                 logger.error(f"🚨 Ошибка при обработке рекуррента для sub_id {sub.id}: {repr(e)}")
+
+
+async def auto_close_sessions_job():
+    """
+    Фоновая задача для APScheduler. Запускается каждую минуту.
+    Проверяет таймауты сессий, списывает уроки и шлет уведомления.
+    """
+    global bots_dict
+
+    async with AsyncSessionLocal() as db:
+        try:
+            # 1. Загружаем все клубы
+            clubs_res = await db.execute(select(Club))
+            clubs = clubs_res.scalars().all()
+
+            club_configs = {}
+            for club in clubs:
+                club_settings = club.club_settings or {}
+                timeout = club_settings.get("limits", {}).get("session_timeout_minutes", 150)
+                club_configs[club.id] = {
+                    "timeout": timeout,
+                    "bot_token": club.bot_token,
+                    "owner_id": club.owner_id,
+                    "club_name": club.name
+                }
+
+            # ЧЕСТНОЕ ВРЕМЯ: Приводим UTC сервера к Московскому времени
+            tz_moscow = timezone(timedelta(hours=3))
+            now_local = datetime.now(tz_moscow).replace(tzinfo=None)
+
+            # 2. Ищем студентов «в зале» (last_visit не NULL)
+            query = select(Student).where(Student.last_visit != None).with_for_update()
+            res = await db.execute(query)
+            students_in_gym = res.scalars().all()
+
+            for student in students_in_gym:
+                config = club_configs.get(student.club_id)
+                if not config:
+                    continue
+
+                timeout_minutes = config["timeout"]
+
+                # Безопасное чтение даты: если вдруг None, берем текущее время
+                last_visit_naive = student.last_visit.replace(tzinfo=None) if student.last_visit else now_local
+                time_passed = now_local - last_visit_naive
+
+                # ЕСЛИ ВРЕМЯ СЕССИИ ИСТЕКЛО (чел потренировался и ушел):
+                if time_passed >= timedelta(minutes=timeout_minutes):
+                    logger.info(f"⏱ Время сессии истекло ({timeout_minutes} мин) для атлета {student.name}")
+
+                    is_unlimited = (student.balance_lessons == 999)
+                    if not is_unlimited:
+                        student.balance_lessons = max(0, (student.balance_lessons or 0) - 1)
+
+                    current_balance = student.balance_lessons
+                    student_name = student.name
+                    parent_id = student.parent_id
+
+                    # Сбрасываем сессию в базе визитов
+                    student.last_visit = None
+
+                    # 3. ОТПРАВКА УВЕДОМЛЕНИЙ ЧЕРЕЗ СЛОВАРЬ БОТОВ
+                    bot = bots_dict.get(config["bot_token"])
+                    if bot:
+                        balance_text = "♾ Безлимит" if is_unlimited else f"{current_balance} зан."
+
+                        # А) Уведомление родителю
+                        if parent_id:
+                            try:
+                                await bot.send_message(
+                                    chat_id=int(parent_id),
+                                    text=f"🏁 <b>Таймаут сессии тренировки!</b>\n\n"
+                                         f"Атлет <b>{student_name}</b> покинул зал.\n"
+                                         f"⏱ Длительность сессии: {timeout_minutes} мин.\n"
+                                         f"📉 Списано: 1 занятие.\n"
+                                         f"🔢 Остаток на балансе: <b>{balance_text}</b>",
+                                    parse_mode="HTML"
+                                )
+                            except Exception as e_msg:
+                                logger.warning(f"Не удалось отправить ТГ-уведомление родителю {parent_id}: {e_msg}")
+
+                        # Б) Уведомление владельцу клуба (админу)
+                        if config["owner_id"]:
+                            try:
+                                await bot.send_message(
+                                    chat_id=int(config["owner_id"]),
+                                    text=f"📝 <b>Автозакрытие сессии визита</b>\n\n"
+                                         f"Клуб: <b>{config['club_name']}</b>\n"
+                                         f"Атлет: <b>{student_name}</b>\n"
+                                         f"Сессия закрыта автоматически через {timeout_minutes} мин.\n"
+                                         f"Баланс в базе успешно обновлен: <b>{balance_text}</b>",
+                                    parse_mode="HTML"
+                                )
+                            except Exception as e_adm:
+                                logger.warning(f"Не удалось отправить ТГ-алерт админу {config['owner_id']}: {e_adm}")
+
+            # Сохраняем списания в базу
+            await db.commit()
+
+        except Exception as cron_err:
+            logger.error(f"❌ Ошибка в кроне автосписаний: {cron_err}", exc_info=True)
+            await db.rollback()
+
+
