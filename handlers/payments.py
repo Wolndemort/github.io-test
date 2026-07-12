@@ -46,42 +46,43 @@ async def show_sections(
         parse_mode="HTML"
     )
 
-    @router.callback_query(F.data.startswith('buy_'))
-    async def select_athlete_handler(callback: types.CallbackQuery, state: FSMContext, session: AsyncSession):
-        discipline_code = callback.data.split('_')[1] # boxing, kickboxing и т.д.
-        await state.update_data(sport_type=discipline_code)
+# 🔥 ФИКС: Все декораторы и функции стоят ровно, тело функции выровнено по стандарту PEP 8
+@router.callback_query(F.data.startswith('buy_'))
+async def select_athlete_handler(callback: types.CallbackQuery, state: FSMContext, session: AsyncSession):
+    discipline_code = callback.data.split('_')[1] # boxing, kickboxing и т.д.
+    await state.update_data(sport_type=discipline_code)
 
-        # Ищем детей этого родителя в БД (с фильтром по parent_id)
-        from database.db import Student
-        res = await session.execute(select(Student).where(Student.parent_id == callback.from_user.id))
-        students = res.scalars().all()
+    # Ищем детей этого родителя в БД (с фильтром по parent_id)
+    from database.db import Student
+    res = await session.execute(select(Student).where(Student.parent_id == callback.from_user.id))
+    students = res.scalars().all()
 
-        # ПОДСТРАХОВКА: Если детей в базе еще нет
-        if not students:
-            return await callback.answer(
-                "🙋‍♂️ У вас еще не зарегистрировано ни одного атлета!\n"
-                "Пожалуйста, сначала добавьте ребенка в личном кабинете.",
-                show_alert=True
-            )
-
-        # Генерируем клавиатуру ТОЛЬКО из реальных детей
-        kb = InlineKeyboardBuilder()
-        for s in students:
-            kb.row(types.InlineKeyboardButton(text=f"👦 {s.name}", callback_data=f"set_at_{s.id}"))
-
-        # Добавим кнопку возврата назад к выбору секций для удобства
-        kb.row(types.InlineKeyboardButton(
-            text="⬅️ Назад к секции",
-            callback_data=f"section_{discipline_code}"
-        ))
-
-        await callback.message.edit_text(
-            "<b>Для кого оформляем абонемент?</b>\n\n"
-            "Выберите ребенка из списка ниже:",
-            reply_markup=kb.as_markup(),
-            parse_mode="HTML"
+    # ПОДСТРАХОВКА: Если детей в базе еще нет
+    if not students:
+        return await callback.answer(
+            "🙋‍♂️ У вас еще не зарегистрировано ни одного атлета!\n"
+            "Пожалуйста, сначала добавьте ребенка в личном кабинете.",
+            show_alert=True
         )
-        await callback.answer()
+
+    # Генерируем клавиатуру ТОЛЬКО из реальных детей
+    kb = InlineKeyboardBuilder()
+    for s in students:
+        kb.row(types.InlineKeyboardButton(text=f"👦 {s.name}", callback_data=f"set_at_{s.id}"))
+
+    # Добавим кнопку возврата назад к выбору секций для удобства
+    kb.row(types.InlineKeyboardButton(
+        text="⬅️ Назад к секции",
+        callback_data=f"section_{discipline_code}"
+    ))
+
+    await callback.message.edit_text(
+        "<b>Для кого оформляем абонемент?</b>\n\n"
+        "Выберите ребенка из списка ниже:",
+        reply_markup=kb.as_markup(),
+        parse_mode="HTML"
+    )
+    await callback.answer()
 
 
 @router.callback_query(F.data.startswith('set_at_'))
