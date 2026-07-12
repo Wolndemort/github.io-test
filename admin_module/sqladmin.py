@@ -1,5 +1,6 @@
 from fastapi import Request
 from sqladmin import Admin, ModelView, BaseView, expose
+from sqlalchemy.ext.asyncio import async_sessionmaker
 from starlette.responses import RedirectResponse
 from database.db import Student, User
 
@@ -49,8 +50,19 @@ class AnalyticsAdmin(BaseView):
 
 
 def setup_admin(app, engine):
-    admin = Admin(app, engine, base_url="/master-dashboard")
+    # 1. Создаем фабрику асинхронных сессий (если у тебя асинхронный движок)
+    # Если движок синхронный, используй обычный sessionmaker(bind=engine)
+    async_session_factory = async_sessionmaker(engine, expire_on_commit=False)
 
+    # 2. Передаем session_maker в админку! Это заставит сохраняться редактирование
+    admin = Admin(
+        app=app,
+        engine=engine,
+        session_maker=async_session_factory,
+        base_url="/master-dashboard"
+    )
+
+    # 3. Регистрируем вьюхи
     admin.add_view(UserAdmin)
     admin.add_view(StudentAdmin)
     admin.add_view(AnalyticsAdmin)

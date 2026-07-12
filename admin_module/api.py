@@ -6,7 +6,7 @@ from fastapi import Query
 from services.analytics import  generate_students_excel, calculate_admin_dashboard
 import hmac
 from datetime import datetime, timedelta, timezone
-from database.db import PaymentOrder, Subscription
+from database.db import PaymentOrder, Subscription, Club, Student
 from database.db import add_abon
 import hashlib
 from fastapi.responses import StreamingResponse
@@ -63,81 +63,71 @@ def get_club_id_from_host(request: Request) -> int:
 
 # 1. Добавляем роут /admin, который просила кнопка в ТГ (убрали get_api_key!)
 
+
+
 @router.get("/admin", response_class=HTMLResponse)
 async def get_admin_dashboard(
-        request: Request,
-        session: AsyncSession = Depends(get_session)
+    request: Request,
+    session: AsyncSession = Depends(get_session)
 ):
     club_id = get_club_id_from_host(request)
 
-    # 1. Загружаем клуб, чтобы достать индивидуальный таймаут сессии из club_settings
     club_res = await session.execute(select(Club).where(Club.id == club_id))
     club = club_res.scalar_one_or_none()
 
-    # Извлекаем таймаут сессии строго по твоей структуре DEFAULT_CLUB_SETTINGS
     club_settings = club.club_settings or {} if club else {}
-    timeout_minutes = club_settings.get("limits", {}).get("session_timeout_minutes", 150)
+    limits_settings = club_settings.get("limits", {})
+    timeout_minutes = limits_settings.get("session_timeout_minutes", 150)
 
-    # 2. Загружаем из базы список студентов ТОЛЬКО этого клуба (Изоляция SaaS)
     result = await session.execute(
         select(Student).where(Student.club_id == club_id)
     )
     students = list(result.scalars().all())
 
-    # Текущее наивное время UTC для точного сопоставления с базой на Аэзе
-    now_naive = datetime.now(timezone.utc).replace(tzinfo=None)
+    tz_moscow = timezone(timedelta(hours=3))
+    now_local = datetime.now(tz_moscow).replace(tzinfo=None)
 
     active_sessions = []
     past_sessions = []
 
-    # 3. Фильтруем студентов по сессиям
     for student in students:
         if student.last_visit:
             last_visit_naive = student.last_visit.replace(tzinfo=None)
-            time_passed = now_naive - last_visit_naive
-
-            # Расчет времени окончания текущей сессии
+            time_passed = now_local - last_visit_naive
             session_end = last_visit_naive + timedelta(minutes=timeout_minutes)
 
             session_info = {
                 "student_id": student.id,
                 "name": student.name,
-                "balance": student.balance_lessons or 0,  # Выводим баланс, чтобы админ всё видел
+                "balance": student.balance_lessons or 0,
                 "last_visit": last_visit_naive.strftime("%d.%m.%Y %H:%M"),
                 "session_end": session_end.strftime("%H:%M"),
                 "time_passed_mins": int(time_passed.total_seconds() // 60)
             }
 
-            # Если уложились в лимит минут — сессия активна (чел сейчас тренируется)
             if time_passed < timedelta(minutes=timeout_minutes):
-                # Считаем сколько минут осталось до закрытия сессии
-                mins_left = int((session_end - now_naive).total_seconds() // 60)
+                delta_left = session_end - now_local
+                mins_left = int(delta_left.total_seconds() // 60)
                 session_info["mins_left"] = max(0, mins_left)
                 active_sessions.append(session_info)
             else:
                 past_sessions.append(session_info)
 
-    # Сортируем: активных — по свежести входа (кто зашел только что — вверху)
     active_sessions.sort(key=lambda x: x["time_passed_mins"])
-    # Прошедших — по свежести выхода (кто ушел недавно — вверху)
     past_sessions.sort(key=lambda x: x["time_passed_mins"])
-
-    # Ограничиваем историю прошедших сессий последними 20 записями
     past_sessions = past_sessions[:20]
 
-    # 4. Передаем полный список студентов в аналитический сервис для сборки графиков
     admin_data = calculate_admin_dashboard(students)
 
-    # 5. Рендерим шаблон admin.html и передаем туда обработанные массивы
     return templates.TemplateResponse(
         "admin.html",
         {
             "request": request,
             "club_id": club_id,
-            "active_sessions": active_sessions,  # Массив активных сессий (в зале)
-            "past_sessions": past_sessions,  # Массив истории (последние 20 визитов)
-            "timeout_minutes": timeout_minutes,  # Сам лимит, если нужно вывести в UI
-            **admin_data  # Твои стандартные метрики (total_athletes, active_now_count и т.д.)
+            "active_sessions": active_sessions,
+            "past_sessions": past_sessions,
+            "timeout_minutes": timeout_minutes,
+            **admin_data
         }
     )
 
@@ -149,63 +139,112 @@ async def get_revenue_stats(
 ):
     club_id = get_club_id_from_host(request)
 
-    # 1. Загружаем клуб для шапки и дисциплин
+    # 1. Загрузка клуба
     club_res = await session.execute(select(Club).where(Club.id == club_id))
     club = club_res.scalar_one_or_none()
     club_name = club.club_settings.get("ui", {}).get("club_name") or club.name if club else "Фитнес-клуб"
 
-    # ИСПРАВЛЕНО: Заменяем устаревший utcnow() на честное локальное время, как в боте
-    now_naive = datetime.now().replace(tzinfo=None)
+    # Настройка честного времени (МСК)
+    tz_moscow = timezone(timedelta(hours=3))
+    now_local = datetime.now(tz_moscow).replace(tzinfo=None)
 
-    # Считаем точные границы временных периодов
-    today_start = now_naive.replace(hour=0, minute=0, second=0, microsecond=0)
-    week_start = today_start - timedelta(days=now_naive.weekday())
+    today_start = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
+    week_start = today_start - timedelta(days=now_local.weekday())
     month_start = today_start.replace(day=1)
 
-    # 2. РАСЧЕТ РЕАЛЬНОЙ ВЫРУЧКИ ПО ПЕРИОДАМ (Строго CONFIRMED из amount_kopecks)
-
-    # Выручка за сегодня
-    today_res = await session.execute(
-        select(func.sum(PaymentOrder.amount_kopecks)).where(
-            PaymentOrder.club_id == club_id,
-            PaymentOrder.status == "CONFIRMED",
-            PaymentOrder.created_at >= today_start
-        )
-    )
-    revenue_today = (today_res.scalar() or 0) / 100
-
-    # Выручка за неделю
-    week_res = await session.execute(
-        select(func.sum(PaymentOrder.amount_kopecks)).where(
-            PaymentOrder.club_id == club_id,
-            PaymentOrder.status == "CONFIRMED",
-            PaymentOrder.created_at >= week_start
-        )
-    )
-    revenue_week = (week_res.scalar() or 0) / 100
-
-    # Выручка за месяц
-    month_res = await session.execute(
-        select(func.sum(PaymentOrder.amount_kopecks)).where(
+    # ==========================================
+    # БЛОК 1: ФИНАНСЫ (Для твоих графиков/отчетов)
+    # ==========================================
+    payments_res = await session.execute(
+        select(PaymentOrder.amount_kopecks, PaymentOrder.created_at).where(
             PaymentOrder.club_id == club_id,
             PaymentOrder.status == "CONFIRMED",
             PaymentOrder.created_at >= month_start
         )
     )
-    revenue_month = (month_res.scalar() or 0) / 100
+    all_payments = payments_res.all()
 
-    # 3. ТОП ДИСЦИПЛИН ПО РЕАЛЬНЫМ ОПЛАТАМ
-    disc_res = await session.execute(
+    revenue_today = 0
+    revenue_week = 0
+    revenue_month = 0
+
+    for row in all_payments:
+        amt = row[0]
+        dt = row[1]
+        p_date = dt.replace(tzinfo=None) if dt else month_start
+        amount_rub = (amt or 0) / 100
+
+        revenue_month += amount_rub
+        if p_date >= week_start:
+            revenue_week += amount_rub
+        if p_date >= today_start:
+            revenue_today += amount_rub
+
+    # Направления по оплатам
+    disc_pay_res = await session.execute(
         select(Student.discipline, func.sum(PaymentOrder.amount_kopecks))
         .join(Student, PaymentOrder.student_id == Student.id)
-        .where(
-            PaymentOrder.club_id == club_id,
-            PaymentOrder.status == "CONFIRMED"
-        )
+        .where(PaymentOrder.club_id == club_id, PaymentOrder.status == "CONFIRMED")
         .group_by(Student.discipline)
-        .order_by(func.sum(PaymentOrder.amount_kopecks).desc())
     )
 
+    # Рекурренты
+    type_res = await session.execute(
+        select(PaymentOrder.type, func.count(PaymentOrder.id))
+        .where(PaymentOrder.club_id == club_id, PaymentOrder.status == "CONFIRMED")
+        .group_by(PaymentOrder.type)
+    )
+    payment_types = {"FIRST": 0, "RECURRENT": 0}
+    for row in type_res.all():
+        if row[0] in payment_types:
+            payment_types[row[0]] = row[1]
+
+    # ==========================================
+    # БЛОК 2: АТЛЕТЫ И АБОНЕМЕНТЫ (Для твоего HTML)
+    # ==========================================
+    # Вытаскиваем ВСЕХ студентов этого клуба одним запросом
+    students_res = await session.execute(
+        select(Student).where(Student.club_id == club_id)
+    )
+    students = students_res.scalars().all()
+
+    if not students:
+        # Если в клубе пусто — отдаем флаг empty, как просит HTML
+        return templates.TemplateResponse(
+            "stats.html",
+            {"request": request, "empty": True, "club_name": club_name}
+        )
+
+    total_athletes = len(students)
+    active_passes = 0
+    frozen_passes = 0
+    burning_passes = 0
+    inactive_passes = 0
+    total_lessons_left = 0
+
+    churned_students = []
+    discipline_counts = {}
+
+    for s in students:
+        total_lessons_left += s.balance_lessons
+
+        # Считаем популярность направлений по числу людей
+        disc_key = s.discipline or "boxing"
+        discipline_counts[disc_key] = discipline_counts.get(disc_key, 0) + 1
+
+        # Распределяем по статусам абонементов
+        if s.is_frozen:
+            frozen_passes += 1
+        elif s.balance_lessons <= 0:
+            inactive_passes += 1
+            churned_students.append({"name": s.name})
+        elif 0 < s.balance_lessons <= 3:
+            burning_passes += 1
+            active_passes += 1
+        else:
+            active_passes += 1
+
+    # Красивые имена для дисциплин в HTML
     discipline_names = {
         "boxing": "🥊 Бокс (Дети)",
         "kickboxing": "🤼‍♂️ Кикбоксинг",
@@ -213,44 +252,48 @@ async def get_revenue_stats(
         "yoga": "🧘‍♂️ Йога"
     }
 
-    discipline_stats = []
-    for row in disc_res.all():
-        raw_disc = row[0] or "boxing"
-        total_kopecks = row[1] or 0
-        discipline_stats.append({
-            "name": discipline_names.get(raw_disc, f"🏃‍♂️ {raw_disc}"),
-            "amount": total_kopecks / 100
-        })
+    disciplines_stats = [
+        {"name": discipline_names.get(k, f"🏃‍♂️ {k}"), "active_athletes": v}
+        for k, v in discipline_counts.items()
+    ]
 
-    # 4. ПОДСЧЕТ РЕКУРРЕНТОВ (FIRST против RECURRENT)
-    type_res = await session.execute(
-        select(PaymentOrder.type, func.count(PaymentOrder.id))
-        .where(PaymentOrder.club_id == club_id, PaymentOrder.status == "CONFIRMED")
-        .group_by(PaymentOrder.type)
-    )
+    # Сортируем топ-атлетов по остатку занятий (первые 5 человек)
+    sorted_students = sorted(students, key=lambda x: x.balance_lessons, reverse=True)
+    top_students = [{"name": s.name, "balance": s.balance_lessons} for s in sorted_students[:5]]
 
-    payment_types = {"FIRST": 0, "RECURRENT": 0}
-    for row in type_res.all():
-        if row[0] in payment_types:
-            payment_types[row[0]] = row[1]
+    # Считаем Retention (Удержание). Например: процент тех, у кого баланс > 0
+    retention_rate = round((active_passes / total_athletes) * 100) if total_athletes > 0 else 0
 
-    # 5. ОТДАЕМ ОЧИЩЕННЫЕ ДАННЫЕ В ШАБЛОН РЕВЕНЬЮ
+    # 5. ОТДАЕМ ПОЛНЫЙ КОМПЛЕКТ ДАННЫХ В ШАБЛОН
     return templates.TemplateResponse(
         "stats.html",
         {
             "request": request,
+            "empty": False,
             "club_id": club_id,
             "club_name": club_name,
-            "revenue_today": revenue_today,
-            "revenue_week": revenue_week,
-            "revenue_month": revenue_month,
-            "discipline_stats": discipline_stats,
+
+            # Данные для HTML-карточек
+            "total_athletes": total_athletes,
+            "retention_rate": retention_rate,
+            "active_passes": active_passes,
+            "frozen_passes": frozen_passes,
+            "burning_passes": burning_passes,
+            "inactive_passes": inactive_passes,
+            "total_lessons_left": total_lessons_left,
+            "disciplines_stats": disciplines_stats,
+            "churned_students": churned_students,
+            "top_students": top_students,
+
+            # Финансы (на случай, если захочешь вывести их туда же)
+            "revenue_today": round(revenue_today, 2),
+            "revenue_week": round(revenue_week, 2),
+            "revenue_month": round(revenue_month, 2),
             "payment_types": payment_types
         }
     )
 
 
-# 3. Выгрузка в Excel. Перенесли префикс /stats/export/excel прямо в декоратор
 @router.get("/stats/export/excel")
 async def export_students_to_excel(
         request: Request,
