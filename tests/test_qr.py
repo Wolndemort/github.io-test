@@ -14,17 +14,15 @@ def mock_sqlalchemy_result(student):
 @pytest.mark.asyncio
 @patch("handlers.user_option.generate_signature")
 async def test_parse_qr_scan_new_session_success(mock_gen_sig):
-    """Тест 1: Успешный проход с открытием НОВОЙ сессии (прошло больше 2.5 часов). Занятие должно списаться."""
+    """Тест 1: Успешный проход с открытием НОВОЙ сессии. Занятие на входе НЕ должно списаться (за него отвечает крон)."""
     # 1. Настройка окружения
     mock_gen_sig.return_value = 'valid_sig'
     session = AsyncMock()
 
-    # Мокаем клуб
     club = MagicMock()
     club.id = 1
     club.name = "Test Club"
 
-    # Задаем дефолтные лимиты клуба в JSONB для теста
     club_settings = {
         "limits": {
             "session_timeout_minutes": 150,
@@ -33,8 +31,11 @@ async def test_parse_qr_scan_new_session_success(mock_gen_sig):
         "turnstile": {"enabled": False}
     }
 
-    # 2. Создаем студента, у которого прошлый визит был ОЧЕНЬ давно (например, 5 часов назад)
-    # Сессия закрыта, занятие ОБЯЗАНО списаться
+    # Синхронизируем генерацию времени с Московским часовым поясом, как в новом хендлере
+    tz_moscow = timezone(timedelta(hours=3))
+    now_local = datetime.now(tz_moscow).replace(tzinfo=None)
+
+    # 2. Создаем студента, у которого прошлый визит был 5 часов назад
     class MockStudent:
         def __init__(self):
             self.id = 1
@@ -42,14 +43,12 @@ async def test_parse_qr_scan_new_session_success(mock_gen_sig):
             self.club_id = 1
             self.balance_lessons = 10
             self.is_frozen = 0
-            # Переводим в naive UTC (без таймзоны), как требует СУБД Postgres на Аэзе
-            self.last_visit = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=5)
-            self.expire_date = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(days=10)
+            self.last_visit = now_local - timedelta(hours=5)
+            self.expire_date = now_local + timedelta(days=10)
             self.parent_id = 12345
 
     student = MockStudent()
 
-    # ИСПРАВЛЕНО: Мокаем execute() вместо get() для поддержки новой row-level блокировки
     session.execute.return_value = mock_sqlalchemy_result(student)
 
     message = AsyncMock()
@@ -61,8 +60,8 @@ async def test_parse_qr_scan_new_session_success(mock_gen_sig):
     await parse_qr_scan(message, session, club, club_settings)
 
     # 4. Проверки
-    # Прошло 5 часов -> занятие списалось! Баланс стал 9
-    assert student.balance_lessons == 9
+    # ИСПРАВЛЕНО: Теперь на входе баланс НЕ списывается, он остается равен 10!
+    assert student.balance_lessons == 10
     session.commit.assert_called_once()
 
     # Проверяем текст ответа бота
@@ -74,7 +73,7 @@ async def test_parse_qr_scan_new_session_success(mock_gen_sig):
 @pytest.mark.asyncio
 @patch("handlers.user_option.generate_signature")
 async def test_parse_qr_scan_inside_session_success(mock_gen_sig):
-    """Тест 2: Повторный проход в рамках одной сессии (прошло 10 минут). Занятие НЕ должно списаться!"""
+    """Тест 2: Повторный проход в рамках одной сессии (прошло 10 минут). Занятие НЕ должно списаться."""
     mock_gen_sig.return_value = 'valid_sig'
     session = AsyncMock()
 
@@ -86,8 +85,10 @@ async def test_parse_qr_scan_inside_session_success(mock_gen_sig):
         "turnstile": {"enabled": False}
     }
 
+    tz_moscow = timezone(timedelta(hours=3))
+    now_local = datetime.now(tz_moscow).replace(tzinfo=None)
+
     # Создаем студента, у которого прошлый визит был всего 10 минут назад
-    # Сессия активна -> баланс должен остаться нетронутым (10 занятий)
     class MockStudent:
         def __init__(self):
             self.id = 1
@@ -95,14 +96,12 @@ async def test_parse_qr_scan_inside_session_success(mock_gen_sig):
             self.club_id = 1
             self.balance_lessons = 10
             self.is_frozen = 0
-            # Переводим в naive UTC (без таймзоны)
-            self.last_visit = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(minutes=10)
-            self.expire_date = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(days=10)
+            self.last_visit = now_local - timedelta(minutes=10)
+            self.expire_date = now_local + timedelta(days=10)
             self.parent_id = 12345
 
     student = MockStudent()
 
-    # ИСПРАВЛЕНО: Мокаем execute() вместо get() для поддержки новой row-level блокировки
     session.execute.return_value = mock_sqlalchemy_result(student)
 
     message = AsyncMock()
@@ -114,7 +113,7 @@ async def test_parse_qr_scan_inside_session_success(mock_gen_sig):
     await parse_qr_scan(message, session, club, club_settings)
 
     # Проверки
-    # Сессия активна -> баланс остался равен 10! Занятие сохранено!
+    # Сессия активна -> баланс остался равен 10
     assert student.balance_lessons == 10
     session.commit.assert_called_once()
 
