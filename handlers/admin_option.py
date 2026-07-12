@@ -1845,6 +1845,7 @@ async def process_shop_id(message: types.Message, state: FSMContext):
         parse_mode="HTML"
     )
 
+
 @router.message(YooKassaSetupStates.waiting_for_secret_key)
 async def process_secret_key(
         message: types.Message,
