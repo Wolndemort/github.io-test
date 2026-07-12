@@ -1,7 +1,5 @@
-from datetime import datetime, timedelta
-from sqlalchemy import update
+from datetime import date
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-from redis import Redis
 from services.yookassa_client import YooKassaClient
 import uuid
 from config import PROXY_URL
@@ -13,7 +11,7 @@ from database.db import Student, Club,Subscription
 from handlers.buttons import discipline, get_pay_options_kb, get_cash_options_kb
 from database.db import add_abon
 from aiogram.fsm.context import FSMContext
-from aiogram.types import InlineKeyboardButton, LabeledPrice, Message, PreCheckoutQuery
+from aiogram.types import InlineKeyboardButton
 from aiogram import Router, F, types
 from handlers.states import PaymentStates
 
@@ -48,42 +46,42 @@ async def show_sections(
         parse_mode="HTML"
     )
 
-@router.callback_query(F.data.startswith('buy_'))
-async def select_athlete_handler(callback: types.CallbackQuery, state: FSMContext, session: AsyncSession):
-    discipline_code = callback.data.split('_')[1] # boxing, kickboxing и т.д.
-    await state.update_data(sport_type=discipline_code)
+    @router.callback_query(F.data.startswith('buy_'))
+    async def select_athlete_handler(callback: types.CallbackQuery, state: FSMContext, session: AsyncSession):
+        discipline_code = callback.data.split('_')[1] # boxing, kickboxing и т.д.
+        await state.update_data(sport_type=discipline_code)
 
-    # Ищем детей этого родителя в БД (с фильтром по parent_id)
-    from database.db import Student
-    res = await session.execute(select(Student).where(Student.parent_id == callback.from_user.id))
-    students = res.scalars().all()
+        # Ищем детей этого родителя в БД (с фильтром по parent_id)
+        from database.db import Student
+        res = await session.execute(select(Student).where(Student.parent_id == callback.from_user.id))
+        students = res.scalars().all()
 
-    # ПОДСТРАХОВКА: Если детей в базе еще нет
-    if not students:
-        return await callback.answer(
-            "🙋‍♂️ У вас еще не зарегистрировано ни одного атлета!\n"
-            "Пожалуйста, сначала добавьте ребенка в личном кабинете.",
-            show_alert=True
+        # ПОДСТРАХОВКА: Если детей в базе еще нет
+        if not students:
+            return await callback.answer(
+                "🙋‍♂️ У вас еще не зарегистрировано ни одного атлета!\n"
+                "Пожалуйста, сначала добавьте ребенка в личном кабинете.",
+                show_alert=True
+            )
+
+        # Генерируем клавиатуру ТОЛЬКО из реальных детей
+        kb = InlineKeyboardBuilder()
+        for s in students:
+            kb.row(types.InlineKeyboardButton(text=f"👦 {s.name}", callback_data=f"set_at_{s.id}"))
+
+        # Добавим кнопку возврата назад к выбору секций для удобства
+        kb.row(types.InlineKeyboardButton(
+            text="⬅️ Назад к секции",
+            callback_data=f"section_{discipline_code}"
+        ))
+
+        await callback.message.edit_text(
+            "<b>Для кого оформляем абонемент?</b>\n\n"
+            "Выберите ребенка из списка ниже:",
+            reply_markup=kb.as_markup(),
+            parse_mode="HTML"
         )
-
-    # Генерируем клавиатуру ТОЛЬКО из реальных детей
-    kb = InlineKeyboardBuilder()
-    for s in students:
-        kb.row(types.InlineKeyboardButton(text=f"👦 {s.name}", callback_data=f"set_at_{s.id}"))
-
-    # Добавим кнопку возврата назад к выбору секций для удобства
-    kb.row(types.InlineKeyboardButton(
-        text="⬅️ Назад к секции", 
-        callback_data=f"section_{discipline_code}"
-    ))
-
-    await callback.message.edit_text(
-        "<b>Для кого оформляем абонемент?</b>\n\n"
-        "Выберите ребенка из списка ниже:",
-        reply_markup=kb.as_markup(),
-        parse_mode="HTML"
-    )
-    await callback.answer()
+        await callback.answer()
 
 
 @router.callback_query(F.data.startswith('set_at_'))
@@ -104,12 +102,12 @@ async def athlete_chosen_handler(callback: types.CallbackQuery, state: FSMContex
 
 
 # Полностью заменяем хендлер set_limit_ на этот:
-# Заменяем старый хендлер set_tariff_ на этот:
+# Заменяем старый хендлер set_tariff_ на этот
 @router.callback_query(F.data.startswith('set_tariff_'))
 async def process_kids_limit(
         callback: types.CallbackQuery,
         state: FSMContext,
-        session: AsyncSession,  # Добавили сессию для проверки карты
+        session: AsyncSession,
         club_settings: dict
 ):
     parts = callback.data.split('_')
@@ -119,8 +117,7 @@ async def process_kids_limit(
     except (IndexError, ValueError):
         return await callback.answer("Ошибка обработки кнопки тарифа ❌", show_alert=True)
 
-    await state.update_data(sport_type=sport_type)
-
+    # 1. Извлекаем данные о выбранной секции и тарифе
     discipline_cfg = club_settings.get("disciplines", {}).get(sport_type, {})
     if not discipline_cfg:
         return await callback.answer("Ошибка: секция не найдена 🛠", show_alert=True)
@@ -130,15 +127,85 @@ async def process_kids_limit(
         return await callback.answer("Ошибка: выбранный тариф больше не существует ❌", show_alert=True)
 
     selected_tariff = tariffs[tariff_idx]
+
+    # =========================================================================
+    # 🔥 ЗДЕСЬ МЫ ЖЕСТКО И ВЕЖЛИВО ПОБЕЖДАЕМ КЛИЕНТОВ ПО ВОЗРАСТУ
+    # =========================================================================
+
+    # Достаем ID ребенка, которого родитель выбрал на предыдущем шаге из памяти FSM
+    data = await state.get_data()
+    student_id = data.get('student_id')
+
+    if student_id:
+        # Тянем актуальные данные ребенка из Postgres
+        student_res = await session.execute(select(Student).where(Student.id == student_id))
+        student = student_res.scalar_one_or_none()
+
+        if student and student.birthday:
+            today = date.today()
+            # Честный расчет возраста ребенка в годах с учетом месяца и дня рождения
+            student_age = today.year - student.birthday.year - (
+                        (today.month, today.day) < (student.birthday.month, student.birthday.day))
+
+            # Достаем возрастной лимит из выбранного тарифа
+            min_age_limit = selected_tariff.get("min_age", 0)
+
+            # Перехват: если ребенок слишком мал для этого тарифа
+            if student_age < min_age_limit:
+                await callback.answer()  # Сразу гасим часики на кнопке
+
+                # 🧠 УМНЫЙ СУПЕР-ПОДБОР: Сканируем весь JSONB-конфиг клуба на предмет альтернатив
+                available_disciplines = []
+                for disc_key, disc_val in club_settings.get("disciplines", {}).items():
+                    # Проверяем только активные направления и исключаем то, куда ребенок не прошел
+                    if disc_val.get("active") and disc_key != sport_type:
+                        sect_tariffs = disc_val.get("tariffs", [])
+                        if sect_tariffs:
+                            # Проверяем самый первый тариф в альтернативной секции — подходит ли возраст?
+                            if student_age >= sect_tariffs[0].get("min_age", 0):
+                                available_disciplines.append(f"• <b>{disc_val.get('name')}</b>")
+
+                # Формируем вежливый и аргументированный текст отказа
+                alt_text = ""
+                if available_disciplines:
+                    alt_text = (
+                            f"\n\n Заботясь о развитии и безопасности вашего ребенка, мы подобрали "
+                            f"альтернативные направления в нашем клубе, куда <b>{student.name}</b> "
+                            f"может записаться прямо сейчас:\n" + "\n".join(available_disciplines)
+                    )
+                else:
+                    alt_text = f"\n\nК сожалению, для возраста вашего ребенка в нашем клубе пока нет подходящих открытых направлений."
+
+                # Перерисовываем экран в красивую заглушку-рекомендацию
+                kb = types.InlineKeyboardMarkup(inline_keyboard=[[
+                    types.InlineKeyboardButton(text="↩️ Вернуться к выбору направлений", callback_data="choose_section")
+                ]])
+
+                return await callback.message.edit_text(
+                    text=f"⚠️ <b>Доступ ограничен по возрасту!</b>\n\n"
+                         f"В целях эффективного развития спортивных навыков и соблюдения техники безопасности, "
+                         f"на тарифный план секции <b>{discipline_cfg.get('name')}</b> принимаются дети строго с <b>{min_age_limit} лет</b>.\n\n"
+                         f"Сейчас вашему атлету <b>{student.name}</b> исполнилось <b>{student_age} лет</b>."
+                         f"{alt_text}\n\n"
+                         f"Вы можете выбрать другое доступное направление по кнопке ниже 👇",
+                    reply_markup=kb,
+                    parse_mode="HTML"
+                )
+
+    # =========================================================================
+    # ЕСЛИ РЕБЕНОК ПРОШЕЛ ПРОВЕРКУ — ВЫПОЛНЯЕТСЯ ТВОЙ СТАНДАРТНЫЙ КОД ОПЛАТЫ
+    # =========================================================================
+    await state.update_data(sport_type=sport_type)
+
     price = selected_tariff.get('price')
     days = selected_tariff.get('days', 30)
     count = selected_tariff.get('count', 0)
     display_name = discipline_cfg.get('name', 'Секция')
 
     label = f"Безлимит на {days} дней" if count == 999 else f"{count} зан. / {days} дн."
-    data = await state.get_data()
+
     await state.update_data(
-        student_id=data.get('student_id') or callback.from_user.id,
+        student_id=student_id or callback.from_user.id,
         lesson_count=count,
         days_to_add=days,
         price=price,
@@ -146,8 +213,7 @@ async def process_kids_limit(
         tariff_label=label
     )
 
-    # 🔍 ПРОВЕРКА: Есть ли у родителя сохраненная карта в нашей базе?
-    from database.db import Subscription
+    # 🔍 ПРОВЕРКА КАРТЫ РОДИТЕЛЯ
     sub_res = await session.execute(
         select(Subscription)
         .where(Subscription.user_id == callback.from_user.id)
@@ -156,11 +222,9 @@ async def process_kids_limit(
     )
     saved_card = sub_res.scalar_one_or_none()
 
-    # Формируем динамические кнопки
     inline_keyboard = []
 
     if saved_card:
-        # Если карта есть — предлагаем оплату в 1 клик
         inline_keyboard.append([
             types.InlineKeyboardButton(text="⚡️ Оплатить сохраненной картой", callback_data="pay_one_click")
         ])
@@ -168,12 +232,10 @@ async def process_kids_limit(
             types.InlineKeyboardButton(text="💳 Оплатить новой картой", callback_data="pay_method_official")
         ])
     else:
-        # Если карты нет — стандартная первая оплата
         inline_keyboard.append([
             types.InlineKeyboardButton(text="💳 Онлайн оплата картой", callback_data="pay_method_official")
         ])
 
-    # Всегда оставляем твою серую схему по СБП внизу
     inline_keyboard.append([
         types.InlineKeyboardButton(text="↩️ Перевод по СБП (Вручную по чеку)", callback_data="pay_method_sbp")
     ])
@@ -262,7 +324,7 @@ async def process_one_click_payment(callback: types.CallbackQuery, state: FSMCon
         new_order.status = "CONFIRMED"
 
         # Твоя родная функция начисления абонемента
-        from handlers.payments import add_abon
+        from database.db import add_abon
 
         abon_result = await add_abon(
             student_id=data['student_id'],

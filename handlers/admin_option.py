@@ -1356,22 +1356,17 @@ async def admin_edit_tariff_menu(callback: types.CallbackQuery, club_settings: d
     tariff = tariffs[tariff_idx_int]
 
     builder = InlineKeyboardBuilder()
-
-    # Генерируем чистые callback_data для кнопок ввода параметров
-    builder.row(types.InlineKeyboardButton(text=f"💰 Цена: {tariff.get('price')} руб.",
-                                           callback_data=f"input_tar_price_{disc_id}_{tariff_idx_int}"))
-    builder.row(types.InlineKeyboardButton(text=f"⏳ Срок: {tariff.get('days')} дней",
-                                           callback_data=f"input_tar_days_{disc_id}_{tariff_idx_int}"))
-
+    builder.row(types.InlineKeyboardButton(text=f"💰 Цена: {tariff['price']} руб.", callback_data=f"input_tar_price_{disc_id}_{tariff_idx}"))
+    builder.row(types.InlineKeyboardButton(text=f"⏳ Срок: {tariff['days']} дней", callback_data=f"input_tar_days_{disc_id}_{tariff_idx}"))
     if discipline.get("type") == "lessons":
-        builder.row(types.InlineKeyboardButton(text=f"🔢 Занятий: {tariff.get('count')}",
-                                               callback_data=f"input_tar_count_{disc_id}_{tariff_idx_int}"))
+        builder.row(types.InlineKeyboardButton(text=f"🔢 Занятий: {tariff['count']}", callback_data=f"input_tar_count_{disc_id}_{tariff_idx}"))
 
-    # Кнопка удаления и возврата теперь шлют четкие, безопасные индексы
-    builder.row(
-        types.InlineKeyboardButton(text="❌ Удалить тариф", callback_data=f"adm_tar_del_{disc_id}_{tariff_idx_int}"))
+    # 🔥 ДОБАВЛЯЕМ СЮДА ЭТУ СТРОКУ (с большими пробелами для удобства)
+    builder.row(types.InlineKeyboardButton( text = f"👶 Мин. возраст: {tariff.get('min_age', 0)} лет",
+                                            callback_data = f"input_tar_min_age_{disc_id}_{tariff_idx}" ))
+
+    builder.row(types.InlineKeyboardButton(text="❌ Удалить тариф", callback_data=f"adm_tar_del_{disc_id}_{tariff_idx}"))
     builder.row(types.InlineKeyboardButton(text="⬅️ Назад", callback_data=f"adm_tar_sect_{disc_id}"))
-
     builder.adjust(1)  # Выстраиваем кнопки строго в один вертикальный ряд
 
     await callback.message.edit_text(
@@ -1459,6 +1454,7 @@ async def admin_start_tariff_edit(callback: types.CallbackQuery, state: FSMConte
     """Инициализация процесса изменения конкретного поля тарифа"""
     parts = callback.data.split("_")
     await state.update_data(edit_type=parts[2], disc_id=parts[3], tariff_idx=int(parts[4]), club_id=club_id)
+
     if parts[2] == "price":
         await state.set_state(AdminTariffStates.waiting_for_price)
         await callback.message.answer("💰 Введите новую <b>стоимость</b> тарифа (целое число, например 4000):",
@@ -1466,19 +1462,25 @@ async def admin_start_tariff_edit(callback: types.CallbackQuery, state: FSMConte
     elif parts[2] == "days":
         await state.set_state(AdminTariffStates.waiting_for_days)
         await callback.message.answer("⏳ Введите новое <b>количество дней</b> действия абонемента:", parse_mode="HTML")
-    # === ДОБАВИЛИ ТОП-АКЦЕНТ НА БЕЗЛИМИТ СЮДА ===
     elif parts[2] == "count":
         await state.set_state(AdminTariffStates.waiting_for_count)
-        text = (
-            "🔢 <b>Введите новое количество занятий для тарифа:</b>\n\n"
-            "• Укажите обычный лимит тренировок (например: <code>8</code>, <code>12</code>, <code>24</code>).\n\n"
-            "🚨🚨🚨 <b>ВАЖНО: ЕСЛИ ВЫ ДЕЛАЕТЕ ЭТОТ ТАРИФ БЕЗЛИМИТНЫМ — ВВЕДИТЕ СТРОГО ЧИСЛО</b> <code>999</code> 🚨🚨🚨\n\n"
-            "<i>Если ввести 999, система автоматически переключит проход по этому тарифу в режим безлимита без списания занятий!</i>"
-        )
+        text = ("🔢 <b>Введите новое количество занятий...</b>")  # Твой текст
         await callback.message.answer(text=text, parse_mode="HTML")
+
+    # 🔥 ДОБАВЛЯЕМ НАШУ НОВУЮ ВЕТКУ ВОЗРАСТА СЮДА
+    elif parts[2] == "min_age":
+        await state.set_state(AdminTariffStates.waiting_for_min_age)
+        await callback.message.answer(
+            text="👶 <b>Возрастной ценз для тарифа:</b>\n\n"
+                 "Введите <b>минимальный возраст</b> ребенка в годах (целое число, например: <code>8</code> для бокса).\n\n"
+                 "<i>Введите <code>0</code>, если у этого тарифа нет ограничений по возрасту.</i>",
+            parse_mode="HTML"
+        )
+
     await callback.answer()
 
 
+@router.message(AdminTariffStates.waiting_for_min_age) # 🔥 ДОБАВИЛИ ДЕКОРАТОР СЮДА
 @router.message(AdminTariffStates.waiting_for_price)
 @router.message(AdminTariffStates.waiting_for_days)
 @router.message(AdminTariffStates.waiting_for_count)
@@ -1492,11 +1494,11 @@ async def admin_save_tariff_field(message: types.Message, state: FSMContext, clu
     s_data = await state.get_data()
     disc_id, idx, field = s_data["disc_id"], s_data["tariff_idx"], s_data["edit_type"]
 
+    # Автоматически запишет val по ключу "min_age" в JSONB!
     club_settings["disciplines"][disc_id]["tariffs"][idx][field] = val
     await save_club_settings(session, redis, bot.token, s_data["club_id"], club_settings)
     await state.clear()
     await return_to_tariff_menu(message, club_settings, disc_id)
-
 
 #Создание Тарифов
 # 1. Ловим нажатие на кнопку "➕ Добавить тариф"
@@ -1532,56 +1534,66 @@ async def admin_add_tariff_price(message: types.Message, state: FSMContext):
 
 
 # 3. Ловим ввод ДНЕЙ (Записываем 999 для безлимитных секций)
+# 3. Ловим ввод ДНЕЙ
 @router.message(AdminTariffStates.add_days)
 async def admin_add_tariff_days(
         message: types.Message,
-        state: FSMContext,
-        club_settings: dict,
-        session,
-        redis: Redis,
-        bot
+        state: FSMContext
 ):
     if not message.text.isdigit():
         return await message.answer("❌ Срок действия должен быть числом дней! Попробуйте еще раз:")
 
     days = int(message.text)
     s_data = await state.get_data()
-    disc_id = s_data["disc_id"]
-    club_id = s_data["club_id"]
     d_type = s_data["d_type"]
-    new_price = s_data["new_price"]
 
-    # ЕСЛИ СЕКЦИЯ БЕЗЛИМИТНАЯ — СТАВИМ COUNT = 999 И СРАЗУ СОХРАНЯЕМ В БД
+    # ИСПРАВЛЕНО: Для безлимита сохраняем данные в FSM и требуем ВОЗРАСТ
     if d_type == "unlimited":
-        new_tariff = {
-            "count": 999,  # Маркер безлимита для вашей системы
-            "price": new_price,
-            "days": days
-        }
+        await state.update_data(new_days=days, new_count=999) # 999 ставим автоматически в памяти
+        await state.set_state(AdminTariffStates.add_min_age)   # Меняем состояние на ввод возраста
 
-        if "tariffs" not in club_settings["disciplines"][disc_id]:
-            club_settings["disciplines"][disc_id]["tariffs"] = []
+        await message.answer(
+            text="<b>Шаг 3 из 4 (Безлимит):</b> Введите <b>минимальный возраст</b> ребенка для этого тарифа (например: 4).\n\n"
+                 "<i>Введите 0, если ограничений по возрасту у этого тарифа нет.</i>",
+            parse_mode="HTML"
+        )
 
-        club_settings["disciplines"][disc_id]["tariffs"].append(new_tariff)
-
-        await save_club_settings(session, redis, bot.token, club_id, club_settings)
-        await state.clear()
-        await return_to_tariff_menu(message, club_settings, disc_id)
-
-    # ЕСЛИ СЕКЦИЯ ОБЫЧНАЯ — ПЕРЕХОДИМ К ВВОДУ ЗАНЯТИЙ
+    # ЕСЛИ СЕКЦИЯ ОБЫЧНАЯ — ПЕРЕХОДИМ К ВВОДУ ЗАНЯТИЙ (как и было)
     else:
         await state.update_data(new_days=days)
         await state.set_state(AdminTariffStates.add_count)
 
         await message.answer(
-            "<b>Шаг 3 из 3:</b> Введите лимит количества занятий для этого тарифа (например: 12):",
+            text="<b>Шаг 3 of 4:</b> Введите лимит количества занятий для этого тарифа (например: 12):",
             parse_mode="HTML"
         )
 
 
 # 4. Ловим ввод ЗАНЯТИЙ (Только для обычных секций)
+# 4. Ловим ввод ЗАНЯТИЙ (Только для обычных секций)
 @router.message(AdminTariffStates.add_count)
 async def admin_add_tariff_count(
+        message: types.Message,
+        state: FSMContext
+):
+    if not message.text.isdigit():
+        return await message.answer("❌ Количество занятий должно быть целым числом! Попробуйте еще раз:")
+
+    count = int(message.text)
+
+    # ИСПРАВЛЕНО: Сохраняем count в память FSM и переключаем на ввод возраста
+    await state.update_data(new_count=count)
+    await state.set_state(AdminTariffStates.add_min_age)
+
+    await message.answer(
+        text="<b>Шаг 4 из 4:</b> Введите <b>минимальный возраст</b> ребенка для этого тарифа (например: 8).\n\n"
+             "<i>Введите 0, если ограничений по возрасту у этого тарифа нет.</i>",
+        parse_mode="HTML"
+    )
+
+# 5. 🔥 ФИНАЛ: Ловим ввод ВОЗРАСТА при создании, собираем тариф и пушим в БД
+@router.message(AdminTariffStates.add_min_age)
+async def admin_add_tariff_min_age_final(
         message: types.Message,
         state: FSMContext,
         club_settings: dict,
@@ -1590,29 +1602,41 @@ async def admin_add_tariff_count(
         bot
 ):
     if not message.text.isdigit():
-        return await message.answer("❌ Количество занятий должно быть целым числом! Попробуйте еще раз:")
+        return await message.answer("❌ Возраст должен быть целым числом года! Попробуйте еще раз:")
 
-    count = int(message.text)
+    min_age = int(message.text)
     s_data = await state.get_data()
     disc_id = s_data["disc_id"]
     club_id = s_data["club_id"]
 
+    # Собираем полноценный тарифный план с новым полем возрастного ценза
     new_tariff = {
-        "count": count,
+        "count": s_data["new_count"],
+        "days": s_data["new_days"],
         "price": s_data["new_price"],
-        "days": s_data["new_days"]
+        "min_age": min_age  # 👈 Записали!
     }
 
     if "tariffs" not in club_settings["disciplines"][disc_id]:
         club_settings["disciplines"][disc_id]["tariffs"] = []
 
+    # Добавляем созданный тариф в JSONB-конфиг
     club_settings["disciplines"][disc_id]["tariffs"].append(new_tariff)
 
+    # Автоматически активируем секцию, раз в ней появился тариф
+    club_settings["disciplines"][disc_id]["active"] = True
+
+    # Сохраняем в базу данных Postgres и очищаем Redis-кэш мидлвари
     await save_club_settings(session, redis, bot.token, club_id, club_settings)
     await state.clear()
+
+    await message.answer("✨ <b>Новый тариф успешно создан и запущен!</b>", parse_mode="HTML")
+
+    # Красиво возвращаем админа в меню тарифов секции
     await return_to_tariff_menu(message, club_settings, disc_id)
 
 
+#SHEDULE SHEDULE
 # =====================================================================
 # ШАГ 1: ВЫБОР СЕКЦИИ (Сохраняем club_id, чтобы не терялся)
 # =====================================================================

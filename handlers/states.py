@@ -52,7 +52,8 @@ class AdminTariffStates(StatesGroup):
     waiting_for_price = State()
     waiting_for_days = State()
     waiting_for_count = State()
-
+    waiting_for_min_age = State()  # Для изменения возраста в готовом тарифе
+    add_min_age = State()
     # Состояния для пошагового мастера создания нового тарифа
     add_price = State()
     add_days = State()
