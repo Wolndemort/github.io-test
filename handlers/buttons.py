@@ -14,7 +14,6 @@ def get_profile_keyboard(user, club_settings: dict, is_authorized: bool = False)
     его club_id и user_id в ссылку WebApp.
     """
     builder = InlineKeyboardBuilder()
-
     # ⚙️ Достаем фичи из настроек клуба
     features = club_settings.get("features", {})
 
@@ -31,7 +30,6 @@ def get_profile_keyboard(user, club_settings: dict, is_authorized: bool = False)
             callback_data="show_android_instructions"  # Коллбэк для Android
         )
     )
-
     # ЕДИНАЯ КНОПКА: Передаем и club_id, и user_id в GET-параметрах
     builder.row(types.InlineKeyboardButton(
         text="📱 Проход по FaceID",
@@ -43,15 +41,11 @@ def get_profile_keyboard(user, club_settings: dict, is_authorized: bool = False)
         # 🔥 ДОБАВИЛИ КНОПКУ УПРАВЛЕНИЯ ПОДПИСКОЙ КРУПНЫМИ БУКВАМИ
         builder.row(types.InlineKeyboardButton(text='💳 УПРАВЛЕНИЕ ПОДПИСКОЙ', callback_data='manage_subscription'))
 
-
     # 1. Всегда доступные кнопки
     builder.row(types.InlineKeyboardButton(text='➕ Добавить атлета', callback_data='add_athlete'))
     builder.row(types.InlineKeyboardButton(text='🔍 Подробно об атлетах', callback_data='detailed_status_info'))
 
     # 2. ДИНАМИЧЕСКИЕ КНОПКИ
-    if features.get("online_payments", False):
-        builder.row(types.InlineKeyboardButton(text='Купить абонемент 💳', callback_data='choose_section'))
-
     if features.get("freeze", True):
         builder.row(types.InlineKeyboardButton(text='❄️ Заморозить абонемент', callback_data='freeze_sub'))
 

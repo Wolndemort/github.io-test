@@ -36,10 +36,6 @@ async def super_admin_main(
         text="🖥 Управление всеми клубами (SqlAdmin)",
         url="https://speedycrm.ru/master-dashboard"  # Откроет список франшиз
     ))
-    builder.row(types.InlineKeyboardButton(
-        text="👥 Общая база всех атлетов (SqlAdmin)",
-        url="https://speedycrm.ru/student/list"  # Откроет полный список учеников
-    ))
 
     # --- Остальные кнопки управления SaaS ---
     builder.row(types.InlineKeyboardButton(text="➕ Добавить клуб", callback_data="add_new_club"))
