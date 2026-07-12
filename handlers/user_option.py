@@ -767,7 +767,7 @@ async def handle_gen_qr(
 
     # 4. Красивый ответ с кнопкой "Назад"
     kb = InlineKeyboardBuilder()
-    kb.row(types.InlineKeyboardButton(text="🔙 Назад к списку", callback_data="show_qr"))
+    kb.row(types.InlineKeyboardButton(text="🔙 Назад в профиль", callback_data="profile"))
 
     await callback.message.answer_photo(
         photo=photo,

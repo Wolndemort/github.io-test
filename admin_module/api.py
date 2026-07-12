@@ -154,8 +154,8 @@ async def get_revenue_stats(
     club = club_res.scalar_one_or_none()
     club_name = club.club_settings.get("ui", {}).get("club_name") or club.name if club else "Фитнес-клуб"
 
-    # Работаем строго в наивном формате UTC (как на Аэзе)
-    now_naive = datetime.utcnow()
+    # ИСПРАВЛЕНО: Заменяем устаревший utcnow() на честное локальное время, как в боте
+    now_naive = datetime.now().replace(tzinfo=None)
 
     # Считаем точные границы временных периодов
     today_start = now_naive.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -195,7 +195,6 @@ async def get_revenue_stats(
     revenue_month = (month_res.scalar() or 0) / 100
 
     # 3. ТОП ДИСЦИПЛИН ПО РЕАЛЬНЫМ ОПЛАТАМ
-    # Связываем PaymentOrder со Student через JOIN, чтобы вытащить секцию ребенка
     disc_res = await session.execute(
         select(Student.discipline, func.sum(PaymentOrder.amount_kopecks))
         .join(Student, PaymentOrder.student_id == Student.id)
@@ -237,7 +236,7 @@ async def get_revenue_stats(
 
     # 5. ОТДАЕМ ОЧИЩЕННЫЕ ДАННЫЕ В ШАБЛОН РЕВЕНЬЮ
     return templates.TemplateResponse(
-        "stats.html",  # Перенаправляем строго на наш новый красивый шаблон выручки
+        "stats.html",
         {
             "request": request,
             "club_id": club_id,
@@ -249,6 +248,7 @@ async def get_revenue_stats(
             "payment_types": payment_types
         }
     )
+
 
 # 3. Выгрузка в Excel. Перенесли префикс /stats/export/excel прямо в декоратор
 @router.get("/stats/export/excel")
