@@ -116,44 +116,34 @@ async def process_kids_limit(
         tariff_idx = int(parts[3])
     except (IndexError, ValueError):
         return await callback.answer("Ошибка обработки кнопки тарифа ❌", show_alert=True)
-
     # 1. Извлекаем данные о выбранной секции и тарифе
     discipline_cfg = club_settings.get("disciplines", {}).get(sport_type, {})
     if not discipline_cfg:
         return await callback.answer("Ошибка: секция не найдена 🛠", show_alert=True)
-
     tariffs = discipline_cfg.get("tariffs", [])
     if tariff_idx >= len(tariffs):
         return await callback.answer("Ошибка: выбранный тариф больше не существует ❌", show_alert=True)
-
     selected_tariff = tariffs[tariff_idx]
-
     # =========================================================================
     # 🔥 ЗДЕСЬ МЫ ЖЕСТКО И ВЕЖЛИВО ПОБЕЖДАЕМ КЛИЕНТОВ ПО ВОЗРАСТУ
     # =========================================================================
-
     # Достаем ID ребенка, которого родитель выбрал на предыдущем шаге из памяти FSM
     data = await state.get_data()
     student_id = data.get('student_id')
-
     if student_id:
         # Тянем актуальные данные ребенка из Postgres
         student_res = await session.execute(select(Student).where(Student.id == student_id))
         student = student_res.scalar_one_or_none()
-
         if student and student.birthday:
             today = date.today()
             # Честный расчет возраста ребенка в годах с учетом месяца и дня рождения
             student_age = today.year - student.birthday.year - (
                         (today.month, today.day) < (student.birthday.month, student.birthday.day))
-
             # Достаем возрастной лимит из выбранного тарифа
             min_age_limit = selected_tariff.get("min_age", 0)
-
             # Перехват: если ребенок слишком мал для этого тарифа
             if student_age < min_age_limit:
                 await callback.answer()  # Сразу гасим часики на кнопке
-
                 # 🧠 УМНЫЙ СУПЕР-ПОДБОР: Сканируем весь JSONB-конфиг клуба на предмет альтернатив
                 available_disciplines = []
                 for disc_key, disc_val in club_settings.get("disciplines", {}).items():
@@ -164,7 +154,6 @@ async def process_kids_limit(
                             # Проверяем самый первый тариф в альтернативной секции — подходит ли возраст?
                             if student_age >= sect_tariffs[0].get("min_age", 0):
                                 available_disciplines.append(f"• <b>{disc_val.get('name')}</b>")
-
                 # Формируем вежливый и аргументированный текст отказа
                 alt_text = ""
                 if available_disciplines:
@@ -175,12 +164,10 @@ async def process_kids_limit(
                     )
                 else:
                     alt_text = f"\n\nК сожалению, для возраста вашего ребенка в нашем клубе пока нет подходящих открытых направлений."
-
                 # Перерисовываем экран в красивую заглушку-рекомендацию
                 kb = types.InlineKeyboardMarkup(inline_keyboard=[[
                     types.InlineKeyboardButton(text="↩️ Вернуться к выбору направлений", callback_data="choose_section")
                 ]])
-
                 return await callback.message.edit_text(
                     text=f"⚠️ <b>Доступ ограничен по возрасту!</b>\n\n"
                          f"В целях эффективного развития спортивных навыков и соблюдения техники безопасности, "
@@ -191,19 +178,15 @@ async def process_kids_limit(
                     reply_markup=kb,
                     parse_mode="HTML"
                 )
-
     # =========================================================================
     # ЕСЛИ РЕБЕНОК ПРОШЕЛ ПРОВЕРКУ — ВЫПОЛНЯЕТСЯ ТВОЙ СТАНДАРТНЫЙ КОД ОПЛАТЫ
     # =========================================================================
     await state.update_data(sport_type=sport_type)
-
     price = selected_tariff.get('price')
     days = selected_tariff.get('days', 30)
     count = selected_tariff.get('count', 0)
     display_name = discipline_cfg.get('name', 'Секция')
-
     label = f"Безлимит на {days} дней" if count == 999 else f"{count} зан. / {days} дн."
-
     await state.update_data(
         student_id=student_id or callback.from_user.id,
         lesson_count=count,
@@ -212,16 +195,23 @@ async def process_kids_limit(
         discipline_name=display_name,
         tariff_label=label
     )
+    # === НАЧАЛО ТВОЕЙ СТАРОЙ ЛОГИКИ ОПЛАТЫ С ЖЕСТКОЙ ЗАЩИТОЙ ОТ ЗАВИСАНИЯ ===
+    try:
+        # 🔍 ПРОВЕРКА КАРТЫ РОДИТЕЛЯ (Оборачиваем в try, если таблицы Subscription нет)
+        from database.db import Subscription
+        sub_res = await session.execute(
+            select(Subscription)
+            .where(Subscription.user_id == callback.from_user.id)
+            .where(Subscription.rebill_id.is_not(None))
+            .limit(1)
+        )
+        saved_card = sub_res.scalar_one_or_none()
+    except Exception as sub_error:
+        # Если таблицы нет или SQL упал — не вешаем кнопку, а пишем в логи и считаем, что карты нет
+        logger.error(f"⚠️ Ошибка проверки сохраненной карты: {sub_error}")
+        saved_card = None
 
-    # 🔍 ПРОВЕРКА КАРТЫ РОДИТЕЛЯ
-    sub_res = await session.execute(
-        select(Subscription)
-        .where(Subscription.user_id == callback.from_user.id)
-        .where(Subscription.rebill_id.is_not(None))
-        .limit(1)
-    )
-    saved_card = sub_res.scalar_one_or_none()
-
+    # Формируем динамические кнопки
     inline_keyboard = []
 
     if saved_card:
@@ -247,8 +237,14 @@ async def process_kids_limit(
         f"Условия: <b>{label} — {price}₽</b>\n\n"
         f"Пожалуйста, выберите способ оплаты:"
     )
-    await callback.message.edit_text(text=text, reply_markup=kb, parse_mode="HTML")
-    await callback.answer()
+
+    try:
+        await callback.message.edit_text(text=text, reply_markup=kb, parse_mode="HTML")
+        await callback.answer()  # 🔥 ОБЯЗАТЕЛЬНО ТУТ ГАСИМ КРУТИЛКУ
+    except Exception as edit_error:
+        logger.error(f"❌ Ошибка отправки текста оплаты: {edit_error}")
+        # Если edit_text отвалился (например, текст совпадает), принудительно отжимаем часики!
+        await callback.answer("Ошибка вывода меню оплаты", show_alert=True)
 
 
 @router.callback_query(F.data == 'pay_one_click')
