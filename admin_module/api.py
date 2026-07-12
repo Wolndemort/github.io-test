@@ -658,13 +658,14 @@ async def open_turnstile(
     if is_inside_session:
         message_text = "Турникет открыт! Повторный проход, сессия активна."
     else:
-        if student.balance_lessons != 999:
-            student.balance_lessons -= 1
-        student.last_visit = now_naive  # Пишем строго naive-время без таймзоны!
-        # Запоминаем текущее значение баланса в обычную переменную, отвязав от SQLAlchemy объекта
+        # 🛑 СТРОКУ student.balance_lessons -= 1 МЫ ОТСЮДА ПОЛНОСТЬЮ УДАЛИЛИ!
+
+        # Просто фиксируем время входа для Postgres, запуская сессию
+        student.last_visit = now_naive
+
+        # Кэшируем текущий баланс для вывода на экран (он остался прежним, например, 1)
         current_balance = student.balance_lessons
-        message_text = f"Турникет открыт! Осталось занятий: {current_balance}"
-    # ФИКСИРУЕМ ИЗМЕНЕНИЯ В БАЗЕ (Освобождаем строку перед сетевым запросом к реле)
+        message_text = f"Турникет открыт! Приятной тренировки. Доступных занятий: {current_balance}"
     try:
         await db.commit()
     except Exception as db_err:
@@ -784,47 +785,27 @@ async def open_webapp_turnstile(
         if now_naive - last_visit_naive < timedelta(minutes=timeout_minutes):
             is_inside_session = True
 
+    # Жесткая проверка: если сессии нет и на балансе реально 0 — турникет не откроется
     if not is_inside_session and student.balance_lessons <= 0 and student.balance_lessons != 999:
         return {"success": False, "message": "На балансе нет доступных занятий."}
 
-    # === ФОРМИРУЕМ ЛОГИКУ СПИСАНИЙ И ТЕКСТА (СТРОГО ДО КОММИТА) ===
+    # === ФОРМИРУЕМ ЛОГИКУ СЕССИЙ И ТЕКСТА (СТРОГО ДО КОММИТА) ===
     if is_inside_session:
-        logger.info(f"🔄 Повторный проход через WebApp. Атлет {student.name} в сессии. Занятие НЕ списываем.")
+        logger.info(f"🔄 Повторный проход через WebApp. Атлет {student.name} в сессии.")
         session_end = student.last_visit + timedelta(minutes=timeout_minutes)
         session_end_str = session_end.strftime("%H:%M")
         message_text = f"Турникет открыт! Повторный проход. Сессия активна до {session_end_str}."
     else:
-        # Алерт владельцу клуба при списании второго занятия за день
-        if student.last_visit:
-            last_visit_naive = student.last_visit.replace(tzinfo=None)
-            if now_naive - last_visit_naive < timedelta(hours=6):
-                try:
-                    bots_dict = getattr(request.app.state, "bots_dict", {})
-                    bot = bots_dict.get(club.bot_token)
-                    if bot and club.owner_id:
-                        await bot.send_message(
-                            chat_id=int(club.owner_id),
-                            text=f"⚠️ <b>Алерт WebApp СКУД (Повторный визит)</b>\n\n"
-                                 f"Атлет: <b>{student.name}</b>\n"
-                                 f"Родитель открыл турникет через WebApp кнопку спустя {timeout_minutes} мин.\n"
-                                 f"Система зафиксировала новую сессию и <b>списала второе занятие за сегодня</b>.",
-                            parse_mode="HTML"
-                        )
-                except Exception as alert_err:
-                    logger.error(f"Не удалось отправить алерт владельцу клуба: {alert_err}")
-
-        if student.balance_lessons != 999:
-            student.balance_lessons -= 1
-
-        # Записываем строго naive UTC-время, чтобы Postgres не падал
+        # ИСПРАВЛЕНО: Мы больше НЕ уменьшаем баланс при входе! Он остается прежним.
+        # Записываем строго naive-время, запуская отсчет сессии тренировки
         student.last_visit = now_naive
 
-        # Полностью разрываем связь с SQLAlchemy-объектом: кэшируем в память примитивы
+        # Кэшируем текущий баланс в память для вывода родителю на экран
         current_balance = student.balance_lessons
         athlete_name = str(student.name)
-        message_text = f"Турникет открыт для {athlete_name}! Осталось занятий: {current_balance}"
+        message_text = f"Турникет открыт для {athlete_name}! Доступно занятий: {current_balance}"
 
-    # 4. ФИКСИРУЕМ ИЗМЕНЕНИЯ В БАЗЕ (Освобождаем row-level блокировку)
+    # 4. ФИКСИРУЕМ ИЗМЕНЕНИЯ В БАЗЕ (Освобождаем row-level блокировку строки студента)
     try:
         await db.commit()
     except Exception as db_err:
@@ -833,7 +814,7 @@ async def open_webapp_turnstile(
 
     # ОБЪЕКТ student ПОСЛЕ СТРОКИ ВЫШЕ БОЛЬШЕ НЕ ТРОГАЕМ!
 
-    # 5. ОТПРАВЛЯЕМ КОМАНДУ НА РЕЛЕ DINGTIAN (БЕЗ блокировки базы данных)
+    # 5. ОТПРАВКА КОМАНДЫ НА РЕЛЕ DINGTIAN (Без блокировки транзакции базы данных)
     try:
         base_url = str(relay_config.get("base_url", ""))
         if base_url and not base_url.startswith("http"):

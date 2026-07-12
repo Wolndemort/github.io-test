@@ -809,8 +809,9 @@ async def process_manual_checkin(
 
     student_id = int(callback.data.split("_")[-1])
 
-    # Работаем строго в наивном формате UTC (как в базе данных на Аэзе) для защиты от TypeError
-    now_naive = datetime.now(timezone.utc).replace(tzinfo=None)
+    # НАСТРОЙКА ВРЕМЕНИ: Принудительно переводим время на МСК, чтобы сойтись с кроном и админкой!
+    tz_moscow = timezone(timedelta(hours=3))
+    now_naive = datetime.now(tz_moscow).replace(tzinfo=None)
 
     try:
         # 2. Загружаем студента из базы с row-level блокировкой (with_for_update) от Race Condition
@@ -898,7 +899,7 @@ async def process_manual_checkin(
             await state.clear()
             return await callback.answer("У атлета закончились занятия! ❌", show_alert=True)
 
-        # === 7. ПРИМЕНЯЕМ ЛОГИКУ СПИСАНИЯ ЗАНЯТИЙ ===
+        # === 7. ПРИМЕНЯЕМ ЛОГИКУ СЕССИЙ (БЕЗ СПИСАНИЯ ПРИ ВХОДЕ) ===
         usage_info = ""
         parent_text = ""
 
@@ -912,13 +913,13 @@ async def process_manual_checkin(
             usage_info = f"\n🔄 <b>Повторный визит сессии ({timeout_mins} мин).</b> Занятие сохранено.\n📊 Баланс: <b>{balance} зан.</b>"
             parent_text = f"🔄 <b>Повторный вход в зал (в рамках сессии).</b>\n📊 Баланс: {balance} зан."
         else:
-            # Обычный новый визит — списываем занятие и открываем новую сессию
-            student.balance_lessons -= 1
-            student.last_visit = now_naive  # Фиксируем время новой сессии
-            usage_info = f"\n📉 Списано 1 занятие.\n📦 Осталось: <b>{student.balance_lessons} зан.</b>"
-            parent_text = f"📉 Списано 1 занятие.\n📦 Осталось: {student.balance_lessons} зан."
+            # ИСПРАВЛЕНО: Мы больше НЕ уменьшаем баланс при входе! Он остается прежним.
+            # Просто фиксируем время начала новой сессии для планировщика
+            student.last_visit = now_naive
+            usage_info = f"\n🟢 Сессия открыта на {timeout_mins} мин.\n📊 Доступных занятий: <b>{balance} зан.</b>"
+            parent_text = f"🟢 Началась тренировка в зале.\n📊 Доступных занятий: {balance} зан."
 
-        # === 8. ФИКСИРУЕМ ИЗМЕНЕНИЯ В БАЗЕ (Освобождаем row-level блокировку ДО сетевого запроса к реле) ===
+        # === 8. ФИКСИРУЕМ ИЗМЕНЕНИЯ В БАЗЕ (Освобождаем row-level блокировку строки) ===
         try:
             await session.commit()
         except Exception as db_err:
@@ -936,9 +937,7 @@ async def process_manual_checkin(
                 if base_url and not base_url.startswith("http"):
                     turnstile_config["base_url"] = f"http://{base_url}"
 
-                # Физический запрос к реле ДингТиан (база уже свободна)
                 turnstile_opened = await trigger_dingtian_turnstile(turnstile_config)
-
                 if turnstile_opened:
                     turnstile_status = "\n✅ <b>Турникет открыт</b>"
                 else:
@@ -957,7 +956,7 @@ async def process_manual_checkin(
             else:
                 msg_unfreeze = f"\n❄️ <b>Абонемент автоматически разморожен!</b>"
 
-        # 10. КРАСИВОЕ SaaS-УВЕДОМЛЕНИЕ ДЛЯ КЛИЕНТА (РОДИТЕЛЯ)
+        # 10. SaaS-УВЕДОМЛЕНИЕ ДЛЯ КЛИЕНТА (РОДИТЕЛЯ)
         if student.parent_id:
             try:
                 await callback.bot.send_message(
@@ -968,7 +967,7 @@ async def process_manual_checkin(
             except Exception as parent_err:
                 logger.warning(f"Не удалось уведомить родителя {student.parent_id}: {parent_err}")
 
-        # 11. UI: Меняем текст сообщения админу, фиксируя успешный чекин и убирая инлайн-кнопки
+        # 11. UI: Меняем текст сообщения админу, фиксируя успешный чекин
         expire_str = student.expire_date.strftime('%d.%m.%Y') if student.expire_date else "Не указано"
         await callback.message.edit_text(
             f"{status_emoji} <b>Вход отмечен вручную</b>\n👤 Атлет: <b>{student_name}</b>"
@@ -986,6 +985,7 @@ async def process_manual_checkin(
         await session.rollback()
         logger.error(f"❌ Критическая ошибка ручного чекина (Клуб {club.id}): {e}", exc_info=True)
         await callback.answer("⚠️ Критическая ошибка сохранения", show_alert=True)
+
 
 
 @router.callback_query(F.data == 'admin_edit_payments')
