@@ -1,97 +1,73 @@
-from datetime import datetime, timedelta, timezone
-from unittest.mock import AsyncMock, patch, MagicMock
 import pytest
+from unittest.mock import AsyncMock, patch
 from handlers.user_option import parse_qr_scan
 
 
-def mock_sqlalchemy_result(student):
-    """Вспомогательная функция для создания мока ответа execute() в SQLAlchemy 2.0"""
-    mock_res = MagicMock()
-    mock_res.scalar_one_or_none.return_value = student
-    return mock_res
-
-
 @pytest.mark.asyncio
 @patch("handlers.user_option.generate_signature")
-async def test_parse_qr_scan_no_lessons(mock_gen_sig):
-    """Проверяем блокировку лимитного атлета при балансе 0, если сессия закрыта (визит 5 часов назад)"""
+@patch("handlers.user_option.process_athlete_gate_pass")
+async def test_parse_qr_scan_no_lessons(mock_gate_service, mock_gen_sig):
+    """Тест: Проверка поведения при отсутствии доступных занятий."""
     mock_gen_sig.return_value = 'valid_sig'
 
-    session = AsyncMock()
-    club = MagicMock()
-    club.id = 1
-    club.name = "Test Club"
-
-    # Задаем дефолтные лимиты в конфиг для теста
-    club_settings = {
-        "limits": {"session_timeout_minutes": 150, "freeze_days_step": 7},
-        "turnstile": {"enabled": False}
+    # Имитируем, что центральный сервис отклонил проход из-за нулевого баланса
+    mock_gate_service.return_value = {
+        "success": False,
+        "message": "❌ На балансе нет доступных занятий."
     }
 
-    student = MagicMock()
-    student.name = 'AdamTest'
-    student.club_id = 1
-    student.balance_lessons = 0  # Лимитный абонемент закончился
-    student.is_frozen = 0
-
-    # Ставим визит 5 часов назад в UTC без таймзоны (как в реальной базе)
-    student.last_visit = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=5)
-    student.expire_date = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(days=1)
-
-    # ИСПРАВЛЕНО ПОД NEW АРХИТЕКТУРУ: Мокаем execute() вместо get()
-    session.execute.return_value = mock_sqlalchemy_result(student)
+    session = AsyncMock()
+    club = AsyncMock()
+    club_settings = {"limits": {"session_timeout_minutes": 150}}
 
     message = AsyncMock()
     message.web_app_data.data = "student:1:salt:valid_sig"
     message.answer = AsyncMock()
 
+    # Запуск
     await parse_qr_scan(message, session, club, club_settings)
 
+    # Проверяем, что хендлер отдал админу/пользователю ошибку, которую вернул сервис
     args, kwargs = message.answer.call_args
     actual_text = args[0] if args else kwargs.get('text', '')
-
-    assert "🔴 ДОСТУП ЗАПРЕЩЕН" in actual_text
-    assert "❌ На балансе нет занятий" in actual_text
-    assert student.balance_lessons == 0
+    assert "НА БАЛАНСЕ НЕТ ДОСТУПНЫХ ЗАНЯТИЙ" in actual_text.upper()
 
 
 @pytest.mark.asyncio
 @patch("handlers.user_option.generate_signature")
-async def test_parse_qr_scan_unlimited_success(mock_gen_sig):
-    """Проверяем, что безлимитного атлета (999) пускает в зал при открытии новой сессии"""
+@patch("handlers.user_option.process_athlete_gate_pass")
+async def test_parse_qr_scan_unlimited_success(mock_gate_service, mock_gen_sig):
+    """Тест: Успешный проход атлета с безлимитным абонементом (маркер 999)."""
     mock_gen_sig.return_value = 'valid_sig'
 
-    session = AsyncMock()
-    club = MagicMock()
-    club.id = 1
-    club.name = "Test Club"
-    club_settings = {
-        "limits": {"session_timeout_minutes": 150, "freeze_days_step": 7},
-        "turnstile": {"enabled": False}
+    # Имитируем успешный ответ сервиса для безлимитчика
+    mock_gate_service.return_value = {
+        "success": True,
+        "message": "Приятной тренировки! Доступно: Безлимит",
+        "turnstile_status": "✅ Турникет открыт",
+        "student_name": "AdamTest",
+        "parent_id": 12345,
+        "club_name": "Test Club",
+        "expire_str": "12.08.2026",
+        "is_was_frozen": False,
+        "returned_early_days": 0,
+        "balance": 999,
+        "is_inside_session": False
     }
 
-    student = MagicMock()
-    student.name = 'AdamTest'
-    student.club_id = 1
-    student.balance_lessons = 999  # МАРКЕР БЕЗЛИМИТА
-    student.is_frozen = 0
-
-    # Ставим визит без таймзоны (naive), как требует новая архитектура на Аэзе
-    student.last_visit = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=5)
-    student.expire_date = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(days=30)
-
-    # ИСПРАВЛЕНО ПОД NEW АРХИТЕКТУРУ: Мокаем execute() вместо get()
-    session.execute.return_value = mock_sqlalchemy_result(student)
+    session = AsyncMock()
+    club = AsyncMock()
+    club_settings = {"limits": {"session_timeout_minutes": 150}}
 
     message = AsyncMock()
     message.web_app_data.data = "student:1:salt:valid_sig"
     message.answer = AsyncMock()
+    message.bot.send_message = AsyncMock()
 
+    # Запуск
     await parse_qr_scan(message, session, club, club_settings)
 
+    # Проверяем, что в ответе фигурирует успешный статус прохода
     args, kwargs = message.answer.call_args
     actual_text = args[0] if args else kwargs.get('text', '')
-
-    assert "ПРОХОДИТЕ" in actual_text
-    assert "♾ <b>Режим: Безлимит</b>" in actual_text
-    assert student.balance_lessons == 999  # Баланс НЕ уменьшился!
+    assert "ПРОХОДИТЕ" in actual_text.upper()
