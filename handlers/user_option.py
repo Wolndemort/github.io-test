@@ -169,7 +169,7 @@ async def detailed_status_handler(
 ):
     user_id = callback.from_user.id
 
-    # Так как сервер на Аэзе в Вене, работаем строго в UTC для честного сравнения дат
+    # Сервер на Аэзе живет по UTC, оставляем сравнение для логики в UTC формате
     now = datetime.now(timezone.utc)
 
     # Запрашиваем студентов этого родителя для текущего клуба
@@ -188,14 +188,13 @@ async def detailed_status_handler(
     # Заголовок нового экрана
     detail_text = f"📊 <b>Подробный статус абонементов</b>\n🏰 Клуб: <b>{club.name}</b>\n\n"
 
-    # Вытаскиваем таймаут сессии клуба из JSONB (дефолт 150 минут = 2.5 часа)
+    # Вытаскиваем таймаут сессии клуба из JSONB (дефолт 150 минут)
     club_settings = club.club_settings or {}
     timeout_minutes = club_settings.get("limits", {}).get("session_timeout_minutes", 150)
 
     for s in students:
-        # 1. Расчет дней до окончания или сколько дней назад истек
+        # 1. Расчет дней до окончания
         if s.expire_date:
-            # Убираем таймзону для корректного вычитания naive datetime
             expire_naive = s.expire_date.replace(tzinfo=None)
             now_naive = now.replace(tzinfo=None)
 
@@ -210,14 +209,17 @@ async def detailed_status_handler(
         # 2. Форматирование даты последнего визита И РАСЧЕТ ТЕКУЩЕЙ СЕССИИ
         session_status_str = ""
         if s.last_visit:
-            # Приводим к UTC
             last_visit_utc = s.last_visit.replace(tzinfo=timezone.utc) if s.last_visit.tzinfo is None else s.last_visit
-            last_visit_str = f"<b>{last_visit_utc.strftime('%d.%m.%Y в %H:%M')}</b>"
 
-            # Проверяем, активна ли 2.5-часовая сессия прямо сейчас
+            # ИСПРАВЛЕНО: Прибавляем +3 часа к UTC базы для красивого вывода МСК родителю!
+            last_visit_moscow = last_visit_utc.replace(tzinfo=None) + timedelta(hours=3)
+            last_visit_str = f"<b>{last_visit_moscow.strftime('%d.%m.%Y в %H:%M')}</b>"
+
+            # Сравнение идет в строгом серверном UTC (как в кроне)
             if now - last_visit_utc < timedelta(minutes=timeout_minutes):
-                session_end = last_visit_utc + timedelta(minutes=timeout_minutes)
-                session_end_str = session_end.strftime("%H:%M")
+                # ИСПРАВЛЕНО: Время окончания сессии на экране тоже сдвигаем на +3 часа!
+                session_end_moscow = last_visit_moscow + timedelta(minutes=timeout_minutes)
+                session_end_str = session_end_moscow.strftime("%H:%M")
                 session_status_str = f"🚪 Сессия входа: <b>🟢 Активна (до {session_end_str})</b>\n"
             else:
                 session_status_str = f"🚪 Сессия входа: <b>⚫️ Завершена</b>\n"
@@ -231,10 +233,10 @@ async def detailed_status_handler(
         else:
             birthday_str = "<i>не указан</i>"
 
-        # 4. Логика возможности заморозки (can_freeze)
+        # 4. Логика возможности заморозки
         freeze_status = "✅ Доступна" if s.can_freeze == 1 else "❌ Недоступна"
 
-        # Собираем блок информации по конкретному студенту
+        # Собираем блок информации
         detail_text += (
             f"👤 Атлет: <b>{s.name}</b>\n"
             f"🆔 ID профиля: <code>{s.id}</code>\n"
@@ -242,11 +244,10 @@ async def detailed_status_handler(
             f"{time_info}\n"
             f"❄️ Возможность заморозки: {freeze_status}\n"
             f"👟 Последний визит: {last_visit_str}\n"
-            f"{session_status_str}"  # 👈 Добавили вывод статуса текущей сессии
+            f"{session_status_str}"
             f"───────────────────\n\n"
         )
 
-    # Кнопка «Назад»
     back_keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="⬅️ Назад в Личный Кабинет", callback_data="profile")]
     ])
