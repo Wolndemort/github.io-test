@@ -6,38 +6,60 @@ from database.db import Student, User
 
 
 class UserAdmin(ModelView, model=User):
-    # Явно передаем свойства модели вместо строк, чтобы избежать багов WTForms
     column_list = [User.user_id, User.full_name]
     column_searchable_list = [User.full_name]
     name = "Родитель"
     name_plural = "Родители"
     page_size = 10
 
-    # ВКЛЮЧАЕМ УПРАВЛЕНИЕ: Разрешаем удаление и редактирование родителей
     can_delete = True
     can_edit = True
+    can_create = True
 
 
 class StudentAdmin(ModelView, model=Student):
-    # ФИКС ОШИБКИ LIST: Добавляем также телефон и твою новую колонку birthday
     column_list = [
         Student.id,
         Student.name,
         Student.expire_date,
         Student.balance_lessons,
         Student.parent_phone,
-        Student.birthday  # Теперь колонка накатана алембиком, её можно выводить!
+        Student.birthday
     ]
     column_searchable_list = [Student.name, Student.parent_phone]
+
+    # ИСПРАВЛЕНИЕ: Явно перечисляем поля для формы редактирования в браузере.
+    # Мы УБРАЛИ отсюда объект связи 'parent', оставив только текстовые и числовые поля!
+    # Благодаря этому SQLAdmin не будет вешать базу тяжелым сканированием связей.
+    form_columns = [
+        "name",
+        "club_id",
+        "parent_id",
+        "balance_lessons",
+        "expire_date",
+        "birthday",
+        "parent_phone",
+        "discipline",
+        "can_freeze",
+        "is_frozen"
+    ]
+
+    # ДОПОЛНИТЕЛЬНО: Делаем поле parent_id удобным выпадающим списком с AJAX-поиском,
+    # чтобы база не падала в дедлок при открытии формы редактирования
+    form_ajax_refs = {
+        "parent": {
+            "fields": ["full_name"],
+            "placeholder": "Выберите родителя",
+        }
+    }
 
     name = "Ученик"
     name_plural = "Атлеты"
     page_size = 10
 
-    # ФИКС УДАЛЕНИЯ: Без этих флагов кнопки удаления физически не будет в интерфейсе!
-    can_delete = True  # Появится иконка корзины для удаления атлетов!
-    can_edit = True  # Разрешаем редактировать баланс занятий и ДР прямо из браузера
-    can_create = True  # Разрешаем админу создавать записи через веб, если нужно
+    can_delete = True
+    can_edit = True
+    can_create = True
 
 
 class AnalyticsAdmin(BaseView):
@@ -50,11 +72,8 @@ class AnalyticsAdmin(BaseView):
 
 
 def setup_admin(app, engine):
-    # 1. Создаем фабрику асинхронных сессий (если у тебя асинхронный движок)
-    # Если движок синхронный, используй обычный sessionmaker(bind=engine)
     async_session_factory = async_sessionmaker(engine, expire_on_commit=False)
 
-    # 2. Передаем session_maker в админку! Это заставит сохраняться редактирование
     admin = Admin(
         app=app,
         engine=engine,
@@ -62,7 +81,6 @@ def setup_admin(app, engine):
         base_url="/master-dashboard"
     )
 
-    # 3. Регистрируем вьюхи
     admin.add_view(UserAdmin)
     admin.add_view(StudentAdmin)
     admin.add_view(AnalyticsAdmin)
