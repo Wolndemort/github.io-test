@@ -645,43 +645,57 @@ async def open_turnstile(
     relay_config = club_settings.get("turnstile", {})
     if not relay_config.get("enabled", False):
         return {"success": False, "message": "СКУД отключен в настройках вашего клуба"}
+
     timeout_minutes = club_settings.get("limits", {}).get("session_timeout_minutes", 150)
+
     is_inside_session = False
     if student.last_visit:
         last_visit_naive = student.last_visit.replace(tzinfo=None)
+        # Честное сравнение UTC времени сервера и UTC времени из базы
         if now_naive - last_visit_naive < timedelta(minutes=timeout_minutes):
             is_inside_session = True
-    # Проверка баланса (если не безлимит 999)
+
+    # Жесткая проверка баланса: если сессии нет и уроков 0 — не пускаем
     if not is_inside_session and student.balance_lessons <= 0 and student.balance_lessons != 999:
         return {"success": False, "message": "На балансе нет доступных занятий."}
-    # Логика списания и подготовка сообщения СТРОГО до коммита
-    if is_inside_session:
-        message_text = "Турникет открыт! Повторный проход, сессия активна."
-    else:
-        # 🛑 СТРОКУ student.balance_lessons -= 1 МЫ ОТСЮДА ПОЛНОСТЬЮ УДАЛИЛИ!
 
-        # Просто фиксируем время входа для Postgres, запуская сессию
+    # === ФОРМИРУЕМ ЛОГИКУ СЕССИЙ И ТЕКСТА (СТРОГО ДО КОММИТА) ===
+    if is_inside_session:
+        # ИСПРАВЛЕНО: Прибавляем +3 часа к UTC из базы только для красивого текста на экране!
+        visit_moscow = student.last_visit.replace(tzinfo=None) + timedelta(hours=3)
+        session_end = visit_moscow + timedelta(minutes=timeout_minutes)
+        session_end_str = session_end.strftime("%H:%M")
+        message_text = f"Турникет открыт! Повторный проход. Сессия активна до {session_end_str}."
+    else:
+        # Мы больше НЕ уменьшаем баланс при входе! Он остается прежним.
+        # Просто фиксируем время начала новой сессии для Postgres в UTC формате
         student.last_visit = now_naive
 
         # Кэшируем текущий баланс для вывода на экран (он остался прежним, например, 1)
         current_balance = student.balance_lessons
         message_text = f"Турникет открыт! Приятной тренировки. Доступных занятий: {current_balance}"
+
+    # 4. ФИКСИРУЕМ ИЗМЕНЕНИЯ В БАЗЕ (Освобождаем строку перед сетевым запросом к реле)
     try:
         await db.commit()
     except Exception as db_err:
         logger.error(f"Ошибка коммита базы данных перед СКУД (FaceID): {db_err}")
         return {"success": False, "message": "Ошибка сохранения данных визита."}
-    # ОБЪЕКТ student ПОСЛЕ СТРОКИ ВЫШЕ БОЛЬШЕ НЕ ТРОГАЕМ, ЧТОБЫ НЕ ВЫЗВАТЬ СЕТЕВУЮ ОШИБКУ ПОДДКЛЮЧЕНИЯ БАЗЫ
-    # ОТПРАВЛЯЕМ КОМАНДУ НА РЕЛЕ DINGTIAN
+
+    # ОБЪЕКТ student ПОСЛЕ СТРОКИ ВЫШЕ БОЛЬШЕ НЕ ТРОГАЕМ, ЧТОБЫ НЕ ВЫЗВАТЬ СЕТЕВУЮ ОШИБКУ ПОДКЛЮЧЕНИЯ БАЗЫ
+
+    # 5. ОТПРАВЛЯЕМ КОМАНДУ НА РЕЛЕ DINGTIAN (Без блокировки транзакции базы)
     try:
         base_url = str(relay_config.get("base_url", ""))
         if base_url and not base_url.startswith("http"):
             relay_config["base_url"] = f"http://{base_url}"
+
         is_opened = await trigger_dingtian_turnstile(relay_config)
         if is_opened is False:
             return {"success": False, "message": "Реле отклонило команду на открытие."}
     except Exception as e:
         logger.warning(f"Ошибка сети/таймаута СКУД FaceID: {str(e)}. Проход разрешен.")
+
     return {"success": True, "message": message_text}
 
 
@@ -768,7 +782,7 @@ async def open_webapp_turnstile(
     expire_naive = student.expire_date.replace(tzinfo=None) if student.expire_date else None
 
     if expire_naive and expire_naive < now_naive:
-        return {"success": False, "message": "Срок действия абонемента истек."}
+        return {"success": False, "message": "Срок действия абонемента исчез."}
 
     # Чтение JSONB-настроек реле
     relay_config = club_settings.get("turnstile", {})
@@ -778,7 +792,7 @@ async def open_webapp_turnstile(
 
     timeout_minutes = club_settings.get("limits", {}).get("session_timeout_minutes", 150)
 
-    # Расчет активной сессии визита
+    # Расчет активной сессии визита (сравнение строго в UTC)
     is_inside_session = False
     if student.last_visit:
         last_visit_naive = student.last_visit.replace(tzinfo=None)
@@ -792,12 +806,15 @@ async def open_webapp_turnstile(
     # === ФОРМИРУЕМ ЛОГИКУ СЕССИЙ И ТЕКСТА (СТРОГО ДО КОММИТА) ===
     if is_inside_session:
         logger.info(f"🔄 Повторный проход через WebApp. Атлет {student.name} в сессии.")
-        session_end = student.last_visit + timedelta(minutes=timeout_minutes)
+
+        # ИСПРАВЛЕНО: Прибавляем +3 часа к UTC из базы только для красивого текста на экране родителя!
+        visit_moscow = student.last_visit.replace(tzinfo=None) + timedelta(hours=3)
+        session_end = visit_moscow + timedelta(minutes=timeout_minutes)
         session_end_str = session_end.strftime("%H:%M")
         message_text = f"Турникет открыт! Повторный проход. Сессия активна до {session_end_str}."
     else:
-        # ИСПРАВЛЕНО: Мы больше НЕ уменьшаем баланс при входе! Он остается прежним.
-        # Записываем строго naive-время, запуская отсчет сессии тренировки
+        # Мы больше НЕ уменьшаем баланс при входе! Он остается прежним.
+        # Записываем строго naive-время в формате UTC, запуская отсчет сессии тренировки
         student.last_visit = now_naive
 
         # Кэшируем текущий баланс в память для вывода родителю на экран

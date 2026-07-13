@@ -584,14 +584,16 @@ async def parse_qr_scan(
         if not is_unlimited and not is_inside_session:
             if (student.balance_lessons or 0) <= 0:
                 return await message.answer(f"🔴 ДОСТУП ЗАПРЕЩЕН\n👤 {student_name}\n❌ На балансе нет занятий")
-
         # === 6. ЛОГИКА СЕССИЙ И ПОДГОТОВКА ДАННЫХ ДЛЯ ВЫВОДА ===
         status_emoji = "🟢"
         if is_unlimited:
             display_balance = "♾ <b>Режим: Безлимит</b>"
         elif is_inside_session:
             logger.info(f"🔄 Повторный проход по QR в рамках сессии для {student_name}.")
-            session_end = student.last_visit + timedelta(minutes=timeout_minutes)
+
+            # ИСПРАВЛЕНО: Прибавляем +3 часа к UTC из базы только для красивого текста на экране!
+            visit_moscow = student.last_visit.replace(tzinfo=None) + timedelta(hours=3)
+            session_end = visit_moscow + timedelta(minutes=timeout_minutes)
             session_end_str = session_end.strftime("%H:%M")
             display_balance = (
                 f"🔢 Осталось занятий: <b>{student.balance_lessons}</b>\n"
@@ -599,8 +601,8 @@ async def parse_qr_scan(
                 f"⚠️ <i>После <b>{session_end_str}</b> вход спишет новое занятие!</i>"
             )
         else:
-            # ИСПРАВЛЕНО: Мы больше НЕ уменьшаем баланс при входе! Он остается прежним.
-            # Просто открываем новую сессию тренировки в базе
+            # Мы больше НЕ уменьшаем баланс при входе! Он остается прежним.
+            # Просто открываем новую сессию тренировки в базе в UTC формате
             student.last_visit = now_naive
             display_balance = f"🔢 Доступных занятий: <b>{student.balance_lessons}</b>"
 

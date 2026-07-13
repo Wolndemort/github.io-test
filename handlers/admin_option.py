@@ -809,8 +809,7 @@ async def process_manual_checkin(
 
     student_id = int(callback.data.split("_")[-1])
 
-    # НАСТРОЙКА ВРЕМЕНИ: Принудительно переводим время на МСК, чтобы сойтись с кроном и админкой!
-
+    # НАСТРОЙКА ВРЕМЕНИ: База данных Postgres на Аэзе требует чистый UTC формат
     now_naive = datetime.now(timezone.utc).replace(tzinfo=None)
 
     try:
@@ -874,7 +873,8 @@ async def process_manual_checkin(
         is_inside_session = False
         if student.last_visit:
             last_visit_naive = student.last_visit.replace(tzinfo=None)
-            if (now_naive - last_visit_naive).total_seconds() < (timeout_mins * 60):
+            # Честное сравнение UTC времени сервера и UTC времени из базы данных
+            if now_naive - last_visit_naive < timedelta(minutes=timeout_mins):
                 is_inside_session = True
 
         # 6. Проверка права доступа (Срок действия абонемента — уже обновленный после разморозки)
@@ -908,13 +908,16 @@ async def process_manual_checkin(
             parent_text = "♾ Режим: <b>Безлимит</b>"
         elif is_inside_session:
             # Повторный визит — занятие НЕ списываем, время визита НЕ обновляем
-            session_end = student.last_visit + timedelta(minutes=timeout_mins)
+
+            # Прибавляем +3 часа к UTC из базы только для красивого текста на экране админу!
+            visit_moscow = student.last_visit.replace(tzinfo=None) + timedelta(hours=3)
+            session_end = visit_moscow + timedelta(minutes=timeout_mins)
             session_end_str = session_end.strftime("%H:%M")
-            usage_info = f"\n🔄 <b>Повторный визит сессии ({timeout_mins} мин).</b> Занятие сохранено.\n📊 Баланс: <b>{balance} зан.</b>"
+            usage_info = f"\n🔄 <b>Повторный визит сессии ({timeout_mins} мин).</b> Занятие сохранено.\n📊 Сессия активна до: <b>{session_end_str}</b>\n📊 Баланс: <b>{balance} зан.</b>"
             parent_text = f"🔄 <b>Повторный вход в зал (в рамках сессии).</b>\n📊 Баланс: {balance} зан."
         else:
-            # ИСПРАВЛЕНО: Мы больше НЕ уменьшаем баланс при входе! Он остается прежним.
-            # Просто фиксируем время начала новой сессии для планировщика
+            # Мы больше НЕ уменьшаем баланс при входе! Он остается прежним.
+            # Просто фиксируем время начала новой сессии для Postgres в UTC формате
             student.last_visit = now_naive
             usage_info = f"\n🟢 Сессия открыта на {timeout_mins} мин.\n📊 Доступных занятий: <b>{balance} зан.</b>"
             parent_text = f"🟢 Началась тренировка в зале.\n📊 Доступных занятий: {balance} зан."
