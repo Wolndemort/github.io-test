@@ -27,7 +27,16 @@ class YooKassaClient:
             }
             logger.info("🌐 Трафик к API ЮKassa успешно направлен через РФ-прокси.")
 
-    async def init_payment(self, order_id: str, amount_kopecks: int, user_id: int, bot_username: str) -> dict:
+    async def init_payment(
+            self,
+            order_id: str,
+            amount_kopecks: int,
+            user_id: int,
+            bot_username: str,
+            user_email: Optional[str] = None,  # 🆕 Добавлено для чека
+            user_phone: Optional[str] = None,  # 🆕 Добавлено для чека
+            vat_code: int = 1  # 🆕 Добавлено: 1 — без НДС (самый частый для ботов)
+    ) -> dict:
         """
         Создание первой оплаты.
         Передаем save_payment_method=True, чтобы ЮKassa сохранила карту для подписки.
@@ -39,6 +48,21 @@ class YooKassaClient:
 
         # Очищаем юзернейм от собаки, если админ передал его как @my_bot
         clean_bot_username = bot_username.replace("@", "")
+
+        # 🆕 Формируем обязательный для боевого режима объект чека (54-ФЗ)
+        customer = {}
+        if user_email:
+            customer["email"] = user_email
+        if user_phone:
+            # Исправлено: используем lambda, чтобы избежать ошибки с методом self
+            clean_phone = "".join(filter(lambda x: x.isdigit(), user_phone))
+            customer["phone"] = f"+{clean_phone}" if not user_phone.startswith("+") else user_phone
+
+        # Если не передали ни email, ни телефон, ЮKassa выдаст ошибку.
+        # В качестве фолбека можно использовать заглушку, но лучше собирать email/телефон у юзера.
+        if not customer:
+            logger.warning(f"⚠️ Для платежа {order_id} не передан контакт юзера. Применен фолбек email.")
+            customer["email"] = "no-email@merchant.ru"
 
         payload = {
             "amount": {
@@ -55,7 +79,25 @@ class YooKassaClient:
                 "order_id": order_id,
                 "user_id": user_id
             },
-            "description": "Первоначальный взнос и привязка карты для регулярной подписки"
+            "description": "Первоначальный взнос и привязка карты для регулярной подписки",
+
+            # 🆕 ДОБАВЛЕН ОБЪЕКТ ЧЕКА ДЛЯ ФИСКАЛИЗАЦИИ
+            "receipt": {
+                "customer": customer,
+                "items": [
+                    {
+                        "description": "Доступ к закрытому клубу (подписка)",
+                        "quantity": "1.00",
+                        "amount": {
+                            "value": amount_rub,
+                            "currency": "RUB"
+                        },
+                        "vat_code": vat_code,  # 1 — Без НДС, 2 — 0%, 3 — 10%, 4 — 20%
+                        "payment_mode": "full_payment",
+                        "payment_subject": "service"
+                    }
+                ]
+            }
         }
 
         # ЮKassa требует уникальный Idempotence-Key для каждого запроса создания платежа
@@ -70,7 +112,7 @@ class YooKassaClient:
                 res_json = response.json()
 
                 # ЮKassa при успешном создании платежа возвращает HTTP 201 Created
-                if response.status_code in [200, 201]:
+                if response.status_code == 200 or response.status_code == 201:
                     logger.info(f"✅ Ссылка на оплату создана. ID Платежа ЮKassa: {res_json['id']}")
                     return {
                         "Success": True,
