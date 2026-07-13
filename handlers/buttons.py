@@ -39,7 +39,7 @@ def get_profile_keyboard(user, club_settings: dict, is_authorized: bool = False)
     if features.get("online_payments", False):
         builder.row(types.InlineKeyboardButton(text='Купить абонемент 💳', callback_data='choose_section'))
         # 🔥 ДОБАВИЛИ КНОПКУ УПРАВЛЕНИЯ ПОДПИСКОЙ КРУПНЫМИ БУКВАМИ
-        builder.row(types.InlineKeyboardButton(text='💳 УПРАВЛЕНИЕ ПОДПИСКОЙ', callback_data='manage_subscription'))
+        builder.row(types.InlineKeyboardButton(text='💳 ✅ УПРАВЛЕНИЕ ПОДПИСКОЙ', callback_data='manage_subscription'))
 
     # 1. Всегда доступные кнопки
     builder.row(types.InlineKeyboardButton(text='➕ Добавить атлета', callback_data='add_athlete'))
