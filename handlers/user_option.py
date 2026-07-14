@@ -208,22 +208,25 @@ async def detailed_status_handler(
 
         # 2. Форматирование даты последнего визита И РАСЧЕТ ТЕКУЩЕЙ СЕССИИ
         session_status_str = ""
-        if s.last_visit:
+
+        # ИСПРАВЛЕНО: Строгая проверка на существование даты и на реальный год (защита от багов СУБД)
+        if s.last_visit is not None and getattr(s.last_visit, 'year', 0) > 2000:
             last_visit_utc = s.last_visit.replace(tzinfo=timezone.utc) if s.last_visit.tzinfo is None else s.last_visit
 
-            # ИСПРАВЛЕНО: Прибавляем +3 часа к UTC базы для красивого вывода МСК родителю!
+            # Прибавляем +3 часа к UTC базы для красивого вывода МСК родителю!
             last_visit_moscow = last_visit_utc.replace(tzinfo=None) + timedelta(hours=3)
             last_visit_str = f"<b>{last_visit_moscow.strftime('%d.%m.%Y в %H:%M')}</b>"
 
             # Сравнение идет в строгом серверном UTC (как в кроне)
             if now - last_visit_utc < timedelta(minutes=timeout_minutes):
-                # ИСПРАВЛЕНО: Время окончания сессии на экране тоже сдвигаем на +3 часа!
+                # Время окончания сессии на экране тоже сдвигаем на +3 часа!
                 session_end_moscow = last_visit_moscow + timedelta(minutes=timeout_minutes)
                 session_end_str = session_end_moscow.strftime("%H:%M")
                 session_status_str = f"🚪 Сессия входа: <b>🟢 Активна (до {session_end_str})</b>\n"
             else:
                 session_status_str = f"🚪 Сессия входа: <b>⚫️ Завершена</b>\n"
         else:
+            # Гарантированный вывод для абсолютно новых учеников
             last_visit_str = "<i>еще не посещал занятия</i>"
             session_status_str = f"🚪 Сессия входа: <b>⚫️ Нет активных сессий</b>\n"
 
@@ -262,8 +265,6 @@ async def detailed_status_handler(
     except Exception as e:
         logger.error(f"❌ Ошибка в детальном статусе: {e}")
         await callback.answer("Ошибка при загрузке подробных данных")
-
-
 @router.callback_query(F.data.startswith('section_'))
 async def universal_section_handler(
         callback: types.CallbackQuery,
