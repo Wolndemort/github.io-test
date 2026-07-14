@@ -1,7 +1,5 @@
 streams:
-  camera1: echo://cam1.aemaykop-skud.netcraze.pro:5541/live/ch0
-  camera2: echo://cam2.aemaykop-skud.netcraze.pro:5542/live/ch0
-  camera3: echo://cam3.aemaykop-skud.netcraze.pro:5543/live/ch0
-  camera4: echo://cam4.aemaykop-skud.netcraze.pro:5544/live/ch0
-#(Префикс echo:// внутри go2rtc используется для умного автоматического
-#определения протокола через веб-прокси, если стандартный rtsp:// через облако Keenetic начнет блокироваться провайдером).
+  camera1: http://admin:Aemaykop2026@cam1.aemaykop-skud.netcraze.pro/live/ch0.m3u8
+  camera2: http://admin:Aemaykop2026@cam2.aemaykop-skud.netcraze.pro/live/ch0.m3u8
+  camera3: http://admin:Aemaykop2026@cam3.aemaykop-skud.netcraze.pro/live/ch0.m3u8
+  camera4: http://admin:Aemaykop2026@cam4.aemaykop-skud.netcraze.pro/live/ch0.m3u8
