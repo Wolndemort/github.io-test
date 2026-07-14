@@ -74,8 +74,15 @@ class Subscription(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     # Кто платит (Родитель)
     user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey('users.user_id'), index=True)
-    # За какого ребенка идет оплата
-    student_id: Mapped[int] = mapped_column(ForeignKey('students.id'), index=True)
+
+    # ИСПРАВЛЕНО: Сделано Optional и добавлен ondelete="SET NULL"
+    # Если ученика удалят, подписка останется в базе, но поле student_id станет пустым
+    student_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey('students.id', ondelete="SET NULL"),
+        nullable=True,
+        index=True
+    )
+
     # В какой клуб капают деньги
     club_id: Mapped[int] = mapped_column(ForeignKey('clubs.id'), index=True)
 
@@ -99,7 +106,15 @@ class PaymentOrder(Base):
     # Уникальный ID платежа (будем генерировать UUID строку)
     id: Mapped[str] = mapped_column(String(50), primary_key=True)
     user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey('users.user_id'), index=True)
-    student_id: Mapped[int] = mapped_column(ForeignKey('students.id'), index=True)
+
+    # ИСПРАВЛЕНО: Сделано Optional и добавлен ondelete="SET NULL"
+    # Ордер на оплату не удалится (бухгалтерия сходится), но ссылка на ученика очистится
+    student_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey('students.id', ondelete="SET NULL"),
+        nullable=True,
+        index=True
+    )
+
     club_id: Mapped[int] = mapped_column(ForeignKey('clubs.id'), index=True)
 
     amount_kopecks: Mapped[int] = mapped_column(Integer)
