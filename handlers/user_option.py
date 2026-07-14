@@ -713,20 +713,20 @@ async def process_athlete_birthday(
             await session.flush()  # Фиксируем изменения в текущей сессии базы данных
 
         # 2. Создаем атлета со ВСЕМИ привязками и Днём Рождения!
-        new_student = Student(
-            parent_id=user_id,
-            club_id=club_id,
-            name=name,
-            birthday=birthday_date,  # Передаем ОБЪЕКТ даты
-            expire_date=None,
-            balance_lessons=0,
-            can_freeze=1,
-            is_frozen=0,
-            last_visit=datetime.now()
-        )
+            # ИСПРАВЛЕНО: Убрано заполнение last_visit, теперь оно по дефолту будет NULL (пустым)
+            new_student = Student(
+                parent_id=user_id,
+                club_id=club_id,
+                name=name,
+                birthday=birthday_date,  # Передаем ОБЪЕКТ даты
+                expire_date=None,
+                balance_lessons=0,
+                can_freeze=1,
+                is_frozen=0
+            )
 
-        session.add(new_student)
-        await session.commit()
+            session.add(new_student)
+            await session.commit()
 
         logger.success(f"👤 Клиент сам добавил атлета: {name} с ДР {birthday_date} (Клуб ID: {club_id})")
 
@@ -827,83 +827,6 @@ async def process_user_contact(
         await message.answer("⚠️ Произошла внутренняя ошибка привязки профиля. Пожалуйста, сообщите администратору.")
 
 
-@router.message(F.contact)
-async def process_user_contact(
-        message: types.Message,
-        session: AsyncSession,
-        club: Club,
-        club_settings: dict
-):
-    # Очищаем номер от плюсов и пробелов
-    raw_phone = message.contact.phone_number.replace("+", "").strip()
-    clean_phone_10 = raw_phone[-10:]  # Последние 10 цифр (9991112233)
-    user_id = message.from_user.id
-
-    try:
-        # Пытаемся импортировать модель User. Поправь путь, если она лежит в database.models или skud.py!
-        try:
-            from database.db import User
-        except ImportError:
-            # Если не нашел в db, импортируем из skud (судя по твоему дереву файлов)
-            from database.db import User
-
-        # Ищем студентов, у которых телефон содержит последние 10 цифр
-        stmt = select(Student).where(
-            Student.parent_phone.contains(clean_phone_10),
-            Student.club_id == club.id
-        )
-        result = await session.execute(stmt)
-        students = result.scalars().all()
-
-        if not students:
-            return await message.answer(
-                f"❌ Атлеты с номером <code>...{clean_phone_10[-4:]}</code> не найдены в базе клуба <b>{club.name}</b>.\n\n"
-                "Свяжитесь с администратором, чтобы он внес ваш номер в систему.",
-                parse_mode="HTML",
-                reply_markup=types.ReplyKeyboardRemove()
-            )
-
-        # Проверяем, зарегистрирован ли уже этот user_id в таблице users
-        user_stmt = select(User).where(User.user_id == user_id)
-        user_exists = (await session.execute(user_stmt)).scalar_one_or_none()
-
-        if not user_exists:
-            # Создаем запись для нового пользователя, передавая ВСЕ базовые поля,
-            # чтобы PostgreSQL не ругался на NOT NULL ограничения.
-            new_user = User(
-                user_id=user_id,
-                phone=raw_phone,  # Поправь имя поля (телефон), если в твоей модели User оно называется по-другому
-                username=message.from_user.username  # Передаем юзернейм на всякий случай
-            )
-            session.add(new_user)
-            await session.flush()  # Синхронизируем с базой, чтобы ID зафиксировался
-
-        # Привязываем Telegram ID ко всем найденным карточкам атлетов
-        for student in students:
-            student.parent_id = user_id
-            session.add(student)
-
-        await session.commit()
-        names = ", ".join([f"<b>{s.name}</b>" for s in students])
-
-        await message.answer(
-            f"✅ Авторизация в <b>{club.name}</b> успешна!\n\n"
-            f"Привязаны атлеты: {names}\n\n"
-            "Теперь вам доступен личный кабинет и QR-пропуск.",
-            parse_mode="HTML",
-            reply_markup=get_main_menu_keyboard(club_settings, club.id)
-        )
-
-    except Exception as e:
-        await session.rollback()
-        logger.error(f"❌ Ошибка авторизации в клубе {club.id}: {e}")
-        # Выводим точный текст ошибки в чат, чтобы мгновенно понять, если упал импорт или база данных
-        await message.answer(
-            f"⚠️ Произошла ошибка при привязке профиля.\n"
-            f"<b>Лог ошибки:</b> <code>{str(e)}</code>\n\n"
-            f"Перешлите это сообщение разработчику.",
-            parse_mode="HTML"
-        )
 
 
 @router.callback_query(F.data.startswith('schedule_'))

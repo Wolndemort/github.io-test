@@ -569,7 +569,7 @@ async def manual_add_finish(
     try:
         new_expire = datetime.now() + timedelta(days=days)
 
-        # Создаем студента с точными параметрами из конфига и last_visit
+        # ИСПРАВЛЕНО: Убрано принудительное заполнение last_visit. Теперь оно создается чистым (NULL).
         new_student = Student(
             name=name,
             club_id=club.id,
@@ -579,8 +579,7 @@ async def manual_add_finish(
             balance_lessons=count,
             expire_date=new_expire,
             can_freeze=1,
-            is_frozen=0,
-            last_visit=datetime.now()
+            is_frozen=0
         )
 
         session.add(new_student)
