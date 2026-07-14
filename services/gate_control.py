@@ -31,10 +31,18 @@ async def process_athlete_gate_pass(student_id: int, db, club_settings: dict) ->
     student_name = str(student.name)
 
     # 2. АНТИ-СПАМ (Защита от флуда тапов)
-    if student.last_visit:
+    # 2. АНТИ-СПАМ (Защита от флуда тапов)
+    # ИСПРАВЛЕНО: Защита от дефолтных пустых значений у новых пользователей
+    if student.last_visit is not None:
         last_visit_naive = student.last_visit.replace(tzinfo=None)
-        if (now_naive - last_visit_naive).total_seconds() < 10:
-            return {"success": False, "message": "⏳ Не спамьте, турникет уже обрабатывает запрос."}
+
+        # Если время визита из будущего или равно стартовой эпохе (баг инициализации БД), пропускаем
+        if last_visit_naive.year > 2000:
+            time_diff = (now_naive - last_visit_naive).total_seconds()
+
+            # Срабатывает, только если реальный визит был в диапазоне от 0 до 10 секунд назад
+            if 0 <= time_diff < 10:
+                return {"success": False, "message": "⏳ Не спамьте, турникет уже обрабатывает запрос."}
 
     # 3. ЛОГИКА ДОСРОЧНОЙ РАЗМОРОЗКИ
     is_was_frozen = False

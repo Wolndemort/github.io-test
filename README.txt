@@ -543,3 +543,4 @@ scanner_url = f"https://wolndemort.github.io/github.io-test/scanner.html{club_id
     docker compose up -d --build
     ```
 3.  Платформа автоматически проверит `healthcheck` зависимостей, поднимет веб-сервер и диспетчер aiogram на сервере.
+* Починили удаление

@@ -116,7 +116,6 @@ class PaymentOrder(Base):
         nullable=True,
         index=True
     )
-
     # ИСПРАВЛЕНО: Сделано Optional и добавлен ondelete="SET NULL"
     # Ордер на оплату не удалится (бухгалтерия сходится), но ссылка на ученика очистится
     student_id: Mapped[Optional[int]] = mapped_column(
