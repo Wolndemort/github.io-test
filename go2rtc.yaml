@@ -1,0 +1,7 @@
+streams:
+  camera1: echo://cam1.aemaykop-skud.netcraze.pro:5541/live/ch0
+  camera2: echo://cam2.aemaykop-skud.netcraze.pro:5542/live/ch0
+  camera3: echo://cam3.aemaykop-skud.netcraze.pro:5543/live/ch0
+  camera4: echo://cam4.aemaykop-skud.netcraze.pro:5544/live/ch0
+#(Префикс echo:// внутри go2rtc используется для умного автоматического
+#определения протокола через веб-прокси, если стандартный rtsp:// через облако Keenetic начнет блокироваться провайдером).
