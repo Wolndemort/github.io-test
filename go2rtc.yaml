@@ -1,5 +1,5 @@
 streams:
-  camera1: http://admin:Aemaykop2026@cam1.aemaykop-skud.netcraze.pro/live/ch0.m3u8
-  camera2: http://admin:Aemaykop2026@cam2.aemaykop-skud.netcraze.pro/live/ch0.m3u8
-  camera3: http://admin:Aemaykop2026@cam3.aemaykop-skud.netcraze.pro/live/ch0.m3u8
-  camera4: http://admin:Aemaykop2026@cam4.aemaykop-skud.netcraze.pro/live/ch0.m3u8
+  camera1: rtsp://admin:Aemaykop2026@cam1.aemaykop-skud.netcraze.pro/live/ch0?transport=http
+  camera2: rtsp://admin:Aemaykop2026@cam2.aemaykop-skud.netcraze.pro/live/ch0?transport=http
+  camera3: rtsp://admin:Aemaykop2026@cam3.aemaykop-skud.netcraze.pro/live/ch0?transport=http
+  camera4: rtsp://admin:Aemaykop2026@cam4.aemaykop-skud.netcraze.pro/live/ch0?transport=http
