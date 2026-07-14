@@ -685,18 +685,24 @@ async def process_athlete_birthday(
         club_settings: dict
 ):
     try:
-        # Валидируем формат даты и получаем объект datetime.date
+        # Валидируем формат даты
         birthday_date = datetime.strptime(message.text.strip(), "%d.%m.%Y").date()
     except ValueError:
         return await message.answer(
             "❌ Неверный формат! Введите дату строго в формате ДД.ММ.ГГГГ (например: 25.10.2015):"
         )
 
-    # Достаем накопленные данные из стейта
+    # Достаем данные из стейта
     data = await state.get_data()
     name = data.get('athlete_name')
-    club_id = data.get('current_club_id') or club.id
+
+    # ИСПРАВЛЕНО: Берем club_id ТОЛЬКО из стейта.
+    # Если там пусто, используем inspect или берём из __dict__ объекта club, чтобы не триггерить lazy load
+    club_id = data.get('current_club_id') or club.__dict__.get('id')
     user_id = message.from_user.id
+
+    # Берем имя родителя из ТГ, чтобы full_name в таблице users не был NULL
+    user_full_name = message.from_user.full_name or "Не указано"
 
     try:
         # 1. ПРОВЕРКА / АВТОПРИСУТСТВИЕ РОДИТЕЛЯ В ТАБЛИЦЕ USERS
@@ -704,38 +710,41 @@ async def process_athlete_birthday(
         user_exists = (await session.execute(user_stmt)).scalar_one_or_none()
 
         if not user_exists:
-            # Если пользователя нет в БД, создаем его, чтобы избежать ForeignKeyViolationError
             new_user = User(
-                user_id=user_id
-                # Если в модели User есть другие обязательные поля без default, добавьте их сюда
+                user_id=user_id,
+                club_id=club_id,
+                full_name=user_full_name,
+                is_accepted=False,
+                is_biometric_enabled=False
             )
             session.add(new_user)
-            await session.flush()  # Фиксируем изменения в текущей сессии базы данных
+            await session.flush()  # Фиксируем родителя для ForeignKey
 
-        # 2. Создаем атлета со ВСЕМИ привязками и Днём Рождения!
-            # ИСПРАВЛЕНО: Убрано заполнение last_visit, теперь оно по дефолту будет NULL (пустым)
-            new_student = Student(
-                parent_id=user_id,
-                club_id=club_id,
-                name=name,
-                birthday=birthday_date,  # Передаем ОБЪЕКТ даты
-                expire_date=None,
-                balance_lessons=0,
-                can_freeze=1,
-                is_frozen=0
-            )
-
-            session.add(new_student)
-            await session.commit()
+        # 2. Создаем атлета
+        new_student = Student(
+            parent_id=user_id,
+            club_id=club_id,
+            name=name,
+            birthday=birthday_date,
+            expire_date=None,
+            balance_lessons=0,
+            can_freeze=1,
+            is_frozen=0,
+            discipline="boxing"
+        )
+        session.add(new_student)
+        await session.commit()  # Сохраняем в БД
 
         logger.success(f"👤 Клиент сам добавил атлета: {name} с ДР {birthday_date} (Клуб ID: {club_id})")
 
-        # Отправляем в главное меню
+        # ИСПРАВЛЕНО: Безопасно вытаскиваем имя клуба без триггера Lazy Load
+        club_name = club.__dict__.get('name') or "нашем клубе"
+
         await message.answer(
-            f"✅ Атлет <b>{name}</b> успешно зарегистрирован в <b>{club.name}</b>!\n\n"
+            f"✅ Атлет <b>{name}</b> успешно зарегистрирован в <b>{club_name}</b>!\n\n"
             "Теперь вы можете купить абонемент или сформировать QR-пропуск в меню.",
             parse_mode="HTML",
-            reply_markup=get_main_menu_keyboard(club_settings, club.id)
+            reply_markup=get_main_menu_keyboard(club_settings, club_id)
         )
         await state.clear()
 
