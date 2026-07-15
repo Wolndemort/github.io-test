@@ -119,7 +119,7 @@ def get_section_menu_kb(discipline_code: str, discipline_name: str):
     return builder.as_markup()
 
 
-def admin_keyboard(club_settings: dict, club_id: int, subscription_date: datetime = None):
+def admin_keyboard(club_id: int, club_settings: dict, sub_expire_str: str = None):
     builder = InlineKeyboardBuilder()
 
     # ⚙️ Достаем фичи из конфига
@@ -128,10 +128,18 @@ def admin_keyboard(club_settings: dict, club_id: int, subscription_date: datetim
     # Наивное UTC-время сервера
     now_naive = datetime.now(timezone.utc).replace(tzinfo=None)
 
+    # Конвертируем строку с датой подписки в datetime объект (без timezone)
+    subscription_date = None
+    if sub_expire_str:
+        try:
+            subscription_date = datetime.fromisoformat(sub_expire_str).replace(tzinfo=None)
+        except Exception:
+            subscription_date = None
+
     # Логика проверки активности CRM
     is_crm_active = True
     if subscription_date:
-        if subscription_date.replace(tzinfo=None) <= now_naive:
+        if subscription_date <= now_naive:
             is_crm_active = False
     else:
         is_crm_active = False
@@ -140,9 +148,9 @@ def admin_keyboard(club_settings: dict, club_id: int, subscription_date: datetim
     builder.row(types.InlineKeyboardButton(text='🛠 Настройки клуба', callback_data='admin_settings'))
     builder.row(types.InlineKeyboardButton(text="💵 Принять наличку", callback_data="admin_cash_list"))
 
-    sub_text = "💳 Продлить подписку"
+    # Формируем текст кнопки подписки
     if subscription_date:
-        days_left = (subscription_date.replace(tzinfo=None) - now_naive).days
+        days_left = (subscription_date - now_naive).days
         if days_left >= 0:
             sub_text = f"💳 Подписка: {days_left} дн. (Продлить)"
         else:
@@ -177,32 +185,27 @@ def admin_keyboard(club_settings: dict, club_id: int, subscription_date: datetim
         text="📹 Камеры (WebApp)",
         web_app=types.WebAppInfo(url=f"{base_url}/webapp/live_cam?club_id={club_id}")
     ))
-
     builder.row(types.InlineKeyboardButton(
         text="📊 Таблица (WebApp)",
         web_app=types.WebAppInfo(url=f"{base_url}/admin?club_id={club_id}")
     ))
-
     builder.row(types.InlineKeyboardButton(
         text="🗓 Расписание (WebApp)",
         web_app=types.WebAppInfo(url=f"{base_url}/webapp/schedule?club_id={club_id}")
     ))
-
     builder.row(types.InlineKeyboardButton(
         text="📈 Вся статистика клуба ",
         web_app=types.WebAppInfo(url=f"{base_url}/revenue?club_id={club_id}")
     ))
-
     builder.row(types.InlineKeyboardButton(
         text="📄 Выгрузка в Excel",
         url=f"{base_url}/stats/export/excel?club_id={club_id}"
     ))
-
     builder.row(types.InlineKeyboardButton(text='🔙 Назад', callback_data='begin'))
 
-    # Настраиваем сетку инлайн кнопок
     builder.adjust(1)
     return builder.as_markup()
+
 
 
 # --- НАДСТРОЙКА: НАДЁЖНАЯ ФУНКЦИЯ ДЛЯ НИЖНЕЙ КНОПКИ СКУД ---

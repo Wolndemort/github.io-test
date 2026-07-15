@@ -380,7 +380,6 @@ async def export_database(
             os.remove(file_path)
 
 
-
 @router.callback_query(F.data == 'daily_report')
 async def show_daily_report(
         callback: types.CallbackQuery,
@@ -395,7 +394,7 @@ async def show_daily_report(
     if not (is_owner or is_super_admin):
         return await callback.answer("❌ Доступ ограничен.", show_alert=True)
 
-    # 2. Анти-спам защита (Rate Limit на 5 секунд), чтобы админы не ложили БД частыми кликами
+    # 2. Anti-spam защита (Rate Limit на 5 секунд), чтобы админы не ложили БД частыми кликами
     lock_key = f"lock:report:{club.id}"
     if await redis.get(lock_key):
         return await callback.answer("⏳ Секунду, данные загружаются...", show_alert=False)
@@ -407,7 +406,7 @@ async def show_daily_report(
         start_of_yesterday = start_of_today - timedelta(days=1)
         sleeping_threshold = now - timedelta(days=14)
 
-        # 3. Базовые визиты и действующие абонементы (из твоего старого метода)
+        # 3. Базовые визиты и действующие абонементы
         visits, active_passes = await get_daily_stats(club_id=club.id, session=session)
 
         # 4. Касса за СЕГОДНЯ (сумма в копейках переводится в рубли)
@@ -466,11 +465,9 @@ async def show_daily_report(
 
         if disc_visits_rows:
             for disc_key, count in disc_visits_rows:
-                # Если у студента в базе дисциплина None, пишем заглушку
                 if not disc_key:
                     human_name = "Не определено"
                 else:
-                    # Переводим технический ключ (bjj, boxing) в человеческое название из JSONB
                     human_name = config_disciplines.get(str(disc_key).lower(), {}).get("name", disc_key)
 
                 visits_by_discipline_text += f" • {human_name}: <code>{count} чел.</code>\n"
@@ -503,10 +500,18 @@ async def show_daily_report(
             f"<i>⏱ Обновлено в {now.strftime('%H:%M:%S')}</i>"
         )
 
-        # 10. Обновляем старый инлайн-экран отчета
+        # 10. 🌟 ФИКС: Тянем железную дату подписки SaaS из БД для отображения в клавиатуре
+        club_db = await session.get(Club, club.id)
+        sub_expire_str = club_db.subscription_expire_at.isoformat() if club_db.subscription_expire_at else None
+
+        # Обновляем инлайн-экран отчета с правильным порядком аргументов и датой подписки
         await callback.message.edit_text(
             text=report_text,
-            reply_markup=admin_keyboard(club_id=club.id, club_settings=club_settings),
+            reply_markup=admin_keyboard(
+                club_id=club.id,
+                club_settings=club_settings,
+                sub_expire_str=sub_expire_str  # 🌟 Теперь дни подписки отобразятся верно!
+            ),
             parse_mode="HTML"
         )
         await callback.answer("Данные обновлены ✅")
