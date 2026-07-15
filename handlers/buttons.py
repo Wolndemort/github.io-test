@@ -118,8 +118,7 @@ def get_section_menu_kb(discipline_code: str, discipline_name: str):
 
     return builder.as_markup()
 
-
-def admin_keyboard(club_id: int, club_settings: dict, sub_expire_str: str = None):
+def admin_keyboard(club_id: int, club_settings: dict, subscription_date: datetime = None):
     builder = InlineKeyboardBuilder()
 
     # ⚙️ Достаем фичи из конфига
@@ -128,18 +127,10 @@ def admin_keyboard(club_id: int, club_settings: dict, sub_expire_str: str = None
     # Наивное UTC-время сервера
     now_naive = datetime.now(timezone.utc).replace(tzinfo=None)
 
-    # Конвертируем строку с датой подписки в datetime объект (без timezone)
-    subscription_date = None
-    if sub_expire_str:
-        try:
-            subscription_date = datetime.fromisoformat(sub_expire_str).replace(tzinfo=None)
-        except Exception:
-            subscription_date = None
-
     # Логика проверки активности CRM
     is_crm_active = True
     if subscription_date:
-        if subscription_date <= now_naive:
+        if subscription_date.replace(tzinfo=None) <= now_naive:
             is_crm_active = False
     else:
         is_crm_active = False
@@ -148,9 +139,9 @@ def admin_keyboard(club_id: int, club_settings: dict, sub_expire_str: str = None
     builder.row(types.InlineKeyboardButton(text='🛠 Настройки клуба', callback_data='admin_settings'))
     builder.row(types.InlineKeyboardButton(text="💵 Принять наличку", callback_data="admin_cash_list"))
 
-    # Формируем текст кнопки подписки
+    # Формируем текст кнопки подписки по чистому datetime напрямую из БД
     if subscription_date:
-        days_left = (subscription_date - now_naive).days
+        days_left = (subscription_date.replace(tzinfo=None) - now_naive).days
         if days_left >= 0:
             sub_text = f"💳 Подписка: {days_left} дн. (Продлить)"
         else:
@@ -295,7 +286,6 @@ def get_cash_options_kb(discipline_cfg: dict) -> types.InlineKeyboardMarkup:
     # Кнопка возврата в список (используем ваш callback_data)
     builder.row(types.InlineKeyboardButton(text="🔙 Назад", callback_data="admin_cash_list"))
     return builder.as_markup()
-
 
 
 def get_scanner_keyboard(club_id: int):

@@ -2,7 +2,7 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from sqlalchemy.ext.asyncio import AsyncSession
 import copy
 from datetime import time, datetime
-from sqlalchemy import select, func, and_, desc
+from sqlalchemy import  func, and_
 from services.gate_control import process_athlete_gate_pass
 from sqlalchemy.orm.attributes import flag_modified
 from handlers.skud import save_and_test_turnstile
@@ -30,6 +30,7 @@ from loguru import logger
 
 router = Router()
 
+
 @router.message(Command('admin'))
 @router.callback_query(F.data == "admin")
 async def admin_panel(
@@ -40,34 +41,26 @@ async def admin_panel(
         is_super_admin: bool,
         session: AsyncSession
 ):
-    # 1. Жесткая SaaS-проверка прав доступа
     if not (is_owner or is_super_admin):
         return
 
-    # Извлекаем message в зависимости от типа события (текст или нажатие кнопки)
     message = event.message if isinstance(event, types.CallbackQuery) else event
 
-    # Отжимаем крутилку на инлайн-кнопке моментально
     if isinstance(event, types.CallbackQuery):
         await event.answer()
 
     try:
-        # 2. Агрегируем свежую оперативную статистику из базы данных
         all_users = await get_all_users_count(club_id=club.id, session=session)
         active_subs = await get_active_subs_count(club_id=club.id, session=session)
         club_name = club_settings.get("ui", {}).get("club_name") or club.name
 
-        # --- РАСЧЕТ ОСТАТКА ПОДПИСКИ CRM ---
         sub_end = club.subscription_expire_at
         if sub_end:
-            # Убираем таймзону для честного вычитания дат naive datetime на Аэзе
             days_left = (sub_end.replace(tzinfo=None) - datetime.now().replace(tzinfo=None)).days
             sub_info = f"<code>до {sub_end.strftime('%d.%m.%Y')} ({max(0, days_left)} дн.)</code>"
         else:
             sub_info = "<code>не активна</code>"
-        # ----------------------------------
 
-        # 3. Формируем красивый итоговый текст для босса
         text = (
             f"📈 <b>Панель управления: {club_name}</b>\n\n"
             f"🔐 Подписка CRM: {sub_info}\n"
@@ -76,60 +69,54 @@ async def admin_panel(
             "Чего желаете, босс?"
         )
 
-        # 4. Отправляем инлайн-меню с настройками и статистикой
         await message.answer(
             text=text,
             reply_markup=admin_keyboard(
-                club_settings=club_settings,  # Первым — словарь настроек
-                club_id=club.id,  # Вторым — числовой ID клуба
-                subscription_date=sub_end  # Третьим — дата окончания подписки
+                club_id=club.id,
+                club_settings=club_settings,
+                subscription_date=sub_end  # 🌟 Железный проброс даты напрямую из БД
             ),
             parse_mode="HTML"
         )
 
-        # 5. ФИКС: Выкатываем нативную нижнюю панель СКУД-сканера, откуда сработает sendData
         await message.answer(
             text="📸 Нативная панель СКУД активирована внизу экрана.",
             reply_markup=get_scanner_keyboard(club_id=club.id)
         )
 
     except Exception as e:
-        logger.error(f"❌ Критическая ошибка в админ-панели клуба {club.id}: {e}", exc_info=True)
+        logger.error(f"❌ Критическая ошибка в admin_panel для клуба {club.id}: {e}", exc_info=True)
 
 
-@router.callback_query(F.data == "admin_keyboard")
+@router.callback_query(F.data == "back_to_admin")
 async def back_to_admin_main_menu(
         callback: types.CallbackQuery,
+        club: Club,
         club_settings: dict,
-        club: Club,  # Объект из мидлвари
         is_owner: bool,
         is_super_admin: bool
 ):
-    # Жесткая SaaS-проверка прав
     if not (is_owner or is_super_admin):
-        await callback.answer("У вас нет доступа!", show_alert=True)
-        return
-
-    await callback.answer()  # Сразу гасим часики на кнопке
+        return await callback.answer("❌ Доступ ограничен.", show_alert=True)
 
     club_name = club_settings.get("ui", {}).get("club_name") or club.name
 
-    # 1. Изменяем старое сообщение — возвращаем инлайн-панель управления
     await callback.message.edit_text(
-        text=f"🏠 <b>Панель управления: {club_name}</b>\nВыберите нужный раздел:",
+        text=f"⚙️ <b>Панель управления: {club_name}</b>\nВыберите нужный раздел:",
         reply_markup=admin_keyboard(
-            club_settings=club_settings,
             club_id=club.id,
-            subscription_date=club.subscription_expire_at
+            club_settings=club_settings,
+            subscription_date=club.subscription_expire_at  # 🌟 Имя совпадает, PyCharm зеленый!
         ),
         parse_mode="HTML"
     )
+    await callback.answer()
 
-    # 2. ФИКС: Отправляем новое сообщение, которое выкатит нативную кнопку сканера снизу
     await callback.message.answer(
         text="📸 Панель СКУД активирована внизу экрана.",
         reply_markup=get_scanner_keyboard(club_id=club.id)
     )
+
 
 
 @router.callback_query(F.data == "admin_settings")
