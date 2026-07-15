@@ -4,7 +4,7 @@ from services.yookassa_client import YooKassaClient
 import uuid
 from config import PROXY_URL
 from database.db import PaymentOrder, User
-from sqlalchemy import select
+from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 from loguru import logger
 from database.db import Student, Club,Subscription 
