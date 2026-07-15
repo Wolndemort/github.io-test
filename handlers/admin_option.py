@@ -1,10 +1,9 @@
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from sqlalchemy.ext.asyncio import AsyncSession
 import copy
-from datetime import datetime, time, timedelta
+from datetime import time, datetime
 from sqlalchemy import select, func, and_, desc
 from services.gate_control import process_athlete_gate_pass
-from datetime import datetime, timezone
 from sqlalchemy.orm.attributes import flag_modified
 from handlers.skud import save_and_test_turnstile
 from handlers.states import AdminStates, AdminSettings, TurnstileSetup, AdminTariffStates, AdminScheduleStates, \
@@ -384,19 +383,19 @@ async def export_database(
 
 @router.callback_query(F.data == 'daily_report')
 async def show_daily_report(
-    callback: types.CallbackQuery,
-    club,                   # Передается из нашей оптимизированной мидлвари
-    club_settings: dict,     # Передается из нашей оптимизированной мидлвари
-    is_owner: bool,
-    is_super_admin: bool,
-    session: AsyncSession,
-    redis                   # Передается из мидлвари для контроля спама кнопкой
+        callback: types.CallbackQuery,
+        club,  # Из нашей оптимизированной мидлвари (CleanClubContext)
+        club_settings: dict,  # Из нашей оптимизированной мидлвари
+        is_owner: bool,
+        is_super_admin: bool,
+        session: AsyncSession,
+        redis  # Передается из мидлвари для контроля спама кнопкой
 ):
-    # 1. Жесткая проверка прав
+    # 1. Жесткая проверка прав доступа
     if not (is_owner or is_super_admin):
         return await callback.answer("❌ Доступ ограничен.", show_alert=True)
 
-    # 2. Анти-спам защита (Rate Limit на 5 секунд), чтобы не перегружать БД кликами
+    # 2. Анти-спам защита (Rate Limit на 5 секунд), чтобы админы не ложили БД частыми кликами
     lock_key = f"lock:report:{club.id}"
     if await redis.get(lock_key):
         return await callback.answer("⏳ Секунду, данные загружаются...", show_alert=False)
@@ -408,10 +407,10 @@ async def show_daily_report(
         start_of_yesterday = start_of_today - timedelta(days=1)
         sleeping_threshold = now - timedelta(days=14)
 
-        # 3. Базовые визиты и действующие абонементы
+        # 3. Базовые визиты и действующие абонементы (из твоего старого метода)
         visits, active_passes = await get_daily_stats(club_id=club.id, session=session)
 
-        # 4. Касса за сегодня (в копейках -> в рубли)
+        # 4. Касса за СЕГОДНЯ (сумма в копейках переводится в рубли)
         today_rev_res = await session.execute(
             select(func.coalesce(func.sum(PaymentOrder.amount_kopecks), 0)).where(
                 and_(
@@ -423,7 +422,7 @@ async def show_daily_report(
         )
         revenue_today = today_rev_res.scalar_one() / 100
 
-        # 5. Касса за вчера
+        # 5. Касса за ВЧЕРА (для расчета динамики)
         yesterday_rev_res = await session.execute(
             select(func.coalesce(func.sum(PaymentOrder.amount_kopecks), 0)).where(
                 and_(
@@ -436,7 +435,7 @@ async def show_daily_report(
         )
         revenue_yesterday = yesterday_rev_res.scalar_one() / 100
 
-        # 6. Общие лимиты, просроченные и спящие клиенты одним легким SQL-запросом
+        # 6. Общее число клиентов, просроченные и спящие одним легким SQL-запросом
         stats_res = await session.execute(
             select(
                 func.count(Student.id).label("total"),
@@ -448,30 +447,63 @@ async def show_daily_report(
         )
         stats = stats_res.one()
 
-        # 7. Расчет динамики выручки
-        if revenue_today > revenue_yesterday:
-            revenue_diff_text = f"🟢 +{revenue_today - revenue_yesterday:,.0f} ₽"
-        elif revenue_today < revenue_yesterday:
-            revenue_diff_text = f"🔴 -{revenue_yesterday - revenue_today:,.0f} ₽"
-        else:
-            revenue_diff_text = "⚪️ 0 ₽"
+        # 7. 🥋 СЧИТАЕМ РЕАЛЬНЫЕ ВИЗИТЫ ПО СЕКЦИЯМ ЗА СЕГОДНЯ (Группировка SQL)
+        disc_visits_res = await session.execute(
+            select(Student.discipline, func.count(Student.id))
+            .where(
+                and_(
+                    Student.club_id == club.id,
+                    Student.last_visit >= start_of_today
+                )
+            )
+            .group_by(Student.discipline)
+        )
+        disc_visits_rows = disc_visits_res.all()
 
-        # 8. Сборка красивого интерфейсного текста отчета
+        # Собираем красивый текстовый блок с разбивкой по дисциплинам
+        config_disciplines = club_settings.get("disciplines", {})
+        visits_by_discipline_text = ""
+
+        if disc_visits_rows:
+            for disc_key, count in disc_visits_rows:
+                # Если у студента в базе дисциплина None, пишем заглушку
+                if not disc_key:
+                    human_name = "Не определено"
+                else:
+                    # Переводим технический ключ (bjj, boxing) в человеческое название из JSONB
+                    human_name = config_disciplines.get(str(disc_key).lower(), {}).get("name", disc_key)
+
+                visits_by_discipline_text += f" • {human_name}: <code>{count} чел.</code>\n"
+        else:
+            visits_by_discipline_text = " • <i>Пока никто не чекинился сегодняшним числом</i>\n"
+
+        # 8. Расчет текстового индикатора динамики кассы
+        if revenue_today > revenue_yesterday:
+            revenue_diff_text = f"🟢 +{revenue_today - revenue_yesterday:,.0f} ₽ (Выше вчера)"
+        elif revenue_today < revenue_yesterday:
+            revenue_diff_text = f"🔴 -{revenue_yesterday - revenue_today:,.0f} ₽ (Ниже вчера)"
+        else:
+            revenue_diff_text = "⚪️ На уровне вчера"
+
+        # 9. Сборка финального премиального интерфейса отчета для директора
         report_text = (
             f"📊 <b>БИЗНЕС-ОТЧЕТ: {club.name}</b>\n"
             f"📅 Дата: <code>{now.strftime('%d.%m.%Y')}</code>\n\n"
-            f"💰 <b>Касса сегодня:</b> <code>{revenue_today:,.0f} ₽</code> ({revenue_diff_text})\n"
+            f"💰 <b>Касса сегодня:</b> <code>{revenue_today:,.0f} ₽</code>\n"
+            f"⚖️ <b>Динамика:</b> <code>{revenue_diff_text}</code>\n"
             f"👤 <b>Клиентов в базе:</b> <code>{stats.total} чел.</code>\n\n"
             f"📈 <b>АКТИВНОСТЬ ЗА ДЕНЬ:</b>\n"
-            f"🚶‍♂️ Посещений зала: <code>{visits}</code>\n"
+            f"🚶‍♂️ Всего визитов: <code>{visits}</code>\n"
             f"💎 Активных абонементов: <code>{active_passes}</code>\n\n"
-            f"🚨 <b>ПРОБЛЕМНЫЕ ЗОНЫ:</b>\n"
+            f"🥋 <b>ВИЗИТЫ ПО СЕКЦИЯМ СЕГОДНЯ:</b>\n"
+            f"{visits_by_discipline_text}\n"
+            f"🚨 <b>МЕНЕДЖМЕНТ (Проверить админа):</b>\n"
             f"❌ Ноль на балансе: <code>{stats.expired} чел.</code>\n"
             f"💤 Спящие (&gt;14 дней): <code>{stats.sleeping} чел.</code>\n\n"
             f"<i>⏱ Обновлено в {now.strftime('%H:%M:%S')}</i>"
         )
 
-        # 9. Обновляем сообщение
+        # 10. Обновляем старый инлайн-экран отчета
         await callback.message.edit_text(
             text=report_text,
             reply_markup=admin_keyboard(club_id=club.id, club_settings=club_settings),
