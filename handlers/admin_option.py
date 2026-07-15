@@ -72,9 +72,9 @@ async def admin_panel(
         await message.answer(
             text=text,
             reply_markup=admin_keyboard(
-                club_id=club.id,
-                club_settings=club_settings,
-                subscription_date=sub_end  # 🌟 Железный проброс даты напрямую из БД
+                club.id,  # 1. ID клуба
+                club_settings,  # 2. Настройки
+                club.subscription_expire_at  # 3. Дата напрямую из БД
             ),
             parse_mode="HTML"
         )
@@ -104,9 +104,9 @@ async def back_to_admin_main_menu(
     await callback.message.edit_text(
         text=f"⚙️ <b>Панель управления: {club_name}</b>\nВыберите нужный раздел:",
         reply_markup=admin_keyboard(
-            club_id=club.id,
-            club_settings=club_settings,
-            subscription_date=club.subscription_expire_at  # 🌟 Имя совпадает, PyCharm зеленый!
+            club.id,  # 1. ID клуба
+            club_settings,  # 2. Настройки
+            club.subscription_expire_at  # 3. Дата напрямую из БД
         ),
         parse_mode="HTML"
     )
@@ -495,9 +495,9 @@ async def show_daily_report(
         await callback.message.edit_text(
             text=report_text,
             reply_markup=admin_keyboard(
-                club_id=club.id,
-                club_settings=club_settings,
-                sub_expire_str=sub_expire_str  # 🌟 Теперь дни подписки отобразятся верно!
+                club.id,  # 1. ID клуба
+                club_settings,  # 2. Настройки
+                club.subscription_expire_at  # 3. Дата напрямую из БД
             ),
             parse_mode="HTML"
         )
