@@ -163,7 +163,6 @@ async def send_backup_to_admin():
         logger.debug("🗑️ Временный файл бэкапа удален с диска")
 
 
-
 async def check_abon_mailing():
     """
     Рассылка уведомлений об истекающих абонементах.
@@ -425,7 +424,7 @@ async def saas_daily_morning_check():
 # добавил овнер айди для админ панели прокинул в мидлвер, я супер админ, добавил индексы,
 # добавил колонку ситинг и клуб, перебрал майн, старт,
 
-
+#Рекурентные автоплатежи
 async def saas_recurrent_payments_job(session_factory):
     """
     Ночная задача (APScheduler) для автоматического списания денег по подпискам ЮKassa.
@@ -573,7 +572,7 @@ async def saas_recurrent_payments_job(session_factory):
                 await session.rollback()
                 logger.error(f"🚨 Ошибка при обработке рекуррента для sub_id {sub.id}: {repr(e)}")
 
-
+#Авто закрытие сесии
 async def auto_close_sessions_job():
     """
     Фоновая задача для APScheduler. Запускается каждую минуту.

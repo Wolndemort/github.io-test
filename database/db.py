@@ -125,7 +125,7 @@ class PaymentOrder(Base):
     )
 
     club_id: Mapped[int] = mapped_column(ForeignKey('clubs.id'), index=True)
-
+    discipline: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     amount_kopecks: Mapped[int] = mapped_column(Integer)
     # Статусы банка: NEW, CONFIRMED, REJECTED и т.д.
     status: Mapped[str] = mapped_column(String(20), default="NEW")
@@ -359,7 +359,8 @@ async def add_abon(
         session: AsyncSession,
         club_id: int,
         club_settings: dict,
-        days_to_add: int = None  # <--- Добавили аргумент для точного срока тарифа
+        days_to_add: int = None,
+        discipline: str = None  # 🌟 КРИТИЧЕСКИЙ ФИКС: Добавили аргумент дисциплины
 ):
     """
     Универсальная функция зачисления абонемента (SaaS).
@@ -373,9 +374,12 @@ async def add_abon(
             logger.warning(f"⚠️ [Клуб {club_id}] Попытка доступа к чужому студенту ID: {student_id}")
             return None
 
-        # ИСПРАВЛЕНО: Сбрасываем часы, минуты и микросекунды в 00:00:00
-        # Чтобы часовые пояса и микросекунды не ломали логику чекинов (last_visit)
+        # Сбрасываем часы, минуты и микросекунды в 00:00:00
         now = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+
+        # 🌟 КРИТИЧЕСКИЙ ФИКС: Если передана новая дисциплина — обновляем её у студента
+        if discipline:
+            student.discipline = discipline
 
         # 2. Расчет даты продления
         if days_to_add is None:
@@ -385,23 +389,19 @@ async def add_abon(
 
         # Если абонемент еще активен — плюсуем к дате окончания. Если просрочен — отсчет от сегодняшней полночи.
         if current_expire and current_expire > now:
-            # ИСПРАВЛЕНО: Убедимся, что и старая дата тоже очищена от времени для точного расчета
             start_date = current_expire.replace(hour=0, minute=0, second=0, microsecond=0)
         else:
             start_date = now
 
         new_expire = start_date + timedelta(days=days_to_add)
 
-        # Принудительно выставляем конец дня или чистую полночь
+        # Принудительно выставляем конец дня
         student.expire_date = new_expire.replace(hour=23, minute=59, second=59, microsecond=0)
 
-        # 3. Логика занятий (Сверяем с маркером безлимита 999)
+        # 3. Логика занятия (Сверяем с маркером безлимита 999)
         if lessons_count == 999:
-            # Режим безлимита (у вас маркер 999)
             student.balance_lessons = 999
         else:
-            # Если у пользователя до этого был безлимит (999), а сейчас он купил обычный лимит,
-            # мы обнуляем прошлый безлимит, чтобы не складывать числа с 999.
             current_balance = student.balance_lessons or 0
             if current_balance == 999:
                 current_balance = 0
@@ -419,7 +419,7 @@ async def add_abon(
         await session.commit()
 
         logger.info(
-            f"✅ [Клуб {club_id}] Продлен: {student.name} | До: {new_expire.strftime('%d.%m.%Y')} | Занятий: {student.balance_lessons}")
+            f"✅ [Клуб {club_id}] Продлен: {student.name} | Направление: {student.discipline} | До: {new_expire.strftime('%d.%m.%Y')} | Занятий: {student.balance_lessons}")
 
         return new_expire.strftime('%d.%m.%Y'), student.parent_id
 

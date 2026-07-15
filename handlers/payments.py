@@ -46,21 +46,28 @@ async def show_sections(
         parse_mode="HTML"
     )
 
-# 🔥 ФИКС: Все декораторы и функции стоят ровно, тело функции выровнено по стандарту PEP 8
 @router.callback_query(F.data.startswith('buy_'))
-async def select_athlete_handler(callback: types.CallbackQuery, state: FSMContext, session: AsyncSession):
-    discipline_code = callback.data.split('_')[1] # boxing, kickboxing и т.д.
+async def select_athlete_handler(
+    callback: types.CallbackQuery,
+    state: FSMContext,
+    session: AsyncSession,
+    club_id: int  # 🌟 Из нашей оптимизированной мидлвари! Без этого нельзя!
+):
+    discipline_code = callback.data.split('_')[1]  # boxing, kickboxing и т.д.
     await state.update_data(sport_type=discipline_code)
 
-    # Ищем детей этого родителя в БД (с фильтром по parent_id)
-    from database.db import Student
-    res = await session.execute(select(Student).where(Student.parent_id == callback.from_user.id))
+    # 🌟 ФИКС: Жестко ищем детей только этого родителя И строго в рамках текущего КЛУБА
+    res = await session.execute(
+        select(Student)
+        .where(Student.parent_id == callback.from_user.id)
+        .where(Student.club_id == club_id)  # <--- Защита от смешивания данных разных клубов
+    )
     students = res.scalars().all()
 
     # ПОДСТРАХОВКА: Если детей в базе еще нет
     if not students:
         return await callback.answer(
-            "🙋‍♂️ У вас еще не зарегистрировано ни одного атлета!\n"
+            "🙋‍♂️ У вас еще не зарегистрировано ни одного атлета в этом клубе!\n"
             "Пожалуйста, сначала добавьте ребенка в личном кабинете.",
             show_alert=True
         )
@@ -68,6 +75,10 @@ async def select_athlete_handler(callback: types.CallbackQuery, state: FSMContex
     # Генерируем клавиатуру ТОЛЬКО из реальных детей
     kb = InlineKeyboardBuilder()
     for s in students:
+        # 🌟 СТРАХОВКА: Чтобы не превысить лимит 64 байта в callback_data,
+        # если имя дисциплины короткое (box, kick, bjj, yoga), можно зашить его в кнопку.
+        # Формат: set_at_[student_id]_[short_discipline]
+        # Если боитесь за лимит байт, оставляем просто s.id, но фильтр по club_id выше — ОБЯЗАТЕЛЕН.
         kb.row(types.InlineKeyboardButton(text=f"👦 {s.name}", callback_data=f"set_at_{s.id}"))
 
     # Добавим кнопку возврата назад к выбору секций для удобства
@@ -87,19 +98,44 @@ async def select_athlete_handler(callback: types.CallbackQuery, state: FSMContex
 
 @router.callback_query(F.data.startswith('set_at_'))
 async def athlete_chosen_handler(callback: types.CallbackQuery, state: FSMContext, club_settings: dict):
-    target = callback.data.split('_')[2]
+    parts = callback.data.split('_')
+    target = parts[2]
     student_id = callback.from_user.id if target == "me" else int(target)
 
-    # ВОТ ТУТ МЫ ПОБЕЖДАЕМ NONE
-    await state.update_data(student_id=student_id)
+    # 🌟 ФИКС: Гарантированно вытаскиваем дисциплину из кнопки (если есть) или из FSM стейта
+    if len(parts) > 3:
+        sport_type = parts[3]
+    else:
+        data = await state.get_data()
+        sport_type = data.get('sport_type')
 
-    data = await state.get_data()
-    discipline_cfg = club_settings.get("disciplines", {}).get(data['sport_type'])
+    # Жесткая подстраховка: если дисциплину вообще нигде не нашли, вежливо возвращаем к началу
+    if not sport_type:
+        return await callback.answer(
+            "⚠️ Сессия устарела. Пожалуйста, выберите секцию заново.",
+            show_alert=True
+        )
 
-    # Показываем твою клавиатуру (8 зан, 12 зан и т.д.)
-    markup = get_pay_options_kb(discipline_cfg, data['sport_type'])
-    await callback.message.edit_text(f"🥋 Секция: <b>{discipline_cfg['name']}</b>\nВыберите тариф:", reply_markup=markup,
-                                     parse_mode="HTML")
+    # Жестко фиксируем в стейт оба параметра — и студента, и спорт
+    await state.update_data(student_id=student_id, sport_type=sport_type)
+
+    # Спокойно берем конфиг дисциплины из настроек клуба
+    discipline_cfg = club_settings.get("disciplines", {}).get(sport_type)
+
+    if not discipline_cfg:
+        return await callback.answer("❌ Ошибка: Выбранное направление временно недоступно.", show_alert=True)
+
+    # Формируем клавиатуру тарифов (8 зан, 12 зан, безлимит)
+    markup = get_pay_options_kb(discipline_cfg, sport_type)
+
+    await callback.message.edit_text(
+        text=f"🥋 Секция: <b>{discipline_cfg.get('name', 'Спорт')}</b>\n"
+             f"Выбранный атлет: {(await state.get_data()).get('student_name', 'Ребенок')}\n\n"
+             f"Пожалуйста, выберите подходящий тарифный план 👇",
+        reply_markup=markup,
+        parse_mode="HTML"
+    )
+    await callback.answer()
 
 
 # Полностью заменяем хендлер set_limit_ на этот:
@@ -255,8 +291,10 @@ async def process_one_click_payment(callback: types.CallbackQuery, state: FSMCon
     data = await state.get_data()
     user_id = callback.from_user.id
 
-    # 1. Достаем токен сохраненной карты (rebill_id в ЮKassa — это payment_method_id)
-    from database.db import Subscription, PaymentOrder, User, Club
+    # Извлекаем тип спорта (дисциплину) из стейта
+    sport_type = data.get('sport_type')  # Сюда прилетит: 'boxing', 'kickboxing', 'bjj', 'yoga'
+
+    # 1. Достаем токен сохраненной карты (payment_method_id в ЮKassa)
     sub_res = await session.execute(select(Subscription).where(Subscription.user_id == user_id).limit(1))
     saved_card = sub_res.scalar_one_or_none()
 
@@ -302,7 +340,6 @@ async def process_one_click_payment(callback: types.CallbackQuery, state: FSMCon
     await session.commit()
 
     # 3. Вызываем фоновое списание по токену карты через ЮKassa
-    from config import PROXY_URL
     yookassa_node = YooKassaClient(
         shop_id=shop_id,
         secret_key=secret_key,
@@ -320,26 +357,31 @@ async def process_one_click_payment(callback: types.CallbackQuery, state: FSMCon
     if charge_res.get("Success") and charge_res.get("Status") == "succeeded":
         new_order.status = "CONFIRMED"
 
-        # Твоя родная функция начисления абонемента
-        from database.db import add_abon
-
+        # 🌟 КРИТИЧЕСКИЙ ФИКС: Передаем discipline в нашу обновленную функцию add_abon
         abon_result = await add_abon(
             student_id=data['student_id'],
             lessons_count=data['lesson_count'],
             session=session,
             club_id=user.club_id,
-            club_settings=club.club_settings if club else {},
-            days_to_add=data['days_to_add']
+            club_settings=club.club_settings,
+            days_to_add=data['days_to_add'],
+            discipline=sport_type  # <--- ТЕПЕРЬ ДИСЦИПЛИНА ЗАПИШЕТСЯ КОРРЕКТНО!
         )
         await session.commit()
 
         if abon_result:
             new_expire, _ = abon_result
             desc = "БЕЗЛИМИТ" if data['lesson_count'] == 999 else f"{data['lesson_count']} зан."
+
+            # Достаем понятное человеку название секции для UI
+            human_disc = club.club_settings.get("disciplines", {}).get(str(sport_type).lower(), {}).get("name",
+                                                                                                        sport_type)
+
             await callback.message.edit_text(
                 f"⚡️ <b>Оплата успешно проведена в 1 клик!</b>\n\n"
-                f"Списано: <b>{data['price']}₽</b> с вашей сохраненной карты.\n"
-                f"Абонемент (<b>{desc}</b>) успешно активирован и действует до: <b>{new_expire}</b>. 🔥"
+                f"🥋 Секция: <b>{human_disc}</b>\n"
+                f"💳 Списано: <b>{data['price']}₽</b> с вашей сохраненной карты.\n"
+                f"📦 Абонемент (<b>{desc}</b>) успешно активирован и действует до: <b>{new_expire}</b>. 🔥"
             )
         await state.clear()
     else:
@@ -405,6 +447,7 @@ async def process_official_card_payment(
     amount_kopecks = int(float(price) * 100)
     lesson_count = data['lesson_count']
     days_to_add = data['days_to_add']
+    sport_type = data.get('sport_type')  # 🌟 Извлекаем тип спорта
 
     # 1. Проверяем настройки клуба
     user_res = await session.execute(select(User).where(User.user_id == user_id))
@@ -426,41 +469,41 @@ async def process_official_card_payment(
     if not shop_id or not secret_key:
         return await callback.message.answer("⚠️ Онлайн-оплата картой временно недоступна для этого клуба.")
 
-    # 2. 🔥 ПРОВЕРЯЕМ, ЕСТЬ ЛИ СОХРАНЕННАЯ КАРТА (Как у Velvet VPN)
+    # 2. ПРОВЕРЯЕМ, ЕСТЬ ЛИ СОХРАНЕННАЯ КАРТА
     sub_query = select(Subscription).where(
-        Subscription.user_id == user_id,
-        Subscription.club_id == user.club_id,
-        Subscription.rebill_id.isnot(None)
+        and_(
+            Subscription.user_id == user_id,
+            Subscription.club_id == user.club_id,
+            Subscription.rebill_id.is_not(None)
+        )
     )
     sub_res = await session.execute(sub_query)
     saved_subscription = sub_res.scalar_one_or_none()
 
-    # Формируем уникальный ID заказа для нашей СУБД
     order_id = f"INIT_{uuid.uuid4().hex[:12].upper()}"
-
-    # Инициализируем ноду ЮKassa
     yookassa_node = YooKassaClient(shop_id=shop_id, secret_key=secret_key, proxy_url=PROXY_URL)
 
     # =====================================================================
     # СЦЕНАРИЙ Б: КАРТА ЕСТЬ -> СПИСЫВАЕМ В 1 КЛИК
     # =====================================================================
     if saved_subscription and saved_subscription.rebill_id:
-        # Создаем черновик заказа со статусом RECURRING (повторный)
         new_order = PaymentOrder(
             id=order_id, user_id=user_id, student_id=student_id, club_id=user.club_id,
             amount_kopecks=amount_kopecks, lesson_count=lesson_count, days_to_add=days_to_add,
-            status="NEW", type="RECURRING"  # Маркер повторной оплаты
+            status="NEW", type="RECURRING",
+            discipline=sport_type  # 🌟 ЗАПИСЫВАЕМ СЕКЦИЮ В ОРДЕР ПЕРЕД КЛИКОМ
         )
+
         session.add(new_order)
         await session.commit()
 
-        # Меняем текст на «прогресс-бар», чтобы юзер видел, что магия пошла
-        await callback.message.edit_text("⏳ <b>Оплата в 1 клик...</b>\n\nСписываем средства со связанной карты. Пожалуйста, подождите.", parse_mode="HTML")
+        await callback.message.edit_text(
+            "⏳ <b>Оплата в 1 клик...</b>\n\nСписываем средства со связанной карты. Пожалуйста, подождите.",
+            parse_mode="HTML")
 
         ui_cfg = club.club_settings.get("ui", {}) if club.club_settings else {}
         club_name = ui_cfg.get("club_name", club.name if club else "Фитнес-клуб")
 
-        # Вызываем скрытое списание по токену сохраненной карты
         charge_data = await yookassa_node.charge_payment(
             order_id=order_id,
             amount_kopecks=amount_kopecks,
@@ -469,24 +512,48 @@ async def process_official_card_payment(
         )
 
         if charge_data.get("Success"):
-            # Если статус 'succeeded' — ЮKassa списала деньги сразу в фоне!
             if charge_data.get("Status") == "succeeded":
-                # Здесь можно сразу выдать сообщение об успехе, 
-                # но лучше дождаться вебхука, который начислит абонемент и пришлет уведомление.
+                new_order.status = "CONFIRMED"
+
+                # 🌟 ФИКС: Если ЮKassa списала деньги моментально в фоне,
+                # мы активируем абонемент прямо ЗДЕСЬ, передавая ПРАВИЛЬНУЮ дисциплину!
+                abon_result = await add_abon(
+                    student_id=student_id,
+                    lessons_count=lesson_count,
+                    session=session,
+                    club_id=user.club_id,
+                    club_settings=club.club_settings,
+                    days_to_add=days_to_add,
+                    discipline=sport_type  # <--- Дисциплина успешно села в базу!
+                )
+                await session.commit()
+
+                if abon_result:
+                    new_expire, _ = abon_result
+                    desc = "БЕЗЛИМИТ" if lesson_count == 999 else f"{lesson_count} зан."
+                    human_disc = club.club_settings.get("disciplines", {}).get(str(sport_type).lower(), {}).get("name",
+                                                                                                                sport_type)
+
+                    await callback.message.edit_text(
+                        f"⚡️ <b>Оплата успешно проведена в 1 клик!</b>\n\n"
+                        f"🥋 Направление: <b>{human_disc}</b>\n"
+                        f"💳 Списано: <b>{price}₽</b> с вашей сохраненной карты.\n"
+                        f"📦 Абонемент (<b>{desc}</b>) успешно активирован и действует до: <b>{new_expire}</b>. 🔥"
+                    )
                 await state.clear()
                 return
             else:
-                # Если статус pending (например, банк проверяет), просто ждем вебхук
+                # Если статус pending — управление уходит на вебхук.
+                # (Чтобы вебхук не зачислил бокс, крайне рекомендую использовать Вариант №1 с колонкой в БД!)
                 await state.clear()
                 return
         else:
-            # Если списание по привязанной карте сорвалось (нет денег, карта просрочена)
             new_order.status = "REJECTED"
             await session.commit()
-            
-            # Предлагаем оплатить по старинке (ссылкой)
+
             kb = types.InlineKeyboardMarkup(inline_keyboard=[
-                [types.InlineKeyboardButton(text="💳 Ввести данные карты вручную", callback_data="pay_method_official_force_new")]
+                [types.InlineKeyboardButton(text="💳 Ввести данные карты вручную",
+                                            callback_data="pay_method_official_force_new")]
             ])
             return await callback.message.edit_text(
                 f"❌ <b>Не удалось списать оплату со связанной карты.</b>\n\n"
@@ -496,12 +563,13 @@ async def process_official_card_payment(
             )
 
     # =====================================================================
-    # СЦЕНАРИЙ А: КАРТЫ НЕТ -> ГЕНЕРИРУЕМ ССЫЛКУ (Твой стандартный код)
+    # СЦЕНАРИЙ А: КАРТЫ НЕТ -> ГЕНЕРИРУЕМ ССЫЛКУ
     # =====================================================================
     new_order = PaymentOrder(
         id=order_id, user_id=user_id, student_id=student_id, club_id=user.club_id,
         amount_kopecks=amount_kopecks, lesson_count=lesson_count, days_to_add=days_to_add,
-        status="NEW", type="FIRST"
+        status="NEW", type="FIRST",
+        discipline=sport_type  # 🌟 ЗАПИСЫВАЕМ СЕКЦИЮ В ОРДЕР ДЛЯ ВЕБХУКА
     )
     session.add(new_order)
     await session.commit()
@@ -535,15 +603,15 @@ async def process_official_card_payment(
 async def handle_receipt_submission(
         message: types.Message,
         state: FSMContext,
-        club: Club,
-        club_settings: dict
+        club,                 # Из нашей оптимизированной мидлвари
+        club_settings: dict   # Из нашей оптимизированной мидлвари
 ):
     # 1. Сбор данных из стейта плательщика
     data = await state.get_data()
     student_id = data.get('student_id')
-    sport_type = data.get('sport_type')
-    lesson_count = data.get('lesson_count', 0)  # Будет число (8, 12) или 999 для безлимита
-    days_to_add = data.get('days_to_add', 30)   # <--- ДОСТАЛИ настроенные дни (30, 45, 90)
+    sport_type = data.get('sport_type')         # Сюда прилетает: 'boxing', 'kickboxing', 'bjj', 'yoga'
+    lesson_count = data.get('lesson_count', 0)
+    days_to_add = data.get('days_to_add', 30)
     price = data.get('price', 0)
 
     photo_id = message.photo[-1].file_id
@@ -552,8 +620,6 @@ async def handle_receipt_submission(
 
     # 2. Текст уведомления для владельца клуба
     discipline_name = club_settings.get("disciplines", {}).get(sport_type, {}).get("name", "Спорт")
-
-    # Корректно скрываем маркер 999 на экране админа
     tariff_label = "<b>♾ БЕЗЛИМИТ</b>" if lesson_count == 999 else f"<b>🔢 {lesson_count} зан.</b>"
 
     admin_text = (
@@ -564,12 +630,21 @@ async def handle_receipt_submission(
         f"🆔 ID Атлета: <code>{student_id}</code>\n"
     )
 
-    # 3. Компактные кнопки для админа (без текста sport_type, строго цифры!)
-    # Формат: adm_confirm_[student_id]_[lesson_count]_[days_to_add]
+    # 🌟 КРИТИЧЕСКИЙ ФИКС: Сжимаем название секции в короткий шорткат для callback_data
+    discipline_to_shortcut = {
+        "boxing": "box",
+        "kickboxing": "kick",
+        "bjj": "bjj",
+        "yoga": "yoga"
+    }
+    shortcut = discipline_to_shortcut.get(str(sport_type).lower(), "box")
+
+    # 3. Компактные кнопки для админа
+    # Формат теперь строго: adm_confirm_[student_id]_[lesson_count]_[days_to_add]_[shortcut]
     admin_kb = InlineKeyboardBuilder()
     admin_kb.row(types.InlineKeyboardButton(
         text="✅ Подтвердить и активировать",
-        callback_data=f"adm_confirm_{student_id}_{lesson_count}_{days_to_add}") # <--- Зашили дни!
+        callback_data=f"adm_confirm_{student_id}_{lesson_count}_{days_to_add}_{shortcut}") # <--- Зашили шорткат дисциплины!
     )
     admin_kb.row(types.InlineKeyboardButton(
         text="❌ Отклонить чек",
@@ -606,8 +681,8 @@ async def handle_receipt_submission(
 async def admin_confirm_payment(
         callback: types.CallbackQuery,
         session: AsyncSession,
-        club: Club,
-        club_settings: dict
+        club,  # Из нашей оптимизированной мидлвари
+        club_settings: dict  # Из нашей оптимизированной мидлвари
 ):
     # 1. ЗАЩИТА от двойного клика по кнопке
     if any(word in (callback.message.caption or "") for word in ["✅ ОФОРМЛЕНО", "✅ ОПЛАЧЕНО", "🟢 ОДОБРЕНО"]):
@@ -618,59 +693,68 @@ async def admin_confirm_payment(
         return await callback.answer("❌ Вы не являетесь владельцем этого клуба!", show_alert=True)
 
     # 3. ПАРСИНГ данных из кнопки
-    # adm_confirm_[student_id]_[lesson_count]_[days_to_add]
+    # Формат кнопки теперь: adm_confirm_[student_id]_[lesson_count]_[days_to_add]_[disc_shortcut]
     parts = callback.data.split('_')
     try:
         student_id = int(parts[2])
         count = int(parts[3])  # Получит число занятий или 999
         days_to_add = int(parts[4])  # Получит точные дни (30, 45, 90)
+
+        # Защита: если дисциплина не передана в старой кнопке — страхуемся дефолтом
+        disc_shortcut = parts[5] if len(parts) > 5 else "box"
     except (IndexError, ValueError):
         return await callback.answer("Ошибка распаковки данных кнопки ❌", show_alert=True)
 
-    # 4. ЛОГИКА ЗАЧИСЛЕНИЯ абонемента в СУБД
+    # Маппинг коротких ключей в реальные названия дисциплин из вашего DEFAULT_CLUB_SETTINGS
+    shortcut_to_discipline = {
+        "box": "boxing",
+        "kick": "kickboxing",
+        "bjj": "bjj",
+        "yoga": "yoga"
+    }
+    target_discipline = shortcut_to_discipline.get(disc_shortcut, "boxing")
+
+    # 4. ЛОГИКА ЗАЧИСЛЕНИЯ абонемента в СУБД (Передаем дисциплину!)
+    # Чтобы логика add_abon не ломалась, мы передаем target_discipline внутрь.
+    # Убедитесь, что ваша функция add_abon принимает аргумент discipline!
     result = await add_abon(
         student_id=student_id,
         lessons_count=count,
         session=session,
         club_id=club.id,
         club_settings=club_settings,
-        days_to_add=days_to_add  # <--- ПЕРЕДАЛИ точный срок купленного тарифа!
+        days_to_add=days_to_add,
+        discipline=target_discipline  # <--- КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ
     )
 
     if result:
         new_expire, parent_id = result
 
-        # Красивый статус для админского экрана (прячем техническое 999)
+        # Красивый статус для админского экрана
         desc = "БЕЗЛИМИТ" if count == 999 else f"{count} зан."
+        human_disc = club_settings.get("disciplines", {}).get(target_discipline, {}).get("name", target_discipline)
 
         # 5. UI: Полностью убираем инлайн-кнопки под фоткой чека и пишем статус
         await callback.message.edit_reply_markup(reply_markup=None)
         await callback.message.edit_caption(
-            caption=callback.message.caption + f"\n\n🟢 <b>ОДОБРЕНО АДМИНОМ!</b>\n📦 Тариф: {desc}\n📅 Продлен до: {new_expire}",
+            caption=callback.message.caption + f"\n\n🟢 <b>ОДОБРЕНО АДМИНОМ!</b>\n🥋 Направление: {human_disc}\n📦 Тариф: {desc}\n📅 Продлен до: {new_expire}",
             parse_mode="HTML"
         )
 
-        # 6. КРАСИВОЕ SaaS-УВЕДОМЛЕНИЕ ДЛЯ КЛИЕНТА (РОДИТЕЛЯ)
+        # 6. SaaS-УВЕДОМЛЕНИЕ ДЛЯ КЛИЕНТА (РОДИТЕЛЯ)
         try:
-            # Вытаскиваем имя из JSONB
             ui_club_name = club_settings.get("ui", {}).get("club_name")
-
-            # Если имя пустое или совпадает с дефолтной заглушкой — берем железное имя из колонки club.name
-            if not ui_club_name or ui_club_name == "Новый фитнес-клуб":
-                club_name = club.name
-            else:
-                club_name = ui_club_name
+            club_name = club.name if not ui_club_name or ui_club_name == "Новый фитнес-клуб" else ui_club_name
 
             await callback.bot.send_message(
                 chat_id=parent_id,
                 text=f"🥳 <b>Отличные новости!</b>\n\n"
                      f"Ваша оплата в фитнес-клуб <b>{club_name}</b> успешно проверена.\n"
-                     f"Абонемент (<b>{desc}</b>) успешно активирован и действует до: <b>{new_expire}</b>. 🔥\n\n"
+                     f"Абонемент <b>{human_disc}</b> (<b>{desc}</b>) успешно активирован и действует до: <b>{new_expire}</b>. 🔥\n\n"
                      f"<i>Ждем вас на тренировках!</i>",
                 parse_mode="HTML"
             )
         except Exception as e:
-            # Ловим любые ошибки отправки (блок бота, флуд), чтобы админ-панель не падала
             logger.error(f"Не удалось доставить уведомление пользователю {parent_id}: {e}")
 
         await callback.answer("Успешно зачислено в базу! ✅")

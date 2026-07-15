@@ -809,7 +809,8 @@ async def yookassa_webhook(request: Request, session: AsyncSession = Depends(get
                 session=session,
                 club_id=order.club_id,
                 club_settings=club_settings,
-                days_to_add=order.days_to_add
+                days_to_add=order.days_to_add,
+                discipline=order.discipline
             )
 
             # Сохраняем транзакцию. Блокировка with_for_update снимется автоматически

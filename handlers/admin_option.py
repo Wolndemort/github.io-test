@@ -1,10 +1,12 @@
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from sqlalchemy.ext.asyncio import AsyncSession
 import copy
+from datetime import datetime, time, timedelta
+from sqlalchemy import select, func, and_, desc
 from services.gate_control import process_athlete_gate_pass
 from datetime import datetime, timezone
 from sqlalchemy.orm.attributes import flag_modified
-from handlers.skud import save_and_test_turnstile, trigger_dingtian_turnstile
+from handlers.skud import save_and_test_turnstile
 from handlers.states import AdminStates, AdminSettings, TurnstileSetup, AdminTariffStates, AdminScheduleStates, \
     YooKassaSetupStates, AdminSettingsSG
 from redis.asyncio import Redis
@@ -15,7 +17,7 @@ from handlers.buttons import get_scanner_keyboard
 from aiogram.types import FSInputFile
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from database.db import get_all_users_count, get_active_subs_count, User, get_daily_stats, Student, \
-    Club
+    Club, PaymentOrder
 from sqlalchemy import select
 from handlers.buttons import admin_keyboard
 from handlers.states import AdminManualAdd
@@ -379,43 +381,110 @@ async def export_database(
             os.remove(file_path)
 
 
+
 @router.callback_query(F.data == 'daily_report')
 async def show_daily_report(
     callback: types.CallbackQuery,
-    club: Club,              # <--- Исправлено
-    club_settings: dict,     # <--- Исправлено
-    is_owner: bool,          # <--- Исправлено
-    is_super_admin: bool,    # <--- Исправлено
-    session: AsyncSession
+    club,                   # Передается из нашей оптимизированной мидлвари
+    club_settings: dict,     # Передается из нашей оптимизированной мидлвари
+    is_owner: bool,
+    is_super_admin: bool,
+    session: AsyncSession,
+    redis                   # Передается из мидлвари для контроля спама кнопкой
 ):
+    # 1. Жесткая проверка прав
     if not (is_owner or is_super_admin):
-        return await callback.answer("❌ Доступ ограничен.")
+        return await callback.answer("❌ Доступ ограничен.", show_alert=True)
+
+    # 2. Анти-спам защита (Rate Limit на 5 секунд), чтобы не перегружать БД кликами
+    lock_key = f"lock:report:{club.id}"
+    if await redis.get(lock_key):
+        return await callback.answer("⏳ Секунду, данные загружаются...", show_alert=False)
+    await redis.set(lock_key, "1", ex=5)
 
     try:
-        # 🛡️ Передаем club.id
-        visits, active = await get_daily_stats(club_id=club.id, session=session)
+        now = datetime.now()
+        start_of_today = datetime.combine(now.date(), time.min)
+        start_of_yesterday = start_of_today - timedelta(days=1)
+        sleeping_threshold = now - timedelta(days=14)
 
+        # 3. Базовые визиты и действующие абонементы
+        visits, active_passes = await get_daily_stats(club_id=club.id, session=session)
+
+        # 4. Касса за сегодня (в копейках -> в рубли)
+        today_rev_res = await session.execute(
+            select(func.coalesce(func.sum(PaymentOrder.amount_kopecks), 0)).where(
+                and_(
+                    PaymentOrder.club_id == club.id,
+                    PaymentOrder.status == "CONFIRMED",
+                    PaymentOrder.created_at >= start_of_today
+                )
+            )
+        )
+        revenue_today = today_rev_res.scalar_one() / 100
+
+        # 5. Касса за вчера
+        yesterday_rev_res = await session.execute(
+            select(func.coalesce(func.sum(PaymentOrder.amount_kopecks), 0)).where(
+                and_(
+                    PaymentOrder.club_id == club.id,
+                    PaymentOrder.status == "CONFIRMED",
+                    PaymentOrder.created_at >= start_of_yesterday,
+                    PaymentOrder.created_at < start_of_today
+                )
+            )
+        )
+        revenue_yesterday = yesterday_rev_res.scalar_one() / 100
+
+        # 6. Общие лимиты, просроченные и спящие клиенты одним легким SQL-запросом
+        stats_res = await session.execute(
+            select(
+                func.count(Student.id).label("total"),
+                func.count(Student.id).filter(Student.balance_lessons <= 0).label("expired"),
+                func.count(Student.id).filter(
+                    and_(Student.last_visit < sleeping_threshold, Student.last_visit.is_not(None))
+                ).label("sleeping")
+            ).where(Student.club_id == club.id)
+        )
+        stats = stats_res.one()
+
+        # 7. Расчет динамики выручки
+        if revenue_today > revenue_yesterday:
+            revenue_diff_text = f"🟢 +{revenue_today - revenue_yesterday:,.0f} ₽"
+        elif revenue_today < revenue_yesterday:
+            revenue_diff_text = f"🔴 -{revenue_yesterday - revenue_today:,.0f} ₽"
+        else:
+            revenue_diff_text = "⚪️ 0 ₽"
+
+        # 8. Сборка красивого интерфейсного текста отчета
         report_text = (
-            f"📊 <b>ОТЧЕТ: {club.name}</b>\n"
-            f"📅 Дата: {datetime.now().strftime('%d.%m.%Y')}\n\n"
-            f"👤 <b>Посещений сегодня:</b> <code>{visits}</code>\n"
-            f"💎 <b>Активных абонементов:</b> <code>{active}</code>\n\n"
-            f"<i>Обновлено в {datetime.now().strftime('%H:%M')}</i>"
+            f"📊 <b>БИЗНЕС-ОТЧЕТ: {club.name}</b>\n"
+            f"📅 Дата: <code>{now.strftime('%d.%m.%Y')}</code>\n\n"
+            f"💰 <b>Касса сегодня:</b> <code>{revenue_today:,.0f} ₽</code> ({revenue_diff_text})\n"
+            f"👤 <b>Клиентов в базе:</b> <code>{stats.total} чел.</code>\n\n"
+            f"📈 <b>АКТИВНОСТЬ ЗА ДЕНЬ:</b>\n"
+            f"🚶‍♂️ Посещений зала: <code>{visits}</code>\n"
+            f"💎 Активных абонементов: <code>{active_passes}</code>\n\n"
+            f"🚨 <b>ПРОБЛЕМНЫЕ ЗОНЫ:</b>\n"
+            f"❌ Ноль на балансе: <code>{stats.expired} чел.</code>\n"
+            f"💤 Спящие (&gt;14 дней): <code>{stats.sleeping} чел.</code>\n\n"
+            f"<i>⏱ Обновлено в {now.strftime('%H:%M:%S')}</i>"
         )
 
+        # 9. Обновляем сообщение
         await callback.message.edit_text(
             text=report_text,
-            # Не забывай прокидывать club.id в клавиатуру, если она того требует
             reply_markup=admin_keyboard(club_id=club.id, club_settings=club_settings),
             parse_mode="HTML"
         )
+        await callback.answer("Данные обновлены ✅")
 
     except Exception as e:
         if "message is not modified" in str(e).lower():
             await callback.answer("Данные актуальны ✅")
         else:
-            logger.error(f"❌ Ошибка отчета (Клуб {club.id}): {e}")
-            await callback.answer("⚠️ Ошибка статистики", show_alert=True)
+            logger.error(f"❌ Ошибка интерактивного отчета (Клуб {club.id}): {e}")
+            await callback.answer("⚠️ Ошибка при формировании статистики", show_alert=True)
 
 
 @router.callback_query(F.data == 'admin_add_manual')
