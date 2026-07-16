@@ -40,19 +40,24 @@ router = Router()
 async def go_to_begin(
         callback: types.CallbackQuery,
         state: FSMContext,
-        club: Club,  # <--- Достаем из мидлвари
-        club_settings: dict  # <--- Достаем из мидлвари
+        club: Club,
+        club_settings: dict
 ):
     await state.clear()
     user_name = callback.from_user.first_name
 
-    # Берем название клуба из настроек UI
-    club_name = club_settings.get("ui", {}).get("club_name", club.name)
+    # 1. Сначала пытаемся взять имя из JSON-настроек UI
+    setting_name = club_settings.get("ui", {}).get("club_name")
+
+    # 2. Если имени в UI нет ИЛИ там зашита дефолтная заглушка — берем реальное имя клуба из club.name
+    if not setting_name or setting_name == "Новый фитнес-клуб":
+        club_name = club.name
+    else:
+        club_name = setting_name
 
     await callback.message.edit_text(
         text=f"<b>{club_name}</b>\n\nС возвращением, {user_name}! Чем я могу помочь?",
         parse_mode="HTML",
-        # ПЕРЕДАЕМ АРГУМЕНТЫ В КЛАВУ:
         reply_markup=get_main_menu_keyboard(club_settings, club.id)
     )
     await callback.answer()
@@ -265,6 +270,7 @@ async def detailed_status_handler(
     except Exception as e:
         logger.error(f"❌ Ошибка в детальном статусе: {e}")
         await callback.answer("Ошибка при загрузке подробных данных")
+
 @router.callback_query(F.data.startswith('section_'))
 async def universal_section_handler(
         callback: types.CallbackQuery,
