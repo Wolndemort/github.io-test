@@ -1,13 +1,21 @@
 streams:
   camera1:
     - rtsp://admin:Aemaykop2026@192.168.1.21:554/11
+    - rtsp://admin:Aemaykop2026@192.168.1.21:554/h264_stream
+    - rtsp://admin:Aemaykop2026@192.168.1.21:554/live/ch0
     - ffmpeg:camera1#video=mjpeg
   camera2:
     - rtsp://admin:Aemaykop2026@192.168.1.22:554/11
+    - rtsp://admin:Aemaykop2026@192.168.1.22:554/h264_stream
+    - rtsp://admin:Aemaykop2026@192.168.1.22:554/live/ch0
     - ffmpeg:camera2#video=mjpeg
   camera3:
     - rtsp://admin:Aemaykop2026@192.168.1.23:554/11
+    - rtsp://admin:Aemaykop2026@192.168.1.23:554/h264_stream
+    - rtsp://admin:Aemaykop2026@192.168.1.23:554/live/ch0
     - ffmpeg:camera3#video=mjpeg
   camera4:
     - rtsp://admin:Aemaykop2026@192.168.1.24:554/11
+    - rtsp://admin:Aemaykop2026@192.168.1.24:554/h264_stream
+    - rtsp://admin:Aemaykop2026@192.168.1.24:554/live/ch0
     - ffmpeg:camera4#video=mjpeg
