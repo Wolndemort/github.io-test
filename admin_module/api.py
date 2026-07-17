@@ -475,7 +475,7 @@ async def get_cameras_page(request: Request, club_id: int = Query(...)):
     return templates.TemplateResponse("cameras.html", {"request": request, "club_id": club_id})
 
 
-# 2. Роут генерации стрима (ПОЛНОСТЬЮ ОБНОВЛЁННЫЙ ПРОКСИ-ВАРИАНТ)
+# 2. Роут генерации стрима
 @router.get("/webapp/live_cam/stream")
 async def video_stream(
         club_id: int = Query(...),
@@ -494,29 +494,98 @@ async def video_stream(
 
     # Берем имя камеры из club_settings. Если там пусто, ставим дефолтное "camera1"
     settings = club.club_settings or {}
-    camera_src = settings.get("turnstile", {}).get("camera_src", "camera1")
+    turnstile_settings = settings.get("turnstile", {})
+    if not isinstance(turnstile_settings, dict):
+        turnstile_settings = {}
+    camera_src = turnstile_settings.get("camera_src") or "camera1"
 
-    # Внутренний URL в сети Docker (смартфон его не видит, но FastAPI до него достучится)
-    go2rtc_mjpeg_api = f"http://gym_go2rtc:1984/api/stream.mjpeg?src={camera_src}"
+    # Смартфон не видит внутреннюю Docker-сеть. Поэтому FastAPI сам подключается
+    # к go2rtc и передает полученные байты наружу без изменения.
+    go2rtc_mjpeg_api = "http://gym_go2rtc:1984/api/stream.mjpeg"
+    timeout = httpx.Timeout(connect=10.0, read=None, write=10.0, pool=10.0)
+    client = httpx.AsyncClient(timeout=timeout)
 
-    # Асинхронный генератор-мост
+    try:
+        request = client.build_request(
+            "GET",
+            go2rtc_mjpeg_api,
+            params={"src": camera_src}
+        )
+        response = await client.send(request, stream=True)
+    except httpx.RequestError as exc:
+        await client.aclose()
+        logger.error(
+            "Не удалось подключиться к go2rtc: club_id={}, camera_src={}, error={}",
+            club_id,
+            camera_src,
+            exc
+        )
+        raise HTTPException(
+            status_code=502,
+            detail="Сервис камер временно недоступен"
+        ) from exc
+
+    if response.status_code != 200:
+        status_code = response.status_code
+        await response.aclose()
+        await client.aclose()
+        logger.error(
+            "go2rtc не отдал MJPEG-поток: club_id={}, camera_src={}, status={}",
+            club_id,
+            camera_src,
+            status_code
+        )
+        raise HTTPException(
+            status_code=502,
+            detail=f"Камера не отдала видеопоток (go2rtc: {status_code})"
+        )
+
+    # В MJPEG заголовок Content-Type содержит boundary — имя разделителя кадров.
+    # Нельзя подставлять его вручную: у разных источников оно может отличаться.
+    content_type = response.headers.get(
+        "content-type",
+        "multipart/x-mixed-replace; boundary=frame"
+    )
+
+    if "multipart/x-mixed-replace" not in content_type.lower():
+        await response.aclose()
+        await client.aclose()
+        logger.error(
+            "go2rtc вернул неожиданный Content-Type: club_id={}, camera_src={}, content_type={}",
+            club_id,
+            camera_src,
+            content_type
+        )
+        raise HTTPException(
+            status_code=502,
+            detail="Камера доступна, но не отдает MJPEG. Проверьте кодек в go2rtc"
+        )
+
     async def stream_generator():
-        async with httpx.AsyncClient(timeout=None) as client:
-            try:
-                async with client.stream("GET", go2rtc_mjpeg_api) as response:
-                    if response.status_code != 200:
-                        return
+        try:
+            # aiter_raw сохраняет multipart-разметку и границы JPEG-кадров как есть.
+            async for chunk in response.aiter_raw():
+                yield chunk
+        except httpx.HTTPError as exc:
+            logger.warning(
+                "MJPEG-поток оборвался: club_id={}, camera_src={}, error={}",
+                club_id,
+                camera_src,
+                exc
+            )
+        finally:
+            await response.aclose()
+            await client.aclose()
 
-                    # Читаем байты по кусочкам из go2rtc и транслируем в телефон админа
-                    async for chunk in response.aiter_bytes():
-                        yield chunk
-            except httpx.RequestError:
-                return
-
-    # Отдаем поток с правильным MJPEG заголовком
+    # X-Accel-Buffering запрещает Nginx копить кадры в буфере.
     return StreamingResponse(
         stream_generator(),
-        media_type="multipart/x-mixed-replace; boundary=--frame"
+        headers={
+            "Content-Type": content_type,
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+            "X-Accel-Buffering": "no"
+        }
     )
 
 

@@ -63,7 +63,8 @@ DEFAULT_CLUB_SETTINGS = {
          "password": "", #заполняется через админку (фсм)
          "relay_index": 1, # первое реле слева
          "pulse_time_seconds": 1, #время откртия
-         "timeout_seconds": 5  #таймаут ожидания ответа клуба
+         "timeout_seconds": 5,  #таймаут ожидания ответа клуба
+         "camera_src": "camera1"  #имя потока из go2rtc.yaml
     }
 }
 

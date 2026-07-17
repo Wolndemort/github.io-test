@@ -68,11 +68,66 @@
             display: block;
         }
 
+        .camera-status {
+            position: absolute;
+            inset: 0;
+            z-index: 2;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
+            padding: 24px;
+            box-sizing: border-box;
+            background: rgba(0, 0, 0, 0.82);
+            color: #f2f2f7;
+            text-align: center;
+            transition: opacity 0.2s ease;
+        }
+
+        .camera-status.hidden {
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        .spinner {
+            width: 28px;
+            height: 28px;
+            border: 3px solid rgba(255, 255, 255, 0.25);
+            border-top-color: #34c759;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+
+        .camera-status.error .spinner {
+            display: none;
+        }
+
+        .retry-button {
+            display: none;
+            border: 0;
+            border-radius: 8px;
+            padding: 9px 14px;
+            background: #0a84ff;
+            color: #ffffff;
+            font: inherit;
+            font-weight: 600;
+            cursor: pointer;
+        }
+
+        .camera-status.error .retry-button {
+            display: inline-block;
+        }
+
         /* Анимация пульсации для плашки LIVE */
         @keyframes pulse {
             0% { opacity: 1; }
             50% { opacity: 0.6; }
             100% { opacity: 1; }
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
         }
     </style>
 </head>
@@ -85,18 +140,83 @@
     </div>
 
     <div class="video-container">
-        <!-- Запрашиваем поток с нашего нового эндпоинта, передавая club_id -->
-        <img class="video-stream" src="/webapp/live_cam/stream?club_id={{club_id}}" alt="Подключение к камере..."/>
-
-
+        <div id="camera-status" class="camera-status" role="status">
+            <span class="spinner" aria-hidden="true"></span>
+            <span id="camera-status-text">Подключение к камере…</span>
+            <button id="retry-button" class="retry-button" type="button">Повторить</button>
+        </div>
+        <img
+            id="camera-stream"
+            class="video-stream"
+            src="/webapp/live_cam/stream?club_id={{ club_id }}"
+            alt="Прямая трансляция с камеры"
+        />
     </div>
 
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <script>
-        // Инициализируем WebApp Telegram, чтобы он понимал, что страница загрузилась
-        const webapp = window.Telegram.WebApp;
-        webapp.ready();
-        webapp.expand(); // Автоматически раскрываем WebApp на весь экран телефона
+        const cameraStream = document.getElementById('camera-stream');
+        const cameraStatus = document.getElementById('camera-status');
+        const cameraStatusText = document.getElementById('camera-status-text');
+        const retryButton = document.getElementById('retry-button');
+        const streamUrl = cameraStream.getAttribute('src');
+        let connectionTimeout;
+        let frameWatcher;
+
+        function showConnecting() {
+            cameraStatus.classList.remove('hidden', 'error');
+            cameraStatusText.textContent = 'Подключение к камере…';
+            clearTimeout(connectionTimeout);
+            clearInterval(frameWatcher);
+
+            // У MJPEG событие load ведет себя по-разному в разных WebView.
+            // Поэтому дополнительно проверяем, появился ли декодированный кадр.
+            frameWatcher = setInterval(() => {
+                if (cameraStream.naturalWidth > 0) {
+                    clearInterval(frameWatcher);
+                    clearTimeout(connectionTimeout);
+                    cameraStatus.classList.add('hidden');
+                }
+            }, 250);
+
+            connectionTimeout = setTimeout(() => {
+                clearInterval(frameWatcher);
+                showError('Камера не ответила за 15 секунд');
+            }, 15000);
+        }
+
+        function showError(message) {
+            clearTimeout(connectionTimeout);
+            clearInterval(frameWatcher);
+            cameraStatus.classList.remove('hidden');
+            cameraStatus.classList.add('error');
+            cameraStatusText.textContent = message;
+        }
+
+        cameraStream.addEventListener('load', () => {
+            clearTimeout(connectionTimeout);
+            clearInterval(frameWatcher);
+            cameraStatus.classList.add('hidden');
+        });
+
+        cameraStream.addEventListener('error', () => {
+            showError('Не удалось получить видеопоток');
+        });
+
+        retryButton.addEventListener('click', () => {
+            showConnecting();
+            const separator = streamUrl.includes('?') ? '&' : '?';
+            cameraStream.src = `${streamUrl}${separator}_=${Date.now()}`;
+        });
+
+        showConnecting();
+
+        // Страница также остается удобной для проверки в обычном браузере.
+        if (window.Telegram && window.Telegram.WebApp) {
+            const webapp = window.Telegram.WebApp;
+            webapp.ready();
+            webapp.expand();
+        }
     </script>
 </body>
 </html>

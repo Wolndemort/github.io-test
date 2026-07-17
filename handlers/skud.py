@@ -78,7 +78,15 @@ async def save_and_test_turnstile(
     else:
         current_settings = {}
 
-        # 2. Записываем новые параметры турникета
+    # Настройка турникета и камера пока хранятся в одном JSON-разделе.
+    # Не теряем выбранную камеру при повторном сохранении адреса реле.
+    current_turnstile = current_settings.get("turnstile", {})
+    if isinstance(current_turnstile, dict):
+        new_turnstile_config["camera_src"] = current_turnstile.get("camera_src") or "camera1"
+    else:
+        new_turnstile_config["camera_src"] = "camera1"
+
+    # 2. Записываем новые параметры турникета
     current_settings["turnstile"] = new_turnstile_config
 
     try:
