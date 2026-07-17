@@ -45,6 +45,7 @@ services:
       - ./logs:/app/logs
     extra_hosts:
       - "securepay.tinkoff.ru:91.194.226.17"
+      - "host.docker.internal:host-gateway"
 
   redis:
     image: redis:7-alpine
