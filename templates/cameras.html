@@ -36,6 +36,36 @@
             color: #f2f2f7;
         }
 
+        .camera-switcher {
+            width: 100%;
+            max-width: 500px;
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 8px;
+            margin-bottom: 14px;
+        }
+
+        .camera-btn {
+            border: 0;
+            border-radius: 10px;
+            padding: 10px 8px;
+            background: #2c2c2e;
+            color: #ffffff;
+            font: inherit;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.15s ease, transform 0.15s ease;
+        }
+
+        .camera-btn.active {
+            background: #0a84ff;
+        }
+
+        .camera-btn:active {
+            transform: scale(0.98);
+        }
+
         .badge {
             background-color: #34c759; /* Зеленый индикатор LIVE */
             color: #ffffff;
@@ -139,6 +169,13 @@
         <span class="badge">Eфир</span>
     </div>
 
+    <div class="camera-switcher" role="tablist" aria-label="Выбор камеры">
+        <button class="camera-btn active" type="button" data-camera="camera1">Камера 1</button>
+        <button class="camera-btn" type="button" data-camera="camera2">Камера 2</button>
+        <button class="camera-btn" type="button" data-camera="camera3">Камера 3</button>
+        <button class="camera-btn" type="button" data-camera="camera4">Камера 4</button>
+    </div>
+
     <div class="video-container">
         <div id="camera-status" class="camera-status" role="status">
             <span class="spinner" aria-hidden="true"></span>
@@ -159,7 +196,9 @@
         const cameraStatus = document.getElementById('camera-status');
         const cameraStatusText = document.getElementById('camera-status-text');
         const retryButton = document.getElementById('retry-button');
-        const streamUrl = cameraStream.getAttribute('src');
+        const cameraButtons = Array.from(document.querySelectorAll('.camera-btn'));
+        const baseStreamUrl = '/webapp/live_cam/stream?club_id={{ club_id }}';
+        let currentCamera = 'camera1';
         let connectionTimeout;
         let frameWatcher;
 
@@ -193,6 +232,17 @@
             cameraStatusText.textContent = message;
         }
 
+        function setActiveCamera(cameraSrc) {
+            currentCamera = cameraSrc;
+            cameraButtons.forEach((button) => {
+                button.classList.toggle('active', button.dataset.camera === cameraSrc);
+            });
+
+            const separator = baseStreamUrl.includes('?') ? '&' : '?';
+            cameraStream.src = `${baseStreamUrl}${separator}camera_src=${encodeURIComponent(cameraSrc)}&_=${Date.now()}`;
+            showConnecting();
+        }
+
         cameraStream.addEventListener('load', () => {
             clearTimeout(connectionTimeout);
             clearInterval(frameWatcher);
@@ -204,12 +254,17 @@
         });
 
         retryButton.addEventListener('click', () => {
-            showConnecting();
-            const separator = streamUrl.includes('?') ? '&' : '?';
-            cameraStream.src = `${streamUrl}${separator}_=${Date.now()}`;
+            setActiveCamera(currentCamera);
+        });
+
+        cameraButtons.forEach((button) => {
+            button.addEventListener('click', () => {
+                setActiveCamera(button.dataset.camera);
+            });
         });
 
         showConnecting();
+        setActiveCamera('camera1');
 
         // Страница также остается удобной для проверки в обычном браузере.
         if (window.Telegram && window.Telegram.WebApp) {

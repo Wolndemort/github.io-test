@@ -479,6 +479,7 @@ async def get_cameras_page(request: Request, club_id: int = Query(...)):
 @router.get("/webapp/live_cam/stream")
 async def video_stream(
         club_id: int = Query(...),
+        camera_src: str | None = Query(None),
         session: AsyncSession = Depends(get_session)
 ):
     """
@@ -497,7 +498,7 @@ async def video_stream(
     turnstile_settings = settings.get("turnstile", {})
     if not isinstance(turnstile_settings, dict):
         turnstile_settings = {}
-    camera_src = turnstile_settings.get("camera_src") or "camera1"
+    camera_src = camera_src or turnstile_settings.get("camera_src") or "camera1"
 
     # Смартфон не видит внутреннюю Docker-сеть. Поэтому FastAPI сам подключается
     # к go2rtc и передает полученные байты наружу без изменения.
