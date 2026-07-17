@@ -288,18 +288,4 @@ def get_cash_options_kb(discipline_cfg: dict) -> types.InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-def get_scanner_keyboard(club_id: int):
-    builder = ReplyKeyboardBuilder()
-
-    # Полный путь к твоему сканеру на GitHub с большими пробелами
-    scanner_url = f"https://wolndemort.github.io/github.io-test/scanner.html?club_id={club_id}&v=102"
-
-    # Создаем настоящую нижнюю Reply-кнопку (из нее sendData ТОЧНО сработает)
-    builder.row(types.KeyboardButton(
-        text="📸 ОТКРЫТЬ СКАНЕР (ВХОД)",
-        web_app=types.WebAppInfo(url=scanner_url)
-    ))
-
-    # resize_keyboard делает кнопку компактной, а не огромной на весь экран
-    return builder.as_markup(resize_keyboard=True)
 

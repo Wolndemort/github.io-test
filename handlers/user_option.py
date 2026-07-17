@@ -7,9 +7,10 @@ from services.gate_control import process_athlete_gate_pass
 from aiogram.utils.keyboard import ReplyKeyboardBuilder
 from aiogram.filters import Command
 from sqlalchemy.ext.asyncio import AsyncSession
-from database.db import Student, process_student_freeze, Club, User
+from database.db import Student, process_student_freeze, Club, User, VisitLog
 from config import secret_key
 from sqlalchemy import select
+from sqlalchemy import func
 from handlers.buttons import get_main_menu_keyboard, get_profile_keyboard, get_section_menu_kb
 from aiogram.fsm.context import FSMContext
 from aiogram.types import InlineKeyboardButton, BufferedInputFile
@@ -255,6 +256,35 @@ async def detailed_status_handler(
             f"{session_status_str}"
             f"───────────────────\n\n"
         )
+
+    visit_count_stmt = select(func.count(VisitLog.id)).where(
+        VisitLog.club_id == club.id,
+        VisitLog.student_id.in_([s.id for s in students])
+    )
+    total_visits = await session.scalar(visit_count_stmt) or 0
+
+    recent_visits_stmt = (
+        select(VisitLog, Student.name)
+        .join(Student, Student.id == VisitLog.student_id)
+        .where(
+            VisitLog.club_id == club.id,
+            VisitLog.student_id.in_([s.id for s in students])
+        )
+        .order_by(VisitLog.visited_at.desc())
+        .limit(5)
+    )
+    recent_visits_rows = (await session.execute(recent_visits_stmt)).all()
+
+    visits_block = f"📚 <b>История посещений клуба:</b>\nВсего чек-инов: <b>{total_visits}</b>\n"
+    if recent_visits_rows:
+        visits_block += "\n<b>Последние 5:</b>\n"
+        for visit, student_name in recent_visits_rows:
+            visit_time = visit.visited_at.strftime("%d.%m.%Y %H:%M")
+            visits_block += f"• <b>{student_name}</b> — <code>{visit_time}</code>\n"
+    else:
+        visits_block += "\n<i>Пока нет ни одного чекина.</i>\n"
+
+    detail_text += visits_block
 
     back_keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="⬅️ Назад в Личный Кабинет", callback_data="profile")]

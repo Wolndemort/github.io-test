@@ -1,7 +1,7 @@
 import logging
 from datetime import datetime, timedelta, timezone
 from sqlalchemy import select
-from database.db import Student, Club  # Сверь пути импорта под свой проект
+from database.db import Student, Club, VisitLog  # Сверь пути импорта под свой проект
 
 logger = logging.getLogger(__name__)
 
@@ -93,6 +93,13 @@ async def process_athlete_gate_pass(student_id: int, db, club_settings: dict) ->
         student.last_visit = now_naive  # Открываем новую сессию в UTC
         balance_text = "Безлимит" if is_unlimited else f"{balance} зан."
         message_text = f"Приятной тренировки! Доступно: {balance_text}"
+
+    db.add(VisitLog(
+        student_id=student.id,
+        club_id=student.club_id,
+        visited_at=now_naive,
+        source="gate" if not is_inside_session else "repeat"
+    ))
 
     # 7. ФИКСИРУЕМ ИЗМЕНЕНИЯ В БАЗЕ ДО ЗАПРОСА К ЖЕЛЕЗУ
     try:

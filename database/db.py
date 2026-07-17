@@ -138,6 +138,19 @@ class PaymentOrder(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, server_default="now()")
 
 
+class VisitLog(Base):
+    __tablename__ = 'visit_logs'
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    student_id: Mapped[int] = mapped_column(
+        ForeignKey('students.id', ondelete="CASCADE"),
+        index=True
+    )
+    club_id: Mapped[int] = mapped_column(ForeignKey('clubs.id'), index=True)
+    visited_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, server_default="now()")
+    source: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+
+
 
 async def init_db():
     try:

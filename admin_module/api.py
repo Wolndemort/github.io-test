@@ -479,7 +479,7 @@ async def get_cameras_page(request: Request, club_id: int = Query(...)):
 @router.get("/webapp/live_cam/stream")
 async def video_stream(
         club_id: int = Query(...),
-        camera_src: str | None = Query(None),
+        camera_src: str | None = None,
         session: AsyncSession = Depends(get_session)
 ):
     """
