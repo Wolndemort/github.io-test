@@ -1,13 +1,13 @@
 streams:
   camera1:
-    - http://admin:Aemaykop2026@cam1.aemaykop-skud.netcraze.pro:80/live/ch0?transport=http&mode=mjpeg
+    - rtsp://admin:Aemaykop2026@cam1.aemaykop-skud.netcraze.pro:5541/live/ch0
     - ffmpeg:camera1#video=mjpeg
   camera2:
-    - http://admin:Aemaykop2026@cam2.aemaykop-skud.netcraze.pro:80/live/ch0?transport=http&mode=mjpeg
+    - rtsp://admin:Aemaykop2026@cam2.aemaykop-skud.netcraze.pro:5542/live/ch0
     - ffmpeg:camera2#video=mjpeg
   camera3:
-    - http://admin:Aemaykop2026@cam3.aemaykop-skud.netcraze.pro:80/live/ch0?transport=http&mode=mjpeg
+    - rtsp://admin:Aemaykop2026@cam3.aemaykop-skud.netcraze.pro:5543/live/ch0
     - ffmpeg:camera3#video=mjpeg
   camera4:
-    - http://admin:Aemaykop2026@cam4.aemaykop-skud.netcraze.pro:80/live/ch0?transport=http&mode=mjpeg
+    - rtsp://admin:Aemaykop2026@cam4.aemaykop-skud.netcraze.pro:5544/live/ch0
     - ffmpeg:camera4#video=mjpeg
