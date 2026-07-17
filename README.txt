@@ -544,3 +544,4 @@ scanner_url = f"https://wolndemort.github.io/github.io-test/scanner.html{club_id
     ```
 3.  Платформа автоматически проверит `healthcheck` зависимостей, поднимет веб-сервер и диспетчер aiogram на сервере.
 * Починили удаление
+rtsp://admin:Aemaykop2026@192.168.1.20:554/11
