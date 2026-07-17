@@ -88,7 +88,7 @@ services:
       - "1984:1984"
       - "8554:8554"
     volumes:
-      - ./go2rtc.yaml:/config.yml:ro
+      - ./go2rtc.yaml:/config/go2rtc.yaml:ro
 
 
 
