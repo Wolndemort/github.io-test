@@ -7,6 +7,13 @@
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <link rel="stylesheet" href="{{ url_for('static', path='css/mono.css') }}?v=1.0.0">
     <style>
+        {% if loading.enabled %}
+        body { visibility: hidden; }
+        #app-loader { visibility: visible; position: fixed; inset: 0; z-index: 10; display: flex; flex-direction: column; align-items: center; justify-content: center; background: #f0f0f0; }
+        #app-loader img { width: 96px; height: 96px; object-fit: contain; border-radius: 22px; margin-bottom: 18px; }
+        #app-loader .spinner { width: 28px; height: 28px; border: 3px solid #d5d5d5; border-top-color: #0088cc; border-radius: 50%; animation: spin .8s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        {% endif %}
         body { font-family: sans-serif; background: #f0f0f0; padding: 20px; text-align: center; }
         .btn { display: block; width: 100%; padding: 15px; margin: 10px 0; background: #0088cc; color: white; border: none; border-radius: 8px; font-size: 16px; cursor: pointer; }
         .student-card { background: white; padding: 15px; margin-bottom: 10px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); border: 2px solid transparent; transition: 0.3s; }
@@ -14,6 +21,7 @@
     </style>
 </head>
 <body>
+    {% if loading.enabled %}<div id="app-loader"><img src="{{ logo_url or url_for('static', path='img/logo.png') }}" onerror="this.style.display='none'"><div>{{ loading.message }}</div><div class="spinner"></div></div>{% endif %}
     <h2>Пропускной пункт клуба</h2>
 
     <div id="setup-biometry-box" style="display: none; background: #ffeeba; padding: 15px; margin-bottom: 20px; border-radius: 8px;">
@@ -32,6 +40,7 @@
     </div>
 
     <script>
+        {% if loading.enabled %}setTimeout(() => { document.body.style.visibility = 'visible'; document.getElementById('app-loader')?.remove(); }, {{ loading.duration_ms }});{% endif %}
         const tg = window.Telegram.WebApp;
         tg.expand();
 

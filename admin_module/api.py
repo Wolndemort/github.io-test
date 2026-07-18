@@ -420,10 +420,16 @@ async def webapp_schedule_page(
             })
 
     # Отдаем чистый контекст в шаблон
+    ui = settings.get("ui", {}) if isinstance(settings.get("ui", {}), dict) else {}
+    loading = ui.get("loading", {}) if isinstance(ui.get("loading", {}), dict) else {}
     context = {
         "request": request,
         "club_name": club.name or 'Без названия',
         "disciplines": parsed_disciplines
+        ,"loading": {"enabled": bool(loading.get("enabled", False)),
+                     "duration_ms": max(300, min(10000, int(loading.get("duration_ms", 1200)))),
+                     "message": str(loading.get("message", "Загружаем приложение…"))},
+        "logo_url": str(ui.get("logo_url", ""))
     }
     return templates.TemplateResponse("schedule.html", context)
 
@@ -608,13 +614,19 @@ async def get_web_app_page(request: Request, user_id: int, db: AsyncSession = De
     if not user:
         raise HTTPException(status_code=404, detail="Пользователь не найден")
 
+    club = await db.get(Club, user.club_id)
+    settings = (club.club_settings or {}) if club else {}
+    ui = settings.get("ui", {}) if isinstance(settings.get("ui", {}), dict) else {}
+    loading = ui.get("loading", {}) if isinstance(ui.get("loading", {}), dict) else {}
     # Достаем список студентов для этого родителя
     students_query = select(Student).where(Student.parent_id == user_id)
     students_result = await db.execute(students_query)
     students = students_result.scalars().all()
 
     # Рендерим HTML страницу и передаем туда список детей
-    return templates.TemplateResponse("biometric_pass.html", {"request": request, "students": students})
+    return templates.TemplateResponse("biometric_pass.html", {"request": request, "students": students,
+        "club_name": club.name if club else "", "logo_url": ui.get("logo_url", ""),
+        "loading": {"enabled": bool(loading.get("enabled", False)), "duration_ms": max(300, min(10000, int(loading.get("duration_ms", 1200)))), "message": str(loading.get("message", "Загружаем приложение…"))}})
 
 
 
@@ -654,9 +666,15 @@ async def get_biometric_page(request: Request, club_id: int, user_id: int, db: A
     students_query = select(Student).where(Student.parent_id == user_id, Student.club_id == club_id)
     students_result = await db.execute(students_query)
     students = students_result.scalars().all()
+    club = await db.get(Club, club_id)
+    settings = (club.club_settings or {}) if club else {}
+    ui = settings.get("ui", {}) if isinstance(settings.get("ui", {}), dict) else {}
+    loading = ui.get("loading", {}) if isinstance(ui.get("loading", {}), dict) else {}
 
     # Рендерим HTML и передаем туда список детей
-    return templates.TemplateResponse("biometric_pass.html", {"request": request, "students": students})
+    return templates.TemplateResponse("biometric_pass.html", {"request": request, "students": students,
+        "club_name": club.name if club else "", "logo_url": ui.get("logo_url", ""),
+        "loading": {"enabled": bool(loading.get("enabled", False)), "duration_ms": max(300, min(10000, int(loading.get("duration_ms", 1200)))), "message": str(loading.get("message", "Загружаем приложение…"))}})
 
 # 2. РОУТ ДЛЯ ОБРАБОТКИ НАЖАТИЯ И ОТКРЫТИЯ ТУРНИКЕТА
 

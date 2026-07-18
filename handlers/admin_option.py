@@ -25,6 +25,7 @@ from aiogram.fsm.context import FSMContext
 from datetime import timedelta
 from aiogram import Router, F, types
 import asyncio
+import json
 from loguru import logger
 
 
@@ -152,6 +153,7 @@ async def admin_settings_menu(callback: types.CallbackQuery, club_settings: dict
         text="⚙️ Настройка лимитов клуба",
         callback_data="manage_club_limits"  # 👈 Тот самый колбэк, который ведёт на новое меню!
     ))
+    builder.row(types.InlineKeyboardButton(text="🎨 Загрузочный экран WebApp", callback_data="configure_webapp_loading"))
 
     builder.row(types.InlineKeyboardButton(
         text="💰 Настройка тарифов",
@@ -2071,6 +2073,47 @@ async def change_limit_freeze(callback: types.CallbackQuery, state: FSMContext):
     await callback.answer()
 
 
+@router.callback_query(F.data == "configure_webapp_loading")
+async def configure_webapp_loading(callback: types.CallbackQuery, state: FSMContext, club_settings: dict):
+    ui = club_settings.get("ui", {}) or {}
+    loading = ui.get("loading", {}) or {}
+    await state.set_state(AdminSettingsSG.waiting_for_loading_config)
+    await callback.message.answer(
+        "🎨 Отправьте JSON одной строкой:\n"
+        '<code>{"enabled":true,"logo_url":"https://.../logo.png","duration_ms":1200,"message":"Загружаем приложение…"}</code>\n\n'
+        f"Сейчас: {'включён' if loading.get('enabled') else 'выключен'}.", parse_mode="HTML")
+    await callback.answer()
+
+
+@router.message(AdminSettingsSG.waiting_for_loading_config)
+async def save_webapp_loading(message: types.Message, state: FSMContext, club: Club,
+                              session: AsyncSession, redis: Redis):
+    try:
+        value = json.loads(message.text or "")
+        if not isinstance(value, dict):
+            raise ValueError
+        enabled = bool(value.get("enabled", False))
+        logo_url = str(value.get("logo_url", "")).strip()
+        duration = int(value.get("duration_ms", 1200))
+        text = str(value.get("message", "Загружаем приложение…")).strip()[:120]
+        if duration < 300 or duration > 10000:
+            return await message.answer("duration_ms должен быть от 300 до 10000.")
+    except (ValueError, TypeError, json.JSONDecodeError):
+        return await message.answer("Неверный JSON. Проверьте пример и отправьте ещё раз.")
+    settings = dict(club.club_settings or {})
+    ui = dict(settings.get("ui") or {})
+    ui["logo_url"] = logo_url
+    ui["loading"] = {"enabled": enabled, "duration_ms": duration, "message": text}
+    settings["ui"] = ui
+    db_club = await session.merge(club)
+    db_club.club_settings = settings
+    flag_modified(db_club, "club_settings")
+    await session.commit()
+    await redis.delete(f"club_config:{message.bot.token}")
+    await state.clear()
+    await message.answer("✅ Настройки загрузочного экрана WebApp сохранены.")
+
+
 @router.callback_query(F.data == "change_freeze_price")
 async def change_freeze_price(callback: types.CallbackQuery, state: FSMContext):
     await state.set_state(AdminSettingsSG.waiting_for_freeze_price)
@@ -2088,10 +2131,18 @@ async def process_freeze_price(message: types.Message, state: FSMContext, club: 
     if price < 0 or price > 100000:
         return await message.answer("Цена должна быть от 0 до 100000 ₽.")
     settings = dict(club.club_settings or {})
-    settings.setdefault("limits", {})["freeze_price_per_day"] = price
-    club.club_settings = settings
-    flag_modified(club, "club_settings")
-    await session.commit()
+    limits = dict(settings.get("limits") or {})
+    limits["freeze_price_per_day"] = price
+    settings["limits"] = limits
+    db_club = await session.merge(club)
+    db_club.club_settings = settings
+    flag_modified(db_club, "club_settings")
+    try:
+        await session.commit()
+    except Exception:
+        await session.rollback()
+        logger.exception("Ошибка сохранения цены платной заморозки")
+        return await message.answer("❌ Не удалось сохранить цену. Попробуйте ещё раз.")
     await redis.delete(f"club_config:{message.bot.token}")
     await state.clear()
     await message.answer(f"✅ Цена платной заморозки: {price:g} ₽ за день.")

@@ -12,7 +12,13 @@ DEFAULT_CLUB_SETTINGS = {
         "club_name": "Новый фитнес-клуб",
         "welcome_text": "Добро пожаловать! Выберите направление:",
         "payment_info": "+79000000000 (Имя Получателя)",  # СБП
-        "support_link": "@admin_username"
+        "support_link": "@admin_username",
+        "logo_url": "",
+        "loading": {
+            "enabled": False,
+            "duration_ms": 1200,
+            "message": "Загружаем приложение…"
+        }
     },
 
     # 3. ДИСЦИПЛИНЫ (Ключевой блок для хендлеров оплаты)
