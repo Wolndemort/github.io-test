@@ -81,3 +81,4 @@ class AdminSettingsSG(StatesGroup):
     waiting_for_freeze_step = State()      # Ждем ввод дней заморозки
     waiting_for_freeze_price = State()     # Ждем цену 1 дня платной заморозки
     waiting_for_loading_config = State()
+    waiting_for_loading_logo = State()

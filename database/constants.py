@@ -9,7 +9,7 @@ DEFAULT_CLUB_SETTINGS = {
 
     # 2. Тексты и контакты (Для каждого клуба свои)
     "ui": {
-        "club_name": "Новый фитнес-клуб",
+        "club_name": "",
         "welcome_text": "Добро пожаловать! Выберите направление:",
         "payment_info": "+79000000000 (Имя Получателя)",  # СБП
         "support_link": "@admin_username",

@@ -26,6 +26,8 @@ from datetime import timedelta
 from aiogram import Router, F, types
 import asyncio
 import json
+from uuid import uuid4
+from pathlib import Path
 from loguru import logger
 
 
@@ -53,7 +55,9 @@ async def admin_panel(
     try:
         all_users = await get_all_users_count(club_id=club.id, session=session)
         active_subs = await get_active_subs_count(club_id=club.id, session=session)
-        club_name = club_settings.get("ui", {}).get("club_name") or club.name
+        club_name = club_settings.get("ui", {}).get("club_name")
+        if not club_name or club_name == "Новый фитнес-клуб":
+            club_name = club.name or "Клуб"
 
         sub_end = club.subscription_expire_at
         if sub_end:
@@ -100,7 +104,9 @@ async def back_to_admin_main_menu(
     if not (is_owner or is_super_admin):
         return await callback.answer("❌ Доступ ограничен.", show_alert=True)
 
-    club_name = club_settings.get("ui", {}).get("club_name") or club.name
+    club_name = club_settings.get("ui", {}).get("club_name")
+    if not club_name or club_name == "Новый фитнес-клуб":
+        club_name = club.name or "Клуб"
 
     await callback.message.edit_text(
         text=f"⚙️ <b>Панель управления: {club_name}</b>\nВыберите нужный раздел:",
@@ -154,6 +160,7 @@ async def admin_settings_menu(callback: types.CallbackQuery, club_settings: dict
         callback_data="manage_club_limits"  # 👈 Тот самый колбэк, который ведёт на новое меню!
     ))
     builder.row(types.InlineKeyboardButton(text="🎨 Загрузочный экран WebApp", callback_data="configure_webapp_loading"))
+    builder.row(types.InlineKeyboardButton(text="🖼 Загрузить логотип WebApp", callback_data="upload_webapp_logo"))
 
     builder.row(types.InlineKeyboardButton(
         text="💰 Настройка тарифов",
@@ -1429,7 +1436,7 @@ async def admin_start_tariff_edit(callback: types.CallbackQuery, state: FSMConte
     elif parts[2] == "count":
         await state.set_state(AdminTariffStates.waiting_for_count)
         text = ("🔢 <b>Введите новое количество занятий.</b>\n\n"
-                "♾ Для безлимитного тарифа введите <b>999</b>.")
+                "♾ Для безлимитного тарифа напишите <b>Безлимит</b>.")
         await callback.message.answer(text=text, parse_mode="HTML")
 
     # 🔥 ДОБАВЛЯЕМ НАШУ НОВУЮ ВЕТКУ ВОЗРАСТА СЮДА
@@ -1452,10 +1459,13 @@ async def admin_start_tariff_edit(callback: types.CallbackQuery, state: FSMConte
 async def admin_save_tariff_field(message: types.Message, state: FSMContext, club_settings: dict, session, redis: Redis,
                                   bot):
     """Валидация и сохранение измененного текстового поля"""
-    if not message.text.isdigit():
+    raw_value = (message.text or "").strip().lower()
+    if field == "count" and raw_value in {"безлимит", "безлимитный", "unlimited"}:
+        val = 999
+    elif not raw_value.isdigit():
         return await message.answer("❌ Ошибка ввода! Пожалуйста, отправьте корректное целое число.")
-
-    val = int(message.text)
+    else:
+        val = int(raw_value)
     s_data = await state.get_data()
     disc_id, idx, field = s_data["disc_id"], s_data["tariff_idx"], s_data["edit_type"]
 
@@ -1530,7 +1540,7 @@ async def admin_add_tariff_days(
 
         await message.answer(
             text="<b>Шаг 3 из 4:</b> Введите лимит количества занятий для этого тарифа (например: 12).\n\n"
-                 "♾ <b>Для безлимитного тарифа введите 999.</b>",
+                 "♾ <b>Для безлимитного тарифа напишите «Безлимит».</b>",
             parse_mode="HTML"
         )
 
@@ -1542,10 +1552,13 @@ async def admin_add_tariff_count(
         message: types.Message,
         state: FSMContext
 ):
-    if not message.text.isdigit():
-        return await message.answer("❌ Количество занятий должно быть целым числом! Попробуйте еще раз:")
-
-    count = int(message.text)
+    raw_count = (message.text or "").strip().lower()
+    if raw_count in {"безлимит", "безлимитный", "unlimited"}:
+        count = 999
+    elif raw_count.isdigit():
+        count = int(raw_count)
+    else:
+        return await message.answer("❌ Введите число занятий или напишите «Безлимит».")
 
     # ИСПРАВЛЕНО: Сохраняем count в память FSM и переключаем на ввод возраста
     await state.update_data(new_count=count)
@@ -2083,6 +2096,45 @@ async def configure_webapp_loading(callback: types.CallbackQuery, state: FSMCont
         '<code>{"enabled":true,"logo_url":"https://.../logo.png","duration_ms":1200,"message":"Загружаем приложение…"}</code>\n\n'
         f"Сейчас: {'включён' if loading.get('enabled') else 'выключен'}.", parse_mode="HTML")
     await callback.answer()
+
+
+@router.callback_query(F.data == "upload_webapp_logo")
+async def upload_webapp_logo(callback: types.CallbackQuery, state: FSMContext):
+    await state.set_state(AdminSettingsSG.waiting_for_loading_logo)
+    await callback.message.answer("🖼 Отправьте изображение логотипа одним сообщением.")
+    await callback.answer()
+
+
+@router.message(AdminSettingsSG.waiting_for_loading_logo, F.photo)
+async def save_webapp_logo(message: types.Message, state: FSMContext, club: Club,
+                           session: AsyncSession, redis: Redis):
+    folder = Path("static/uploads/logos")
+    folder.mkdir(parents=True, exist_ok=True)
+    filename = f"club_{club.id}_{uuid4().hex}.jpg"
+    path = folder / filename
+    try:
+        await message.bot.download(message.photo[-1], destination=path)
+        settings = dict(club.club_settings or {})
+        ui = dict(settings.get("ui") or {})
+        ui["logo_url"] = f"/static/uploads/logos/{filename}"
+        settings["ui"] = ui
+        db_club = await session.merge(club)
+        db_club.club_settings = settings
+        flag_modified(db_club, "club_settings")
+        await session.commit()
+    except Exception:
+        await session.rollback()
+        path.unlink(missing_ok=True)
+        logger.exception("Ошибка загрузки логотипа WebApp")
+        return await message.answer("❌ Не удалось сохранить логотип. Попробуйте ещё раз.")
+    await redis.delete(f"club_config:{message.bot.token}")
+    await state.clear()
+    await message.answer("✅ Логотип загружен и сохранён.")
+
+
+@router.message(AdminSettingsSG.waiting_for_loading_logo)
+async def invalid_webapp_logo(message: types.Message):
+    await message.answer("Отправьте именно изображение логотипа (фото).")
 
 
 @router.message(AdminSettingsSG.waiting_for_loading_config)
