@@ -478,6 +478,23 @@ async def saas_recurrent_payments_job(session_factory):
                 logger.error(f"🚨 Атлет с ID {sub.student_id} подписки {sub.id} не найден!")
                 continue
 
+            # В Subscription хранится карта и сумма, но не параметры тарифа.
+            # Восстанавливаем их из последнего подтверждённого заказа.
+            latest_order_result = await session.execute(
+                select(PaymentOrder)
+                .where(
+                    PaymentOrder.student_id == sub.student_id,
+                    PaymentOrder.club_id == sub.club_id,
+                    PaymentOrder.status == "CONFIRMED",
+                )
+                .order_by(PaymentOrder.created_at.desc())
+                .limit(1)
+            )
+            latest_order = latest_order_result.scalar_one_or_none()
+            lesson_count = latest_order.lesson_count if latest_order else 8
+            days_to_add = latest_order.days_to_add if latest_order and latest_order.days_to_add else 30
+            discipline = latest_order.discipline if latest_order and latest_order.discipline else student.discipline
+
             # Фиксируем попытку списания в базу данных (внутри текущей транзакции, БЕЗ commit)
             new_order = PaymentOrder(
                 id=order_id,
@@ -485,9 +502,9 @@ async def saas_recurrent_payments_job(session_factory):
                 student_id=sub.student_id,
                 club_id=sub.club_id,
                 amount_kopecks=sub.amount_kopecks,
-                # ⚡ ИСПРАВЛЕНО: Динамически берем баланс занятий из подписки, а не хардкодим 8 уроков
-                lesson_count=getattr(sub, 'lesson_count', 8),
-                days_to_add=30,
+                lesson_count=lesson_count,
+                days_to_add=days_to_add,
+                discipline=discipline,
                 status="NEW",
                 type="RECURRENT"
             )
@@ -518,14 +535,14 @@ async def saas_recurrent_payments_job(session_factory):
                 if charge_res.get("Success") and charge_res.get("Status") == "succeeded":
                     new_order.status = "CONFIRMED"
 
-                    # Сдвигаем дату следующего ночного списания на 30 дней вперед в naive UTC
-                    sub.next_charge_at = now_naive + timedelta(days=30)
+                    # Сдвигаем дату следующего списания на срок тарифа.
+                    sub.next_charge_at = now_naive + timedelta(days=days_to_add)
 
                     # Продлеваем абонемент студенту в Postgres
                     current_expire = student.expire_date.replace(tzinfo=None) if student.expire_date else now_naive
                     base_date = current_expire if current_expire > now_naive else now_naive
 
-                    student.expire_date = base_date + timedelta(days=30)
+                    student.expire_date = base_date + timedelta(days=days_to_add)
 
                     # Зачисляем количество занятий, привязанных к этому тарифу подписки
                     if student.balance_lessons != 999:
@@ -540,7 +557,7 @@ async def saas_recurrent_payments_job(session_factory):
                                 chat_id=sub.user_id,
                                 text=f"✨ <b>Подписка успешно продлена!</b>\n\n"
                                      f"Сумма <b>{sub.amount_kopecks / 100}₽</b> успешно списана с вашей карты.\n"
-                                     f"Абонемент атлета <b>{student.name}</b> обновлен на 30 дней.\n"
+                                     f"Абонемент атлета <b>{student.name}</b> обновлен на {days_to_add} дней.\n"
                                      f"Зачислено занятий: <b>+{new_order.lesson_count} зан.</b>\n\n"
                                      f"Приятных тренировок! 💪",
                                 parse_mode="HTML"
