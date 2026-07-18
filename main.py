@@ -486,6 +486,7 @@ async def saas_recurrent_payments_job(session_factory):
                     PaymentOrder.student_id == sub.student_id,
                     PaymentOrder.club_id == sub.club_id,
                     PaymentOrder.status == "CONFIRMED",
+                    PaymentOrder.type.notlike("FREEZE%"),
                 )
                 .order_by(PaymentOrder.created_at.desc())
                 .limit(1)

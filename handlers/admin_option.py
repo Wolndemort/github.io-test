@@ -1990,17 +1990,21 @@ async def manage_club_limits_handler(callback: types.CallbackQuery, club: Club):
     # Достаем текущие значения из JSONB или берем наши дефолты
     timeout = limits.get("session_timeout_minutes", 150)
     freeze_step = limits.get("freeze_days_step", 7)
+    freeze_price = limits.get("freeze_price_per_day", 0)
 
     text = f"⚙️ <b>Управление лимитами клуба «{club.name}»</b>\n\n" \
            f"⏱ <b>Сессия визита (СКУД):</b> <code>{timeout} мин.</code> ({timeout / 60:.1f} ч.)\n" \
            f"<i>В течение этого времени повторные проходы через турникет не списывают занятия.</i>\n\n" \
            f"❄️ <b>Шаг заморозки абонемента:</b> <code>{freeze_step} дн.</code>\n" \
            f"<i>Минимальный пакет дней, на который списывается заморозка.</i>\n\n" \
+           f"💳 <b>Платная заморозка:</b> <code>{freeze_price} ₽/день</code>\n" \
+           f"<i>0 — покупка заморозки отключена.</i>\n\n" \
            f"Выберите параметр для изменения:"
 
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="⏱ Изменить время сессии", callback_data="change_limit_session")],
         [InlineKeyboardButton(text="❄️ Изменить шаг заморозки", callback_data="change_limit_freeze")],
+        [InlineKeyboardButton(text="💳 Цена 1 дня заморозки", callback_data="change_freeze_price")],
         [InlineKeyboardButton(text="⬅️ Назад в настройки", callback_data="admin_settings")]
     ])
 
@@ -2065,6 +2069,32 @@ async def change_limit_freeze(callback: types.CallbackQuery, state: FSMContext):
     await callback.message.answer("❄️ <b>Введите новый минимальный шаг заморозки в днях</b> (например, 7):",
                                   parse_mode="HTML")
     await callback.answer()
+
+
+@router.callback_query(F.data == "change_freeze_price")
+async def change_freeze_price(callback: types.CallbackQuery, state: FSMContext):
+    await state.set_state(AdminSettingsSG.waiting_for_freeze_price)
+    await callback.message.answer("💳 Введите цену одного дня заморозки в рублях (0 — отключить):")
+    await callback.answer()
+
+
+@router.message(AdminSettingsSG.waiting_for_freeze_price)
+async def process_freeze_price(message: types.Message, state: FSMContext, club: Club, session: AsyncSession,
+                               redis: Redis):
+    try:
+        price = float((message.text or "").replace(",", ".").strip())
+    except ValueError:
+        return await message.answer("Введите число, например 150 или 0.")
+    if price < 0 or price > 100000:
+        return await message.answer("Цена должна быть от 0 до 100000 ₽.")
+    settings = dict(club.club_settings or {})
+    settings.setdefault("limits", {})["freeze_price_per_day"] = price
+    club.club_settings = settings
+    flag_modified(club, "club_settings")
+    await session.commit()
+    await redis.delete(f"club_config:{message.bot.token}")
+    await state.clear()
+    await message.answer(f"✅ Цена платной заморозки: {price:g} ₽ за день.")
 
 
 # ❄️ ИСПРАВЛЕННЫЙ ХЕНДЛЕР ШАГА ЗАМОРОЗКИ (Строка 1844)

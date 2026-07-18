@@ -8,7 +8,7 @@ from services.analytics import generate_students_excel, calculate_admin_dashboar
 import hmac
 from datetime import datetime, timedelta, timezone
 from database.db import PaymentOrder, Subscription
-from database.db import add_abon
+from database.db import add_abon, purchase_student_freeze
 import hashlib
 from fastapi.responses import StreamingResponse
 import json
@@ -881,15 +881,20 @@ async def yookassa_webhook(request: Request, session: AsyncSession = Depends(get
             club_settings = club.club_settings if club else {}
 
             # 3. НАЧИСЛЯЕМ АБОНЕМЕНТ УЧЕНИКУ
-            abon_result = await add_abon(
-                student_id=order.student_id,
-                lessons_count=order.lesson_count,
-                session=session,
-                club_id=order.club_id,
-                club_settings=club_settings,
-                days_to_add=order.days_to_add,
-                discipline=order.discipline
-            )
+            if order.type.startswith("FREEZE"):
+                abon_result = await purchase_student_freeze(
+                    order.student_id, order.club_id, order.days_to_add, session
+                )
+            else:
+                abon_result = await add_abon(
+                    student_id=order.student_id,
+                    lessons_count=order.lesson_count,
+                    session=session,
+                    club_id=order.club_id,
+                    club_settings=club_settings,
+                    days_to_add=order.days_to_add,
+                    discipline=order.discipline
+                )
 
             # Сохраняем транзакцию. Блокировка with_for_update снимется автоматически
             await session.commit()
@@ -910,7 +915,8 @@ async def yookassa_webhook(request: Request, session: AsyncSession = Depends(get
                         student_name = student_obj.name if student_obj else f"ID {order.student_id}"
                         # =========================================================================
 
-                        desc = "БЕЗЛИМИТ" if order.lesson_count == 999 else f"{order.lesson_count} зан."
+                        desc = (f"заморозка на {order.days_to_add} дн." if order.type.startswith("FREEZE")
+                                else ("БЕЗЛИМИТ" if order.lesson_count == 999 else f"{order.lesson_count} зан."))
                         ui_cfg = club_settings.get("ui", {})
                         club_name = ui_cfg.get("club_name", club.name if club else "Фитнес-клуб")
 

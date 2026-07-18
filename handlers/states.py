@@ -3,6 +3,7 @@ from aiogram.fsm.state import State, StatesGroup
 
 class PaymentStates(StatesGroup):
     waiting_for_receipt = State()
+    waiting_for_freeze_days = State()
 
 
 class RegistrationStates(StatesGroup):
@@ -78,3 +79,4 @@ class AdminSettingsSG(StatesGroup):
     # Твои старые состояния (например, для ввода ключей ЮKassa)
     waiting_for_session_timeout = State()  # Ждем ввод минут сессии
     waiting_for_freeze_step = State()      # Ждем ввод дней заморозки
+    waiting_for_freeze_price = State()     # Ждем цену 1 дня платной заморозки

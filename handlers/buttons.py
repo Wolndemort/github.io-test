@@ -39,6 +39,8 @@ def get_profile_keyboard(user, club_settings: dict, is_authorized: bool = False)
 
     if features.get("online_payments", False):
         builder.row(types.InlineKeyboardButton(text='Купить абонемент 💳', callback_data='choose_section'))
+    if features.get("freeze", True) and club_settings.get("limits", {}).get("freeze_price_per_day", 0) > 0:
+        builder.row(types.InlineKeyboardButton(text='❄️ Купить заморозку', callback_data='buy_freeze'))
         # 🔥 ДОБАВИЛИ КНОПКУ УПРАВЛЕНИЯ ПОДПИСКОЙ КРУПНЫМИ БУКВАМИ
         builder.row(types.InlineKeyboardButton(text='💳 УПРАВЛЕНИЕ ПОДПИСКОЙ', callback_data='manage_subscription'))
 

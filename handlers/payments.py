@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from loguru import logger
 from database.db import Student, Club,Subscription 
 from handlers.buttons import discipline, get_pay_options_kb, get_cash_options_kb
-from database.db import add_abon
+from database.db import add_abon, purchase_student_freeze
 from aiogram.fsm.context import FSMContext
 from aiogram.types import InlineKeyboardButton
 from aiogram import Router, F, types
@@ -17,6 +17,30 @@ from handlers.states import PaymentStates
 
 
 router = Router()
+
+
+@router.message(PaymentStates.waiting_for_freeze_days)
+async def receive_paid_freeze_days(message: types.Message, state: FSMContext):
+    try:
+        days = int((message.text or "").strip())
+    except ValueError:
+        return await message.answer("Введите целое количество дней, например 14.")
+    if not 1 <= days <= 365:
+        return await message.answer("Количество дней должно быть от 1 до 365.")
+    data = await state.get_data()
+    price = float(data.get("freeze_price_per_day", 0))
+    if price <= 0:
+        await state.clear()
+        return await message.answer("Покупка заморозки сейчас недоступна.")
+    total = round(price * days, 2)
+    await state.update_data(lesson_count=0, days_to_add=days, price=total,
+                           discipline_name="Заморозка абонемента", tariff_label=f"Заморозка на {days} дн.")
+    kb = types.InlineKeyboardMarkup(inline_keyboard=[
+        [types.InlineKeyboardButton(text="💳 Оплатить картой", callback_data="pay_method_official")],
+        [types.InlineKeyboardButton(text="↩️ Оплата по СБП", callback_data="pay_method_sbp")],
+        [types.InlineKeyboardButton(text="❌ Отмена", callback_data="profile")]
+    ])
+    await message.answer(f"❄️ Заморозка на <b>{days} дней</b>\nК оплате: <b>{total:g} ₽</b>", reply_markup=kb, parse_mode="HTML")
 
 
 @router.callback_query(F.data == 'choose_section')
@@ -448,6 +472,7 @@ async def process_official_card_payment(
     lesson_count = data['lesson_count']
     days_to_add = data['days_to_add']
     sport_type = data.get('sport_type')  # 🌟 Извлекаем тип спорта
+    payment_kind = data.get("payment_kind", "SUBSCRIPTION")
 
     # 1. Проверяем настройки клуба
     user_res = await session.execute(select(User).where(User.user_id == user_id))
@@ -490,7 +515,7 @@ async def process_official_card_payment(
         new_order = PaymentOrder(
             id=order_id, user_id=user_id, student_id=student_id, club_id=user.club_id,
             amount_kopecks=amount_kopecks, lesson_count=lesson_count, days_to_add=days_to_add,
-            status="NEW", type="RECURRING",
+            status="NEW", type="FREEZE_RECURRING" if payment_kind == "FREEZE" else "RECURRING",
             discipline=sport_type  # 🌟 ЗАПИСЫВАЕМ СЕКЦИЮ В ОРДЕР ПЕРЕД КЛИКОМ
         )
 
@@ -517,20 +542,19 @@ async def process_official_card_payment(
 
                 # 🌟 ФИКС: Если ЮKassa списала деньги моментально в фоне,
                 # мы активируем абонемент прямо ЗДЕСЬ, передавая ПРАВИЛЬНУЮ дисциплину!
-                abon_result = await add_abon(
-                    student_id=student_id,
-                    lessons_count=lesson_count,
-                    session=session,
-                    club_id=user.club_id,
-                    club_settings=club.club_settings,
-                    days_to_add=days_to_add,
-                    discipline=sport_type  # <--- Дисциплина успешно села в базу!
-                )
+                if payment_kind == "FREEZE":
+                    abon_result = await purchase_student_freeze(student_id, user.club_id, days_to_add, session)
+                else:
+                    abon_result = await add_abon(
+                        student_id=student_id, lessons_count=lesson_count, session=session,
+                        club_id=user.club_id, club_settings=club.club_settings,
+                        days_to_add=days_to_add, discipline=sport_type)
                 await session.commit()
 
                 if abon_result:
                     new_expire, _ = abon_result
-                    desc = "БЕЗЛИМИТ" if lesson_count == 999 else f"{lesson_count} зан."
+                    desc = (f"заморозка на {days_to_add} дн." if payment_kind == "FREEZE"
+                            else ("БЕЗЛИМИТ" if lesson_count == 999 else f"{lesson_count} зан."))
                     human_disc = club.club_settings.get("disciplines", {}).get(str(sport_type).lower(), {}).get("name",
                                                                                                                 sport_type)
 
@@ -568,7 +592,7 @@ async def process_official_card_payment(
     new_order = PaymentOrder(
         id=order_id, user_id=user_id, student_id=student_id, club_id=user.club_id,
         amount_kopecks=amount_kopecks, lesson_count=lesson_count, days_to_add=days_to_add,
-        status="NEW", type="FIRST",
+        status="NEW", type="FREEZE_FIRST" if payment_kind == "FREEZE" else "FIRST",
         discipline=sport_type  # 🌟 ЗАПИСЫВАЕМ СЕКЦИЮ В ОРДЕР ДЛЯ ВЕБХУКА
     )
     session.add(new_order)
@@ -613,6 +637,7 @@ async def handle_receipt_submission(
     lesson_count = data.get('lesson_count', 0)
     days_to_add = data.get('days_to_add', 30)
     price = data.get('price', 0)
+    payment_kind = data.get("payment_kind", "SUBSCRIPTION")
 
     photo_id = message.photo[-1].file_id
     user_id = message.from_user.id
@@ -637,7 +662,7 @@ async def handle_receipt_submission(
         "bjj": "bjj",
         "yoga": "yoga"
     }
-    shortcut = discipline_to_shortcut.get(str(sport_type).lower(), "box")
+    shortcut = "frz" if payment_kind == "FREEZE" else discipline_to_shortcut.get(str(sport_type).lower(), "box")
 
     # 3. Компактные кнопки для админа
     # Формат теперь строго: adm_confirm_[student_id]_[lesson_count]_[days_to_add]_[shortcut]
@@ -712,26 +737,23 @@ async def admin_confirm_payment(
         "bjj": "bjj",
         "yoga": "yoga"
     }
+    is_paid_freeze = disc_shortcut == "frz"
     target_discipline = shortcut_to_discipline.get(disc_shortcut, "boxing")
 
     # 4. ЛОГИКА ЗАЧИСЛЕНИЯ абонемента в СУБД (Передаем дисциплину!)
     # Чтобы логика add_abon не ломалась, мы передаем target_discipline внутрь.
     # Убедитесь, что ваша функция add_abon принимает аргумент discipline!
-    result = await add_abon(
-        student_id=student_id,
-        lessons_count=count,
-        session=session,
-        club_id=club.id,
-        club_settings=club_settings,
-        days_to_add=days_to_add,
-        discipline=target_discipline  # <--- КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ
-    )
+    result = (await purchase_student_freeze(student_id, club.id, days_to_add, session)
+              if is_paid_freeze else await add_abon(
+                  student_id=student_id, lessons_count=count, session=session,
+                  club_id=club.id, club_settings=club_settings,
+                  days_to_add=days_to_add, discipline=target_discipline))
 
     if result:
         new_expire, parent_id = result
 
         # Красивый статус для админского экрана
-        desc = "БЕЗЛИМИТ" if count == 999 else f"{count} зан."
+        desc = f"заморозка на {days_to_add} дн." if is_paid_freeze else ("БЕЗЛИМИТ" if count == 999 else f"{count} зан.")
         human_disc = club_settings.get("disciplines", {}).get(target_discipline, {}).get("name", target_discipline)
 
         # 5. UI: Полностью убираем инлайн-кнопки под фоткой чека и пишем статус

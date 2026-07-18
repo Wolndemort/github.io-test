@@ -518,12 +518,37 @@ async def get_active_subs_count(club_id: int, session: AsyncSession):
         return 0
 
 
+async def purchase_student_freeze(
+        student_id: int,
+        club_id: int,
+        days: int,
+        session: AsyncSession,
+):
+    """Применяет уже оплаченную заморозку. Отдельно от бесплатного лимита."""
+    if days < 1:
+        return None
+    try:
+        student = await session.get(Student, student_id, with_for_update=True)
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        expire = student.expire_date.replace(tzinfo=None) if student and student.expire_date else None
+        if not student or student.club_id != club_id or not expire or expire <= now:
+            return None
+        if getattr(student, "is_frozen", 0) == 1:
+            return None
+
+        student.expire_date = student.expire_date + timedelta(days=days)
+        student.is_frozen = 1
+        student.frozen_at = now
+        await session.flush()
+        return student.expire_date, student.parent_id
+    except Exception:
+        await session.rollback()
+        logger.exception(f"Ошибка платной заморозки Student {student_id}")
+        return None
+
 async def create_db_backup() -> str | None:
     # Добавляем расширение .gz, так как файл будет сжатым архивом
     backup_path = f"backup_{datetime.now().strftime('%Y-%m-%d')}.sql.gz"
-    
-    # Добавляем | gzip > в конец команды для сжатия на лету
-    # Используем именно -h db, как прописано в сервисах docker-compose!
     db_password = os.getenv("DB_PASSWORD")
     if not db_password:
         logger.error("❌ DB_PASSWORD не задан, резервная копия отменена")

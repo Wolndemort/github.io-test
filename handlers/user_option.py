@@ -20,7 +20,7 @@ from datetime import datetime
 from loguru import logger
 import hashlib
 import hmac
-from handlers.states import RegistrationStates
+from handlers.states import RegistrationStates, PaymentStates
 from handlers.skud import trigger_dingtian_turnstile
 
 
@@ -475,6 +475,44 @@ async def choose_student_for_freeze(
         reply_markup=builder.as_markup(),
         parse_mode="HTML"
     )
+
+
+@router.callback_query(F.data == "buy_freeze")
+async def choose_student_for_paid_freeze(callback: types.CallbackQuery, session: AsyncSession, club: Club,
+                                         club_settings: dict, state: FSMContext):
+    price = club_settings.get("limits", {}).get("freeze_price_per_day", 0)
+    if not club_settings.get("features", {}).get("freeze", True) or price <= 0:
+        return await callback.answer("Покупка заморозки сейчас недоступна.", show_alert=True)
+    result = await session.execute(select(Student).where(
+        Student.parent_id == callback.from_user.id, Student.club_id == club.id
+    ).order_by(Student.name))
+    students = result.scalars().all()
+    builder = InlineKeyboardBuilder()
+    now = datetime.now()
+    available = 0
+    for student in students:
+        if student.expire_date and student.expire_date > now and not getattr(student, "is_frozen", 0):
+            builder.row(types.InlineKeyboardButton(text=f"❄️ {student.name}", callback_data=f"paid_freeze_student_{student.id}"))
+            available += 1
+    builder.row(types.InlineKeyboardButton(text="⬅️ Назад", callback_data="profile"))
+    if not available:
+        return await callback.answer("Нет активных абонементов для заморозки.", show_alert=True)
+    await callback.message.edit_text(
+        f"❄️ <b>Покупка заморозки</b>\n\nВыберите атлета, затем введите количество дней.\n"
+        f"Стоимость: <b>{price} ₽ за 1 день</b>", reply_markup=builder.as_markup(), parse_mode="HTML")
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("paid_freeze_student_"))
+async def start_paid_freeze_days(callback: types.CallbackQuery, state: FSMContext, club_settings: dict):
+    student_id = int(callback.data.rsplit("_", 1)[1])
+    price = club_settings.get("limits", {}).get("freeze_price_per_day", 0)
+    await state.update_data(student_id=student_id, payment_kind="FREEZE", freeze_price_per_day=price)
+    await state.set_state(PaymentStates.waiting_for_freeze_days)
+    await callback.message.edit_text(
+        f"Введите количество дней заморозки (от 1 до 365).\n"
+        f"Цена: <b>{price} ₽ за день</b>", parse_mode="HTML")
+    await callback.answer()
 
 
 @router.callback_query(F.data == 'show_qr')

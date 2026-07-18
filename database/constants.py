@@ -48,6 +48,7 @@ DEFAULT_CLUB_SETTINGS = {
     },
     "limits": {
         "freeze_days_step": 7,
+        "freeze_price_per_day": 0,
         "subscription_days": 30,
         "session_timeout_minutes": 150  # 👈 Добавили таймаут сессии визита в минутах
     },
