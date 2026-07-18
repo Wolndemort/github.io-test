@@ -411,15 +411,23 @@ async def add_abon(
         # Принудительно выставляем конец дня
         student.expire_date = new_expire.replace(hour=23, minute=59, second=59, microsecond=0)
 
-        # 3. Логика занятия (Сверяем с маркером безлимита 999)
+        # 3. Логика занятий.
+        # Для тарифов с ограниченным числом занятий остаток относится
+        # только к действующему периоду. Поэтому после окончания срока
+        # новый абонемент начинается с его собственного лимита, а не
+        # складывается с остатком просроченного абонемента.
+        discipline_cfg = club_settings.get("disciplines", {}).get(discipline or student.discipline, {})
+        is_lessons_tariff = discipline_cfg.get("type", "lessons") == "lessons"
         if lessons_count == 999:
             student.balance_lessons = 999
         else:
-            current_balance = student.balance_lessons or 0
-            if current_balance == 999:
-                current_balance = 0
-
-            student.balance_lessons = current_balance + lessons_count
+            if is_lessons_tariff and not (current_expire and current_expire > now):
+                student.balance_lessons = lessons_count
+            else:
+                current_balance = student.balance_lessons or 0
+                if current_balance == 999:
+                    current_balance = 0
+                student.balance_lessons = current_balance + lessons_count
 
         # 4. Сброс флагов заморозки
         student.is_frozen = 0

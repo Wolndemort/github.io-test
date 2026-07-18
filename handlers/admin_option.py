@@ -1149,7 +1149,9 @@ async def return_to_tariff_menu(message: types.Message, club_settings: dict, dis
         if d_type == "unlimited":
             t_text = f"💳 {tariff.get('days')} дн. — {tariff.get('price')} руб."
         else:
-            t_text = f"💳 {tariff.get('count')} зан. / {tariff.get('days')} дн. — {tariff.get('price')} руб."
+            count = tariff.get("count", 0)
+            count_label = "♾ Безлимит" if count == 999 else f"{count} зан."
+            t_text = f"💳 {count_label} / {tariff.get('days')} дн. — {tariff.get('price')} руб."
         builder.row(types.InlineKeyboardButton(text=t_text, callback_data=f"adm_tar_edit_{disc_id}_{idx}"))
 
     builder.row(types.InlineKeyboardButton(text="➕ Добавить тариф", callback_data=f"adm_tar_add_{disc_id}"))
@@ -1221,7 +1223,9 @@ async def admin_manage_section_tariffs(callback: types.CallbackQuery, club_setti
         if d_type == "unlimited":
             t_text = f"💳 {tariff.get('days')} дн. — {tariff.get('price')} руб."
         else:
-            t_text = f"💳 {tariff.get('count')} зан. / {tariff.get('days')} дн. — {tariff.get('price')} руб."
+            count = tariff.get("count", 0)
+            count_label = "♾ Безлимит" if count == 999 else f"{count} зан."
+            t_text = f"💳 {count_label} / {tariff.get('days')} дн. — {tariff.get('price')} руб."
 
         builder.row(types.InlineKeyboardButton(text=t_text, callback_data=f"adm_tar_edit_{disc_id}_{idx}"))
 
@@ -1316,7 +1320,8 @@ async def admin_edit_tariff_menu(callback: types.CallbackQuery, club_settings: d
     builder.row(types.InlineKeyboardButton(text=f"💰 Цена: {tariff['price']} руб.", callback_data=f"input_tar_price_{disc_id}_{tariff_idx}"))
     builder.row(types.InlineKeyboardButton(text=f"⏳ Срок: {tariff['days']} дней", callback_data=f"input_tar_days_{disc_id}_{tariff_idx}"))
     if discipline.get("type") == "lessons":
-        builder.row(types.InlineKeyboardButton(text=f"🔢 Занятий: {tariff['count']}", callback_data=f"input_tar_count_{disc_id}_{tariff_idx}"))
+        count_label = "♾ Безлимит" if tariff.get("count") == 999 else str(tariff.get("count", 0))
+        builder.row(types.InlineKeyboardButton(text=f"🔢 Занятий: {count_label}", callback_data=f"input_tar_count_{disc_id}_{tariff_idx}"))
 
     # 🔥 ДОБАВЛЯЕМ СЮДА ЭТУ СТРОКУ (с большими пробелами для удобства)
     builder.row(types.InlineKeyboardButton( text = f"👶 Мин. возраст: {tariff.get('min_age', 0)} лет",
@@ -1421,7 +1426,8 @@ async def admin_start_tariff_edit(callback: types.CallbackQuery, state: FSMConte
         await callback.message.answer("⏳ Введите новое <b>количество дней</b> действия абонемента:", parse_mode="HTML")
     elif parts[2] == "count":
         await state.set_state(AdminTariffStates.waiting_for_count)
-        text = ("🔢 <b>Введите новое количество занятий...</b>")  # Твой текст
+        text = ("🔢 <b>Введите новое количество занятий.</b>\n\n"
+                "♾ Для безлимитного тарифа введите <b>999</b>.")
         await callback.message.answer(text=text, parse_mode="HTML")
 
     # 🔥 ДОБАВЛЯЕМ НАШУ НОВУЮ ВЕТКУ ВОЗРАСТА СЮДА
@@ -1521,7 +1527,8 @@ async def admin_add_tariff_days(
         await state.set_state(AdminTariffStates.add_count)
 
         await message.answer(
-            text="<b>Шаг 3 of 4:</b> Введите лимит количества занятий для этого тарифа (например: 12):",
+            text="<b>Шаг 3 из 4:</b> Введите лимит количества занятий для этого тарифа (например: 12).\n\n"
+                 "♾ <b>Для безлимитного тарифа введите 999.</b>",
             parse_mode="HTML"
         )
 

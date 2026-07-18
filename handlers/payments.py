@@ -996,7 +996,8 @@ async def final_cash_pay(
         session=session,
         club_id=club.id,
         club_settings=club_settings,
-        days_to_add=days  # <--- Теперь срок действия будет начислен абсолютно верно!
+        days_to_add=days,
+        discipline=sport_type
     )
 
     if result:
