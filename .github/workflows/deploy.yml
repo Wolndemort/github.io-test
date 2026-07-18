@@ -3,9 +3,17 @@ name: My_crm_bot
 on:
   push:
     branches: [ master ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
 
 jobs:
-  test_and_deploy:
+  tests:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
@@ -28,9 +36,14 @@ jobs:
           SECRET_KEY: SECRET_KEY
         run: |
           export PYTHONPATH=$PYTHONPATH:$(pwd)
-           pip install aiosqlite
           pytest
 
+  deploy_production:
+    needs: tests
+    if: github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
       - name: Deploy to Server
         uses: appleboy/ssh-action@v1.0.3
         with:
@@ -40,10 +53,12 @@ jobs:
           script: |
             cd /root/github.io-test
             mkdir -p backups
-            docker exec gym_db pg_dump -U postgres crm_db > backups/pre_deploy_$(date +%F_%H-%M).sql
+            backup="backups/pre_deploy_$(date +%F_%H-%M-%S).sql"
+            docker exec gym_db pg_dump -U postgres -d crm_db > "$backup"
+            test -s "$backup"
             ls -t backups/pre_deploy_*.sql | tail -n +11 | xargs rm -f -- 2>/dev/null || true 
-            git fetch --all
-            git reset --hard origin/master
+            git fetch origin master
+            git checkout --detach origin/master
             docker compose down
             docker compose up -d --build
             docker image prune -f

@@ -10,6 +10,7 @@ from datetime import datetime, date, timezone
 from sqlalchemy import Date
 from loguru import logger
 import asyncio
+import gzip
 from datetime import timedelta
 from sqlalchemy import select
 from database.constants import DEFAULT_CLUB_SETTINGS
@@ -554,21 +555,14 @@ async def create_db_backup() -> str | None:
         logger.error("❌ DB_PASSWORD не задан, резервная копия отменена")
         return None
 
-    command = f"pg_dump -h db -p 5432 -U postgres crm_db | gzip > {backup_path}"
-
-    
     try:
-        process = await asyncio.create_subprocess_shell(
-            command,
-            env={"PGPASSWORD": db_password},
+        process = await asyncio.create_subprocess_exec(
+            "pg_dump", "-h", "db", "-p", "5432", "-U", "postgres", "crm_db",
             stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
+            stderr=asyncio.subprocess.PIPE,
+            env={**os.environ, "PGPASSWORD": db_password},
         )
-        
-        # Ждем завершения и собираем логи ошибок, если они будут
         stdout, stderr = await process.communicate()
-        
-        # Если код возврата не 0 — значит pg_dump завершился с ошибкой!
         if process.returncode != 0:
             error_msg = stderr.decode().strip()
             logger.error(f"❌ Ошибка внутри pg_dump: {error_msg}")
@@ -576,7 +570,9 @@ async def create_db_backup() -> str | None:
             if os.path.exists(backup_path):
                 os.remove(backup_path)
             return None
-            
+
+        with gzip.open(backup_path, "wb") as backup_file:
+            backup_file.write(stdout)
         logger.info(f"📦 Бэкап базы данных успешно создан: {backup_path}")
         return backup_path
 

@@ -107,6 +107,8 @@ else location.replace(location.pathname+'?club_id=' + encodeURIComponent(new URL
     club_res = await session.execute(select(Club).where(Club.id == club_id))
     club = club_res.scalar_one_or_none()
 
+    await verify_webapp_admin(club, init_data)
+
     club_settings = club.club_settings or {} if club else {}
     limits_settings = club_settings.get("limits", {})
     timeout_minutes = limits_settings.get("session_timeout_minutes", 150)

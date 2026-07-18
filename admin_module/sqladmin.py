@@ -1,8 +1,34 @@
+import hmac
+import os
+
 from fastapi import Request
 from sqladmin import Admin, ModelView, BaseView, expose
+from sqladmin.authentication import AuthenticationBackend
 from sqlalchemy.ext.asyncio import async_sessionmaker
 from starlette.responses import RedirectResponse
 from database.db import Student, User
+
+
+class AdminAuth(AuthenticationBackend):
+    async def login(self, request: Request) -> bool:
+        form = await request.form()
+        username = str(form.get("username", ""))
+        password = str(form.get("password", ""))
+        expected_user = os.getenv("ADMIN_PANEL_USER")
+        expected_password = os.getenv("ADMIN_PANEL_PASSWORD")
+        if not expected_user or not expected_password:
+            return False
+        if hmac.compare_digest(username, expected_user) and hmac.compare_digest(password, expected_password):
+            request.session["admin_authenticated"] = True
+            return True
+        return False
+
+    async def logout(self, request: Request) -> bool:
+        request.session.clear()
+        return True
+
+    async def authenticate(self, request: Request) -> bool:
+        return request.session.get("admin_authenticated") is True
 
 
 class UserAdmin(ModelView, model=User):
@@ -75,7 +101,8 @@ def setup_admin(app, engine):
         app=app,
         engine=engine,
         session_maker=async_session_factory,
-        base_url="/master-dashboard"
+        base_url="/master-dashboard",
+        authentication_backend=AdminAuth(secret_key=os.getenv("SECRET_KEY", "")),
     )
     admin.add_view(UserAdmin)
     admin.add_view(StudentAdmin)

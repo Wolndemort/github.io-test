@@ -3,6 +3,7 @@ import os
 import uuid
 
 from starlette.staticfiles import StaticFiles
+from starlette.middleware.sessions import SessionMiddleware
 
 from services.analytics import calculate_daily_business_report, calculate_admin_dashboard
 from datetime import timedelta, time, timezone
@@ -117,6 +118,7 @@ async def lifespan(app: FastAPI):
 
 # Инициализация FastAPI
 app = FastAPI(title="SpeedyCRM SaaS API", lifespan=lifespan)
+app.add_middleware(SessionMiddleware, secret_key=os.getenv("SECRET_KEY", ""), https_only=os.getenv("COOKIE_SECURE", "1") == "1")
 app.add_middleware(ProxyHeadersMiddleware, trusted_hosts=["*"])
 app.mount("/static", StaticFiles(directory="static"), name="static")
 app.include_router(router)
