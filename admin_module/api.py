@@ -10,6 +10,7 @@ from datetime import datetime, timedelta, timezone
 from database.db import PaymentOrder, Subscription
 from database.db import add_abon, purchase_student_freeze
 import hashlib
+from decimal import Decimal, InvalidOperation
 from fastapi.responses import StreamingResponse
 import json
 from urllib.parse import parse_qsl
@@ -836,29 +837,24 @@ async def enable_biometry(payload: BiometricEnable, db: AsyncSession = Depends(g
 # Используй существующий router из твоего api.py
 
 
-WEBHOOK_SECRET_TOKEN = "Speedycrmsaas2026"
-
-
 @router.post("/v1/payments/yookassa/webhook")
 async def yookassa_webhook(request: Request, session: AsyncSession = Depends(get_session)):
     """
     Прием уведомлений об оплатах (вебхуков) от ЮKassa.
     Маршрут защищен токеном авторизации для безопасной пересылки РФ -> Вена.
     """
-    # 1. 🛡️ ЗАЩИТА ЭНДПОИНТА
-    #auth_header = request.headers.get("Authorization")
-    #if not auth_header or not auth_header.startswith("Bearer "):
-        #raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing or invalid auth header")
-
-    #token = auth_header.split(" ")[1]
-    #if token != WEBHOOK_SECRET_TOKEN:
-        #raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden: Invalid webhook token")
-
     # Читаем JSON от ЮKassa
     payload = await request.json()
 
     event = payload.get("event")  # 'payment.succeeded'
     object_data = payload.get("object", {})  # Данные платежа
+
+    if event != "payment.succeeded" or object_data.get("status") != "succeeded":
+        return {"status": "ignored"}
+
+    amount_data = object_data.get("amount") or {}
+    if amount_data.get("currency") != "RUB":
+        return {"status": "ignored"}
 
     metadata = object_data.get("metadata", {})
     order_id = metadata.get("order_id")
@@ -866,12 +862,49 @@ async def yookassa_webhook(request: Request, session: AsyncSession = Depends(get
     if not order_id:
         return {"status": "ignored"}
 
-    # 2. 🔥 ЕСЛИ ОПЛАТА УСПЕШНО ПРОШЛА (payment.succeeded)
+    payment_id = object_data.get("id")
+    if not payment_id:
+        return {"status": "ignored"}
+
+    # 2. Обрабатываем только подтверждённую оплату.
     if event == "payment.succeeded":
         # Используем with_for_update() для защиты от двойного начисления (Бот + Вебхук одновременно)
         order_query = select(PaymentOrder).where(PaymentOrder.id == order_id).with_for_update()
         order_result = await session.execute(order_query)
         order = order_result.scalar_one_or_none()
+
+        if not order:
+            return {"status": "ignored"}
+
+        # Payload webhook не принимаем на доверии: сверяем платёж с API ЮKassa.
+        club_result = await session.execute(select(Club).where(Club.id == order.club_id))
+        payment_club = club_result.scalar_one_or_none()
+        pay_cfg = (payment_club.club_settings or {}).get("payments", {}) if payment_club else {}
+        shop_id = pay_cfg.get("yookassa_shop_id")
+        secret_key = pay_cfg.get("yookassa_secret_key")
+        if not shop_id or not secret_key:
+            return {"status": "ignored"}
+        try:
+            async with httpx.AsyncClient(auth=(shop_id, secret_key), timeout=10.0) as client:
+                verify_response = await client.get(f"https://api.yookassa.ru/v3/payments/{payment_id}")
+            if verify_response.status_code != 200:
+                return {"status": "ignored"}
+            verified_payment = verify_response.json()
+            if (verified_payment.get("status") != "succeeded" or
+                    verified_payment.get("metadata", {}).get("order_id") != str(order.id)):
+                return {"status": "ignored"}
+        except httpx.HTTPError:
+            logger.exception("Не удалось проверить платеж %s через API ЮKassa", payment_id)
+            return {"status": "retry"}
+
+        try:
+            received_amount = int(Decimal(str(verified_payment.get("amount", {}).get("value"))) * 100)
+        except (InvalidOperation, TypeError, ValueError):
+            return {"status": "ignored"}
+        if (verified_payment.get("amount", {}).get("currency") != "RUB" or
+                received_amount != order.amount_kopecks):
+            logger.error(f"Сумма webhook не совпала с заказом {order.id}")
+            return {"status": "ignored"}
 
         # Если заказ найден и он еще обрабатывается
         if order and order.status != "CONFIRMED":
