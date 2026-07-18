@@ -197,7 +197,8 @@
         const cameraStatusText = document.getElementById('camera-status-text');
         const retryButton = document.getElementById('retry-button');
         const cameraButtons = Array.from(document.querySelectorAll('.camera-btn'));
-        const baseStreamUrl = '/webapp/live_cam/stream?club_id={{ club_id }}';
+        const tgInitData = window.Telegram?.WebApp?.initData || '';
+        const baseStreamUrl = '/webapp/live_cam/stream?club_id={{ club_id }}&init_data=' + encodeURIComponent(tgInitData);
         let currentCamera = 'camera1';
         let connectionTimeout;
         let frameWatcher;

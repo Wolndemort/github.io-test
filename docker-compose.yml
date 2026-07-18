@@ -39,8 +39,8 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - .:/app
-      - ./logs:/app/logs
+      - app_logs:/app/logs
+      - app_uploads:/app/static/uploads
     extra_hosts:
       - "securepay.tinkoff.ru:91.194.226.17"
       - "host.docker.internal:host-gateway"
@@ -87,6 +87,8 @@ services:
 
 volumes:
   pg_data:
+  app_logs:
+  app_uploads:
 
 networks:
   web_network:

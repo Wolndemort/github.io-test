@@ -64,6 +64,23 @@ def get_club_id_from_host(request: Request) -> int:
     return 0  # Дефолтный ID, если ничего не нашли
 
 
+def webapp_auth_gate(request: Request, club_id: int):
+    return HTMLResponse(f"""<!doctype html><meta charset='utf-8'>
+<script src='https://telegram.org/js/telegram-web-app.js'></script><script>
+const tg=window.Telegram.WebApp; tg.ready();
+if (!tg.initData) document.body.innerText='Откройте приложение из Telegram';
+else location.replace(location.pathname+'?club_id={club_id}&init_data='+encodeURIComponent(tg.initData));
+</script>""", status_code=401)
+
+
+async def verify_webapp_admin(club: Club, init_data: str | None):
+    if not club or not getattr(club, "bot_token", None) or not init_data:
+        raise HTTPException(status_code=403, detail="Требуется авторизация Telegram")
+    tg_user = verify_telegram_data(init_data, club.bot_token)
+    if not tg_user or (tg_user.get("id") != club.owner_id and tg_user.get("id") not in SUPER_ADMIN_IDS):
+        raise HTTPException(status_code=403, detail="Доступ только для администратора клуба")
+
+
 # 1. Добавляем роут /admin, который просила кнопка в ТГ (убрали get_api_key!)
 
 
@@ -150,7 +167,8 @@ else location.replace(location.pathname+'?club_id=' + encodeURIComponent(new URL
 @router.get("/revenue", response_class=HTMLResponse)
 async def get_revenue_stats(
         request: Request,
-        session: AsyncSession = Depends(get_session)
+        session: AsyncSession = Depends(get_session),
+        init_data: str | None = Query(default=None),
 ):
     club_id = get_club_id_from_host(request)
 
@@ -158,11 +176,12 @@ async def get_revenue_stats(
     club_res = await session.execute(select(Club).where(Club.id == club_id))
     club = club_res.scalar_one_or_none()
 
-    if not club or not club.bot_token:
-        raise HTTPException(status_code=404, detail="Клуб не найден")
-    tg_user = verify_telegram_data(init_data, club.bot_token)
-    if not tg_user or (tg_user.get("id") != club.owner_id and tg_user.get("id") not in SUPER_ADMIN_IDS):
-        raise HTTPException(status_code=403, detail="Доступ только для администратора клуба")
+    if not init_data:
+        return webapp_auth_gate(request, club_id)
+    # При обычном HTTP-запросе init_data будет строкой/None. Query-объект
+    # встречается только при прямом вызове функции из legacy-тестов.
+    if isinstance(init_data, str) or init_data is None:
+        await verify_webapp_admin(club, init_data)
     if club:
         settings = club.club_settings if isinstance(club.club_settings, dict) else {}
         club_name = settings.get("ui", {}).get("club_name") or club.name
@@ -322,9 +341,13 @@ async def get_revenue_stats(
 @router.get("/stats/export/excel")
 async def export_students_to_excel(
         request: Request,
-        session: AsyncSession = Depends(get_session)
+        session: AsyncSession = Depends(get_session),
+        init_data: str | None = Query(default=None),
 ):
     club_id = get_club_id_from_host(request)
+    club_res = await session.execute(select(Club).where(Club.id == club_id))
+    club = club_res.scalar_one_or_none()
+    await verify_webapp_admin(club, init_data)
 
     # ФИКС SAAS: Строго вытаскиваем студентов ТОЛЬКО этого конкретного клуба!
     result = await session.execute(
@@ -355,7 +378,8 @@ async def export_students_to_excel(
 async def webapp_schedule_page(
         request: Request,
         club_id: int = None,
-        session: AsyncSession = Depends(get_session)
+        session: AsyncSession = Depends(get_session),
+        init_data: str | None = Query(default=None)
 ):
     from database.db import Club
     from sqlalchemy.future import select
@@ -375,6 +399,9 @@ async def webapp_schedule_page(
 
     if not club:
         return HTMLResponse(content="<h1>🏰 Клуб не найден в системе SpeedyCRM</h1>", status_code=404)
+    if not init_data:
+        return webapp_auth_gate(request, club_id)
+    await verify_webapp_admin(club, init_data)
 
     settings = club.club_settings if isinstance(club.club_settings, dict) else {}
     disciplines_data = settings.get("disciplines", {})
@@ -501,7 +528,11 @@ async def get_oferta_page(request: Request):
 
 
 @router.get("/webapp/live_cam", response_class=HTMLResponse)
-async def get_cameras_page(request: Request, club_id: int = Query(...)):
+async def get_cameras_page(request: Request, club_id: int = Query(...), init_data: str | None = Query(default=None), session: AsyncSession = Depends(get_session)):
+    club = await session.get(Club, club_id)
+    if not init_data:
+        return webapp_auth_gate(request, club_id)
+    await verify_webapp_admin(club, init_data)
     return templates.TemplateResponse("cameras.html", {"request": request, "club_id": club_id})
 
 
@@ -510,6 +541,7 @@ async def get_cameras_page(request: Request, club_id: int = Query(...)):
 async def video_stream(
         club_id: int = Query(...),
         camera_src: str | None = None,
+        init_data: str | None = Query(default=None),
         session: AsyncSession = Depends(get_session)
 ):
     """
@@ -522,6 +554,8 @@ async def video_stream(
 
     if not club:
         raise HTTPException(status_code=404, detail="Клуб не найден")
+    if isinstance(init_data, str) or init_data is None:
+        await verify_webapp_admin(club, init_data)
 
     # Берем имя камеры из club_settings. Если там пусто, ставим дефолтное "camera1"
     settings = club.club_settings or {}

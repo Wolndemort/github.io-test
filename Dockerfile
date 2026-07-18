@@ -20,7 +20,11 @@ RUN pip install --no-cache-dir --upgrade pip && \
 
 COPY . .
 
-RUN mkdir -p database logs
+RUN mkdir -p database logs static/uploads/logos \
+    && useradd --system --create-home --uid 10001 appuser \
+    && chown -R appuser:appuser /app
+
+USER appuser
 
 
 CMD ["python", "main.py"]

@@ -29,6 +29,7 @@ import json
 from uuid import uuid4
 from pathlib import Path
 from loguru import logger
+from PIL import Image, UnidentifiedImageError
 
 
 router = Router()
@@ -2108,12 +2109,22 @@ async def upload_webapp_logo(callback: types.CallbackQuery, state: FSMContext):
 @router.message(AdminSettingsSG.waiting_for_loading_logo, F.photo)
 async def save_webapp_logo(message: types.Message, state: FSMContext, club: Club,
                            session: AsyncSession, redis: Redis):
+    if not message.photo or (message.photo[-1].file_size and message.photo[-1].file_size > 5 * 1024 * 1024):
+        return await message.answer("❌ Логотип должен быть изображением не больше 5 МБ.")
     folder = Path("static/uploads/logos")
     folder.mkdir(parents=True, exist_ok=True)
     filename = f"club_{club.id}_{uuid4().hex}.jpg"
     path = folder / filename
     try:
         await message.bot.download(message.photo[-1], destination=path)
+        with Image.open(path) as image:
+            image.verify()
+        with Image.open(path) as image:
+            image = image.convert("RGB")
+            image.thumbnail((2000, 2000), Image.Resampling.LANCZOS)
+            image.save(path, format="JPEG", quality=88, optimize=True)
+        if path.stat().st_size > 5 * 1024 * 1024:
+            raise ValueError("logo is too large after conversion")
         settings = dict(club.club_settings or {})
         ui = dict(settings.get("ui") or {})
         ui["logo_url"] = f"/static/uploads/logos/{filename}"
