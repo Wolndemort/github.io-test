@@ -38,7 +38,7 @@ api_key_header = APIKeyHeader(name=API_KEY_NAME, auto_error=False)
 
 
 async def get_api_key(header_value: str = Security(api_key_header)):
-    if header_value == API_KEY:
+    if API_KEY and header_value and hmac.compare_digest(header_value, API_KEY):
         return header_value
     raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
@@ -143,7 +143,11 @@ async def get_revenue_stats(
     # 1. Загрузка клуба
     club_res = await session.execute(select(Club).where(Club.id == club_id))
     club = club_res.scalar_one_or_none()
-    club_name = club.club_settings.get("ui", {}).get("club_name") or club.name if club else "Фитнес-клуб"
+    if club:
+        settings = club.club_settings if isinstance(club.club_settings, dict) else {}
+        club_name = settings.get("ui", {}).get("club_name") or club.name
+    else:
+        club_name = "Фитнес-клуб"
 
     # Настройка честного времени (МСК)
 
@@ -632,7 +636,7 @@ def verify_telegram_data(init_data: str, bot_token: str) -> dict | None:
         data_check_string = "\n".join(f"{k}={v}" for k, v in sorted(parsed_data.items()))
         secret_key = hmac.new(b"WebAppData", bot_token.encode(), hashlib.sha256).digest()
         calculated_hash = hmac.new(secret_key, data_check_string.encode(), hashlib.sha256).hexdigest()
-        if calculated_hash == tg_hash:
+        if hmac.compare_digest(calculated_hash, tg_hash):
             return json.loads(parsed_data.get("user", "{}"))
         return None
     except Exception:
@@ -670,7 +674,9 @@ async def open_turnstile(payload: dict, db: AsyncSession = Depends(get_session))
     club_settings = club_res.scalar() or {}
 
     # 2. Вызываем наш единый сервис!
-    res = await process_athlete_gate_pass(student_id, db, club_settings)
+    res = await process_athlete_gate_pass(
+        student_id, db, club_settings, expected_club_id=club_id
+    )
 
     if not res["success"]:
         return {"success": False, "message": res["message"]}
@@ -712,7 +718,9 @@ async def open_webapp_turnstile(
 
     # Вызываем наш центральный сервис прохода!
     club_settings = club.club_settings or {}
-    res = await process_athlete_gate_pass(payload.student_id, db, club_settings)
+    res = await process_athlete_gate_pass(
+        payload.student_id, db, club_settings, expected_club_id=club.id
+    )
 
     if not res["success"]:
         return {"success": False, "message": res["message"]}

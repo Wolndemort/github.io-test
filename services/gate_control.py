@@ -6,12 +6,19 @@ from database.db import Student, Club, VisitLog  # Сверь пути импо�
 logger = logging.getLogger(__name__)
 
 
-async def process_athlete_gate_pass(student_id: int, db, club_settings: dict) -> dict:
+async def process_athlete_gate_pass(
+    student_id: int,
+    db,
+    club_settings: dict,
+    expected_club_id: int | None = None,
+) -> dict:
     """
     Универсальный сервис контроля СКУД, сессий и разморозки.
     НЕ списывает занятия на входе (работает в тандеме с кроном).
     Возвращает словарь: {'success': bool, 'message': str, 'moscow_time_str': str}
     """
+    club_settings = club_settings if isinstance(club_settings, dict) else {}
+
     # 1. ЗАЩИТА ROW-LEVEL LOCKING от Race Condition
     student_res = await db.execute(
         select(Student).where(Student.id == student_id).with_for_update()
@@ -19,6 +26,16 @@ async def process_athlete_gate_pass(student_id: int, db, club_settings: dict) ->
     student = student_res.scalar_one_or_none()
     if not student:
         return {"success": False, "message": "Атлет не найден в базе данных."}
+
+    # QR/WebApp запрос должен работать только внутри клуба, из которого он пришёл.
+    if expected_club_id is not None and student.club_id != expected_club_id:
+        logger.warning(
+            "Попытка прохода атлета из другого клуба: student=%s, club=%s, expected=%s",
+            student_id,
+            student.club_id,
+            expected_club_id,
+        )
+        return {"success": False, "message": "Атлет не найден в этом клубе."}
 
     # Ищем клуб
     club_res = await db.execute(select(Club).where(Club.id == student.club_id))
@@ -69,7 +86,7 @@ async def process_athlete_gate_pass(student_id: int, db, club_settings: dict) ->
     is_inside_session = False
     if student.last_visit:
         last_visit_naive = student.last_visit.replace(tzinfo=None)
-        if now_naive - last_visit_naive < timedelta(minutes=timeout_minutes):
+        if timedelta(0) <= now_naive - last_visit_naive < timedelta(minutes=timeout_minutes):
             is_inside_session = True
 
     # 5. ПРОВЕРКА СРОКА ДЕЙСТВИЯ И БАЛАНСА
@@ -110,7 +127,7 @@ async def process_athlete_gate_pass(student_id: int, db, club_settings: dict) ->
         return {"success": False, "message": "Ошибка сохранения данных визита."}
 
     # 8. ИНТЕГРАЦИЯ ТУРНИКЕТА DINGTIAN
-    relay_config = club_settings.get("turnstile", {})
+    relay_config = dict(club_settings.get("turnstile", {}) or {})
     turnstile_status = "ℹ️ СКУД отключен"
     if relay_config.get("enabled", False):
         try:

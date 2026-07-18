@@ -453,10 +453,10 @@ async def get_daily_stats(club_id: int, session: AsyncSession):
 
         # 1. Считаем посещения ТОЛЬКО для этого клуба
         stmt_visit = (
-            select(func.count(Student.id))
+            select(func.count(VisitLog.id))
             .where(
-                Student.club_id == club_id,         # Фильтр по клубу
-                Student.last_visit >= today_start   # Фильтр по дате
+                VisitLog.club_id == club_id,
+                VisitLog.visited_at >= today_start
             )
         )
         visits_count = await session.scalar(stmt_visit) or 0
@@ -516,13 +516,18 @@ async def create_db_backup() -> str | None:
     
     # Добавляем | gzip > в конец команды для сжатия на лету
     # Используем именно -h db, как прописано в сервисах docker-compose!
+    db_password = os.getenv("DB_PASSWORD")
+    if not db_password:
+        logger.error("❌ DB_PASSWORD не задан, резервная копия отменена")
+        return None
+
     command = f"pg_dump -h db -p 5432 -U postgres crm_db | gzip > {backup_path}"
 
     
     try:
         process = await asyncio.create_subprocess_shell(
             command,
-            env={"PGPASSWORD": "lordwolndemort0195"},
+            env={"PGPASSWORD": db_password},
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE
         )

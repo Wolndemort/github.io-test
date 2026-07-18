@@ -904,7 +904,9 @@ async def process_manual_checkin(
     student_id = int(callback.data.split("_")[-1])
 
     # 2. Передаем задачу нашему универсальному сервису прохода!
-    res = await process_athlete_gate_pass(student_id, session, club_settings)
+    res = await process_athlete_gate_pass(
+        student_id, session, club_settings, expected_club_id=club.id
+    )
 
     if not res["success"]:
         # Если абонемент кончился или ошибка — красиво выводим админу

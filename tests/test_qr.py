@@ -42,7 +42,9 @@ async def test_parse_qr_scan_new_session_success(mock_gate_service, mock_gen_sig
 
     # 3. Проверки
     # Проверяем, что хендлер честно вызвал наш центральный сервис с правильным id ученика
-    mock_gate_service.assert_called_once_with(1, session, club_settings)
+    mock_gate_service.assert_called_once_with(
+        1, session, club_settings, expected_club_id=1
+    )
 
     # Проверяем, что бот вывел админу/родителю сообщение об успешном проходе
     args, kwargs = message.answer.call_args
@@ -87,8 +89,27 @@ async def test_parse_qr_scan_inside_session_success(mock_gate_service, mock_gen_
     await parse_qr_scan(message, session, club, club_settings)
 
     # Проверки
-    mock_gate_service.assert_called_once_with(1, session, club_settings)
+    mock_gate_service.assert_called_once_with(
+        1, session, club_settings, expected_club_id=1
+    )
 
     args, kwargs = message.answer.call_args
     actual_text = args[0] if args else kwargs.get('text', '')
     assert "ПРОХОДИТЕ" in actual_text.upper()
+
+
+@pytest.mark.asyncio
+@patch("handlers.user_option.generate_signature", return_value="expected_sig")
+@patch("handlers.user_option.process_athlete_gate_pass")
+async def test_parse_qr_scan_rejects_invalid_signature(mock_gate_service, _mock_gen_sig):
+    session = AsyncMock()
+    club = AsyncMock()
+    club.id = 1
+    message = AsyncMock()
+    message.web_app_data.data = "student:1:salt:forged_sig"
+    message.answer = AsyncMock()
+
+    await parse_qr_scan(message, session, club, {})
+
+    mock_gate_service.assert_not_awaited()
+    assert "Недействительный QR" in message.answer.await_args.args[0]

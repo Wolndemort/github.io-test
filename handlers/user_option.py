@@ -533,37 +533,56 @@ def fix_layout(text: str) -> str:
     return text
 
 
-@router.message(F.web_app_data)
-async def parse_qr_scan(message: types.Message, session: AsyncSession, club: Club, club_settings: dict):
-    raw_data = fix_layout(message.web_app_data.data)
-    parts = raw_data.split(':')
+async def _handle_qr_scan_data(
+    raw_data: str,
+    message: types.Message,
+    session: AsyncSession,
+    club: Club,
+    club_settings: dict,
+):
+    raw_data = fix_layout(raw_data)
+    parts = raw_data.strip().split(':')
     if len(parts) != 4 or parts[0] != 'student':
         return await message.answer("❌ Ошибка: Неверный формат QR")
 
-    scanned_id = int(parts[1])
+    try:
+        scanned_id = int(parts[1])
+    except ValueError:
+        return await message.answer("❌ Ошибка: Неверный ID в QR")
 
-    # Вызываем наш единый сервис прохода!
-    res = await process_athlete_gate_pass(scanned_id, session, club_settings)
+    # Подпись нельзя игнорировать: иначе любой пользователь может подставить ID
+    # любого атлета вручную. Сравнение через compare_digest защищает от timing-атак.
+    time_salt, provided_signature = parts[2], parts[3]
+    expected_signature = generate_signature(scanned_id, time_salt)
+    if not hmac.compare_digest(provided_signature, expected_signature):
+        return await message.answer("❌ Ошибка: Недействительный QR-пропуск")
+
+    res = await process_athlete_gate_pass(
+        scanned_id,
+        session,
+        club_settings,
+        expected_club_id=club.id,
+    )
     if not res["success"]:
         return await message.answer(res["message"])
 
-    # Формируем красивый ТГ-ответ из готовых параметров сервиса
-    freeze_notice = f"\n❄️ Досрочная разморозка! Сдвиг на -{res['returned_early_days']} дн." if res["is_was_frozen"] and \
-                                                                                                res[
-                                                                                                    "returned_early_days"] > 0 else ""
+    freeze_notice = (
+        f"\n\u2744\ufe0f \u0414\u043e\u0441\u0440\u043e\u0447\u043d\u0430\u044f \u0440\u0430\u0437\u043c\u043e\u0440\u043e\u0437\u043a\u0430! \u0421\u0434\u0432\u0438\u0433 \u043d\u0430 -{res['returned_early_days']} \u0434\u043d."
+        if res["is_was_frozen"] and res["returned_early_days"] > 0
+        else ""
+    )
 
     await message.answer(
-        f"🟢 <b>ПРОХОДИТЕ</b>\n👤 Атлет: <b>{res['student_name']}</b>\n"
-        f"📊 {res['message']}\n📅 До: {res['expire_str']}{freeze_notice}\n{res['turnstile_status']}",
+        f"\U0001f7e2 <b>\u041f\u0420\u041e\u0425\u041e\u0414\u0418\u0422\u0415</b>\n\U0001f464 \u0410\u0442\u043b\u0435\u0442: <b>{res['student_name']}</b>\n"
+        f"\U0001f4c9 {res['message']}\n\U0001f4c6 \u0414\u043e: {res['expire_str']}{freeze_notice}\n{res['turnstile_status']}",
         parse_mode='HTML'
     )
 
-    # Уведомление родителю
     if res["parent_id"]:
         try:
             await message.bot.send_message(
                 chat_id=int(res["parent_id"]),
-                text=f"🔔 <b>{res['club_name']}</b>: {res['student_name']} вошел в зал.",
+                text=f"❗ <b>{res['club_name']}</b>: {res['student_name']} вошел в зал.",
                 parse_mode="HTML"
             )
         except Exception:
@@ -571,14 +590,9 @@ async def parse_qr_scan(message: types.Message, session: AsyncSession, club: Clu
 
 
 @router.message(F.web_app_data)
-async def web_app_qr_handler(
-    message: types.Message,
-    session: AsyncSession,
-    club: Club,
-    club_settings: dict
-):
-    # ПЕРЕДАЕМ ВСЁ: и сообщение, и сессию, и конфиги клуба
-    await parse_qr_scan(
+async def parse_qr_scan(message: types.Message, session: AsyncSession, club: Club, club_settings: dict):
+    await _handle_qr_scan_data(
+        raw_data=message.web_app_data.data,
         message=message,
         session=session,
         club=club,
@@ -589,22 +603,17 @@ async def web_app_qr_handler(
 @router.message(F.text.startswith(("student", "ыегвуте")))
 async def manual_scanner_handler(
         message: types.Message,
-        session: AsyncSession,  # Прилетело из мидлвари
-        club: Club,  # Прилетело из мидлвари
-        club_settings: dict  # Прилетело из мидлвари
+        session: AsyncSession,  # ÐÑÐ¸Ð»ÐµÑÐµÐ»Ð¾ Ð¸Ð· Ð¼Ð¸Ð´Ð»Ð²Ð°ÑÐ¸
+        club: Club,  # ÐÑÐ¸Ð»ÐµÑÐµÐ»Ð¾ Ð¸Ð· Ð¼Ð¸Ð´Ð»Ð²Ð°ÑÐ¸
+        club_settings: dict  # ÐÑÐ¸Ð»ÐµÑÐµÐ»Ð¾ Ð¸Ð· Ð¼Ð¸Ð´Ð»Ð²Ð°ÑÐ¸
 ):
-    # 1. Фикс раскладки (если ввели "ыегвуте" вместо "student")
-    raw_data = fix_layout(message.text)
-
-    # 2. Вызываем наш "огромный" хендлер, ПЕРЕДАВАЯ ВСЕ ДАННЫЕ
-    # Теперь parse_qr_scan внутри себя проверит, что атлет из ЭТОГО клуба
-    await parse_qr_scan(
+    await _handle_qr_scan_data(
+        raw_data=message.text,
         message=message,
         session=session,
         club=club,
         club_settings=club_settings
     )
-
 
 @router.callback_query(F.data.startswith("gen_qr_"))
 async def handle_gen_qr(
