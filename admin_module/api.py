@@ -27,6 +27,7 @@ from starlette import status
 from database.db import User, Student, Club
 from database.db import get_session
 from config import fastapi_key
+from middlewares.db_saas_midleware import SUPER_ADMIN_IDS
 # Убираем глобальный префикс /stats, чтобы роуты /admin и /revenue сидели на своем месте
 router = APIRouter(tags=["Analytics"])
 templates = Jinja2Templates(directory="templates")
@@ -69,9 +70,21 @@ def get_club_id_from_host(request: Request) -> int:
 @router.get("/admin", response_class=HTMLResponse)
 async def get_admin_dashboard(
     request: Request,
-    session: AsyncSession = Depends(get_session)
+    session: AsyncSession = Depends(get_session),
+    init_data: str | None = Query(default=None),
 ):
     club_id = get_club_id_from_host(request)
+
+    # Telegram WebApp сначала открывает безопасный экран, затем JS передаёт
+    # подписанные Telegram initData обратно в этот же URL.
+    if not init_data:
+        return HTMLResponse("""<!doctype html><meta charset='utf-8'>
+<script src='https://telegram.org/js/telegram-web-app.js'></script>
+<script>
+const tg=window.Telegram.WebApp; tg.ready();
+if (!tg.initData) document.body.innerText='Откройте админку из Telegram';
+else location.replace(location.pathname+'?club_id=' + encodeURIComponent(new URLSearchParams(location.search).get('club_id') || '') + '&init_data=' + encodeURIComponent(tg.initData));
+</script>""", status_code=401)
 
     club_res = await session.execute(select(Club).where(Club.id == club_id))
     club = club_res.scalar_one_or_none()
@@ -143,6 +156,12 @@ async def get_revenue_stats(
     # 1. Загрузка клуба
     club_res = await session.execute(select(Club).where(Club.id == club_id))
     club = club_res.scalar_one_or_none()
+
+    if not club or not club.bot_token:
+        raise HTTPException(status_code=404, detail="Клуб не найден")
+    tg_user = verify_telegram_data(init_data, club.bot_token)
+    if not tg_user or (tg_user.get("id") != club.owner_id and tg_user.get("id") not in SUPER_ADMIN_IDS):
+        raise HTTPException(status_code=403, detail="Доступ только для администратора клуба")
     if club:
         settings = club.club_settings if isinstance(club.club_settings, dict) else {}
         club_name = settings.get("ui", {}).get("club_name") or club.name
@@ -682,7 +701,11 @@ from services.gate_control import process_athlete_gate_pass
 
 
 @router.post("/open-turnstile")
-async def open_turnstile(payload: dict, db: AsyncSession = Depends(get_session)):
+async def open_turnstile(
+        payload: dict,
+        db: AsyncSession = Depends(get_session),
+        _: str = Depends(get_api_key),
+):
     student_id = payload.get("student_id")
 
     # 1. Тянем клубные настройки (короткий запрос)
