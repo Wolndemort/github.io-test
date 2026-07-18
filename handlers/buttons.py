@@ -135,10 +135,6 @@ def admin_keyboard(club_id: int, club_settings: dict, subscription_date: datetim
     else:
         is_crm_active = False
 
-    # --- БЛОК 1: Управление (Всегда доступны владельцу) ---
-    builder.row(types.InlineKeyboardButton(text='🛠 Настройки клуба', callback_data='admin_settings'))
-    builder.row(types.InlineKeyboardButton(text="💵 Принять наличку", callback_data="admin_cash_list"))
-
     # Формируем текст кнопки подписки по чистому datetime напрямую из БД
     if subscription_date:
         days_left = (subscription_date.replace(tzinfo=None) - now_naive).days
@@ -149,52 +145,70 @@ def admin_keyboard(club_id: int, club_settings: dict, subscription_date: datetim
     else:
         sub_text = "❌ Подписка не активна (Оплатить)"
 
-    builder.row(types.InlineKeyboardButton(text=sub_text, callback_data='pay_menu'))
+    # --- БЛОК 1: Управление и платежи ---
+    builder.row(
+        types.InlineKeyboardButton(text=sub_text, callback_data='pay_menu'),
+        types.InlineKeyboardButton(text='🛠 Настройки клуба', callback_data='admin_settings')
+    )
+    builder.row(types.InlineKeyboardButton(text="💵 Принять наличку", callback_data="admin_cash_list"))
 
-    # --- БЛОК 2: Динамические фичи (Проверка по конфигу) ---
-    if features.get("daily_report", True):
-        builder.row(types.InlineKeyboardButton(text='📊 Дневной отчет', callback_data='daily_report'))
-
-    if features.get("broadcast", True):
-        builder.row(types.InlineKeyboardButton(text='📢 Рассылка', callback_data='admin_broadcast'))
-
+    # --- БЛОК 2: Ежедневная работа ---
+    operation_buttons = []
     if features.get("manual_add", True):
-        builder.row(types.InlineKeyboardButton(text="🆕 Добавить (вручную)", callback_data="admin_add_manual"))
+        operation_buttons.append(types.InlineKeyboardButton(text="🆕 Добавить атлета", callback_data="admin_add_manual"))
 
     if features.get("qr_checkin", True):
-        builder.row(types.InlineKeyboardButton(text="📝 Отметить посещение", callback_data="admin_manual_visit"))
+        operation_buttons.append(types.InlineKeyboardButton(text="📝 Отметить посещение", callback_data="admin_manual_visit"))
+
+    if operation_buttons:
+        builder.row(*operation_buttons)
 
     builder.row(types.InlineKeyboardButton(text="📅 Расписание (Бот)", callback_data="admin_schedule_main"))
 
-    if features.get("export", True):
-        builder.row(types.InlineKeyboardButton(text='📥 Выгрузка БД (CSV)', callback_data='export_db'))
+    # --- БЛОК 3: Отчёты и коммуникации ---
+    report_buttons = []
+    if features.get("daily_report", True):
+        report_buttons.append(types.InlineKeyboardButton(text='📊 Дневной отчет', callback_data='daily_report'))
 
-    # --- БЛОК 3: WebApps (Изоляция через club_id) ---
+    if features.get("broadcast", True):
+        report_buttons.append(types.InlineKeyboardButton(text='📢 Рассылка', callback_data='admin_broadcast'))
+
+    if features.get("export", True):
+        report_buttons.append(types.InlineKeyboardButton(text='📥 Выгрузка БД (CSV)', callback_data='export_db'))
+
+    if report_buttons:
+        builder.row(*report_buttons[:2])
+        if len(report_buttons) > 2:
+            builder.row(*report_buttons[2:])
+
+    # --- БЛОК 4: WebApps (Изоляция через club_id) ---
     base_url = f"https://{club_id}.speedycrm.ru"
 
-    builder.row(types.InlineKeyboardButton(
-        text="📹 Камеры (WebApp)",
-        web_app=types.WebAppInfo(url=f"{base_url}/webapp/live_cam?club_id={club_id}")
-    ))
-    builder.row(types.InlineKeyboardButton(
-        text="📊 Таблица (WebApp)",
-        web_app=types.WebAppInfo(url=f"{base_url}/admin?club_id={club_id}")
-    ))
-    builder.row(types.InlineKeyboardButton(
-        text="🗓 Расписание (WebApp)",
-        web_app=types.WebAppInfo(url=f"{base_url}/webapp/schedule?club_id={club_id}")
-    ))
-    builder.row(types.InlineKeyboardButton(
-        text="📈 Вся статистика клуба ",
-        web_app=types.WebAppInfo(url=f"{base_url}/revenue?club_id={club_id}")
-    ))
+    builder.row(
+        types.InlineKeyboardButton(
+            text="📊 Таблица (WebApp)",
+            web_app=types.WebAppInfo(url=f"{base_url}/admin?club_id={club_id}")
+        ),
+        types.InlineKeyboardButton(
+            text="📹 Камеры (WebApp)",
+            web_app=types.WebAppInfo(url=f"{base_url}/webapp/live_cam?club_id={club_id}")
+        )
+    )
+    builder.row(
+        types.InlineKeyboardButton(
+            text="📈 Вся статистика клуба",
+            web_app=types.WebAppInfo(url=f"{base_url}/revenue?club_id={club_id}")
+        ),
+        types.InlineKeyboardButton(
+            text="🗓 Расписание (WebApp)",
+            web_app=types.WebAppInfo(url=f"{base_url}/webapp/schedule?club_id={club_id}")
+        )
+    )
     builder.row(types.InlineKeyboardButton(
         text="📄 Выгрузка в Excel",
         url=f"{base_url}/stats/export/excel?club_id={club_id}"
     ))
     builder.row(types.InlineKeyboardButton(text='🔙 Назад', callback_data='begin'))
-
-    builder.adjust(1)
     return builder.as_markup()
 
 
