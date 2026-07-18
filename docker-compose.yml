@@ -9,8 +9,6 @@ services:
     container_name: gym_db
     networks:
       - web_network
-    ports:
-      - "5433:5432"
     restart: always
     environment:
       - POSTGRES_USER=postgres
@@ -36,7 +34,7 @@ services:
       - .env
     environment:
       - REDIS_URL=redis://redis:6379/0
-      - DB_FILE=postgresql+asyncpg://postgres:${DB_PASSWORD}@db:5432/crm_db
+      - DATABASE_URL=postgresql+asyncpg://postgres:${DB_PASSWORD}@db:5432/crm_db
       - PYTHONPATH=/app
     ports:
       - "8000:8000"
@@ -52,8 +50,6 @@ services:
     restart: always
     networks:
       - web_network
-    ports:
-      - "6379:6379"
 
   nginx:
     image: nginx:alpine
