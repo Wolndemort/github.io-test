@@ -930,7 +930,14 @@ async def yookassa_webhook(request: Request, session: AsyncSession = Depends(get
                             "bjj": "🥋 БЖЖ",
                             "yoga": "🧘‍♂️ Йога"
                         }
-                        disc_name = discipline_names.get(discipline_raw, f"🏃‍♂️ {discipline_raw}")
+                        disc_name = ("❄️ Заморозка абонемента" if order.type.startswith("FREEZE")
+                                     else discipline_names.get(discipline_raw, f"🏃‍♂️ {discipline_raw}"))
+                        card_saved = order.type == "FIRST" and payment_method_id and saved_card_flag
+                        client_card_text = (
+                            "Карта привязана к системе автопродления. Следующее списание пройдет автоматически."
+                            if card_saved else
+                            "Оплата успешно зачислена."
+                        )
 
                         # --- А) Сообщение Родителю ---
                         await bot.send_message(
@@ -938,7 +945,7 @@ async def yookassa_webhook(request: Request, session: AsyncSession = Depends(get
                             text=f"🥳 <b>Отличные новости!</b>\n\n"
                                  f"Ваша официальная оплата в фитнес-клуб <b>{club_name}</b> успешно получена.\n"
                                  f"Абонемент (<b>{desc}</b>) успешно активирован и действует до: <b>{new_expire}</b>. 🔥\n"
-                                 f"Карта привязана к системе автопродления. Следующее списание пройдет автоматически.\n\n"
+                                 f"{client_card_text}\n\n"
                                  f"<i>Ждем вас на тренировках!</i>",
                             parse_mode="HTML"
                         )

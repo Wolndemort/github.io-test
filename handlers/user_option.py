@@ -481,7 +481,7 @@ async def choose_student_for_freeze(
 async def choose_student_for_paid_freeze(callback: types.CallbackQuery, session: AsyncSession, club: Club,
                                          club_settings: dict, state: FSMContext):
     price = club_settings.get("limits", {}).get("freeze_price_per_day", 0)
-    if not club_settings.get("features", {}).get("freeze", True) or price <= 0:
+    if price <= 0:
         return await callback.answer("Покупка заморозки сейчас недоступна.", show_alert=True)
     result = await session.execute(select(Student).where(
         Student.parent_id == callback.from_user.id, Student.club_id == club.id
