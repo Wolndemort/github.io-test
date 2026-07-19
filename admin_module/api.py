@@ -179,12 +179,7 @@ async def get_revenue_stats(
     club = club_res.scalar_one_or_none()
 
     if not init_data:
-        return HTMLResponse(f"""<!doctype html><meta charset='utf-8'>
-<script src='https://telegram.org/js/telegram-web-app.js'></script><script>
-const tg=window.Telegram.WebApp; tg.ready();
-if (!tg.initData) document.body.innerText='Откройте приложение из Telegram';
-else location.replace(location.pathname+'?club_id={club_id}&user_id={user_id}&init_data='+encodeURIComponent(tg.initData));
-</script>""", status_code=401)
+        return webapp_auth_gate(request, club_id)
     # При обычном HTTP-запросе init_data будет строкой/None. Query-объект
     # встречается только при прямом вызове функции из legacy-тестов.
     if isinstance(init_data, str) or init_data is None:
@@ -407,7 +402,12 @@ async def webapp_schedule_page(
     if not club:
         return HTMLResponse(content="<h1>🏰 Клуб не найден в системе SpeedyCRM</h1>", status_code=404)
     if not init_data:
-        return webapp_auth_gate(request, club_id)
+        return HTMLResponse(f"""<!doctype html><meta charset='utf-8'>
+<script src='https://telegram.org/js/telegram-web-app.js'></script><script>
+const tg=window.Telegram.WebApp; tg.ready();
+if (!tg.initData) document.body.innerText='Откройте приложение из Telegram';
+else location.replace(location.pathname+'?club_id={club_id}&user_id={user_id}&init_data='+encodeURIComponent(tg.initData));
+</script>""", status_code=401)
     await verify_webapp_admin(club, init_data)
 
     settings = club.club_settings if isinstance(club.club_settings, dict) else {}
@@ -746,7 +746,12 @@ async def get_biometric_page(
     Ссылка в кнопке: https://{club_id}.speedycrm.ru/webapp/biometric-pass?club_id={club_id}&user_id={user_id}
     """
     if not init_data:
-        return webapp_auth_gate(request, club_id)
+        return HTMLResponse(f"""<!doctype html><meta charset='utf-8'>
+<script src='https://telegram.org/js/telegram-web-app.js'></script><script>
+const tg=window.Telegram.WebApp; tg.ready();
+if (!tg.initData) document.body.innerText='Откройте приложение из Telegram';
+else location.replace(location.pathname+'?club_id={club_id}&user_id={user_id}&init_data='+encodeURIComponent(tg.initData));
+</script>""", status_code=401)
 
     club = await db.get(Club, club_id)
     tg_user = verify_telegram_data(init_data, club.bot_token if club else "")

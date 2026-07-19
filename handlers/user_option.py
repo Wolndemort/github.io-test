@@ -688,7 +688,7 @@ async def handle_gen_qr(
     # В блоке 4 подменяем callback_data
     kb = InlineKeyboardBuilder()
     # Зашиваем префикс del_photo и возвращаем админа/родителя в профиль
-    kb.row(types.InlineKeyboardButton(text="🔙 Назад в профиль", callback_data="back_profile_del"))
+    kb.row(types.InlineKeyboardButton(text="🔙 В профиль", callback_data="back_profile_del"))
 
 
     await callback.message.answer_photo(
