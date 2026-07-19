@@ -179,7 +179,12 @@ async def get_revenue_stats(
     club = club_res.scalar_one_or_none()
 
     if not init_data:
-        return webapp_auth_gate(request, club_id)
+        return HTMLResponse(f"""<!doctype html><meta charset='utf-8'>
+<script src='https://telegram.org/js/telegram-web-app.js'></script><script>
+const tg=window.Telegram.WebApp; tg.ready();
+if (!tg.initData) document.body.innerText='Откройте приложение из Telegram';
+else location.replace(location.pathname+'?club_id={club_id}&user_id={user_id}&init_data='+encodeURIComponent(tg.initData));
+</script>""", status_code=401)
     # При обычном HTTP-запросе init_data будет строкой/None. Query-объект
     # встречается только при прямом вызове функции из legacy-тестов.
     if isinstance(init_data, str) or init_data is None:
