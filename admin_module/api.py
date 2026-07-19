@@ -657,12 +657,25 @@ async def video_stream(
 
 
 @router.get("/pass-app", response_class=HTMLResponse)
-async def get_web_app_page(request: Request, user_id: int, db: AsyncSession = Depends(get_session)):
+async def get_web_app_page(
+        request: Request,
+        user_id: int,
+        init_data: str | None = Query(default=None),
+        db: AsyncSession = Depends(get_session),
+):
     """
     Эндпоинт, который открывается в Telegram WebApp по ссылке:
     https://твоя_куча_поддоменов.ru/admin/pass-app?user_id={telegram_id}
     """
-    # Вытаскиваем родителя и всех его детей из базы данных
+    if not init_data:
+        return HTMLResponse(f"""<!doctype html><meta charset='utf-8'>
+<script src='https://telegram.org/js/telegram-web-app.js'></script><script>
+const tg=window.Telegram.WebApp; tg.ready();
+if (!tg.initData) document.body.innerText='Откройте приложение из Telegram';
+else location.replace(location.pathname+'?user_id={user_id}&init_data='+encodeURIComponent(tg.initData));
+</script>""", status_code=401)
+
+    # Вытаскиваем родителя и проверяем подписанные данные Telegram до выдачи детей.
     query = select(User).where(User.user_id == user_id)
     result = await db.execute(query)
     user = result.scalar_one_or_none()
@@ -671,6 +684,9 @@ async def get_web_app_page(request: Request, user_id: int, db: AsyncSession = De
         raise HTTPException(status_code=404, detail="Пользователь не найден")
 
     club = await db.get(Club, user.club_id)
+    tg_user = verify_telegram_data(init_data, club.bot_token if club else "")
+    if not tg_user or int(tg_user.get("id", 0)) != user_id:
+        raise HTTPException(status_code=403, detail="Доступ запрещен")
     settings = (club.club_settings or {}) if club else {}
     ui = settings.get("ui", {}) if isinstance(settings.get("ui", {}), dict) else {}
     loading = ui.get("loading", {}) if isinstance(ui.get("loading", {}), dict) else {}
@@ -713,16 +729,29 @@ def verify_telegram_data(init_data: str, bot_token: str) -> dict | None:
 
 # 1. РОУТ ДЛЯ ВЫДАЧИ HTML СТРАНИЦЫ РОДИТЕЛЮ
 @router.get("/webapp/biometric-pass", response_class=HTMLResponse)
-async def get_biometric_page(request: Request, club_id: int, user_id: int, db: AsyncSession = Depends(get_session)):
+async def get_biometric_page(
+        request: Request,
+        club_id: int,
+        user_id: int,
+        init_data: str | None = Query(default=None),
+        db: AsyncSession = Depends(get_session),
+):
     """
     Отдает красивую HTML-страницу со списком детей.
     Ссылка в кнопке: https://{club_id}.speedycrm.ru/webapp/biometric-pass?club_id={club_id}&user_id={user_id}
     """
+    if not init_data:
+        return webapp_auth_gate(request, club_id)
+
+    club = await db.get(Club, club_id)
+    tg_user = verify_telegram_data(init_data, club.bot_token if club else "")
+    if not tg_user or int(tg_user.get("id", 0)) != user_id:
+        raise HTTPException(status_code=403, detail="Доступ запрещен")
+
     # Достаем студентов, привязанных к этому родителю и этому клубу
     students_query = select(Student).where(Student.parent_id == user_id, Student.club_id == club_id)
     students_result = await db.execute(students_query)
     students = students_result.scalars().all()
-    club = await db.get(Club, club_id)
     settings = (club.club_settings or {}) if club else {}
     ui = settings.get("ui", {}) if isinstance(settings.get("ui", {}), dict) else {}
     loading = ui.get("loading", {}) if isinstance(ui.get("loading", {}), dict) else {}

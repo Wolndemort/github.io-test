@@ -2128,6 +2128,13 @@ async def save_webapp_logo(message: types.Message, state: FSMContext, club: Club
         settings = dict(club.club_settings or {})
         ui = dict(settings.get("ui") or {})
         ui["logo_url"] = f"/static/uploads/logos/{filename}"
+        # Загрузка логотипа должна сразу включать загрузочный экран.
+        # Сохраняем ранее заданные длительность и текст, если они уже были.
+        loading = dict(ui.get("loading") or {})
+        loading["enabled"] = True
+        loading.setdefault("duration_ms", 1200)
+        loading.setdefault("message", "Загружаем приложение…")
+        ui["loading"] = loading
         settings["ui"] = ui
         db_club = await session.merge(club)
         db_club.club_settings = settings

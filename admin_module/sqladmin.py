@@ -6,7 +6,7 @@ from sqladmin import Admin, ModelView, BaseView, expose
 from sqladmin.authentication import AuthenticationBackend
 from sqlalchemy.ext.asyncio import async_sessionmaker
 from starlette.responses import RedirectResponse
-from database.db import Student, User
+from database.db import Club, Student, User
 
 
 class AdminAuth(AuthenticationBackend):
@@ -34,6 +34,13 @@ class AdminAuth(AuthenticationBackend):
 class UserAdmin(ModelView, model=User):
     column_list = [User.user_id, User.full_name]
     column_searchable_list = [User.full_name]
+    form_columns = [
+        "user_id",
+        "club_id",
+        "is_accepted",
+        "full_name",
+        "is_biometric_enabled",
+    ]
     name = "Родитель"
     name_plural = "Родители"
     page_size = 10
@@ -66,7 +73,9 @@ class StudentAdmin(ModelView, model=Student):
         "parent_phone",
         "discipline",
         "can_freeze",
-        "is_frozen"
+        "is_frozen",
+        "frozen_at",
+        "last_visit",
     ]
 
     # Настройка AJAX для связи "parent" теперь работает корректно,
@@ -80,6 +89,31 @@ class StudentAdmin(ModelView, model=Student):
 
     name = "Ученик"
     name_plural = "Атлеты"
+    page_size = 10
+    can_delete = True
+    can_edit = True
+    can_create = True
+
+
+class ClubAdmin(ModelView, model=Club):
+    """Полное управление клубом и его JSON-конфигурацией из master-dashboard."""
+
+    column_list = [
+        Club.id,
+        Club.name,
+        Club.owner_id,
+        Club.subscription_expire_at,
+    ]
+    column_searchable_list = [Club.name, Club.bot_token]
+    form_columns = [
+        "name",
+        "bot_token",
+        "owner_id",
+        "subscription_expire_at",
+        "club_settings",
+    ]
+    name = "Клуб"
+    name_plural = "Клубы"
     page_size = 10
     can_delete = True
     can_edit = True
@@ -106,4 +140,5 @@ def setup_admin(app, engine):
     )
     admin.add_view(UserAdmin)
     admin.add_view(StudentAdmin)
+    admin.add_view(ClubAdmin)
     admin.add_view(AnalyticsAdmin)
