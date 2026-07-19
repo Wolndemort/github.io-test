@@ -21,45 +21,42 @@ def get_profile_keyboard(user, club_settings: dict, is_authorized: bool = False)
     # Формируем базовый URL с изоляцией поддомена по club_id
     base_url = f"https://{user.club_id}.speedycrm.ru"
 
-    builder.row(
-        types.InlineKeyboardButton(
-            text="🍏 Иконка на iPhone",
-            url="https://www.icloud.com/shortcuts/124940b85ce8437191757a95b928c59c"  # Твоя проверенная ссылка iCloud
-        ),
-        types.InlineKeyboardButton(
-            text="🤖 Иконка на Android",
-            callback_data="show_android_instructions"  # Коллбэк для Android
-        )
-    )
-    # ЕДИНАЯ КНОПКА: Передаем и club_id, и user_id в GET-параметрах
+    # 1. Проход и быстрый доступ
     builder.row(types.InlineKeyboardButton(
         text="📱 Проход по FaceID",
         web_app=WebAppInfo(url=f"{base_url}/webapp/biometric-pass?club_id={user.club_id}&user_id={user.user_id}")
     ))
+    builder.row(
+        types.InlineKeyboardButton(text="🍏 Установить на iPhone", url="https://www.icloud.com/shortcuts/124940b85ce8437191757a95b928c59c"),
+        types.InlineKeyboardButton(text="🤖 Android", callback_data="show_android_instructions"),
+    )
 
+    builder.row(
+        types.InlineKeyboardButton(text="📲 Мой QR-пропуск", callback_data="show_qr"),
+        types.InlineKeyboardButton(text="🔍 Атлеты", callback_data="detailed_status_info"),
+    )
+
+    # 2. Покупки и абонемент
     if features.get("online_payments", False):
-        builder.row(types.InlineKeyboardButton(text='Купить абонемент 💳', callback_data='choose_section'))
+        builder.row(types.InlineKeyboardButton(text="💳 Купить абонемент", callback_data="choose_section"))
     if club_settings.get("limits", {}).get("freeze_price_per_day", 0) > 0:
-        builder.row(types.InlineKeyboardButton(text='❄️ Купить заморозку', callback_data='buy_freeze'))
-        # 🔥 ДОБАВИЛИ КНОПКУ УПРАВЛЕНИЯ ПОДПИСКОЙ КРУПНЫМИ БУКВАМИ
-        builder.row(types.InlineKeyboardButton(text='💳 УПРАВЛЕНИЕ ПОДПИСКОЙ', callback_data='manage_subscription'))
+        builder.row(
+            types.InlineKeyboardButton(text="❄️ Купить заморозку", callback_data="buy_freeze"),
+            types.InlineKeyboardButton(text="💳 Подписка", callback_data="manage_subscription"),
+        )
 
-    # 1. Всегда доступные кнопки
-    builder.row(types.InlineKeyboardButton(text='➕ Добавить атлета', callback_data='add_athlete'))
-    builder.row(types.InlineKeyboardButton(text='🔍 Подробно об атлетах', callback_data='detailed_status_info'))
+    # 3. Управление атлетами
+    builder.row(types.InlineKeyboardButton(text="➕ Добавить атлета", callback_data="add_athlete"))
 
-    # 2. ДИНАМИЧЕСКИЕ КНОПКИ
+    # 4. Заморозка действующего абонемента
     if features.get("freeze", True):
-        builder.row(types.InlineKeyboardButton(text='❄️ Заморозить абонемент', callback_data='freeze_sub'))
+        builder.row(types.InlineKeyboardButton(text="❄️ Заморозить абонемент", callback_data="freeze_sub"))
 
-    if features.get("qr", True):
-        builder.row(types.InlineKeyboardButton(text='📲 МОЙ QR-ПРОПУСК', callback_data='show_qr'))
-
-    # 3. Навигация и Авторизация
-    builder.row(types.InlineKeyboardButton(text='НАЧАЛО ◀️🔙', callback_data='begin'))
+    # 5. Навигация и авторизация
+    builder.row(types.InlineKeyboardButton(text="🏠 В главное меню", callback_data="begin"))
 
     if not is_authorized:
-        builder.row(types.InlineKeyboardButton(text='🔐 Привязать профиль по номеру', callback_data='auth_by_phone'))
+        builder.row(types.InlineKeyboardButton(text="🔐 Привязать профиль по номеру", callback_data="auth_by_phone"))
 
     return builder.as_markup()
 
