@@ -315,3 +315,32 @@ Workflow находится в `.github/workflows/deploy.yml`.
 8. Только после этого включать реальные платежи и автосписания.
 
 При проблеме сначала сохраняйте время события, URL/маршрут и фрагмент логов без токенов и паролей. Секреты из `.env` нельзя отправлять в чат, GitHub Issues или логи.
+
+## Миграции Alembic через Docker
+
+В проекте может быть несколько веток миграций, поэтому контейнер запускает все актуальные heads:
+
+```yaml
+alembic upgrade heads
+```
+
+После изменения миграций или `docker-compose.yml` пересоберите API:
+
+```bash
+docker compose up -d --build gym-api
+```
+
+Если контейнер перезапускается и миграция не успевает выполниться, запустите её отдельно:
+
+```bash
+docker compose run --rm --no-deps --entrypoint sh gym-api -c "alembic upgrade heads"
+```
+
+Проверка результата:
+
+```bash
+docker compose ps
+docker compose logs -f --tail=100 gym-api
+```
+
+В логах не должно быть `Multiple head revisions` или `restart loop`. Не используйте `alembic upgrade head`, пока в проекте остаются несколько heads.
