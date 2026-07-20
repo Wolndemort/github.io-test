@@ -309,7 +309,8 @@ async def process_kids_limit(
 
 
 @router.callback_query(F.data == 'pay_one_click')
-async def process_one_click_payment(callback: types.CallbackQuery, state: FSMContext, session: AsyncSession):
+async def process_one_click_payment(callback: types.CallbackQuery, state: FSMContext, session: AsyncSession,
+                                    club: Club):
     await callback.answer("Провожу платеж в 1 клик...", show_alert=False)
 
     data = await state.get_data()
@@ -331,15 +332,12 @@ async def process_one_click_payment(callback: types.CallbackQuery, state: FSMCon
     user_res = await session.execute(select(User).where(User.user_id == user_id))
     user = user_res.scalar_one_or_none()
 
-    if not user or not user.club_id:
-        return await callback.message.answer("❌ Ошибка: Не удалось определить ваш клуб.")
+    if not user:
+        return await callback.message.answer("❌ Ошибка: Пользователь не найден в системе.")
 
-    # 2. Нам нужны платежные ключи этого клуба для проведения автосписания
-    club_res = await session.execute(select(Club).where(Club.id == user.club_id))
-    club = club_res.scalar_one_or_none()
-
-    if not club:
-        return await callback.message.answer("❌ Ошибка: Клуб не найден в системе.")
+    # Клуб берём из middleware: он определён по токену текущего бота,
+    # а не из потенциально устаревшего club_id пользователя.
+    club_id = club.id
 
     pay_settings = club.club_settings.get("payments", {})
     shop_id = pay_settings.get("yookassa_shop_id")
@@ -353,7 +351,7 @@ async def process_one_click_payment(callback: types.CallbackQuery, state: FSMCon
         id=order_id,
         user_id=user_id,
         student_id=data['student_id'],
-        club_id=user.club_id,
+        club_id=club_id,
         amount_kopecks=amount_kopecks,
         lesson_count=data['lesson_count'],
         days_to_add=data['days_to_add'],
@@ -386,7 +384,7 @@ async def process_one_click_payment(callback: types.CallbackQuery, state: FSMCon
             student_id=data['student_id'],
             lessons_count=data['lesson_count'],
             session=session,
-            club_id=user.club_id,
+            club_id=club_id,
             club_settings=club.club_settings,
             days_to_add=data['days_to_add'],
             discipline=sport_type  # <--- ТЕПЕРЬ ДИСЦИПЛИНА ЗАПИШЕТСЯ КОРРЕКТНО!
@@ -458,7 +456,8 @@ async def process_sbp_payment_choice(
 async def process_official_card_payment(
         callback: types.CallbackQuery,
         state: FSMContext,
-        session: AsyncSession
+        session: AsyncSession,
+        club: Club,
 ):
     """Сценарий онлайн-оплаты через ЮKassa: Ссылка (первый раз) ИЛИ 1 клик (если карта привязана)"""
     await callback.answer("Обрабатываю запрос...", show_alert=False)
@@ -478,14 +477,12 @@ async def process_official_card_payment(
     user_res = await session.execute(select(User).where(User.user_id == user_id))
     user = user_res.scalar_one_or_none()
 
-    if not user or not user.club_id:
-        return await callback.message.answer("❌ Ошибка: Клуб не найден в вашей учетной записи.")
+    if not user:
+        return await callback.message.answer("❌ Ошибка: Пользователь не найден в системе.")
 
-    club_res = await session.execute(select(Club).where(Club.id == user.club_id))
-    club = club_res.scalar_one_or_none()
-
-    if not club:
-        return await callback.message.answer("❌ Ошибка: Клуб не найден в базе данных платформы.")
+    # Используем клуб текущего бота из middleware. Это не зависит от старого
+    # или не заполненного club_id в записи пользователя.
+    club_id = club.id
 
     pay_settings = club.club_settings.get("payments", {}) if club.club_settings else {}
     shop_id = pay_settings.get("yookassa_shop_id")
@@ -498,7 +495,7 @@ async def process_official_card_payment(
     sub_query = select(Subscription).where(
         and_(
             Subscription.user_id == user_id,
-            Subscription.club_id == user.club_id,
+            Subscription.club_id == club_id,
             Subscription.rebill_id.is_not(None)
         )
     )
@@ -513,7 +510,7 @@ async def process_official_card_payment(
     # =====================================================================
     if saved_subscription and saved_subscription.rebill_id:
         new_order = PaymentOrder(
-            id=order_id, user_id=user_id, student_id=student_id, club_id=user.club_id,
+            id=order_id, user_id=user_id, student_id=student_id, club_id=club_id,
             amount_kopecks=amount_kopecks, lesson_count=lesson_count, days_to_add=days_to_add,
             status="NEW", type="FREEZE_RECURRING" if payment_kind == "FREEZE" else "RECURRING",
             discipline=sport_type  # 🌟 ЗАПИСЫВАЕМ СЕКЦИЮ В ОРДЕР ПЕРЕД КЛИКОМ
@@ -543,11 +540,11 @@ async def process_official_card_payment(
                 # 🌟 ФИКС: Если ЮKassa списала деньги моментально в фоне,
                 # мы активируем абонемент прямо ЗДЕСЬ, передавая ПРАВИЛЬНУЮ дисциплину!
                 if payment_kind == "FREEZE":
-                    abon_result = await purchase_student_freeze(student_id, user.club_id, days_to_add, session)
+                    abon_result = await purchase_student_freeze(student_id, club_id, days_to_add, session)
                 else:
                     abon_result = await add_abon(
                         student_id=student_id, lessons_count=lesson_count, session=session,
-                        club_id=user.club_id, club_settings=club.club_settings,
+                        club_id=club_id, club_settings=club.club_settings,
                         days_to_add=days_to_add, discipline=sport_type)
                 await session.commit()
 
@@ -590,7 +587,7 @@ async def process_official_card_payment(
     # СЦЕНАРИЙ А: КАРТЫ НЕТ -> ГЕНЕРИРУЕМ ССЫЛКУ
     # =====================================================================
     new_order = PaymentOrder(
-        id=order_id, user_id=user_id, student_id=student_id, club_id=user.club_id,
+        id=order_id, user_id=user_id, student_id=student_id, club_id=club_id,
         amount_kopecks=amount_kopecks, lesson_count=lesson_count, days_to_add=days_to_add,
         status="NEW", type="FREEZE_FIRST" if payment_kind == "FREEZE" else "FIRST",
         discipline=sport_type  # 🌟 ЗАПИСЫВАЕМ СЕКЦИЮ В ОРДЕР ДЛЯ ВЕБХУКА
