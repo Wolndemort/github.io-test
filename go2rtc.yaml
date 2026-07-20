@@ -1,3 +1,6 @@
+api:
+  listen: ":1984"
+
 streams:
   camera1: rtsp://admin:Aemaykop2026@cam1.aemaykop-skud.netcraze.pro:5541/11
   camera2: rtsp://admin:Aemaykop2026@cam2.aemaykop-skud.netcraze.pro:5542/11

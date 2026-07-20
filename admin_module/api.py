@@ -573,7 +573,9 @@ async def video_stream(
 
     # Смартфон не видит внутреннюю Docker-сеть. Поэтому FastAPI сам подключается
     # к go2rtc и передает полученные байты наружу без изменения.
-    go2rtc_mjpeg_api = "http://host.docker.internal:1984/api/stream.mjpeg"
+    # go2rtc работает в той же Docker-сети, что и API. Не используем
+    # host.docker.internal: это ломается на Docker Desktop и при деплое на Linux.
+    go2rtc_mjpeg_api = "http://go2rtc:1984/api/stream.mjpeg"
     timeout = httpx.Timeout(connect=10.0, read=None, write=10.0, pool=10.0)
     client = httpx.AsyncClient(timeout=timeout)
 
