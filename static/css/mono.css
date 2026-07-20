@@ -1,4 +1,5 @@
-/* Единая чёрно-белая тема WebApp и админских страниц. */
+/* Единая чёрно-белая тема WebApp и админских страниц.
+   Включается только на страницах с классом body.mono-theme. */
 :root {
     --mono-black: #111111;
     --mono-white: #ffffff;
@@ -7,207 +8,207 @@
     --mono-muted: #666666;
 }
 
-html,
-body {
+body.mono-theme,
+body.mono-theme html {
     background: var(--mono-white) !important;
     color: var(--mono-black) !important;
 }
 
-body,
-button,
-input,
-select,
-textarea {
+body.mono-theme,
+body.mono-theme button,
+body.mono-theme input,
+body.mono-theme select,
+body.mono-theme textarea {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
 }
 
-h1, h2, h3, h4, h5, h6,
-h1 *, h2 *, h3 *, h4 *, h5 *, h6 * {
+body.mono-theme h1, body.mono-theme h2, body.mono-theme h3, body.mono-theme h4, body.mono-theme h5, body.mono-theme h6,
+body.mono-theme h1 *, body.mono-theme h2 *, body.mono-theme h3 *, body.mono-theme h4 *, body.mono-theme h5 *, body.mono-theme h6 * {
     color: var(--mono-black) !important;
 }
 
-.card,
-.student-card,
-.day-container,
-.lesson-card {
+body.mono-theme .card,
+body.mono-theme .student-card,
+body.mono-theme .day-container,
+body.mono-theme .lesson-card {
     background: var(--mono-white) !important;
     border-color: var(--mono-line) !important;
     box-shadow: 0 2px 10px rgba(0, 0, 0, 0.06) !important;
 }
 
-.search-input,
-input,
-textarea,
-select {
+body.mono-theme .search-input,
+body.mono-theme input,
+body.mono-theme textarea,
+body.mono-theme select {
     background: var(--mono-white) !important;
     color: var(--mono-black) !important;
     border-color: var(--mono-line) !important;
 }
 
-.search-input:focus,
-input:focus,
-textarea:focus,
-select:focus {
+body.mono-theme .search-input:focus,
+body.mono-theme input:focus,
+body.mono-theme textarea:focus,
+body.mono-theme select:focus {
     border-color: var(--mono-black) !important;
     outline: 2px solid #eeeeee;
 }
 
-.btn,
-button,
-.camera-btn,
-.retry-button,
-.time {
+body.mono-theme .btn,
+body.mono-theme button,
+body.mono-theme .camera-btn,
+body.mono-theme .retry-button,
+body.mono-theme .time {
     background: var(--mono-black) !important;
     color: var(--mono-white) !important;
     border: 1px solid var(--mono-black) !important;
 }
 
-.btn:hover,
-button:hover,
-.camera-btn:hover,
-.retry-button:hover {
+body.mono-theme .btn:hover,
+body.mono-theme button:hover,
+body.mono-theme .camera-btn:hover,
+body.mono-theme .retry-button:hover {
     background: #333333 !important;
 }
 
-.btn:active,
-button:active,
-.camera-btn:active,
-.retry-button:active {
+body.mono-theme .btn:active,
+body.mono-theme button:active,
+body.mono-theme .camera-btn:active,
+body.mono-theme .retry-button:active {
     background: var(--mono-white) !important;
     color: var(--mono-black) !important;
 }
 
-.btn-secondary,
-.camera-btn:not(.active) {
+body.mono-theme .btn-secondary,
+body.mono-theme .camera-btn:not(.active) {
     background: var(--mono-white) !important;
     color: var(--mono-black) !important;
     border-color: var(--mono-black) !important;
 }
 
-.btn-secondary:hover,
-.camera-btn:not(.active):hover {
+body.mono-theme .btn-secondary:hover,
+body.mono-theme .camera-btn:not(.active):hover {
     background: var(--mono-soft) !important;
 }
 
-.tg-link,
-.badge {
+body.mono-theme .tg-link,
+body.mono-theme .badge {
     background: var(--mono-black) !important;
     color: var(--mono-white) !important;
 }
 
-.label,
-.sub-text,
-.coach,
-.no-lessons,
-.empty-text,
-.welcome,
-.center-muted-text,
-.gray-bold,
-.check-chat-text,
-.frozen-badge,
-.slots {
+body.mono-theme .label,
+body.mono-theme .sub-text,
+body.mono-theme .coach,
+body.mono-theme .no-lessons,
+body.mono-theme .empty-text,
+body.mono-theme .welcome,
+body.mono-theme .center-muted-text,
+body.mono-theme .gray-bold,
+body.mono-theme .check-chat-text,
+body.mono-theme .frozen-badge,
+body.mono-theme .slots {
     color: var(--mono-muted) !important;
 }
 
-.day-title,
-.student-card h3,
-.student-card p,
-#status-hint,
-#setup-biometry-box p {
+body.mono-theme .day-title,
+body.mono-theme .student-card h3,
+body.mono-theme .student-card p,
+body.mono-theme #status-hint,
+body.mono-theme #setup-biometry-box p {
     color: var(--mono-black) !important;
 }
 
-.student-card p,
-#status-hint,
-#setup-biometry-box p,
-.day-title {
+body.mono-theme .student-card p,
+body.mono-theme #status-hint,
+body.mono-theme #setup-biometry-box p,
+body.mono-theme .day-title {
     color: var(--mono-muted) !important;
 }
 
-.card span[style],
-.card div[style] {
+body.mono-theme .card span[style],
+body.mono-theme .card div[style] {
     color: var(--mono-black) !important;
 }
 
-.list-item,
-.discipline-title,
-summary {
+body.mono-theme .list-item,
+body.mono-theme .discipline-title,
+body.mono-theme summary {
     border-color: var(--mono-line) !important;
     color: var(--mono-black) !important;
 }
 
-.value,
-.value.accent,
-.value.warning,
-.value.danger,
-.green-text,
-.green-success-text,
-.purple-label,
-.red-label,
-.orange-label,
-.red-bold,
-.orange-bold,
-.badge-count {
+body.mono-theme .value,
+body.mono-theme .value.accent,
+body.mono-theme .value.warning,
+body.mono-theme .value.danger,
+body.mono-theme .green-text,
+body.mono-theme .green-success-text,
+body.mono-theme .purple-label,
+body.mono-theme .red-label,
+body.mono-theme .orange-label,
+body.mono-theme .red-bold,
+body.mono-theme .orange-bold,
+body.mono-theme .badge-count {
     color: var(--mono-black) !important;
 }
 
-.birthday-card,
-#setup-biometry-box {
+body.mono-theme .birthday-card,
+body.mono-theme #setup-biometry-box {
     background: var(--mono-soft) !important;
     color: var(--mono-black) !important;
 }
 
-.video-container {
+body.mono-theme .video-container {
     background: var(--mono-black) !important;
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22) !important;
 }
 
-.camera-status {
+body.mono-theme .camera-status {
     background: rgba(17, 17, 17, 0.88) !important;
     color: var(--mono-white) !important;
 }
 
-.camera-status h1,
-.camera-status h2,
-.camera-status h3,
-.camera-status span {
+body.mono-theme .camera-status h1,
+body.mono-theme .camera-status h2,
+body.mono-theme .camera-status h3,
+body.mono-theme .camera-status span {
     color: var(--mono-white) !important;
 }
 
-.spinner {
+body.mono-theme .spinner {
     border-top-color: var(--mono-white) !important;
 }
 
-a {
+body.mono-theme a {
     color: var(--mono-black);
 }
 
 @media (prefers-color-scheme: dark) {
-    html,
-    body {
+    body.mono-theme,
+    body.mono-theme html {
         background: var(--mono-black) !important;
         color: var(--mono-white) !important;
     }
 
-    .card,
-    .student-card,
-    .day-container,
-    .lesson-card,
-    .search-input,
-    input,
-    textarea,
-    select {
+    body.mono-theme .card,
+    body.mono-theme .student-card,
+    body.mono-theme .day-container,
+    body.mono-theme .lesson-card,
+    body.mono-theme .search-input,
+    body.mono-theme input,
+    body.mono-theme textarea,
+    body.mono-theme select {
         background: #1b1b1b !important;
         color: var(--mono-white) !important;
         border-color: #444444 !important;
     }
 
-    h1, h2, h3, h4, h5, h6,
-    h1 *, h2 *, h3 *, h4 *, h5 *, h6 *,
-    .list-item,
-    .discipline-title,
-    summary,
-    a {
+    body.mono-theme h1, body.mono-theme h2, body.mono-theme h3, body.mono-theme h4, body.mono-theme h5, body.mono-theme h6,
+    body.mono-theme h1 *, body.mono-theme h2 *, body.mono-theme h3 *, body.mono-theme h4 *, body.mono-theme h5 *, body.mono-theme h6 *,
+    body.mono-theme .list-item,
+    body.mono-theme .discipline-title,
+    body.mono-theme summary,
+    body.mono-theme a {
         color: var(--mono-white) !important;
     }
 }

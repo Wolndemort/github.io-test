@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
@@ -20,7 +20,7 @@
         .selected-card { border-color: #0088cc; background: #e6f7ff; }
     </style>
 </head>
-<body>
+<body class="mono-theme">
     {% if loading.enabled %}<div id="app-loader"><img src="{{ logo_url or url_for('static', path='img/logo.png') }}" onerror="this.style.display='none'"><div>{{ loading.message }}</div><div class="spinner"></div></div>{% endif %}
     <h2>Пропускной пункт клуба</h2>
 
