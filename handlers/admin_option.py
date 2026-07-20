@@ -179,7 +179,7 @@ async def admin_settings_menu(callback: types.CallbackQuery, club_settings: dict
         text=f"{t_status} СКУД(Турникет)", callback_data='admin_turnstile_main'))
 
     builder.row(types.InlineKeyboardButton(text="🥋 Управление секциями", callback_data="manage_disciplines"))
-    builder.row(types.InlineKeyboardButton(text="⬅️ В админ-панель", callback_data="admin_keyboard"))
+    builder.row(types.InlineKeyboardButton(text="⬅️ В админ-панель", callback_data="admin"))
 
     await callback.message.edit_text(
         "🛠 <b>Настройки модулей клуба</b>\n\nВключайте и выключайте функции бота:",

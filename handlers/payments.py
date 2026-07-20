@@ -319,13 +319,6 @@ async def process_one_click_payment(callback: types.CallbackQuery, state: FSMCon
     # Извлекаем тип спорта (дисциплину) из стейта
     sport_type = data.get('sport_type')  # Сюда прилетит: 'boxing', 'kickboxing', 'bjj', 'yoga'
 
-    # 1. Достаем токен сохраненной карты (payment_method_id в ЮKassa)
-    sub_res = await session.execute(select(Subscription).where(Subscription.user_id == user_id).limit(1))
-    saved_card = sub_res.scalar_one_or_none()
-
-    if not saved_card or not saved_card.rebill_id:
-        return await callback.message.answer("❌ Ошибка: Сохраненная карта не найдена. Оплатите заново для привязки.")
-
     order_id = f"ONE_{uuid.uuid4().hex[:12].upper()}"
     amount_kopecks = int(float(data['price']) * 100)
 
@@ -335,9 +328,29 @@ async def process_one_click_payment(callback: types.CallbackQuery, state: FSMCon
     if not user:
         return await callback.message.answer("❌ Ошибка: Пользователь не найден в системе.")
 
-    # Клуб берём из middleware: он определён по токену текущего бота,
-    # а не из потенциально устаревшего club_id пользователя.
-    club_id = club.id
+    # Совместимость со старыми пользователями: сначала используем их привязку,
+    # а если она не заполнена — клуб текущего бота из middleware.
+    club_id = user.club_id or getattr(club, "id", None)
+    if not club_id:
+        return await callback.message.answer("❌ Ошибка: Не удалось определить ваш клуб.")
+    if not club or club.id != club_id:
+        club_res = await session.execute(select(Club).where(Club.id == club_id))
+        club = club_res.scalar_one_or_none()
+    if not club:
+        return await callback.message.answer("❌ Ошибка: Клуб не найден в системе.")
+
+    # Ищем карту только после определения клуба, чтобы не взять подписку
+    # пользователя из другого клуба.
+    sub_res = await session.execute(
+        select(Subscription).where(
+            Subscription.user_id == user_id,
+            Subscription.club_id == club_id,
+            Subscription.rebill_id.is_not(None)
+        ).limit(1)
+    )
+    saved_card = sub_res.scalar_one_or_none()
+    if not saved_card:
+        return await callback.message.answer("❌ Ошибка: Сохраненная карта не найдена. Оплатите заново для привязки.")
 
     pay_settings = club.club_settings.get("payments", {})
     shop_id = pay_settings.get("yookassa_shop_id")
@@ -480,9 +493,16 @@ async def process_official_card_payment(
     if not user:
         return await callback.message.answer("❌ Ошибка: Пользователь не найден в системе.")
 
-    # Используем клуб текущего бота из middleware. Это не зависит от старого
-    # или не заполненного club_id в записи пользователя.
-    club_id = club.id
+    # Совместимость со старыми пользователями: сначала используем их привязку,
+    # а если она не заполнена — клуб текущего бота из middleware.
+    club_id = user.club_id or getattr(club, "id", None)
+    if not club_id:
+        return await callback.message.answer("❌ Ошибка: Клуб не найден в вашей учетной записи.")
+    if not club or club.id != club_id:
+        club_res = await session.execute(select(Club).where(Club.id == club_id))
+        club = club_res.scalar_one_or_none()
+    if not club:
+        return await callback.message.answer("❌ Ошибка: Клуб не найден в базе данных платформы.")
 
     pay_settings = club.club_settings.get("payments", {}) if club.club_settings else {}
     shop_id = pay_settings.get("yookassa_shop_id")
@@ -854,7 +874,7 @@ async def show_all_students_for_cash(
             callback_data=f"cash_pay_{s.id}")
         )
 
-    builder.row(InlineKeyboardButton(text="⬅️ Назад", callback_data="admin_keyboard"))
+    builder.row(InlineKeyboardButton(text="⬅️ В админ-панель", callback_data="admin"))
 
     club_name = club_settings.get("ui", {}).get("club_name", club.name)
     await callback.message.edit_text(

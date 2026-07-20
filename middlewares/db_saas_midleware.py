@@ -35,6 +35,7 @@ class ClubMiddleware(BaseMiddleware):
             club_obj = Club(
                 id=club_data["id"],
                 name=club_data["name"],
+                bot_token=bot_token,
                 owner_id=club_data["owner_id"],
                 club_settings=club_data["settings"],
                 subscription_expire_at=sub_expire
@@ -56,6 +57,7 @@ class ClubMiddleware(BaseMiddleware):
             club_to_cache = {
                 "id": club_obj.id,
                 "name": club_obj.name,
+                "bot_token": bot_token,
                 "owner_id": club_obj.owner_id,
                 "settings": club_obj.club_settings,
                 "sub_expire": club_obj.subscription_expire_at.isoformat() if club_obj.subscription_expire_at else None

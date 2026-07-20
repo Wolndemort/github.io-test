@@ -31,7 +31,7 @@ async def show_pay_menu(callback: types.CallbackQuery):
         text="☀️ 1 год (365 дн.) — 15 000 ₽", callback_data="buy_sub_365")
     )
     builder.row(types.InlineKeyboardButton(
-        text="⬅️ Назад в админку", callback_data="admin_keyboard")
+        text="⬅️ Назад в админку", callback_data="admin")
     )
     builder.adjust(1)
 
