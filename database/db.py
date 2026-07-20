@@ -132,6 +132,8 @@ class PaymentOrder(Base):
     status: Mapped[str] = mapped_column(String(20), default="NEW")
     # Тип платежа: "FIRST" (первый платеж с привязкой) или "RECURRENT" (автосписание по крону)
     type: Mapped[str] = mapped_column(String(20))
+    # ID платежа ЮKassa для аудита и защиты от повторного зачисления
+    provider_payment_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True, unique=True, index=True)
 
     lesson_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     days_to_add: Mapped[int] = mapped_column(Integer, default=30, server_default="30")

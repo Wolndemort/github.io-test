@@ -41,6 +41,10 @@ class YooKassaClient:
         Создание первой оплаты.
         Передаем save_payment_method=True, чтобы ЮKassa сохранила карту для подписки.
         """
+        if not order_id or len(order_id) > 50 or not isinstance(amount_kopecks, int) or amount_kopecks <= 0:
+            return {"Success": False, "Message": "Некорректные параметры платежа"}
+        if not self.shop_id or not self.secret_key:
+            return {"Success": False, "Message": "Платежный магазин не настроен"}
         url = self.base_url
 
         # Переводим копейки из твоей модели БД в рубли (формат "3500.00")
@@ -102,7 +106,9 @@ class YooKassaClient:
 
         # ЮKassa требует уникальный Idempotence-Key для каждого запроса создания платежа
         headers = {
-            "Idempotence-Key": str(uuid.uuid4()),
+            # Повтор запроса того же заказа должен вернуть тот же платеж,
+            # а не создать второй.
+            "Idempotence-Key": order_id,
             "Content-Type": "application/json"
         }
 
@@ -132,6 +138,10 @@ class YooKassaClient:
         """
         Автосписание без участия пользователя (Рекуррентный платеж по крону).
         """
+        if not order_id or len(order_id) > 50 or not isinstance(amount_kopecks, int) or amount_kopecks <= 0:
+            return {"Success": False, "Message": "Некорректные параметры платежа"}
+        if not payment_method_id or not self.shop_id or not self.secret_key:
+            return {"Success": False, "Message": "Платежные реквизиты не настроены"}
         url = self.base_url
         amount_rub = f"{amount_kopecks / 100:.2f}"
 
@@ -149,7 +159,7 @@ class YooKassaClient:
         }
 
         headers = {
-            "Idempotence-Key": str(uuid.uuid4()),
+            "Idempotence-Key": order_id,
             "Content-Type": "application/json"
         }
 

@@ -64,6 +64,20 @@ class ClubMiddleware(BaseMiddleware):
             }
             await self.redis.set(cache_key, json.dumps(club_to_cache), ex=600)
 
+        # Срок подписки не берём из Redis: он должен блокироваться сразу
+        # после истечения и разблокироваться сразу после платежа.
+        session = data["session"]
+        subscription_result = await session.execute(
+            select(Club.subscription_expire_at, Club.owner_id, Club.id)
+            .where(Club.bot_token == bot_token)
+        )
+        subscription_row = subscription_result.one_or_none()
+        if not subscription_row:
+            return
+        club_obj.subscription_expire_at = subscription_row[0]
+        club_obj.owner_id = subscription_row[1]
+        club_obj.id = subscription_row[2]
+
         # 3. Логика проверки подписки
         now = datetime.now()
         sub_end = club_obj.subscription_expire_at
@@ -86,8 +100,12 @@ class ClubMiddleware(BaseMiddleware):
                 # Если это владелец - проверяем, не пытается ли он оплатить прямо сейчас
                 is_pay_action = False
                 if hasattr(event, "data") and event.data:
-                    if event.data == "pay_menu" or event.data.startswith("buy_sub") or event.data == "admin":
+                    if event.data == "pay_menu" or event.data.startswith("buy_sub"):
                         is_pay_action = True
+                # Успешный платёж обязан пройти до обработчика зачисления,
+                # иначе истёкший клуб никогда не продлится.
+                if isinstance(event, types.Message) and event.successful_payment:
+                    is_pay_action = True
 
                 # Если владелец просто пишет что-то другое или жмет другие кнопки — требуем оплату
                 if not is_pay_action:

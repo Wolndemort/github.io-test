@@ -13,6 +13,7 @@ router = Router()
 
 # Забираем токен ЮKassa из переменных окружения (.env)
 YOOKASSA_PROVIDER_TOKEN = os.getenv("YOOKASSA_PROVIDER_TOKEN", "ТВОЙ_ТОКЕН_ЮКАССЫ_ИЗ_BOTFATHER")
+SUBSCRIPTION_PRICES = {30: 150000, 365: 1500000}
 
 
 # =========================================================================
@@ -51,10 +52,19 @@ async def show_pay_menu(callback: types.CallbackQuery):
 @router.callback_query(F.data.startswith("buy_sub_"))
 async def send_subscription_invoice(callback: types.CallbackQuery, club: "Club"):
     await callback.answer()
-    days = int(callback.data.split("_")[-1])
+    try:
+        days = int(callback.data.split("_")[-1])
+    except (ValueError, IndexError):
+        return await callback.answer("Некорректный тариф.", show_alert=True)
+    if days not in SUBSCRIPTION_PRICES:
+        return await callback.answer("Такой тариф недоступен.", show_alert=True)
+    if callback.from_user.id != club.owner_id:
+        return await callback.answer("Оплатить подписку может только владелец клуба.", show_alert=True)
+    if not YOOKASSA_PROVIDER_TOKEN or YOOKASSA_PROVIDER_TOKEN.startswith("ТВОЙ_"):
+        return await callback.answer("Платежный провайдер еще не настроен.", show_alert=True)
 
     # Математика цен в копейках для ЮKassa (1 рубль = 100 копеек)
-    price_amount = 150000 if days == 30 else 1500000
+    price_amount = SUBSCRIPTION_PRICES[days]
 
     # Зашиваем ID клуба и количество дней
     invoice_payload = f"sub_yookassa:{club.id}:{days}"
@@ -75,8 +85,15 @@ async def send_subscription_invoice(callback: types.CallbackQuery, club: "Club")
 # =========================================================================
 @router.pre_checkout_query()
 async def process_pre_checkout(pre_checkout_query: types.PreCheckoutQuery):
-    # ЮKassa и Telegram ждут этот ответ строго в течение 10 секунд
-    await pre_checkout_query.answer(ok=True)
+    try:
+        prefix, club_id_str, days_str = pre_checkout_query.invoice_payload.split(":")
+        days = int(days_str)
+        club_id = int(club_id_str)
+        valid = prefix == "sub_yookassa" and club_id > 0 and days in SUBSCRIPTION_PRICES
+        valid = valid and pre_checkout_query.total_amount == SUBSCRIPTION_PRICES[days]
+    except (ValueError, AttributeError):
+        valid = False
+    await pre_checkout_query.answer(ok=valid, error_message=None if valid else "Некорректный счет оплаты.")
 
 
 # =========================================================================
@@ -94,6 +111,8 @@ async def on_successful_payment(message: types.Message, session: AsyncSession, r
         _, club_id_str, days_str = payload.split(":")
         target_club_id = int(club_id_str)
         days = int(days_str)
+        if days not in SUBSCRIPTION_PRICES or days <= 0:
+            raise ValueError("unsupported tariff")
     except ValueError:
         logger.error(f"❌ Ошибка парсинга рублевого payload: {payload}")
         return
@@ -106,6 +125,20 @@ async def on_successful_payment(message: types.Message, session: AsyncSession, r
     if not club:
         logger.critical(f"🚨 Оплата ЮKassa пришла для несуществующего club_id: {target_club_id}")
         await message.answer("❌ Произошла системная ошибка. Обратитесь к разработчику платформы.")
+        return
+
+    payment = message.successful_payment
+    if message.bot.token != club.bot_token or message.from_user.id != club.owner_id:
+        logger.warning("Попытка зачисления подписки не из клуба или не владельцем: club=%s user=%s", club.id, message.from_user.id)
+        return await message.answer("❌ Платеж не прошел проверку безопасности.")
+    if payment.total_amount != SUBSCRIPTION_PRICES[days]:
+        logger.error("Несовпадение суммы SaaS-платежа: club=%s payload=%s amount=%s", club.id, payload, payment.total_amount)
+        return await message.answer("❌ Сумма платежа не соответствует тарифу.")
+
+    charge_id = payment.telegram_payment_charge_id
+    idem_key = f"billing:telegram_charge:{charge_id}"
+    if not await redis.set(idem_key, "1", nx=True, ex=90 * 24 * 60 * 60):
+        logger.warning("Повторное событие платежа проигнорировано: %s", charge_id)
         return
 
     # Наивное локальное время
