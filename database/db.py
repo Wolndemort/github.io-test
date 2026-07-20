@@ -50,6 +50,9 @@ class Student(Base):
     can_freeze: Mapped[int] = mapped_column(Integer, default=1)
     is_frozen: Mapped[int] = mapped_column(Integer, default=0)
     frozen_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    # Фактическая длительность текущей заморозки. Нужна для платных пакетов,
+    # которые могут отличаться от стандартного шага клуба.
+    frozen_days: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     balance_lessons: Mapped[int] = mapped_column(default=0)
     birthday: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     last_visit: Mapped[Optional[datetime]] = mapped_column(DateTime)
@@ -310,6 +313,7 @@ async def process_student_freeze(
             # Списываем 1 право на заморозку и ставим флаг
             student.can_freeze -= 1  # ПРАВКА: Уменьшаем на 1, а не обнуляем в 0
             student.is_frozen = 1
+            student.frozen_days = days
 
             # ❄️ ПРАВКА: Записываем текущую дату начала заморозки в твою новую колонку из Alembic!
             student.frozen_at = now_naive
@@ -434,6 +438,8 @@ async def add_abon(
 
         # 4. Сброс флагов заморозки
         student.is_frozen = 0
+        student.frozen_at = None
+        student.frozen_days = None
 
         # Даем ли право на заморозку в новом периоде?
         can_freeze_global = club_settings.get("features", {}).get("freeze", True)
@@ -542,6 +548,7 @@ async def purchase_student_freeze(
         student.expire_date = student.expire_date + timedelta(days=days)
         student.is_frozen = 1
         student.frozen_at = now
+        student.frozen_days = days
         await session.flush()
         return student.expire_date, student.parent_id
     except Exception:

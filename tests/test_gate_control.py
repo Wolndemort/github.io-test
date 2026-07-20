@@ -34,6 +34,7 @@ def make_student(**overrides):
         "last_visit": None,
         "is_frozen": 0,
         "frozen_at": None,
+        "frozen_days": None,
     }
     values.update(overrides)
     return SimpleNamespace(**values)
@@ -92,3 +93,43 @@ async def test_gate_rejects_rapid_repeat():
     assert result["success"] is False
     assert "Не спамьте" in result["message"]
     db.commit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_gate_early_unfreeze_returns_paid_freeze_duration():
+    student = make_student(
+        is_frozen=1,
+        frozen_at=datetime.now(timezone.utc).replace(tzinfo=None),
+        frozen_days=30,
+        expire_date=datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(days=40),
+    )
+    db = make_db(student, SimpleNamespace(id=10, name="Клуб"))
+
+    result = await process_athlete_gate_pass(
+        1, db, {"limits": {"freeze_days_step": 7}}, expected_club_id=10
+    )
+
+    assert result["success"] is True
+    assert result["returned_early_days"] == 30
+    assert student.is_frozen == 0
+    assert student.frozen_at is None
+    assert student.frozen_days is None
+    assert student.expire_date <= datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(days=11)
+
+
+@pytest.mark.asyncio
+async def test_gate_early_unfreeze_legacy_freeze_uses_club_step():
+    student = make_student(
+        is_frozen=1,
+        frozen_at=datetime.now(timezone.utc).replace(tzinfo=None),
+        frozen_days=None,
+        expire_date=datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(days=20),
+    )
+    db = make_db(student, SimpleNamespace(id=10, name="Клуб"))
+
+    result = await process_athlete_gate_pass(
+        1, db, {"limits": {"freeze_days_step": 7}}, expected_club_id=10
+    )
+
+    assert result["success"] is True
+    assert result["returned_early_days"] == 7

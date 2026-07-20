@@ -67,7 +67,9 @@ async def process_athlete_gate_pass(
     if student.is_frozen and student.frozen_at:
         frozen_at_naive = student.frozen_at.replace(tzinfo=None)
         days_passed = max(0, (now_naive.date() - frozen_at_naive.date()).days)
-        freeze_step = club_settings.get("limits", {}).get("freeze_days_step", 7)
+        # Для платной заморозки берем реально купленный срок; старые записи
+        # без frozen_days используют стандартный шаг клуба.
+        freeze_step = getattr(student, "frozen_days", None) or club_settings.get("limits", {}).get("freeze_days_step", 7)
 
         if days_passed < freeze_step:
             diff = freeze_step - days_passed
@@ -78,6 +80,8 @@ async def process_athlete_gate_pass(
 
         student.is_frozen = 0
         student.frozen_at = None
+        if hasattr(student, "frozen_days"):
+            student.frozen_days = None
         is_was_frozen = True
         await db.flush()
 
