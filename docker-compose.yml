@@ -22,6 +22,9 @@ services:
     container_name: gym_crm_api
     networks:
       - web_network
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
     restart: always
     command: >
       sh -c "alembic upgrade heads && uvicorn main:app --host 0.0.0.0 --port 8000"
