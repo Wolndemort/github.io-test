@@ -576,7 +576,9 @@ async def video_stream(
     # go2rtc работает в той же Docker-сети, что и API. Не используем
     # host.docker.internal: это ломается на Docker Desktop и при деплое на Linux.
     go2rtc_mjpeg_api = "http://go2rtc:1984/api/stream.mjpeg"
-    timeout = httpx.Timeout(connect=10.0, read=None, write=10.0, pool=10.0)
+    # Некоторые RTSP-источники поднимают первый кадр заметно дольше обычного.
+    # Даем go2rtc больше времени именно на установление соединения с источником.
+    timeout = httpx.Timeout(connect=150.0, read=None, write=10.0, pool=10.0)
     client = httpx.AsyncClient(timeout=timeout)
 
     try:

@@ -202,6 +202,7 @@
         let currentCamera = 'camera1';
         let connectionTimeout;
         let frameWatcher;
+        const CAMERA_CONNECT_TIMEOUT_MS = 180000;
 
         function showConnecting() {
             cameraStatus.classList.remove('hidden', 'error');
@@ -221,8 +222,8 @@
 
             connectionTimeout = setTimeout(() => {
                 clearInterval(frameWatcher);
-                showError('Камера не ответила за 15 секунд');
-            }, 15000);
+                showError('Камера не ответила за 3 минуты');
+            }, CAMERA_CONNECT_TIMEOUT_MS);
         }
 
         function showError(message) {

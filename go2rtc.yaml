@@ -2,7 +2,7 @@ api:
   listen: ":1984"
 
 streams:
-  camera1: rtsp://admin:Aemaykop2026@192.168.1.20:554/11
+  camera1: rtsp://admin:Aemaykop2026@192.168.1.20:554/12
   camera2: rtsp://admin:Aemaykop2026@192.168.1.21:554/11
   camera3: rtsp://admin:Aemaykop2026@192.168.1.22:554/11
   camera4: rtsp://admin:Aemaykop2026@192.168.1.23:554/11
