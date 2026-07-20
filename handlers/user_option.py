@@ -753,7 +753,7 @@ async def process_athlete_name(message: types.Message, state: FSMContext):
     await message.answer(
         f"✅ Имя сохранено: <b>{message.text}</b>\n\n"
         f"Введите <b>день рождения атлета</b> в формате ДД.ММ.ГГГГ\n"
-        f"<i>(например: 15.08.2012):</i>",
+        f"<i>(например: 15.08.2012 или напишите '0', если неизвестно):</i>",
         parse_mode="HTML"
     )
 
@@ -767,13 +767,17 @@ async def process_athlete_birthday(
         club: Club,
         club_settings: dict
 ):
-    try:
-        # Валидируем формат даты
-        birthday_date = datetime.strptime(message.text.strip(), "%d.%m.%Y").date()
-    except ValueError:
-        return await message.answer(
-            "❌ Неверный формат! Введите дату строго в формате ДД.ММ.ГГГГ (например: 25.10.2015):"
-        )
+    birthday_text = message.text.strip()
+    birthday_date = None
+    if birthday_text != "0":
+        try:
+            # Валидируем формат даты
+            birthday_date = datetime.strptime(birthday_text, "%d.%m.%Y").date()
+        except ValueError:
+            return await message.answer(
+                "❌ Неверный формат! Введите дату строго в формате ДД.ММ.ГГГГ (например: 25.10.2015)\n"
+                "Или напишите '0', если дата рождения неизвестна:"
+            )
 
     # Достаем данные из стейта
     data = await state.get_data()
@@ -818,7 +822,10 @@ async def process_athlete_birthday(
         session.add(new_student)
         await session.commit()  # Сохраняем в БД
 
-        logger.success(f"👤 Клиент сам добавил атлета: {name} с ДР {birthday_date} (Клуб ID: {club_id})")
+        if birthday_date is None:
+            logger.success(f"👤 Клиент сам добавил атлета: {name} без указания ДР (Клуб ID: {club_id})")
+        else:
+            logger.success(f"👤 Клиент сам добавил атлета: {name} с ДР {birthday_date} (Клуб ID: {club_id})")
 
         # ИСПРАВЛЕНО: Безопасно вытаскиваем имя клуба без триггера Lazy Load
         club_name = club.__dict__.get('name') or "нашем клубе"
