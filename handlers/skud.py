@@ -16,7 +16,7 @@ async def trigger_dingtian_turnstile(config: dict) -> bool:
         return False
 
     # Берем параметры, строго сверяя ключи с функцией сохранения
-    relay = config.get("relay_index", 0)  # Оставляем совместимость с ранее рабочей конфигурацией
+    relay = config.get("relay_index", 1)  # Оставляем совместимость с ранее рабочей конфигурацией
     pulse_time = config.get("pulse_time_seconds", 1)
     timeout_val = config.get("timeout_seconds", 5)
     password = config.get("password", "")
