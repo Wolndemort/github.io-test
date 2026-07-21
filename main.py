@@ -34,7 +34,6 @@ from middlewares.main_middleware import DbSessionMiddleware
 from admin_module.api import router
 from redis.asyncio import Redis
 from aiogram.fsm.storage.redis import RedisStorage
-from services.telegram_menu import configure_profile_menu_button
 
 logger.remove()
 logger.add(sys.stderr, level='INFO')
@@ -73,7 +72,6 @@ async def lifespan(app: FastAPI):
             # Регистрируем вебхук в Telegram
             webhook_url = f"{BASE_URL}/webhook/bot/{club.bot_token}"
             await bot.set_webhook(url=webhook_url, drop_pending_updates=True)
-            await configure_profile_menu_button(bot, club.id)
             logger.info(f"✅ ВЕБХУК запущен: Клуб '{club.name}' -> {webhook_url[:35]}...")
         except Exception as e:
             logger.error(f"❌ Ошибка токена для клуба '{club.name}': {e}")
