@@ -34,6 +34,7 @@
 const disciplines = {{ disciplines | tojson }};
 const sportSelect = document.getElementById('sport');
 const tariffSelect = document.getElementById('tariff');
+const studentSelect = document.getElementById('student');
 function renderTariffs() {
   const tariffs = (disciplines[sportSelect.value] || {}).tariffs || [];
   tariffSelect.innerHTML = '';
@@ -50,7 +51,13 @@ document.getElementById('create').addEventListener('click', async () => {
   const button = document.getElementById('create');
   button.disabled = true;
   button.textContent = 'Создаём ссылку...';
-  const payload = {init_data: window.Telegram?.WebApp?.initData || '', club_id: {{ club_id }}, student_id: Number(student.value), sport_type: sport.value, tariff_idx: Number(tariff.value)};
+  const payload = {
+    init_data: window.Telegram?.WebApp?.initData || '',
+    club_id: {{ club_id }},
+    student_id: Number(studentSelect.value),
+    sport_type: sportSelect.value,
+    tariff_idx: Number(tariffSelect.value)
+  };
   const res = await fetch('/webapp/client-cabinet/buy-subscription', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)});
   const data = await res.json();
   if (res.ok && data.payment_url) {

@@ -7,6 +7,13 @@
     <a class="mono-action" href="/webapp/client-cabinet?club_id={{ club_id }}">← Назад</a>
 </div>
 <div class="mono-card">
+    <div class="mono-kicker"><div class="name">Сводка</div><span>история</span></div>
+    <div class="mono-grid-2">
+        <div class="mono-pill"><div class="label">Подписок</div><div class="value">{{ subscriptions|length if subscriptions is defined else 0 }}</div></div>
+        <div class="mono-pill"><div class="label">Платежей</div><div class="value">{{ orders|length if orders is defined else 0 }}</div></div>
+    </div>
+</div>
+<div class="mono-card">
     <div class="mono-kicker"><div class="name">Подписки</div><span>последние</span></div>
     {% if subscriptions %}
         <ul>
