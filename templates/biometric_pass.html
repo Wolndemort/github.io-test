@@ -14,7 +14,7 @@
         .eyebrow { text-transform: uppercase; letter-spacing: .18em; font-size: 11px; color: #666; }
         h2 { font-size: 30px; letter-spacing: -.03em; margin: 8px 0 4px; }
         .btn { display: block; width: 100%; padding: 15px; margin: 10px 0; background: #111; color: white; border: 1px solid #111; border-radius: 16px; font-size: 16px; cursor: pointer; font-weight: 700; }
-        .student-card { background: white; padding: 15px; margin-bottom: 10px; border-radius: 18px; box-shadow: 0 10px 24px rgba(0,0,0,0.05); border: 1px solid #ddd; transition: 0.2s; text-align: left; }
+        .student-card { display: block; width: 100%; appearance: none; -webkit-appearance: none; background: white; padding: 15px; margin-bottom: 10px; border-radius: 18px; box-shadow: 0 10px 24px rgba(0,0,0,0.05); border: 1px solid #ddd; transition: 0.2s; text-align: left; color: #111; font: inherit; cursor: pointer; touch-action: manipulation; -webkit-tap-highlight-color: rgba(0,0,0,.12); pointer-events: auto; }
         .selected-card { border-color: #111; background: #f7f7f7; }
         .mono-action { display: block; text-decoration: none; padding: 15px 16px; border-radius: 16px; border: 1px solid #111; color: #111; background: #fff; font-weight: 700; margin: 10px 0; }
         .cardlist { display: grid; gap: 10px; }
@@ -49,10 +49,10 @@
     <p style="color:#666;" id="status-hint">Выберите атлета для прохода:</p>
     <div id="students-list">
         {% for student in students %}
-        <div class="student-card" id="card-{{ student.id }}" onclick="selectStudent('{{ student.id }}', {{ student.name|tojson }})">
+        <button type="button" class="student-card" id="card-{{ student.id }}" data-student-id="{{ student.id }}" data-student-name="{{ student.name }}">
             <h3 style="margin:0 0 6px 0;">{{ student.name }}</h3>
             <p style="margin:0;color:#666;">Баланс: {{ student.balance_lessons }} занятий</p>
-        </div>
+        </button>
         {% endfor %}
     </div>
 </div>
@@ -82,6 +82,12 @@ const bm = tg?.BiometricManager;
 const serverBiometryEnabled = {{ 'true' if biometric_enabled else 'false' }};
 let selectedStudentId = null;
 let isBiometricReady = false;
+document.querySelectorAll('.student-card').forEach((card) => {
+    card.addEventListener('click', (event) => {
+        event.preventDefault();
+        selectStudent(card.dataset.studentId, card.dataset.studentName || 'атлет');
+    }, { passive: false });
+});
 if (!bm || typeof bm.init !== 'function') {
     const hint = document.getElementById('status-hint');
     if (hint) {
