@@ -38,6 +38,17 @@ const studentSelect = document.getElementById('student');
 function renderTariffs() {
   const tariffs = (disciplines[sportSelect.value] || {}).tariffs || [];
   tariffSelect.innerHTML = '';
+  if (!tariffs.length) {
+    const opt = document.createElement('option');
+    opt.value = '';
+    opt.textContent = 'Тарифы недоступны';
+    tariffSelect.appendChild(opt);
+    document.getElementById('create').disabled = true;
+    document.getElementById('msg').innerText = 'Для выбранного направления пока нет тарифов.';
+    return;
+  }
+  document.getElementById('create').disabled = false;
+  document.getElementById('msg').innerText = '';
   tariffs.forEach((t, idx) => {
     const opt = document.createElement('option');
     opt.value = idx;

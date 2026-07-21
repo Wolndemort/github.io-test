@@ -61,9 +61,17 @@ if (loaderLogo && loaderLogo.dataset && loaderLogo.dataset.src !== loaderLogo.sr
 }
 setTimeout(() => { document.body.style.opacity = '1'; document.getElementById('app-loader')?.remove(); }, {{ loading.duration_ms }});
 {% endif %}
-const tg = window.Telegram.WebApp;
-tg.expand();
-const bm = tg.BiometricManager;
+const tg = window.Telegram?.WebApp;
+if (!tg) {
+    const hint = document.getElementById('status-hint');
+    if (hint) {
+        hint.textContent = 'Откройте этот экран внутри Telegram WebApp.';
+        hint.className = 'hint';
+    }
+} else {
+    tg.expand();
+}
+const bm = tg?.BiometricManager;
 let selectedStudentId = null;
 let isBiometricReady = false;
 if (!bm || typeof bm.init !== 'function') {
@@ -98,7 +106,7 @@ function setupBiometrics() {
     });
 }
 function selectStudent(studentId, studentName) {
-    if (!bm || !bm.isAccessGranted) { tg.showAlert("Сначала активируйте доступ по кнопке сверху."); return; }
+    if (!bm || !bm.isAccessGranted) { tg?.showAlert("Сначала активируйте доступ по кнопке сверху."); return; }
     selectedStudentId = studentId;
     document.querySelectorAll('.student-card').forEach(c => c.classList.remove('selected-card'));
     document.getElementById(`card-${studentId}`).classList.add('selected-card');
@@ -111,8 +119,8 @@ tg.onEvent('mainButtonClicked', function() {
     if (!selectedStudentId) return;
     tg.MainButton.disable();
     if (!bm || typeof bm.authenticate !== 'function') {
-        tg.showAlert("Биометрия на этом устройстве недоступна.");
-        tg.MainButton.enable();
+        tg?.showAlert("Биометрия на этом устройстве недоступна.");
+        tg?.MainButton.enable();
         return;
     }
     bm.authenticate({ reason: "Подтвердите личность для прохода" }, (isAuthenticated, biometricToken) => {
