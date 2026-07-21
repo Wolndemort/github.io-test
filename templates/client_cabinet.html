@@ -14,7 +14,7 @@
         #app-loader .spinner { width: 28px; height: 28px; border: 3px solid #d0d0d0; border-top-color: #111; border-radius: 50%; animation: spin .8s linear infinite; }
         @keyframes spin { to { transform: rotate(360deg); } }
         {% endif %}
-        body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f4f4f4; color: #111; }
+        body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f4f4f4; color: #111; padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom); }
         .wrap { max-width: 760px; margin: 0 auto; padding: 16px; }
         .hero { background: linear-gradient(180deg, #ffffff 0%, #fafafa 100%); border: 1px solid #d9d9d9; border-radius: 24px; padding: 20px; margin-bottom: 14px; box-shadow: 0 14px 40px rgba(0,0,0,.06); }
         .eyebrow { text-transform: uppercase; letter-spacing: .18em; font-size: 11px; color: #666; margin-bottom: 10px; }
@@ -43,13 +43,17 @@
         .status-line.ok .status-dot { background: #111; }
         .status-line.warn .status-dot { background: #7a7a7a; }
         .status-line.bad .status-dot { background: #c7c7c7; }
+        .title, .subtitle, .name, .muted, .btn { overflow-wrap: anywhere; word-break: break-word; }
         @media (max-width: 640px) {
             .summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
             .student { display: block; }
             .status { margin-top: 8px; white-space: normal; }
+            .hero { padding: 16px; border-radius: 20px; }
+            .card { padding: 14px; border-radius: 18px; }
         }
         @media (max-width: 420px) {
             .summary { grid-template-columns: 1fr; }
+            .title { font-size: 24px; }
         }
     </style>
 </head>

@@ -1,3 +1,4 @@
+import asyncio
 import aiohttp
 from aiogram import Router, types
 from loguru import logger
@@ -15,15 +16,17 @@ async def trigger_dingtian_turnstile(config: dict) -> bool:
         return False
 
     # Берем параметры, строго сверяя ключи с функцией сохранения
-    relay = config.get("relay_index", 1)  # Рекомендую ставить 1 по умолчанию для Dingtian
+    relay = config.get("relay_index", 0)  # Оставляем совместимость с ранее рабочей конфигурацией
     pulse_time = config.get("pulse_time_seconds", 1)
     timeout_val = config.get("timeout_seconds", 5)
     password = config.get("password", "")
 
-    clean_url = base_url.rstrip("/")
+    clean_url = str(base_url).strip().rstrip("/")
+    if clean_url and not clean_url.startswith(("http://", "https://")):
+        clean_url = f"http://{clean_url}"
 
-    # ИСПРАВЛЕНО: Корректный URL API для китайских плат Dingtian
-    url = f"{clean_url}/relay_cgi.cgi?type=2&relay=0&on=1&time={pulse_time}&pwd=0"
+    # Корректный URL API для плат Dingtian.
+    url = f"{clean_url}/relay_cgi.cgi?type=2&relay={relay}&on=1&time={pulse_time}&pwd=0"
 
     timeout = aiohttp.ClientTimeout(total=timeout_val)
     auth = aiohttp.BasicAuth(login="admin", password=password) if password else None
@@ -48,12 +51,11 @@ async def trigger_dingtian_turnstile(config: dict) -> bool:
         logger.error(
             f"Ошибка подключения. Не удалось установить соединение к реле {clean_url}. Проверьте KeenDNS и роутер")
         return False
-    except aiohttp.ServerTimeoutError:
+    except (aiohttp.ServerTimeoutError, asyncio.TimeoutError):
         logger.error(f"Превышено время ожидания ответа (Таймаут {timeout_val} сек) от устройства {clean_url}")
         return False
     except Exception as e:
-        # ИСПРАВЛЕНО: У loguru используется exception=True вместо ecx_info=True
-        logger.error(f"Непредвиденная критическая ошибка в модуле СКУД: {e}", exception=True)
+        logger.exception(f"Непредвиденная критическая ошибка в модуле СКУД: {e}")
         return False
 
 
@@ -69,7 +71,7 @@ async def save_and_test_turnstile(
         "type": "dingtian_http",
         "base_url": url,
         "password": password,
-        "relay_index": 1,
+        "relay_index": 0,
         "pulse_time_seconds": 1,
         "timeout_seconds": 5
     }

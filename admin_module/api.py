@@ -709,7 +709,7 @@ else location.replace(location.pathname+'?user_id={user_id}&init_data='+encodeUR
 
     # Рендерим HTML страницу и передаем туда список детей
     return templates.TemplateResponse("biometric_pass.html", {"request": request, "students": students,
-        "club_name": club.name if club else "", "logo_url": ui.get("logo_url", ""),
+        "club_id": club_id, "user_id": user_id, "club_name": club.name if club else "", "logo_url": ui.get("logo_url", ""),
         "loading": {"enabled": bool(loading.get("enabled", False)), "duration_ms": max(300, min(10000, int(loading.get("duration_ms", 1200)))), "message": str(loading.get("message", "Загружаем приложение…"))}})
 
 
