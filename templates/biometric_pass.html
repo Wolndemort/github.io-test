@@ -79,6 +79,7 @@ if (!tg) {
     tg.expand();
 }
 const bm = tg?.BiometricManager;
+const serverBiometryEnabled = {{ 'true' if biometric_enabled else 'false' }};
 let selectedStudentId = null;
 let isBiometricReady = false;
 if (!bm || typeof bm.init !== 'function') {
@@ -92,7 +93,7 @@ if (!bm || typeof bm.init !== 'function') {
 } else {
     bm.init(() => {
         isBiometricReady = true;
-        if (!bm.isAccessGranted) {
+        if (!bm.isAccessGranted && !serverBiometryEnabled) {
             const setupBox = document.getElementById('setup-biometry-box');
             if (setupBox) setupBox.style.display = 'block';
             const hint = document.getElementById('status-hint');
@@ -117,7 +118,7 @@ function selectStudent(studentId, studentName) {
     document.querySelectorAll('.student-card').forEach(c => c.classList.remove('selected-card'));
     document.getElementById(`card-${studentId}`).classList.add('selected-card');
     if (!tg) return;
-    if (!bm || !bm.isAccessGranted) {
+    if (!bm || (!bm.isAccessGranted && !serverBiometryEnabled)) {
         tg.showAlert("Атлет выбран. Сначала активируйте Face ID по кнопке сверху.");
         return;
     }
@@ -134,7 +135,7 @@ if (tg) tg.onEvent('mainButtonClicked', function() {
         tg?.MainButton.enable();
         return;
     }
-    bm.authenticate({ reason: "Подтвердите личность для прохода" }, (isAuthenticated, biometricToken) => {
+    const authenticate = () => bm.authenticate({ reason: "Подтвердите личность для прохода" }, (isAuthenticated, biometricToken) => {
         if (isAuthenticated) {
             fetch('/webapp/open-turnstile', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ student_id: parseInt(selectedStudentId), biometric_token: biometricToken || "verified_by_device", init_data: tg.initData }) })
             .then(res => res.json())
@@ -143,6 +144,14 @@ if (tg) tg.onEvent('mainButtonClicked', function() {
             tg.showAlert("Биометрия не пройдена.");
         }
     });
+    if (!bm.isAccessGranted) {
+        bm.requestAccess({ reason: "Подтвердите доступ к Face ID для прохода" }, (accessGranted) => {
+            if (accessGranted) authenticate();
+            else { tg.showAlert("Доступ к Face ID не предоставлен."); tg.MainButton.enable(); }
+        });
+    } else {
+        authenticate();
+    }
 });
 </script>
 </body>

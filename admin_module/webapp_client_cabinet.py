@@ -88,10 +88,11 @@ async def get_biometric_page(
     if not tg_user or int(tg_user.get("id", 0)) != user_id:
         raise HTTPException(status_code=403, detail="Доступ запрещен")
     students = (await db.execute(select(Student).where(Student.parent_id == user_id, Student.club_id == club_id))).scalars().all()
+    linked_user = await db.get(User, user_id)
     settings = (club.club_settings or {}) if club else {}
     ui = settings.get("ui", {}) if isinstance(settings.get("ui", {}), dict) else {}
     loading = ui.get("loading", {}) if isinstance(ui.get("loading", {}), dict) else {}
-    return templates.TemplateResponse("biometric_pass.html", {"request": request, "students": students, "club": club, "club_id": club_id, "user_id": user_id, "club_name": club.name if club else "", "logo_url": _absolute_webapp_url(request, ui.get("logo_url", "")), "loading": {"enabled": bool(loading.get("enabled", False)), "duration_ms": max(300, min(10000, int(loading.get("duration_ms", 1200)))), "message": str(loading.get("message", "Загружаем приложение…"))}})
+    return templates.TemplateResponse("biometric_pass.html", {"request": request, "students": students, "club": club, "club_id": club_id, "user_id": user_id, "biometric_enabled": bool(getattr(linked_user, "is_biometric_enabled", False)), "club_name": club.name if club else "", "logo_url": _absolute_webapp_url(request, ui.get("logo_url", "")), "loading": {"enabled": bool(loading.get("enabled", False)), "duration_ms": max(300, min(10000, int(loading.get("duration_ms", 1200)))), "message": str(loading.get("message", "Загружаем приложение…"))}})
 
 
 @router.get("/webapp/client-cabinet", response_class=HTMLResponse)
