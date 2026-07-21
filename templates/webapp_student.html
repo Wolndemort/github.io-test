@@ -62,7 +62,7 @@
     {% if visits %}
         <ul>
         {% for visit in visits %}
-            <li>{{ visit.visited_at.strftime('%d.%m.%Y %H:%M') }}</li>
+            <li>{{ visit.visited_at|moscow_time }}</li>
         {% endfor %}
         </ul>
     {% else %}

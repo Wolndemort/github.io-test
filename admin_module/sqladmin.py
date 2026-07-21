@@ -115,7 +115,9 @@ class ClubAdmin(ModelView, model=Club):
     name = "Клуб"
     name_plural = "Клубы"
     page_size = 10
-    can_delete = True
+    # У User есть связь со студентами через delete-orphan. Физическое
+    # удаление родителя может удалить всех его атлетов.
+    can_delete = False
     can_edit = True
     can_create = True
 

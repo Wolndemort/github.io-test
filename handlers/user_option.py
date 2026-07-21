@@ -891,7 +891,7 @@ async def process_athlete_birthday(
 
     try:
         # 1. ПРОВЕРКА / АВТОПРИСУТСТВИЕ РОДИТЕЛЯ В ТАБЛИЦЕ USERS
-        user_stmt = select(User).where(User.user_id == user_id)
+        user_stmt = select(User).where(User.user_id == user_id).with_for_update()
         user_exists = (await session.execute(user_stmt)).scalar_one_or_none()
 
         if not user_exists:
@@ -904,6 +904,13 @@ async def process_athlete_birthday(
             )
             session.add(new_user)
             await session.flush()  # Фиксируем родителя для ForeignKey
+        else:
+            # Старый открытый чат после удаления/сброса пользователя должен
+            # восстановить актуальную клубную привязку до создания Student.
+            user_exists.club_id = club_id
+            if not user_exists.full_name:
+                user_exists.full_name = user_full_name
+            await session.flush()
 
         # 2. Создаем атлета
         new_student = Student(
