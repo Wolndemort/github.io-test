@@ -31,6 +31,16 @@ else location.replace(location.pathname+'?{qs}&init_data='+encodeURIComponent(tg
     </script>""", status_code=401)
 
 
+def _absolute_webapp_url(request: Request, value: str | None) -> str:
+    if not value:
+        return ""
+    if value.startswith("http://") or value.startswith("https://"):
+        return value
+    if value.startswith("/"):
+        return str(request.base_url).rstrip("/") + value
+    return value
+
+
 def _webapp_loading_config(club) -> dict:
     settings = (club.club_settings or {}) if club else {}
     ui = settings.get("ui", {}) if isinstance(settings.get("ui", {}), dict) else {}
@@ -77,7 +87,7 @@ async def get_biometric_page(
     settings = (club.club_settings or {}) if club else {}
     ui = settings.get("ui", {}) if isinstance(settings.get("ui", {}), dict) else {}
     loading = ui.get("loading", {}) if isinstance(ui.get("loading", {}), dict) else {}
-    return templates.TemplateResponse("biometric_pass.html", {"request": request, "students": students, "club_name": club.name if club else "", "logo_url": ui.get("logo_url", ""), "loading": {"enabled": bool(loading.get("enabled", False)), "duration_ms": max(300, min(10000, int(loading.get("duration_ms", 1200)))), "message": str(loading.get("message", "Загружаем приложение…"))}})
+    return templates.TemplateResponse("biometric_pass.html", {"request": request, "students": students, "club_name": club.name if club else "", "logo_url": _absolute_webapp_url(request, ui.get("logo_url", "")), "loading": {"enabled": bool(loading.get("enabled", False)), "duration_ms": max(300, min(10000, int(loading.get("duration_ms", 1200)))), "message": str(loading.get("message", "Загружаем приложение…"))}})
 
 
 @router.get("/webapp/client-cabinet", response_class=HTMLResponse)
@@ -109,7 +119,7 @@ async def get_client_cabinet_page(request: Request, club_id: int, init_data: str
             "club_id": club_id,
             "user_id": user_id,
             "club_name": club.name if club else "",
-            "logo_url": loading["logo_url"],
+            "logo_url": _absolute_webapp_url(request, loading["logo_url"]),
             "students": students,
             "user_name": user.full_name or tg_user.get("first_name", ""),
             "now": datetime.now(),

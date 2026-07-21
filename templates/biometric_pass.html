@@ -7,7 +7,7 @@
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <link rel="stylesheet" href="{{ url_for('static', path='css/mono.css') }}?v=1.0.0">
     <style>
-        {% if loading.enabled %}body { visibility: hidden; } #app-loader { visibility: visible; position: fixed; inset: 0; z-index: 10; display: flex; flex-direction: column; align-items: center; justify-content: center; background: #f4f4f4; } #app-loader img { width: 96px; height: 96px; object-fit: contain; border-radius: 22px; margin-bottom: 18px; filter: grayscale(1); } #app-loader .spinner { width: 28px; height: 28px; border: 3px solid #d5d5d5; border-top-color: #111111; border-radius: 50%; animation: spin .8s linear infinite; } @keyframes spin { to { transform: rotate(360deg); } }{% endif %}
+        {% if loading.enabled %}body { opacity: 0; } #app-loader { opacity: 1; position: fixed; inset: 0; z-index: 10; display: flex; flex-direction: column; align-items: center; justify-content: center; background: #f4f4f4; } #app-loader img { width: 96px; height: 96px; object-fit: contain; border-radius: 22px; margin-bottom: 18px; filter: grayscale(1); -webkit-transform: translateZ(0); backface-visibility: hidden; } #app-loader .spinner { width: 28px; height: 28px; border: 3px solid #d5d5d5; border-top-color: #111111; border-radius: 50%; animation: spin .8s linear infinite; } @keyframes spin { to { transform: rotate(360deg); } }{% endif %}
         body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f4f4f4; color: #111; padding: 18px; text-align: center; }
         .wrap { max-width: 760px; margin: 0 auto; }
         .top { background: linear-gradient(180deg,#fff,#fafafa); border: 1px solid #d9d9d9; border-radius: 24px; padding: 20px; box-shadow: 0 14px 40px rgba(0,0,0,.06); margin-bottom: 12px; text-align: left; }
@@ -21,7 +21,7 @@
     </style>
 </head>
 <body class="mono-theme">
-{% if loading.enabled %}<div id="app-loader"><img src="{{ logo_url or url_for('static', path='img/logo.png') }}" onerror="this.style.display='none'"><div>{{ loading.message }}</div><div class="spinner"></div></div>{% endif %}
+{% if loading.enabled %}<div id="app-loader"><img id="app-loader-logo" src="{{ logo_url or url_for('static', path='img/logo.png') }}" loading="eager" decoding="async" fetchpriority="high" onerror="this.style.display='none'"><div>{{ loading.message }}</div><div class="spinner"></div></div>{% endif %}
 <div class="wrap">
     <div class="top">
         <div class="eyebrow">Checkmat access</div>
@@ -43,7 +43,17 @@
     </div>
 </div>
 <script>
-{% if loading.enabled %}setTimeout(() => { document.body.style.visibility = 'visible'; document.getElementById('app-loader')?.remove(); }, {{ loading.duration_ms }});{% endif %}
+{% if loading.enabled %}
+const loaderLogo = document.getElementById('app-loader-logo');
+if (loaderLogo && loaderLogo.dataset && loaderLogo.dataset.src !== loaderLogo.src) {
+    loaderLogo.dataset.src = loaderLogo.src;
+    const preload = new Image();
+    preload.onload = () => { loaderLogo.src = preload.src; };
+    preload.onerror = () => { loaderLogo.style.display = 'none'; };
+    preload.src = loaderLogo.dataset.src;
+}
+setTimeout(() => { document.body.style.opacity = '1'; document.getElementById('app-loader')?.remove(); }, {{ loading.duration_ms }});
+{% endif %}
 const tg = window.Telegram.WebApp;
 tg.expand();
 const bm = tg.BiometricManager;

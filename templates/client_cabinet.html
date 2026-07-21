@@ -8,8 +8,9 @@
     <link rel="stylesheet" href="{{ url_for('static', path='css/mono.css') }}?v=1.0.0">
     <style>
         {% if loading.enabled %}
-        body { visibility: hidden; }
-        #app-loader { visibility: visible; position: fixed; inset: 0; z-index: 10; display: flex; flex-direction: column; align-items: center; justify-content: center; background: #f6f6f6; }
+        body { opacity: 0; }
+        #app-loader { opacity: 1; position: fixed; inset: 0; z-index: 10; display: flex; flex-direction: column; align-items: center; justify-content: center; background: #f6f6f6; }
+        #app-loader img { width: 96px; height: 96px; object-fit: contain; border-radius: 22px; margin-bottom: 18px; filter: grayscale(1); -webkit-transform: translateZ(0); backface-visibility: hidden; }
         #app-loader .spinner { width: 28px; height: 28px; border: 3px solid #d0d0d0; border-top-color: #111; border-radius: 50%; animation: spin .8s linear infinite; }
         @keyframes spin { to { transform: rotate(360deg); } }
         {% endif %}
@@ -42,6 +43,7 @@
 <body class="mono-theme">
 {% if loading.enabled %}
 <div id="app-loader">
+    <img id="app-loader-logo" src="{{ logo_url or url_for('static', path='img/logo.png') }}" loading="eager" decoding="async" fetchpriority="high" onerror="this.style.display='none'">
     <div style="margin-bottom: 14px; font-weight: 700;">{{ loading.message }}</div>
     <div class="spinner"></div>
 </div>
@@ -117,8 +119,16 @@
         tg.expand();
     }
     {% if loading.enabled %}
+    const loaderLogo = document.getElementById('app-loader-logo');
+    if (loaderLogo && loaderLogo.dataset && loaderLogo.dataset.src !== loaderLogo.src) {
+        loaderLogo.dataset.src = loaderLogo.src;
+        const preload = new Image();
+        preload.onload = () => { loaderLogo.src = preload.src; };
+        preload.onerror = () => { loaderLogo.style.display = 'none'; };
+        preload.src = loaderLogo.dataset.src;
+    }
     setTimeout(() => {
-        document.body.style.visibility = 'visible';
+        document.body.style.opacity = '1';
         document.getElementById('app-loader')?.remove();
     }, {{ loading.duration_ms }});
     {% endif %}

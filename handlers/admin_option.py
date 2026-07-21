@@ -59,9 +59,7 @@ async def admin_panel(
     try:
         all_users = await get_all_users_count(club_id=club.id, session=session)
         active_subs = await get_active_subs_count(club_id=club.id, session=session)
-        club_name = club_settings.get("ui", {}).get("club_name")
-        if not club_name or club_name == "Новый фитнес-клуб":
-            club_name = club.name or "Клуб"
+        club_name = club.name or "Клуб"
 
         sub_end = club.subscription_expire_at
         if sub_end:
@@ -108,9 +106,7 @@ async def back_to_admin_main_menu(
     if not (is_owner or is_super_admin):
         return await callback.answer("❌ Доступ ограничен.", show_alert=True)
 
-    club_name = club_settings.get("ui", {}).get("club_name")
-    if not club_name or club_name == "Новый фитнес-клуб":
-        club_name = club.name or "Клуб"
+    club_name = club.name or "Клуб"
 
     await callback.message.edit_text(
         text=f"⚙️ <b>Панель управления: {club_name}</b>\nВыберите нужный раздел:",
