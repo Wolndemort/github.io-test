@@ -22,7 +22,11 @@ from services.yookassa_client import YooKassaClient
 
 
 def _auth_gate_html(target: str, **params):
-    qs = "&".join(f"{k}={v}" for k, v in params.items())
+    qs = "&".join(
+        f"{k}={v}"
+        for k, v in params.items()
+        if v is not None and v != ""
+    )
     return HTMLResponse(f"""<!doctype html><meta charset='utf-8'>
 <script src='https://telegram.org/js/telegram-web-app.js'></script><script>
 const tg=window.Telegram.WebApp; tg.ready();
@@ -178,7 +182,7 @@ async def webapp_student_page(request: Request, club_id: int, student_id: int, i
 
 
 @router.get("/webapp/client-cabinet/history", response_class=HTMLResponse)
-async def webapp_history_page(request: Request, club_id: int, student_id: int | None = None, init_data: str | None = Query(default=None), db: AsyncSession = Depends(get_session)):
+async def webapp_history_page(request: Request, club_id: int, student_id: int | None = Query(default=None), init_data: str | None = Query(default=None), db: AsyncSession = Depends(get_session)):
     if not init_data:
         return _auth_gate_html("webapp/client-cabinet/history", club_id=club_id, student_id=student_id or "")
     club = await db.get(Club, club_id)
