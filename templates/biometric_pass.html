@@ -31,7 +31,7 @@
 {% if loading.enabled %}<div id="app-loader"><img id="app-loader-logo" src="{{ logo_url or url_for('static', path='img/logo.png') }}" loading="eager" decoding="async" fetchpriority="high" onerror="this.style.display='none'"><div>{{ loading.message }}</div><div class="spinner"></div></div>{% endif %}
 <div class="wrap">
     <div class="top">
-        <div class="eyebrow">Checkmat access</div>
+        <div class="eyebrow">{{ club_name or 'Клуб' }} · Access</div>
         <h2>FaceID / QR</h2>
         <p style="color:#666;margin:0;">Биометрический вход и быстрый проход</p>
     </div>
