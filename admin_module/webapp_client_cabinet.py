@@ -43,6 +43,22 @@ def _webapp_loading_config(club) -> dict:
     }
 
 
+async def _ensure_webapp_user_linked(db: AsyncSession, user_id: int, club_id: int) -> User | None:
+    user = await db.get(User, user_id)
+    if not user:
+        return None
+    if user.club_id != club_id:
+        has_students = await db.scalar(
+            select(Student.id).where(Student.parent_id == user_id, Student.club_id == club_id).limit(1)
+        )
+        if has_students:
+            user.club_id = club_id
+            await db.commit()
+        else:
+            return None
+    return user
+
+
 @router.get("/webapp/biometric-pass", response_class=HTMLResponse)
 async def get_biometric_page(
     request,
@@ -75,9 +91,9 @@ async def get_client_cabinet_page(request: Request, club_id: int, init_data: str
     if not tg_user:
         raise HTTPException(status_code=403, detail="Доступ запрещен")
     user_id = int(tg_user.get("id", 0))
-    user = await db.get(User, user_id)
-    if not user or user.club_id != club_id:
-        raise HTTPException(status_code=403, detail="Пользователь не привязан к клубу")
+    user = await _ensure_webapp_user_linked(db, user_id, club_id)
+    if not user:
+        return await webapp_auth_help_page(request=request, club_id=club_id, init_data=init_data, db=db)
     settings = (club.club_settings or {}) if club else {}
     students = (await db.execute(select(Student).where(Student.parent_id == user_id, Student.club_id == club_id).order_by(Student.name))).scalars().all()
     active_students = sum(1 for s in students if not s.is_frozen and s.expire_date and s.expire_date > datetime.now())
@@ -162,9 +178,9 @@ async def webapp_history_page(request: Request, club_id: int, student_id: int | 
     if not tg_user:
         raise HTTPException(status_code=403, detail="Доступ запрещен")
     user_id = int(tg_user.get("id", 0))
-    user = await db.get(User, user_id)
-    if not user or user.club_id != club_id:
-        raise HTTPException(status_code=403, detail="Пользователь не привязан к клубу")
+    user = await _ensure_webapp_user_linked(db, user_id, club_id)
+    if not user:
+        return await webapp_auth_help_page(request=request, club_id=club_id, init_data=init_data, db=db)
     student_ids = [row[0] for row in (await db.execute(select(Student.id).where(Student.parent_id == user_id, Student.club_id == club_id))).all()]
     if student_id:
         student_ids = [student_id] if student_id in student_ids else []
@@ -183,9 +199,9 @@ async def webapp_buy_subscription_page(request: Request, club_id: int, init_data
     tg_user = verify_telegram_data(init_data, club.bot_token)
     if not tg_user:
         raise HTTPException(status_code=403, detail="Доступ запрещен")
-    user = await db.get(User, int(tg_user.get("id", 0)))
-    if not user or user.club_id != club_id:
-        raise HTTPException(status_code=403, detail="Пользователь не привязан к клубу")
+    user = await _ensure_webapp_user_linked(db, int(tg_user.get("id", 0)), club_id)
+    if not user:
+        return await webapp_auth_help_page(request=request, club_id=club_id, init_data=init_data, db=db)
     students = (await db.execute(select(Student).where(Student.parent_id == user.user_id, Student.club_id == club_id).order_by(Student.name))).scalars().all()
     disciplines = (club.club_settings or {}).get("disciplines", {})
     return templates.TemplateResponse("webapp_buy_subscription.html", {"request": request, "club": club, "club_id": club_id, "students": students, "disciplines": disciplines})

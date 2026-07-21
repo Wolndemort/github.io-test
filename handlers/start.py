@@ -86,9 +86,11 @@ async def start_handler(
         session.add(db_user)
         await session.commit()
     else:
+        if db_user.club_id != club.id:
+            db_user.club_id = club.id
         if db_user.full_name != message.from_user.full_name:
             db_user.full_name = message.from_user.full_name
-            await session.commit()
+        await session.commit()
 
     # 2. ПРОВЕРКА ЮРИДИЧЕСКОГО СОГЛАСИЯ
     if not db_user.is_accepted:
