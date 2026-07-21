@@ -36,7 +36,6 @@ from middlewares.db_saas_midleware import SUPER_ADMIN_IDS
 from admin_module.router_base import router, templates
 from admin_module.webapp_client_cabinet import _ensure_webapp_user_linked
 import admin_module.webapp_client_cabinet  # noqa: F401
-import admin_module.admin_pages  # noqa: F401
 import admin_module.turnstile_biometry  # noqa: F401 - registers SKUD WebApp routes
 import admin_module.payments_webhook  # noqa: F401
 import admin_module.system_api  # noqa: F401
