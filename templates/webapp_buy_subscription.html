@@ -47,11 +47,19 @@ function renderTariffs() {
 sportSelect.addEventListener('change', renderTariffs);
 renderTariffs();
 document.getElementById('create').addEventListener('click', async () => {
+  const button = document.getElementById('create');
+  button.disabled = true;
+  button.textContent = 'Создаём ссылку...';
   const payload = {init_data: window.Telegram?.WebApp?.initData || '', club_id: {{ club_id }}, student_id: Number(student.value), sport_type: sport.value, tariff_idx: Number(tariff.value)};
   const res = await fetch('/webapp/client-cabinet/buy-subscription', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)});
   const data = await res.json();
-  if (res.ok && data.payment_url) location.href = data.payment_url;
-  else document.getElementById('msg').innerText = data.detail || 'Ошибка';
+  if (res.ok && data.payment_url) {
+    location.href = data.payment_url;
+    return;
+  }
+  document.getElementById('msg').innerText = data.detail || 'Ошибка';
+  button.disabled = false;
+  button.textContent = 'Перейти к оплате';
 });
 </script>
 {% endblock %}

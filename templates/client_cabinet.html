@@ -38,6 +38,19 @@
         .student-actions { display: grid; gap: 8px; margin-top: 10px; }
         .section-title { display:flex; align-items:center; justify-content:space-between; margin-bottom: 10px; }
         .section-title span { text-transform: uppercase; letter-spacing: .16em; font-size: 11px; color: #666; }
+        .status-line { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; white-space: normal; }
+        .status-dot { width: 8px; height: 8px; border-radius: 999px; background: #111; display: inline-block; flex: 0 0 auto; }
+        .status-line.ok .status-dot { background: #111; }
+        .status-line.warn .status-dot { background: #7a7a7a; }
+        .status-line.bad .status-dot { background: #c7c7c7; }
+        @media (max-width: 640px) {
+            .summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+            .student { display: block; }
+            .status { margin-top: 8px; white-space: normal; }
+        }
+        @media (max-width: 420px) {
+            .summary { grid-template-columns: 1fr; }
+        }
     </style>
 </head>
 <body class="mono-theme">
@@ -79,11 +92,11 @@
                 </div>
                 <div class="status">
                     {% if student.is_frozen %}
-                        ❄️ Заморожен
+                        <span class="status-line warn"><span class="status-dot" aria-hidden="true"></span><span>Заморожен</span></span>
                     {% elif student.expire_date and student.expire_date > now %}
-                        ✅ Активен
+                        <span class="status-line ok"><span class="status-dot" aria-hidden="true"></span><span>Активен</span></span>
                     {% else %}
-                        🔴 Истек
+                        <span class="status-line bad"><span class="status-dot" aria-hidden="true"></span><span>Истек</span></span>
                     {% endif %}
                 </div>
             </div>

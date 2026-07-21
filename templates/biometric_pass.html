@@ -18,6 +18,13 @@
         .selected-card { border-color: #111; background: #f7f7f7; }
         .mono-action { display: block; text-decoration: none; padding: 15px 16px; border-radius: 16px; border: 1px solid #111; color: #111; background: #fff; font-weight: 700; margin: 10px 0; }
         .cardlist { display: grid; gap: 10px; }
+        .hint { color:#666; font-size:14px; line-height:1.5; }
+        @media (max-width: 540px) {
+            body { padding: 12px; }
+            h2 { font-size: 24px; }
+            .top { padding: 16px; border-radius: 20px; }
+            .student-card, .mono-action, .btn { border-radius: 14px; }
+        }
     </style>
 </head>
 <body class="mono-theme">
@@ -59,15 +66,27 @@ tg.expand();
 const bm = tg.BiometricManager;
 let selectedStudentId = null;
 let isBiometricReady = false;
-bm.init(() => {
-    isBiometricReady = true;
-    if (!bm.isAccessGranted) {
-        document.getElementById('setup-biometry-box').style.display = 'block';
-        document.getElementById('students-list').style.opacity = '0.5';
+if (!bm || typeof bm.init !== 'function') {
+    const hint = document.getElementById('status-hint');
+    if (hint) {
+        hint.textContent = 'На этом устройстве биометрический API Telegram WebApp недоступен. Используйте кабинет на поддерживаемом устройстве или QR-режим.';
+        hint.className = 'hint';
     }
-});
+    const setupBox = document.getElementById('setup-biometry-box');
+    if (setupBox) setupBox.style.display = 'none';
+} else {
+    bm.init(() => {
+        isBiometricReady = true;
+        if (!bm.isAccessGranted) {
+            const setupBox = document.getElementById('setup-biometry-box');
+            if (setupBox) setupBox.style.display = 'block';
+            const list = document.getElementById('students-list');
+            if (list) list.style.opacity = '0.5';
+        }
+    });
+}
 function setupBiometrics() {
-    if (!isBiometricReady) return;
+    if (!bm || !isBiometricReady) return;
     bm.requestAccess({ reason: "Создание безопасного ключа устройства для прохода" }, (accessGranted) => {
         if (accessGranted) {
             fetch('/webapp/enable-biometry', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ init_data: tg.initData }) })
@@ -79,7 +98,7 @@ function setupBiometrics() {
     });
 }
 function selectStudent(studentId, studentName) {
-    if (!bm.isAccessGranted) { tg.showAlert("Сначала активируйте доступ по кнопке сверху."); return; }
+    if (!bm || !bm.isAccessGranted) { tg.showAlert("Сначала активируйте доступ по кнопке сверху."); return; }
     selectedStudentId = studentId;
     document.querySelectorAll('.student-card').forEach(c => c.classList.remove('selected-card'));
     document.getElementById(`card-${studentId}`).classList.add('selected-card');
@@ -91,6 +110,11 @@ function selectStudent(studentId, studentName) {
 tg.onEvent('mainButtonClicked', function() {
     if (!selectedStudentId) return;
     tg.MainButton.disable();
+    if (!bm || typeof bm.authenticate !== 'function') {
+        tg.showAlert("Биометрия на этом устройстве недоступна.");
+        tg.MainButton.enable();
+        return;
+    }
     bm.authenticate({ reason: "Подтвердите личность для прохода" }, (isAuthenticated, biometricToken) => {
         if (isAuthenticated) {
             fetch('/webapp/open-turnstile', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ student_id: parseInt(selectedStudentId), biometric_token: biometricToken || "verified_by_device", init_data: tg.initData }) })

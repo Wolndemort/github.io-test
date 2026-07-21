@@ -17,6 +17,9 @@
 {% block scripts %}
 <script>
 document.getElementById('pay')?.addEventListener('click', async () => {
+  const button = document.getElementById('pay');
+  button.disabled = true;
+  button.textContent = 'Создаём ссылку...';
   const days = document.getElementById('days').value;
   const res = await fetch('/webapp/client-cabinet/buy-freeze?days=' + encodeURIComponent(days), {
     method: 'POST',
@@ -24,8 +27,13 @@ document.getElementById('pay')?.addEventListener('click', async () => {
     body: JSON.stringify({init_data: window.Telegram?.WebApp?.initData || '', club_id: {{ club_id }}, student_id: {{ student.id }}})
   });
   const data = await res.json();
-  if (res.ok && data.payment_url) location.href = data.payment_url;
-  else document.getElementById('msg').innerText = data.detail || 'Ошибка';
+  if (res.ok && data.payment_url) {
+    location.href = data.payment_url;
+    return;
+  }
+  document.getElementById('msg').innerText = data.detail || 'Ошибка';
+  button.disabled = false;
+  button.textContent = 'Перейти к оплате';
 });
 </script>
 {% endblock %}

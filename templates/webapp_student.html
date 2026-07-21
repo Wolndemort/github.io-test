@@ -2,12 +2,47 @@
 {% block title %}Атлет{% endblock %}
 {% block header %}{{ student.name }}{% endblock %}
 {% block subheader %}{{ club.name }}{% endblock %}
+{% block head_extra %}
+<style>
+    .student-meta {
+        display: grid;
+        gap: 10px;
+    }
+    .student-status {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+        white-space: normal;
+    }
+    .student-status .dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 999px;
+        background: #111;
+        flex: 0 0 auto;
+    }
+    .student-status.ok .dot { background: #111; }
+    .student-status.warn .dot { background: #7a7a7a; }
+    .student-status.bad .dot { background: #c7c7c7; }
+    @media (max-width: 540px) {
+        .student-meta { gap: 8px; }
+        .mono-grid-2 { grid-template-columns: 1fr !important; }
+    }
+</style>
+{% endblock %}
 {% block content %}
 <div class="mono-card">
-    <div class="mono-grid-2">
+    <div class="mono-grid-2 student-meta">
         <div class="mono-pill"><div class="label">Абонемент</div><div class="value">{{ student.expire_date.strftime('%d.%m.%Y') if student.expire_date else 'не указан' }}</div></div>
         <div class="mono-pill"><div class="label">Баланс</div><div class="value">{{ student.balance_lessons if student.balance_lessons is not none else 0 }}</div></div>
-        <div class="mono-pill"><div class="label">Статус</div><div class="value">{% if student.is_frozen %}Заморожен{% else %}{% if student.expire_date and student.expire_date > now %}Активен{% else %}Истек{% endif %}{% endif %}</div></div>
+        <div class="mono-pill">
+            <div class="label">Статус</div>
+            <div class="value student-status {% if student.is_frozen %}warn{% elif student.expire_date and student.expire_date > now %}ok{% else %}bad{% endif %}">
+                <span class="dot" aria-hidden="true"></span>
+                <span>{% if student.is_frozen %}Заморожен{% else %}{% if student.expire_date and student.expire_date > now %}Активен{% else %}Истек{% endif %}{% endif %}</span>
+            </div>
+        </div>
         <div class="mono-pill"><div class="label">Freezes</div><div class="value">{{ student.can_freeze if student.can_freeze is not none else 0 }}</div></div>
     </div>
 </div>

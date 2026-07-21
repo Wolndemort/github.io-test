@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from fastapi import Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
@@ -71,7 +71,7 @@ async def _ensure_webapp_user_linked(db: AsyncSession, user_id: int, club_id: in
 
 @router.get("/webapp/biometric-pass", response_class=HTMLResponse)
 async def get_biometric_page(
-    request,
+    request: Request,
     club_id: int,
     user_id: int,
     init_data: str | None = Query(default=None),
@@ -255,23 +255,29 @@ async def webapp_buy_subscription_submit(payload: WebAppBuySubscriptionPayload, 
         raise HTTPException(status_code=409, detail="Платеж уже создается")
     active_pending = (
         await db.execute(
-            select(PaymentOrder.id).where(
+            select(PaymentOrder).where(
                 PaymentOrder.club_id == club.id,
                 PaymentOrder.student_id == student.id,
                 PaymentOrder.type == "FIRST",
                 PaymentOrder.status == "NEW",
-            ).limit(1)
+            ).order_by(PaymentOrder.created_at.desc()).limit(1)
         )
-    ).first()
+    ).scalar_one_or_none()
     if active_pending:
-        await audit_block("webapp_checkout_blocked", "subscription_pending_order", club_id=club.id, user_id=user_id, student_id=student.id)
-        raise HTTPException(status_code=409, detail="Для этого атлета уже создается платеж")
+        pending_age = datetime.utcnow() - (active_pending.created_at or datetime.utcnow())
+        if pending_age <= timedelta(minutes=10):
+            await audit_block("webapp_checkout_blocked", "subscription_pending_order", club_id=club.id, user_id=user_id, student_id=student.id)
+            raise HTTPException(status_code=409, detail="Для этого атлета уже создается платеж")
+        active_pending.status = "FAILED"
+        await db.commit()
     order_id = f"WEB_{uuid.uuid4().hex[:12].upper()}"
     order = PaymentOrder(id=order_id, user_id=user_id, student_id=student.id, club_id=club.id, amount_kopecks=amount_kopecks, lesson_count=count, days_to_add=days, discipline=payload.sport_type, status="NEW", type="FIRST")
     db.add(order)
     await db.commit()
     payment_data = await YooKassaClient(shop_id=shop_id, secret_key=secret_key, proxy_url=PROXY_URL).init_payment(order_id=order_id, amount_kopecks=amount_kopecks, user_id=user_id, bot_username=club.bot_token)
     if not payment_data.get("Success"):
+        order.status = "FAILED"
+        await db.commit()
         raise HTTPException(status_code=400, detail=payment_data.get("Message", "Ошибка создания платежа"))
     audit_event("webapp_subscription_checkout_created", club_id=club.id, user_id=user_id, student_id=student.id, amount_kopecks=amount_kopecks, sport_type=payload.sport_type, tariff_idx=payload.tariff_idx)
     return {"ok": True, "payment_url": payment_data["PaymentURL"]}
