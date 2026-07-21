@@ -11,6 +11,15 @@
     --mono-radius-md: 14px;
 }
 
+/* WebApp pages use a deliberately light palette on every device.  Without
+   this reset iOS dark mode overrides the inline page styles and leaves light
+   cards/buttons with unreadable or apparently empty content. */
+html { color-scheme: light; }
+body.mono-theme,
+body.mono-theme * {
+    box-sizing: border-box;
+}
+
 body.mono-theme,
 body.mono-theme html {
     background: var(--mono-white) !important;
@@ -337,7 +346,8 @@ body.mono-theme a {
     }
 }
 
-@media (prefers-color-scheme: dark) {
+/* Do not derive the WebApp palette from the phone's system dark mode. */
+/* @media (prefers-color-scheme: dark) {
     body.mono-theme,
     body.mono-theme html {
         background: var(--mono-black) !important;
@@ -365,4 +375,4 @@ body.mono-theme a {
     body.mono-theme a {
         color: var(--mono-white) !important;
     }
-}
+} */

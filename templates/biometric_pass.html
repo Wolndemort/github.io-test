@@ -5,11 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>Вход по биометрии</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
-    <link rel="stylesheet" href="{{ url_for('static', path='css/mono.css') }}?v=1.0.0">
+    <link rel="stylesheet" href="{{ url_for('static', path='css/mono.css') }}?v=1.0.1">
     <style>
         {% if loading.enabled %}body { opacity: 0; } #app-loader { opacity: 1; position: fixed; inset: 0; z-index: 10; display: flex; flex-direction: column; align-items: center; justify-content: center; background: #f4f4f4; } #app-loader img { width: 96px; height: 96px; object-fit: contain; border-radius: 22px; margin-bottom: 18px; filter: grayscale(1); -webkit-transform: translateZ(0); backface-visibility: hidden; } #app-loader .spinner { width: 28px; height: 28px; border: 3px solid #d5d5d5; border-top-color: #111111; border-radius: 50%; animation: spin .8s linear infinite; } @keyframes spin { to { transform: rotate(360deg); } }{% endif %}
         body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f4f4f4; color: #111; padding: 18px; padding-top: max(18px, env(safe-area-inset-top)); padding-bottom: max(18px, env(safe-area-inset-bottom)); text-align: center; }
-        .wrap { max-width: 760px; margin: 0 auto; }
+        .wrap { width: 100%; max-width: 760px; margin: 0 auto; }
         .top { background: linear-gradient(180deg,#fff,#fafafa); border: 1px solid #d9d9d9; border-radius: 24px; padding: 20px; box-shadow: 0 14px 40px rgba(0,0,0,.06); margin-bottom: 12px; text-align: left; }
         .eyebrow { text-transform: uppercase; letter-spacing: .18em; font-size: 11px; color: #666; }
         h2 { font-size: 30px; letter-spacing: -.03em; margin: 8px 0 4px; }
@@ -122,7 +122,7 @@ function selectStudent(studentId, studentName) {
     tg.MainButton.color = "#111111";
     tg.MainButton.show();
 }
-tg.onEvent('mainButtonClicked', function() {
+if (tg) tg.onEvent('mainButtonClicked', function() {
     if (!selectedStudentId) return;
     tg.MainButton.disable();
     if (!bm || typeof bm.authenticate !== 'function') {

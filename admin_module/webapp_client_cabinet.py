@@ -91,7 +91,7 @@ async def get_biometric_page(
     settings = (club.club_settings or {}) if club else {}
     ui = settings.get("ui", {}) if isinstance(settings.get("ui", {}), dict) else {}
     loading = ui.get("loading", {}) if isinstance(ui.get("loading", {}), dict) else {}
-    return templates.TemplateResponse("biometric_pass.html", {"request": request, "students": students, "club_name": club.name if club else "", "logo_url": _absolute_webapp_url(request, ui.get("logo_url", "")), "loading": {"enabled": bool(loading.get("enabled", False)), "duration_ms": max(300, min(10000, int(loading.get("duration_ms", 1200)))), "message": str(loading.get("message", "Загружаем приложение…"))}})
+    return templates.TemplateResponse("biometric_pass.html", {"request": request, "students": students, "club": club, "club_id": club_id, "user_id": user_id, "club_name": club.name if club else "", "logo_url": _absolute_webapp_url(request, ui.get("logo_url", "")), "loading": {"enabled": bool(loading.get("enabled", False)), "duration_ms": max(300, min(10000, int(loading.get("duration_ms", 1200)))), "message": str(loading.get("message", "Загружаем приложение…"))}})
 
 
 @router.get("/webapp/client-cabinet", response_class=HTMLResponse)
@@ -397,8 +397,24 @@ async def webapp_buy_freeze_submit(payload: WebAppActionPayload, request: Reques
         await audit_block("webapp_checkout_blocked", "freeze_pending_order", club_id=club.id, user_id=int(tg_user.get("id", 0)), student_id=student.id)
         raise HTTPException(status_code=409, detail="Для этой заморозки уже создается платеж")
     order_id = f"WEBFZ-{club.id}-{student.id}-{uuid.uuid4().hex[:12]}"
+    order = PaymentOrder(
+        id=order_id,
+        user_id=int(tg_user.get("id", 0)),
+        student_id=student.id,
+        club_id=club.id,
+        amount_kopecks=amount_kopecks,
+        lesson_count=0,
+        days_to_add=days,
+        discipline="freeze",
+        status="NEW",
+        type=f"FREEZE_{days}",
+    )
+    db.add(order)
+    await db.commit()
     payment_data = await YooKassaClient(shop_id=shop_id, secret_key=secret_key, proxy_url=PROXY_URL).init_payment(order_id=order_id, amount_kopecks=amount_kopecks, user_id=int(tg_user.get("id", 0)), bot_username=club.bot_token)
     if not payment_data.get("Success"):
+        order.status = "FAILED"
+        await db.commit()
         raise HTTPException(status_code=400, detail=payment_data.get("Message", "Ошибка создания платежа"))
     audit_event("webapp_freeze_checkout_created", club_id=club.id, user_id=int(tg_user.get("id", 0)), student_id=student.id, days=days, amount_kopecks=amount_kopecks)
     return {"ok": True, "payment_url": payment_data["PaymentURL"]}
