@@ -25,12 +25,12 @@
 <div class="wrap">
     <div class="top">
         <div class="eyebrow">Checkmat access</div>
-        <h2>Пропускной пункт клуба</h2>
-        <p style="color:#666;margin:0;">Биометрический вход и QR-проход</p>
+        <h2>FaceID / QR</h2>
+        <p style="color:#666;margin:0;">Биометрический вход и быстрый проход</p>
     </div>
     <div id="setup-biometry-box" style="display:none; background:#fff; padding:15px; margin-bottom:20px; border-radius:18px; border:1px solid #ddd;">
-        <p style="margin:0 0 10px 0; color:#444;">🔒 Для активации прохода необходимо связать FaceID с ботом</p>
-        <button class="btn" style="margin:0;" onclick="setupBiometrics()">Зарегистрировать FaceID</button>
+        <p style="margin:0 0 10px 0; color:#444;">🔒 Для активации прохода нужно один раз связать устройство с профилем</p>
+        <button class="btn" style="margin:0;" onclick="setupBiometrics()">Активировать доступ</button>
     </div>
     <p style="color:#666;" id="status-hint">Выберите атлета для прохода:</p>
     <div id="students-list">
@@ -62,14 +62,14 @@ function setupBiometrics() {
         if (accessGranted) {
             fetch('/webapp/enable-biometry', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ init_data: tg.initData }) })
             .then(res => res.json())
-            .then(() => { tg.showAlert("Устройство успешно связано! Теперь вы можете проходить в клуб."); location.reload(); });
+            .then(() => { tg.showAlert("Устройство успешно связано. Теперь доступ готов."); location.reload(); });
         } else {
-            tg.showAlert("Доступ к FaceID отклонен. Без этого проход невозможен.");
+            tg.showAlert("Доступ отклонен. Без активации проход невозможен.");
         }
     });
 }
 function selectStudent(studentId, studentName) {
-    if (!bm.isAccessGranted) { tg.showAlert("Сначала активируйте FaceID по кнопке сверху!"); return; }
+    if (!bm.isAccessGranted) { tg.showAlert("Сначала активируйте доступ по кнопке сверху."); return; }
     selectedStudentId = studentId;
     document.querySelectorAll('.student-card').forEach(c => c.classList.remove('selected-card'));
     document.getElementById(`card-${studentId}`).classList.add('selected-card');

@@ -8,7 +8,7 @@ from aiogram.utils.keyboard import ReplyKeyboardBuilder
 from aiogram.filters import Command
 from sqlalchemy.ext.asyncio import AsyncSession
 from redis.asyncio import Redis
-from database.db import Student, process_student_freeze, Club, User, VisitLog
+from database.db import Student, process_student_freeze, Club, User, VisitLog, PaymentOrder, Subscription
 from services.abuse_guard import rate_limit, audit_block
 from config import secret_key
 from sqlalchemy import select
@@ -194,7 +194,7 @@ async def detailed_status_handler(
         return
 
     # Заголовок нового экрана
-    detail_text = f"📊 <b>Подробный статус абонементов</b>\n🏰 Клуб: <b>{club.name}</b>\n\n"
+    detail_text = f"📊 <b>Статус атлетов</b>\n🏰 Клуб: <b>{club.name}</b>\n\n"
 
     # Вытаскиваем таймаут сессии клуба из JSONB (дефолт 150 минут)
     club_settings = club.club_settings or {}
@@ -302,6 +302,65 @@ async def detailed_status_handler(
     except Exception as e:
         logger.error(f"❌ Ошибка в детальном статусе: {e}")
         await callback.answer("Ошибка при загрузке подробных данных")
+
+
+@router.callback_query(F.data == "payment_history")
+async def payment_history_handler(
+        callback: types.CallbackQuery,
+        session: AsyncSession,
+        club: Club
+):
+    user_id = callback.from_user.id
+    students = (await session.execute(
+        select(Student).where(Student.parent_id == user_id, Student.club_id == club.id).order_by(Student.name)
+    )).scalars().all()
+
+    if not students:
+        return await callback.answer("У вас нет привязанных атлетов.", show_alert=True)
+
+    student_ids = [s.id for s in students]
+    orders = (await session.execute(
+        select(PaymentOrder)
+        .where(PaymentOrder.club_id == club.id, PaymentOrder.student_id.in_(student_ids))
+        .order_by(PaymentOrder.created_at.desc())
+        .limit(10)
+    )).scalars().all()
+    subs = (await session.execute(
+        select(Subscription)
+        .where(Subscription.club_id == club.id, Subscription.user_id == user_id)
+        .order_by(Subscription.created_at.desc())
+        .limit(5)
+    )).scalars().all()
+
+    text = f"🧾 <b>История</b>\n🏰 Клуб: <b>{club.name}</b>\n\n"
+    if orders:
+        text += "<b>Последние оплаты:</b>\n"
+        for order in orders:
+            created = order.created_at.strftime("%d.%m.%Y %H:%M") if order.created_at else "—"
+            amount = f"{order.amount_kopecks / 100:.0f} ₽"
+            text += f"• <code>{created}</code> — <b>{amount}</b> — {order.status}\n"
+    else:
+        text += "<i>Оплат пока нет.</i>\n"
+
+    text += "\n"
+    if subs:
+        text += "<b>Подписки:</b>\n"
+        for sub in subs:
+            next_charge = sub.next_charge_at.strftime("%d.%m.%Y") if sub.next_charge_at else "—"
+            text += f"• Атлет ID <code>{sub.student_id}</code> — след. списание: <b>{next_charge}</b> — {'активна' if sub.is_active else 'неактивна'}\n"
+    else:
+        text += "<i>Подписок пока нет.</i>\n"
+
+    text += "\n<b>Ваши атлеты:</b>\n"
+    for s in students:
+        status = "❄️ заморожен" if s.is_frozen else ("✅ активен" if s.expire_date and s.expire_date > datetime.now() else "🔴 истек")
+        text += f"• <b>{s.name}</b> — {status}\n"
+
+    back_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⬅️ Назад в профиль", callback_data="profile")]
+    ])
+    await callback.message.edit_text(text, reply_markup=back_keyboard, parse_mode="HTML")
+    await callback.answer()
 
 @router.callback_query(F.data.startswith('section_'))
 async def universal_section_handler(
@@ -470,8 +529,9 @@ async def choose_student_for_freeze(
     # 3. Текст с динамическим числом дней из конфига
     await callback.message.edit_text(
         text=(
-            f"❄️ <b>Заморозка абонемента ({club.name})</b>\n\n"
-            f"Выберите атлета. Срок действия будет продлен на <b>{freeze_days} дней</b>.\n\n"
+        f"❄️ <b>Заморозка</b>\n\n"
+        f"Клуб: <b>{club.name}</b>\n"
+        f"Выберите атлета. Срок действия будет продлен на <b>{freeze_days} дней</b>.\n\n"
             f"⚠️ <i>Заморозка доступна 1 раз за период. Абонемент разморозится автоматически при первом входе в зал.</i>"
         ),
         reply_markup=builder.as_markup(),
@@ -859,7 +919,8 @@ async def auth_by_phone_callback(callback: types.CallbackQuery, club: Club):
     builder = ReplyKeyboardBuilder()
     builder.row(types.KeyboardButton(text="📱 Поделиться контактом", request_contact=True))
     await callback.message.answer(
-        f"📍 <b>Авторизация в клубе {club.name}</b>\n\n"
+        f"📍 <b>Привязка профиля</b>\n\n"
+        f"Клуб: <b>{club.name}</b>\n"
         f"Нажмите кнопку <b>«📱 Поделиться контактом»</b> внизу экрана, "
         f"чтобы система проверила ваш номер телефона в базе данных.",
         reply_markup=builder.as_markup(resize_keyboard=True, one_time_keyboard=True),
@@ -873,12 +934,20 @@ async def process_user_contact(
         message: types.Message,
         session: AsyncSession,
         club: Club,
-        club_settings: dict
+        club_settings: dict,
+        redis: Redis
 ):
     # Очищаем номер от плюсов и пробелов
     raw_phone = message.contact.phone_number.replace("+", "").strip()
     clean_phone_10 = raw_phone[-10:]  # Последние 10 цифр (9991112233)
     user_id = message.from_user.id
+
+    if not await rate_limit(redis, f"rl:bot:bind_phone:{club.id}:{user_id}", 3, 60):
+        await audit_block("bot_bind_blocked", "rate_limited", club_id=club.id, user_id=user_id)
+        return await message.answer(
+            "Слишком часто. Подождите минуту и попробуйте снова.",
+            reply_markup=types.ReplyKeyboardRemove()
+        )
 
     try:
         # Ищем студентов, у которых телефон содержит последние 10 цифр

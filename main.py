@@ -120,6 +120,7 @@ async def lifespan(app: FastAPI):
 
 # Инициализация FastAPI
 app = FastAPI(title="SpeedyCRM SaaS API", lifespan=lifespan)
+app.state.redis_client = redis_client
 app.add_middleware(SessionMiddleware, secret_key=os.getenv("SECRET_KEY", ""), https_only=os.getenv("COOKIE_SECURE", "1") == "1")
 app.add_middleware(ProxyHeadersMiddleware, trusted_hosts=["*"])
 app.mount("/static", StaticFiles(directory="static"), name="static")

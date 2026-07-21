@@ -18,6 +18,7 @@
 - Тестовый restore-check явно отделён от боевого потока бэкапа и описан в README.
 - `restore-check` покрыт unit-тестом для CI без реального PostgreSQL.
 - Добавлена базовая защита от злоупотреблений: антидубль checkout, lock на привязку и rate limit на спам-клики.
+- Добавлен `smoke-check` для post-deploy проверки живого сервиса.
 
 ## Основные маршруты WebApp
 
@@ -40,6 +41,8 @@
 - `scripts/restore_check.py` — отдельный безопасный скрипт для тестового восстановления на тестовой базе.
 - `tests/test_restore_check.py` — unit-тесты CI-обёртки restore-check.
 - `services/abuse_guard.py` — мягкие лимиты и audit для заблокированных попыток.
+- `scripts/smoke_check.py` — post-deploy smoke-check.
+- `tests/test_smoke_check.py` — unit-тесты smoke-check обёртки.
 - `README.txt` — описание политики бэкапов и запуска restore-check.
 
 ## Основные файлы

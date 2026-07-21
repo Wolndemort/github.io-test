@@ -32,8 +32,12 @@ def get_profile_keyboard(user, club_settings: dict, is_authorized: bool = False)
     )
 
     builder.row(
-        types.InlineKeyboardButton(text="📲 Мой QR-пропуск", callback_data="show_qr"),
-        types.InlineKeyboardButton(text="🔍 Атлеты", callback_data="detailed_status_info"),
+        types.InlineKeyboardButton(text="📲 QR-пропуск", callback_data="show_qr"),
+        types.InlineKeyboardButton(text="🔍 Мои атлеты", callback_data="detailed_status_info"),
+    )
+    builder.row(
+        types.InlineKeyboardButton(text="🧾 История", callback_data="payment_history"),
+        types.InlineKeyboardButton(text="💳 Абонемент", callback_data="choose_section"),
     )
 
     # 2. Покупки и абонемент
@@ -92,7 +96,7 @@ def get_main_menu_keyboard(club_settings: dict, club_id: int):
     ))
 
     # 3. ГЛАВНАЯ КНОПКА (Профиль)
-    builder.row(types.InlineKeyboardButton(text='👤 МОЙ ПРОФИЛЬ', callback_data='profile'))
+    builder.row(types.InlineKeyboardButton(text='👤 Профиль', callback_data='profile'))
 
     builder.adjust(2)  # Кнопки по 2 в ряд, профиль на всю ширину (row)
     return builder.as_markup()

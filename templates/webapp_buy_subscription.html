@@ -1,6 +1,6 @@
 {% extends "webapp_base.html" %}
-{% block title %}Покупка абонемента{% endblock %}
-{% block header %}Покупка абонемента{% endblock %}
+{% block title %}Абонемент{% endblock %}
+{% block header %}Абонемент{% endblock %}
 {% block subheader %}{{ club.name }}{% endblock %}
 {% block content %}
 <div class="mono-card">
@@ -24,8 +24,8 @@
         <select id="tariff" style="width:100%;padding:12px;margin-top:6px;"></select>
     </label>
     <div class="mono-divider"></div>
-    <button id="create" class="mono-action dark" style="width:100%;">Создать оплату</button>
-    <a class="mono-action" style="margin-top:10px;" href="/webapp/client-cabinet?club_id={{ club_id }}">Назад в кабинет</a>
+    <button id="create" class="mono-action dark" style="width:100%;">Перейти к оплате</button>
+    <a class="mono-action" style="margin-top:10px;" href="/webapp/client-cabinet?club_id={{ club_id }}">Назад</a>
     <p id="msg"></p>
 </div>
 {% endblock %}

@@ -14,6 +14,8 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import InlineKeyboardButton
 from aiogram import Router, F, types
 from handlers.states import PaymentStates
+from redis.asyncio import Redis
+from services.abuse_guard import rate_limit, audit_block
 
 
 router = Router()
@@ -310,7 +312,7 @@ async def process_kids_limit(
 
 @router.callback_query(F.data == 'pay_one_click')
 async def process_one_click_payment(callback: types.CallbackQuery, state: FSMContext, session: AsyncSession,
-                                    club: Club):
+                                    club: Club, redis: Redis):
     await callback.answer("Провожу платеж в 1 клик...", show_alert=False)
 
     data = await state.get_data()
@@ -318,6 +320,10 @@ async def process_one_click_payment(callback: types.CallbackQuery, state: FSMCon
 
     # Извлекаем тип спорта (дисциплину) из стейта
     sport_type = data.get('sport_type')  # Сюда прилетит: 'boxing', 'kickboxing', 'bjj', 'yoga'
+    idem_key = f"idem:bot:pay_one_click:{club.id}:{user_id}:{data.get('student_id')}:{sport_type}:{data.get('lesson_count')}:{data.get('days_to_add')}"
+    if not await rate_limit(redis, idem_key, 1, 90):
+        await audit_block("bot_checkout_blocked", "duplicate_one_click", club_id=club.id, user_id=user_id, student_id=data.get("student_id"))
+        return await callback.message.answer("Платеж уже создается. Подождите немного.")
 
     order_id = f"ONE_{uuid.uuid4().hex[:12].upper()}"
     amount_kopecks = int(float(data['price']) * 100)
@@ -432,7 +438,8 @@ async def process_one_click_payment(callback: types.CallbackQuery, state: FSMCon
 async def process_sbp_payment_choice(
         callback: types.CallbackQuery,
         state: FSMContext,
-        club_settings: dict
+        club_settings: dict,
+        redis: Redis
 ):
     """Сценарий ручной оплаты по реквизитам СБП (твоя старая схема)"""
     # Включаем твой родной стейт ожидания чека
@@ -447,6 +454,10 @@ async def process_sbp_payment_choice(
 
     if not payment_info or "+79000000000" in payment_info:
         payment_info = "⚠️ Реквизиты временно не указаны. Пожалуйста, свяжитесь с администратором."
+    user_id = callback.from_user.id
+    if not await rate_limit(redis, f"rl:bot:sbp:{user_id}", 3, 60):
+        await audit_block("bot_flow_blocked", "sbp_rate_limited", user_id=user_id)
+        return await callback.answer("Слишком часто. Попробуйте позже.", show_alert=True)
 
     text = (
         f"💰 <b>Оплата по СБП: {data['discipline_name']}</b>\n"
@@ -471,6 +482,7 @@ async def process_official_card_payment(
         state: FSMContext,
         session: AsyncSession,
         club: Club,
+        redis: Redis,
 ):
     """Сценарий онлайн-оплаты через ЮKassa: Ссылка (первый раз) ИЛИ 1 клик (если карта привязана)"""
     await callback.answer("Обрабатываю запрос...", show_alert=False)
@@ -485,6 +497,10 @@ async def process_official_card_payment(
     days_to_add = data['days_to_add']
     sport_type = data.get('sport_type')  # 🌟 Извлекаем тип спорта
     payment_kind = data.get("payment_kind", "SUBSCRIPTION")
+    idem_key = f"idem:bot:pay_official:{club.id}:{user_id}:{student_id}:{sport_type}:{lesson_count}:{days_to_add}:{payment_kind}"
+    if not await rate_limit(redis, idem_key, 1, 90):
+        await audit_block("bot_checkout_blocked", "duplicate_official_payment", club_id=club.id, user_id=user_id, student_id=student_id)
+        return await callback.message.answer("Платеж уже создается. Подождите немного.")
 
     # 1. Проверяем настройки клуба
     user_res = await session.execute(select(User).where(User.user_id == user_id))

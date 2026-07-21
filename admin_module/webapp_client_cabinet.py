@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from fastapi import Depends, HTTPException, Query
+from fastapi import Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,6 +17,7 @@ from admin_module.webapp_verify import verify_telegram_data
 from config import PROXY_URL
 from database.db import Club, PaymentOrder, Student, Subscription, User, VisitLog, get_session, process_student_freeze
 from services.audit import audit_event
+from services.abuse_guard import rate_limit, audit_block
 from services.yookassa_client import YooKassaClient
 
 
@@ -191,7 +192,7 @@ async def webapp_buy_subscription_page(request, club_id: int, init_data: str | N
 
 
 @router.post("/webapp/client-cabinet/buy-subscription")
-async def webapp_buy_subscription_submit(payload: WebAppBuySubscriptionPayload, db: AsyncSession = Depends(get_session)):
+async def webapp_buy_subscription_submit(payload: WebAppBuySubscriptionPayload, request: Request, db: AsyncSession = Depends(get_session)):
     club = await db.get(Club, payload.club_id)
     if not club or not club.bot_token:
         raise HTTPException(status_code=404, detail="Клуб не найден")
@@ -221,6 +222,11 @@ async def webapp_buy_subscription_submit(payload: WebAppBuySubscriptionPayload, 
     secret_key = pay_settings.get("yookassa_secret_key")
     if not shop_id or not secret_key:
         raise HTTPException(status_code=400, detail="ЮKassa не настроена")
+    redis = request.app.state.redis_client
+    idem_key = f"idem:webapp:buy_sub:{club.id}:{user_id}:{student.id}:{payload.sport_type}:{payload.tariff_idx}"
+    if not await rate_limit(redis, idem_key, 1, 90):
+        await audit_block("webapp_checkout_blocked", "duplicate_subscription_checkout", club_id=club.id, user_id=user_id, student_id=student.id)
+        raise HTTPException(status_code=409, detail="Платеж уже создается")
     active_pending = (
         await db.execute(
             select(PaymentOrder.id).where(
@@ -232,6 +238,7 @@ async def webapp_buy_subscription_submit(payload: WebAppBuySubscriptionPayload, 
         )
     ).first()
     if active_pending:
+        await audit_block("webapp_checkout_blocked", "subscription_pending_order", club_id=club.id, user_id=user_id, student_id=student.id)
         raise HTTPException(status_code=409, detail="Для этого атлета уже создается платеж")
     order_id = f"WEB_{uuid.uuid4().hex[:12].upper()}"
     order = PaymentOrder(id=order_id, user_id=user_id, student_id=student.id, club_id=club.id, amount_kopecks=amount_kopecks, lesson_count=count, days_to_add=days, discipline=payload.sport_type, status="NEW", type="FIRST")
@@ -257,7 +264,7 @@ async def webapp_auth_help_page(request, club_id: int, init_data: str | None = Q
 
 
 @router.post("/webapp/client-cabinet/auth")
-async def webapp_bind_phone_submit(payload: WebAppBindPhonePayload, db: AsyncSession = Depends(get_session)):
+async def webapp_bind_phone_submit(payload: WebAppBindPhonePayload, request: Request, db: AsyncSession = Depends(get_session)):
     club = await db.get(Club, payload.club_id)
     if not club or not club.bot_token:
         raise HTTPException(status_code=404, detail="Клуб не найден")
@@ -268,6 +275,11 @@ async def webapp_bind_phone_submit(payload: WebAppBindPhonePayload, db: AsyncSes
     if len(raw_phone) < 10:
         raise HTTPException(status_code=400, detail="Введите номер телефона")
     clean_phone_10 = raw_phone[-10:]
+    redis = request.app.state.redis_client
+    bind_key = f"rl:webapp:bind_phone:{club.id}:{tg_user.get('id', 0)}"
+    if not await rate_limit(redis, bind_key, 3, 60):
+        await audit_block("webapp_bind_blocked", "rate_limited", club_id=club.id, user_id=int(tg_user.get("id", 0)))
+        raise HTTPException(status_code=429, detail="Слишком часто. Попробуйте позже.")
     students = (
         await db.execute(
             select(Student)
@@ -310,7 +322,7 @@ async def webapp_buy_freeze_page(request, club_id: int, student_id: int, init_da
 
 
 @router.post("/webapp/client-cabinet/buy-freeze")
-async def webapp_buy_freeze_submit(payload: WebAppActionPayload, days: int, db: AsyncSession = Depends(get_session)):
+async def webapp_buy_freeze_submit(payload: WebAppActionPayload, request: Request, days: int, db: AsyncSession = Depends(get_session)):
     club = await db.get(Club, payload.club_id)
     if not club or not club.bot_token:
         raise HTTPException(status_code=404, detail="Клуб не найден")
@@ -330,6 +342,11 @@ async def webapp_buy_freeze_submit(payload: WebAppActionPayload, days: int, db: 
     secret_key = getattr(club, "yookassa_secret_key", None) or (club.club_settings or {}).get("payments", {}).get("yookassa_secret_key")
     if not shop_id or not secret_key:
         raise HTTPException(status_code=400, detail="ЮKassa не настроена")
+    redis = request.app.state.redis_client
+    idem_key = f"idem:webapp:buy_freeze:{club.id}:{int(tg_user.get('id', 0))}:{student.id}:{days}"
+    if not await rate_limit(redis, idem_key, 1, 90):
+        await audit_block("webapp_checkout_blocked", "duplicate_freeze_checkout", club_id=club.id, user_id=int(tg_user.get("id", 0)), student_id=student.id)
+        raise HTTPException(status_code=409, detail="Платеж уже создается")
     active_pending = (
         await db.execute(
             select(PaymentOrder.id).where(
@@ -341,6 +358,7 @@ async def webapp_buy_freeze_submit(payload: WebAppActionPayload, days: int, db: 
         )
     ).first()
     if active_pending:
+        await audit_block("webapp_checkout_blocked", "freeze_pending_order", club_id=club.id, user_id=int(tg_user.get("id", 0)), student_id=student.id)
         raise HTTPException(status_code=409, detail="Для этой заморозки уже создается платеж")
     order_id = f"WEBFZ-{club.id}-{student.id}-{uuid.uuid4().hex[:12]}"
     payment_data = await YooKassaClient(shop_id=shop_id, secret_key=secret_key, proxy_url=PROXY_URL).init_payment(order_id=order_id, amount_kopecks=amount_kopecks, user_id=int(tg_user.get("id", 0)), bot_username=club.bot_token)

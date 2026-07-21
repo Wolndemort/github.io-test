@@ -1,6 +1,6 @@
 {% extends "webapp_base.html" %}
-{% block title %}Привязка профиля{% endblock %}
-{% block header %}Привязка профиля{% endblock %}
+{% block title %}Профиль{% endblock %}
+{% block header %}Профиль{% endblock %}
 {% block subheader %}{{ club.name }}{% endblock %}
 {% block content %}
 <div class="mono-card">
@@ -8,8 +8,8 @@
         <input id="phone" type="tel" placeholder="+7..." style="width:100%;padding:12px;margin-top:6px;">
     </label>
     <div class="mono-divider"></div>
-    <button id="bind" class="mono-action dark" style="width:100%;">Привязать</button>
-    <a class="mono-action" style="margin-top:10px;" href="/webapp/client-cabinet?club_id={{ club_id }}">Назад в кабинет</a>
+    <button id="bind" class="mono-action dark" style="width:100%;">Привязать номер</button>
+    <a class="mono-action" style="margin-top:10px;" href="/webapp/client-cabinet?club_id={{ club_id }}">Назад</a>
     <p id="msg"></p>
 </div>
 {% endblock %}
