@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Кабинет клиента</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <link rel="stylesheet" href="{{ url_for('static', path='css/mono.css') }}?v=1.0.0">
+    <style>
+        {% if loading.enabled %}
+        body { visibility: hidden; }
+        #app-loader { visibility: visible; position: fixed; inset: 0; z-index: 10; display: flex; flex-direction: column; align-items: center; justify-content: center; background: #f6f6f6; }
+        #app-loader .spinner { width: 28px; height: 28px; border: 3px solid #d0d0d0; border-top-color: #111; border-radius: 50%; animation: spin .8s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        {% endif %}
+        body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f4f4f4; color: #111; }
+        .wrap { max-width: 760px; margin: 0 auto; padding: 16px; }
+        .hero { background: linear-gradient(180deg, #ffffff 0%, #fafafa 100%); border: 1px solid #d9d9d9; border-radius: 24px; padding: 20px; margin-bottom: 14px; box-shadow: 0 14px 40px rgba(0,0,0,.06); }
+        .eyebrow { text-transform: uppercase; letter-spacing: .18em; font-size: 11px; color: #666; margin-bottom: 10px; }
+        .title { font-size: 28px; font-weight: 800; margin: 0 0 8px; letter-spacing: -0.03em; }
+        .subtitle { color: #666; margin: 0; line-height: 1.5; }
+        .card { background: #fff; border: 1px solid #d9d9d9; border-radius: 22px; padding: 16px; margin-bottom: 12px; box-shadow: 0 10px 28px rgba(0,0,0,.04); }
+        .summary { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 14px; }
+        .pill { border: 1px solid #ddd; border-radius: 16px; padding: 12px; background: #fff; }
+        .pill .value { font-size: 22px; font-weight: 800; line-height: 1; }
+        .pill .label { color: #666; font-size: 12px; margin-top: 6px; text-transform: uppercase; letter-spacing: .08em; }
+        .student { display: flex; justify-content: space-between; gap: 12px; padding: 14px 0; border-top: 1px solid #ececec; }
+        .student:first-child { border-top: 0; padding-top: 0; }
+        .name { font-weight: 800; letter-spacing: -0.02em; }
+        .muted { color: #777; font-size: 14px; }
+        .status { font-weight: 700; white-space: nowrap; }
+        .actions { display: grid; gap: 10px; }
+        .btn { display: block; text-align: center; text-decoration: none; padding: 15px 16px; border-radius: 16px; border: 1px solid #111; color: #111; background: #fff; font-weight: 700; transition: transform .15s ease, background .15s ease; }
+        .btn:hover { transform: translateY(-1px); background: #f7f7f7; }
+        .btn.dark { background: #111; color: #fff; }
+        .btn.soft { border-color: #c8c8c8; color: #111; background: #fff; }
+        .student-actions { display: grid; gap: 8px; margin-top: 10px; }
+        .section-title { display:flex; align-items:center; justify-content:space-between; margin-bottom: 10px; }
+        .section-title span { text-transform: uppercase; letter-spacing: .16em; font-size: 11px; color: #666; }
+    </style>
+</head>
+<body class="mono-theme">
+{% if loading.enabled %}
+<div id="app-loader">
+    <div style="margin-bottom: 14px; font-weight: 700;">{{ loading.message }}</div>
+    <div class="spinner"></div>
+</div>
+{% endif %}
+<div class="wrap mono-shell">
+    <div class="hero mono-hero">
+        <div class="eyebrow mono-eyebrow">Checkmat Jiu-Jitsu × Premium Cabinet</div>
+        <div class="title">Кабинет клиента</div>
+        <p class="subtitle">{{ club_name }} · {{ user_name }}</p>
+        <div class="summary mono-grid-4">
+            <div class="pill mono-pill"><div class="value">{{ summary.total }}</div><div class="label">атлетов</div></div>
+            <div class="pill mono-pill"><div class="value">{{ summary.active }}</div><div class="label">активных</div></div>
+            <div class="pill mono-pill"><div class="value">{{ summary.frozen }}</div><div class="label">заморожено</div></div>
+            <div class="pill mono-pill"><div class="value">{{ summary.expired }}</div><div class="label">истекло</div></div>
+        </div>
+    </div>
+
+    <div class="card mono-card">
+        <div class="section-title mono-kicker"><div class="name">Профили атлетов</div><span>детализация</span></div>
+        {% if students %}
+            {% for student in students %}
+            <div class="student">
+                <div>
+                    <div class="name">{{ student.name }}</div>
+                    <div class="muted">
+                        Баланс: {{ student.balance_lessons if student.balance_lessons is not none else 0 }}
+                        · Абонемент: {{ student.expire_date.strftime('%d.%m.%Y') if student.expire_date else 'не указан' }}
+                        · Бесплатных заморозок: {{ student.can_freeze if student.can_freeze is not none else 0 }}
+                    </div>
+                    {% if student.frozen_days %}
+                    <div class="muted">Платная заморозка: {{ student.frozen_days }} дн.</div>
+                    {% endif %}
+                </div>
+                <div class="status">
+                    {% if student.is_frozen %}
+                        ❄️ Заморожен
+                    {% elif student.expire_date and student.expire_date > now %}
+                        ✅ Активен
+                    {% else %}
+                        🔴 Истек
+                    {% endif %}
+                </div>
+            </div>
+            <div class="student-actions">
+                <a class="btn soft mono-action" href="/webapp/client-cabinet/student?club_id={{ club_id }}&student_id={{ student.id }}">Открыть атлета</a>
+                <a class="btn soft mono-action" href="/webapp/client-cabinet/freeze?club_id={{ club_id }}&student_id={{ student.id }}">Заморозить</a>
+                {% if freeze_price_per_day and freeze_price_per_day > 0 %}
+                <a class="btn dark mono-action dark" href="/webapp/client-cabinet/buy-freeze?club_id={{ club_id }}&student_id={{ student.id }}">Купить заморозку</a>
+                {% endif %}
+            </div>
+            {% endfor %}
+        {% else %}
+            <p class="muted">Пока нет привязанных атлетов.</p>
+        {% endif %}
+    </div>
+
+    <div class="card mono-card">
+        <div class="actions">
+            <a class="btn dark mono-action dark" href="/webapp/biometric-pass?club_id={{ club_id }}&user_id={{ user_id }}">Открыть проход по FaceID</a>
+            <a class="btn soft mono-action" href="/webapp/client-cabinet/buy-subscription?club_id={{ club_id }}">Купить абонемент</a>
+            <a class="btn soft mono-action" href="/webapp/client-cabinet/auth?club_id={{ club_id }}">Привязать профиль по номеру</a>
+            <a class="btn soft mono-action" href="/webapp/client-cabinet/history?club_id={{ club_id }}">История оплат</a>
+            <a class="btn soft mono-action" href="/webapp/client-cabinet?club_id={{ club_id }}">Обновить кабинет</a>
+            <a class="btn soft mono-action" href="#" onclick="window.Telegram?.WebApp?.close(); return false;">Вернуться в профиль бота</a>
+        </div>
+    </div>
+</div>
+
+<script>
+    const tg = window.Telegram?.WebApp;
+    if (tg) {
+        tg.ready();
+        tg.expand();
+    }
+    {% if loading.enabled %}
+    setTimeout(() => {
+        document.body.style.visibility = 'visible';
+        document.getElementById('app-loader')?.remove();
+    }, {{ loading.duration_ms }});
+    {% endif %}
+</script>
+</body>
+</html>

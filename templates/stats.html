@@ -6,122 +6,93 @@
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <link rel="stylesheet" href="{{ url_for('static', path='css/mono.css') }}?v=1.0.0">
     <style>
-        body {
-            background-color: var(--tg-theme-bg-color, #f5f5f5);
-            color: var(--tg-theme-text-color, #222);
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            margin: 0; padding: 15px;
-        }
-        h2 { color: var(--tg-theme-button-color, #3390ec); text-align: center; margin-top: 5px; }
+        body { margin: 0; padding: 0; }
         .grid {
             display: grid;
             grid-template-columns: 1fr 1fr;
             gap: 10px;
             margin-bottom: 12px;
         }
-        .card {
-            background: var(--tg-theme-secondary-bg-color, #ffffff);
-            border-radius: 12px;
-            padding: 15px;
-            margin-bottom: 12px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
-        }
         .card.full { grid-column: span 2; }
-        .label { font-size: 13px; color: #888; margin-bottom: 5px; }
         .value { font-size: 20px; font-weight: bold; }
-        .value.accent { color: var(--tg-theme-button-color, #3390ec); }
-        .value.warning { color: #f2a93b; }
-        .value.danger { color: #e53935; }
-
         .list-item {
             display: flex;
             justify-content: space-between;
             padding: 8px 0;
-            border-bottom: 1px solid var(--tg-theme-bg-color, #f5f5f5);
+            border-bottom: 1px solid #eeeeee;
             font-size: 15px;
         }
         .list-item:last-child { border-bottom: none; }
-
-        /* Стили для красивых спойлеров */
-        details {
-            margin-top: 5px;
-        }
-        summary {
-            font-size: 14px;
-            color: var(--tg-theme-button-color, #3390ec);
-            cursor: pointer;
-            outline: none;
-            padding: 4px 0;
-        }
+        details { margin-top: 5px; }
+        summary { font-size: 14px; cursor: pointer; outline: none; padding: 4px 0; }
         .scroll-box {
             max-height: 150px;
             overflow-y: auto;
             margin-top: 8px;
             padding-right: 5px;
         }
-        .empty-text {
-            text-align: center;
-            color: #888;
-            padding: 20px;
-        }
     </style>
 </head>
 <body class="mono-theme">
-    <h2>Статистика Клуба</h2>
+    <div class="mono-shell">
+    <div class="mono-hero" style="margin-bottom:12px;">
+        <div class="mono-eyebrow">Checkmat analytics</div>
+        <h1 class="mono-title" style="margin-bottom:6px;">Статистика клуба</h1>
+    </div>
 
     {% if empty %}
-    <div class="card">
-        <div class="empty-text">В этом клубе пока нет зарегистрированных атлетов.</div>
+    <div class="card mono-card">
+        <div class="center-muted-text">В этом клубе пока нет зарегистрированных атлетов.</div>
     </div>
     {% else %}
 
     <!-- Сетка базовых метрик -->
-    <div class="grid">
-        <div class="card">
+    <div class="grid mono-grid-2">
+        <div class="card mono-card">
             <div class="label">Всего атлетов</div>
             <div class="value">{{ total_athletes }}</div>
         </div>
-        <div class="card">
+        <div class="card mono-card">
             <div class="label">Удержание (Retention)</div>
-            <div class="value accent">{{ retention_rate }}%</div>
+            <div class="value">{{ retention_rate }}%</div>
         </div>
-        <div class="card">
+        <div class="card mono-card">
             <div class="label">Активные абон.</div>
             <div class="value">{{ active_passes }}</div>
         </div>
-        <div class="card">
+        <div class="card mono-card">
             <div class="label">Заморозки</div>
-            <div class="value warning">{{ frozen_passes }}</div>
+            <div class="value">{{ frozen_passes }}</div>
         </div>
-        <div class="card">
+        <div class="card mono-card">
             <div class="label">Горят (<=3 зан.)</div>
-            <div class="value warning">{{ burning_passes }}</div>
+            <div class="value">{{ burning_passes }}</div>
         </div>
-        <div class="card">
+        <div class="card mono-card">
             <div class="label">Закончились</div>
-            <div class="value danger">{{ inactive_passes }}</div>
+            <div class="value">{{ inactive_passes }}</div>
         </div>
-        <div class="card full">
+        <div class="card mono-card full">
             <div class="label">Осталось уроков на руках</div>
             <div class="value">{{ total_lessons_left }}</div>
         </div>
     </div>
 
     <!-- Популярность дисциплин -->
-    <div class="card">
+    <div class="card mono-card">
         <div class="label">🥋 Популярность направлений</div>
         {% for discipline in disciplines_stats %}
         <div class="list-item">
             <span>{{ discipline.name }}</span>
-            <span style="font-weight: bold; color: var(--tg-theme-button-color, #3390ec);">{{ discipline.active_athletes }}</span>
+            <span style="font-weight: bold;">{{ discipline.active_athletes }}</span>
         </div>
         {% else %}
-        <div style="font-size: 14px; color: #888; padding-top: 5px;">Нет активных дисциплин</div>
+        <div style="font-size: 14px; color: #666; padding-top: 5px;">Нет активных дисциплин</div>
         {% endfor %}
     </div>
 
     <!-- Список для обзвона (Кому нужно продление) -->
-    <div class="card">
+    <div class="card mono-card">
         <div class="label">📞 Срочный обзвон (Закончились абонементы)</div>
         {% if churned_students %}
         <details>
@@ -130,18 +101,18 @@
                 {% for student in churned_students %}
                 <div class="list-item">
                     <span>{{ student.name }}</span>
-                    <span style="color: #888; font-size: 13px;">баланс: 0</span>
+                    <span style="color: #666; font-size: 13px;">баланс: 0</span>
                 </div>
                 {% endfor %}
             </div>
         </details>
         {% else %}
-        <div style="font-size: 14px; color: #4caf50; padding-top: 5px;">🎉 Все абонементы активны!</div>
+        <div style="font-size: 14px; color: #111; padding-top: 5px;">🎉 Все абонементы активны!</div>
         {% endif %}
     </div>
 
     <!-- Топ атлетов -->
-    <div class="card">
+    <div class="card mono-card">
         <div class="label">🏆 Топ атлетов по остатку занятий</div>
         {% for student in top_students %}
         <div class="list-item">
@@ -155,7 +126,9 @@
 
     <script>
         const tg = window.Telegram.WebApp;
-        tg.expand(); // Разворачиваем Web App на максимум внутри ТГ
+        tg.ready();
+        tg.expand();
     </script>
+    </div>
 </body>
 </html>

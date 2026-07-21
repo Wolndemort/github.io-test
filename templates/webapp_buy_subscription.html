@@ -1,0 +1,57 @@
+{% extends "webapp_base.html" %}
+{% block title %}Покупка абонемента{% endblock %}
+{% block header %}Покупка абонемента{% endblock %}
+{% block subheader %}{{ club.name }}{% endblock %}
+{% block content %}
+<div class="mono-card">
+    <div class="mono-grid-2">
+        <label>Атлет
+            <select id="student" style="width:100%;padding:12px;margin-top:6px;">
+                {% for s in students %}
+                <option value="{{ s.id }}">{{ s.name }}</option>
+                {% endfor %}
+            </select>
+        </label>
+        <label>Направление
+            <select id="sport" style="width:100%;padding:12px;margin-top:6px;">
+                {% for code, info in disciplines.items() %}
+                <option value="{{ code }}">{{ info.name if info.name else code }}</option>
+                {% endfor %}
+            </select>
+        </label>
+    </div>
+    <label style="display:block;margin-top:12px;">Тариф
+        <select id="tariff" style="width:100%;padding:12px;margin-top:6px;"></select>
+    </label>
+    <div class="mono-divider"></div>
+    <button id="create" class="mono-action dark" style="width:100%;">Создать оплату</button>
+    <a class="mono-action" style="margin-top:10px;" href="/webapp/client-cabinet?club_id={{ club_id }}">Назад в кабинет</a>
+    <p id="msg"></p>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+const disciplines = {{ disciplines | tojson }};
+const sportSelect = document.getElementById('sport');
+const tariffSelect = document.getElementById('tariff');
+function renderTariffs() {
+  const tariffs = (disciplines[sportSelect.value] || {}).tariffs || [];
+  tariffSelect.innerHTML = '';
+  tariffs.forEach((t, idx) => {
+    const opt = document.createElement('option');
+    opt.value = idx;
+    opt.textContent = (t.count === 999 ? `Безлимит ${t.days} дн.` : `${t.count} зан. / ${t.days} дн.`) + ` — ${t.price} ₽`;
+    tariffSelect.appendChild(opt);
+  });
+}
+sportSelect.addEventListener('change', renderTariffs);
+renderTariffs();
+document.getElementById('create').addEventListener('click', async () => {
+  const payload = {init_data: window.Telegram?.WebApp?.initData || '', club_id: {{ club_id }}, student_id: Number(student.value), sport_type: sport.value, tariff_idx: Number(tariff.value)};
+  const res = await fetch('/webapp/client-cabinet/buy-subscription', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)});
+  const data = await res.json();
+  if (res.ok && data.payment_url) location.href = data.payment_url;
+  else document.getElementById('msg').innerText = data.detail || 'Ошибка';
+});
+</script>
+{% endblock %}

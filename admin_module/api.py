@@ -1,8 +1,11 @@
 import httpx
+import uuid
 from loguru import logger
 from sqlalchemy import func
 from handlers.skud import trigger_dingtian_turnstile
 from services.gate_control import process_athlete_gate_pass
+from services.yookassa_client import YooKassaClient
+from config import PROXY_URL
 from fastapi import Query
 from services.analytics import generate_students_excel, calculate_admin_dashboard
 import hmac
@@ -17,8 +20,7 @@ from urllib.parse import parse_qsl
 import io
 from fastapi import Request
 from fastapi.responses import HTMLResponse
-from fastapi.templating import Jinja2Templates
-from fastapi import Depends, HTTPException, APIRouter, Security
+from fastapi import Depends, HTTPException, Security
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -29,9 +31,42 @@ from database.db import User, Student, Club
 from database.db import get_session
 from config import fastapi_key
 from middlewares.db_saas_midleware import SUPER_ADMIN_IDS
-# Убираем глобальный префикс /stats, чтобы роуты /admin и /revenue сидели на своем месте
-router = APIRouter(tags=["Analytics"])
-templates = Jinja2Templates(directory="templates")
+from admin_module.router_base import router, templates
+import admin_module.webapp_client_cabinet  # noqa: F401
+import admin_module.admin_pages  # noqa: F401
+import admin_module.payments_webhook  # noqa: F401
+import admin_module.system_api  # noqa: F401
+
+
+class WebAppActionPayload(BaseModel):
+    init_data: str
+    club_id: int
+    student_id: int
+
+
+class WebAppClubPayload(BaseModel):
+    init_data: str
+    club_id: int
+
+
+class WebAppBuySubscriptionPayload(BaseModel):
+    init_data: str
+    club_id: int
+    student_id: int
+    sport_type: str
+    tariff_idx: int
+
+
+class WebAppBindPhonePayload(BaseModel):
+    init_data: str
+    club_id: int
+    phone: str
+
+
+class WebAppHistoryQuery(BaseModel):
+    init_data: str
+    club_id: int
+    student_id: int | None = None
 
 API_KEY_NAME = "X-API-Key"
 API_KEY = fastapi_key
@@ -488,40 +523,6 @@ else location.replace(location.pathname+'?club_id={club_id}&user_id={user_id}&in
     return templates.TemplateResponse("schedule.html", context)
 
 
-# --- Системные роуты (Для них защиту по API-ключу ОСТАВЛЯЕМ) ---
-
-class StudentCreate(BaseModel):
-    name: str
-    parent_id: int
-
-
-@router.post("/stats/students")
-async def create_student(data: StudentCreate, session: AsyncSession = Depends(get_session), _=Depends(get_api_key)):
-    new_student = Student(name=data.name, parent_id=data.parent_id)
-    session.add(new_student)
-    await session.commit()
-    return {"status": "success", "student": new_student.name}
-
-
-@router.get("/stats/users", response_model=None)
-async def get_all_users(session: AsyncSession = Depends(get_session), _=Depends(get_api_key)):
-    query = select(User).options(selectinload(User.students))
-    result = await session.execute(query)
-    users = result.scalars().all()
-    return users
-
-
-@router.get("/stats/students/{student_id}")
-async def get_student_info(student_id: int, session: AsyncSession = Depends(get_session), _=Depends(get_api_key)):
-    query = select(Student).where(Student.id == student_id)
-    result = await session.execute(query)
-    student = result.scalar_one_or_none()
-
-    if not student:
-        raise HTTPException(status_code=404, detail="Student not found")
-    return student
-
-
 @router.get("/privacy", response_class=HTMLResponse)
 async def get_privacy_page(request: Request):
     """Страница политики конфиденциальности для WebApp"""
@@ -699,6 +700,7 @@ else location.replace(location.pathname+'?user_id={user_id}&init_data='+encodeUR
     settings = (club.club_settings or {}) if club else {}
     ui = settings.get("ui", {}) if isinstance(settings.get("ui", {}), dict) else {}
     loading = ui.get("loading", {}) if isinstance(ui.get("loading", {}), dict) else {}
+    freeze_price_per_day = settings.get("limits", {}).get("freeze_price_per_day", 0)
     # Достаем список студентов для этого родителя
     students_query = select(Student).where(Student.parent_id == user_id)
     students_result = await db.execute(students_query)
@@ -775,138 +777,486 @@ else location.replace(location.pathname+'?club_id={club_id}&user_id={user_id}&in
         "club_name": club.name if club else "", "logo_url": ui.get("logo_url", ""),
         "loading": {"enabled": bool(loading.get("enabled", False)), "duration_ms": max(300, min(10000, int(loading.get("duration_ms", 1200)))), "message": str(loading.get("message", "Загружаем приложение…"))}})
 
+
+@router.get("/webapp/client-cabinet", response_class=HTMLResponse)
+async def get_client_cabinet_page(
+        request: Request,
+        club_id: int,
+        init_data: str | None = Query(default=None),
+        db: AsyncSession = Depends(get_session),
+):
+    if not init_data:
+        return HTMLResponse(f"""<!doctype html><meta charset='utf-8'>
+<script src='https://telegram.org/js/telegram-web-app.js'></script><script>
+const tg=window.Telegram.WebApp; tg.ready();
+if (!tg.initData) document.body.innerText='Откройте приложение из Telegram';
+else location.replace(location.pathname+'?club_id={club_id}&init_data='+encodeURIComponent(tg.initData));
+</script>""", status_code=401)
+
+    club = await db.get(Club, club_id)
+    if not club or not club.bot_token:
+        raise HTTPException(status_code=404, detail="Клуб не найден")
+
+    tg_user = verify_telegram_data(init_data, club.bot_token)
+    if not tg_user:
+        raise HTTPException(status_code=403, detail="Доступ запрещен")
+
+    user_id = int(tg_user.get("id", 0))
+    user = await db.get(User, user_id)
+    if not user or user.club_id != club_id:
+        raise HTTPException(status_code=403, detail="Пользователь не привязан к клубу")
+
+    settings = (club.club_settings or {}) if club else {}
+    ui = settings.get("ui", {}) if isinstance(settings.get("ui", {}), dict) else {}
+    loading = ui.get("loading", {}) if isinstance(ui.get("loading", {}), dict) else {}
+
+    students_query = select(Student).where(Student.parent_id == user_id, Student.club_id == club_id).order_by(Student.name)
+    students_result = await db.execute(students_query)
+    students = students_result.scalars().all()
+    active_students = sum(1 for s in students if not s.is_frozen and s.expire_date and s.expire_date > datetime.now())
+    frozen_students = sum(1 for s in students if s.is_frozen)
+    expired_students = sum(1 for s in students if not s.is_frozen and (not s.expire_date or s.expire_date <= datetime.now()))
+
+    return templates.TemplateResponse(
+        "client_cabinet.html",
+        {
+            "request": request,
+            "club": club,
+            "club_id": club_id,
+            "user_id": user_id,
+            "club_name": club.name if club else "",
+            "logo_url": ui.get("logo_url", ""),
+            "students": students,
+            "user_name": user.full_name or tg_user.get("first_name", ""),
+            "now": datetime.now(),
+            "summary": {
+                "total": len(students),
+                "active": active_students,
+                "frozen": frozen_students,
+                "expired": expired_students,
+                "free_freeze_available": any((s.can_freeze or 0) > 0 for s in students),
+            },
+            "loading": {
+                "enabled": bool(loading.get("enabled", False)),
+                "duration_ms": max(300, min(10000, int(loading.get("duration_ms", 1200)))),
+                "message": str(loading.get("message", "Загружаем приложение…")),
+            },
+            "freeze_price_per_day": freeze_price_per_day,
+        },
+    )
+
+
+@router.get("/webapp/client-cabinet/freeze", response_class=HTMLResponse)
+async def webapp_freeze_page(
+        request: Request,
+        club_id: int,
+        student_id: int,
+        init_data: str | None = Query(default=None),
+        db: AsyncSession = Depends(get_session),
+):
+    if not init_data:
+        return HTMLResponse(f"""<!doctype html><meta charset='utf-8'>
+<script src='https://telegram.org/js/telegram-web-app.js'></script><script>
+const tg=window.Telegram.WebApp; tg.ready();
+if (!tg.initData) document.body.innerText='Откройте приложение из Telegram';
+else location.replace(location.pathname+'?club_id={club_id}&student_id={student_id}&init_data='+encodeURIComponent(tg.initData));
+</script>""", status_code=401)
+
+    club = await db.get(Club, club_id)
+    if not club or not club.bot_token:
+        raise HTTPException(status_code=404, detail="Клуб не найден")
+
+    tg_user = verify_telegram_data(init_data, club.bot_token)
+    if not tg_user:
+        raise HTTPException(status_code=403, detail="Доступ запрещен")
+
+    student = await db.get(Student, student_id)
+    if not student or student.club_id != club_id or student.parent_id != int(tg_user.get("id", 0)):
+        raise HTTPException(status_code=403, detail="Атлет не найден")
+
+    settings = club.club_settings or {}
+    freeze_days = settings.get("limits", {}).get("freeze_days_step", 7)
+    now = datetime.now()
+    can_freeze = bool(student.expire_date and student.expire_date > now and getattr(student, "can_freeze", 0) > 0 and not getattr(student, "is_frozen", 0))
+
+    return templates.TemplateResponse(
+        "webapp_freeze.html",
+        {
+            "request": request,
+            "club": club,
+            "student": student,
+            "club_id": club_id,
+            "freeze_days": freeze_days,
+            "can_freeze": can_freeze,
+        },
+    )
+
+
+@router.get("/webapp/client-cabinet/student", response_class=HTMLResponse)
+async def webapp_student_page(
+        request: Request,
+        club_id: int,
+        student_id: int,
+        init_data: str | None = Query(default=None),
+        db: AsyncSession = Depends(get_session),
+):
+    if not init_data:
+        return HTMLResponse(f"""<!doctype html><meta charset='utf-8'>
+<script src='https://telegram.org/js/telegram-web-app.js'></script><script>
+const tg=window.Telegram.WebApp; tg.ready();
+if (!tg.initData) document.body.innerText='Откройте приложение из Telegram';
+else location.replace(location.pathname+'?club_id={club_id}&student_id={student_id}&init_data='+encodeURIComponent(tg.initData));
+</script>""", status_code=401)
+
+    club = await db.get(Club, club_id)
+    if not club or not club.bot_token:
+        raise HTTPException(status_code=404, detail="Клуб не найден")
+
+    tg_user = verify_telegram_data(init_data, club.bot_token)
+    if not tg_user:
+        raise HTTPException(status_code=403, detail="Доступ запрещен")
+
+    student = await db.get(Student, student_id)
+    if not student or student.club_id != club_id or student.parent_id != int(tg_user.get("id", 0)):
+        raise HTTPException(status_code=403, detail="Атлет не найден")
+
+    visits_stmt = (
+        select(VisitLog)
+        .where(VisitLog.club_id == club_id, VisitLog.student_id == student_id)
+        .order_by(VisitLog.visited_at.desc())
+        .limit(20)
+    )
+    visits = (await db.execute(visits_stmt)).scalars().all()
+    settings = club.club_settings or {}
+    freeze_price_per_day = settings.get("limits", {}).get("freeze_price_per_day", 0)
+
+    return templates.TemplateResponse(
+        "webapp_student.html",
+        {
+            "request": request,
+            "club": club,
+            "student": student,
+            "club_id": club_id,
+            "freeze_price_per_day": freeze_price_per_day,
+            "visits": visits,
+            "now": datetime.now(),
+        },
+    )
+
+
+@router.get("/webapp/client-cabinet/history", response_class=HTMLResponse)
+async def webapp_history_page(
+        request: Request,
+        club_id: int,
+        student_id: int | None = None,
+        init_data: str | None = Query(default=None),
+        db: AsyncSession = Depends(get_session),
+):
+    if not init_data:
+        return HTMLResponse(f"""<!doctype html><meta charset='utf-8'>
+<script src='https://telegram.org/js/telegram-web-app.js'></script><script>
+const tg=window.Telegram.WebApp; tg.ready();
+if (!tg.initData) document.body.innerText='Откройте приложение из Telegram';
+else location.replace(location.pathname+'?club_id={club_id}&student_id={student_id or ""}&init_data='+encodeURIComponent(tg.initData));
+</script>""", status_code=401)
+    club = await db.get(Club, club_id)
+    if not club or not club.bot_token:
+        raise HTTPException(status_code=404, detail="Клуб не найден")
+    tg_user = verify_telegram_data(init_data, club.bot_token)
+    if not tg_user:
+        raise HTTPException(status_code=403, detail="Доступ запрещен")
+    user_id = int(tg_user.get("id", 0))
+    user = await db.get(User, user_id)
+    if not user or user.club_id != club_id:
+        raise HTTPException(status_code=403, detail="Пользователь не привязан к клубу")
+
+    student_ids_stmt = select(Student.id).where(Student.parent_id == user_id, Student.club_id == club_id)
+    student_ids = [row[0] for row in (await db.execute(student_ids_stmt)).all()]
+    if student_id:
+        student_ids = [student_id] if student_id in student_ids else []
+
+    orders_stmt = (
+        select(PaymentOrder)
+        .where(PaymentOrder.club_id == club_id, PaymentOrder.student_id.in_(student_ids))
+        .order_by(PaymentOrder.created_at.desc())
+        .limit(30)
+    )
+    orders = (await db.execute(orders_stmt)).scalars().all()
+
+    subs_stmt = (
+        select(Subscription)
+        .where(Subscription.club_id == club_id, Subscription.user_id == user_id)
+        .order_by(Subscription.created_at.desc())
+    )
+    subscriptions = (await db.execute(subs_stmt)).scalars().all()
+
+    return templates.TemplateResponse(
+        "webapp_history.html",
+        {
+            "request": request,
+            "club": club,
+            "club_id": club_id,
+            "orders": orders,
+            "subscriptions": subscriptions,
+            "student_id": student_id,
+        },
+    )
+
+
+@router.post("/webapp/client-cabinet/freeze")
+async def webapp_freeze_submit(
+        payload: WebAppActionPayload,
+        db: AsyncSession = Depends(get_session),
+):
+    club = await db.get(Club, payload.club_id)
+    if not club or not club.bot_token:
+        raise HTTPException(status_code=404, detail="Клуб не найден")
+    tg_user = verify_telegram_data(payload.init_data, club.bot_token)
+    if not tg_user:
+        raise HTTPException(status_code=403, detail="Доступ запрещен")
+
+    student = await db.get(Student, payload.student_id)
+    if not student or student.club_id != payload.club_id or student.parent_id != int(tg_user.get("id", 0)):
+        raise HTTPException(status_code=403, detail="Атлет не найден")
+
+    settings = club.club_settings or {}
+    freeze_days = settings.get("limits", {}).get("freeze_days_step", 7)
+    now = datetime.now()
+    if not (student.expire_date and student.expire_date > now and getattr(student, "can_freeze", 0) > 0 and not getattr(student, "is_frozen", 0)):
+        raise HTTPException(status_code=400, detail="Заморозка недоступна")
+
+    new_date = await process_student_freeze(
+        student_id=student.id,
+        club_id=club.id,
+        club_settings=settings,
+        session=db,
+        days=freeze_days
+    )
+    if not new_date:
+        raise HTTPException(status_code=400, detail="Не удалось выполнить заморозку")
+    await db.commit()
+    return {"ok": True, "new_expire": new_date.isoformat(), "student_name": student.name}
+
+
+@router.get("/webapp/client-cabinet/buy-subscription", response_class=HTMLResponse)
+async def webapp_buy_subscription_page(
+        request: Request,
+        club_id: int,
+        init_data: str | None = Query(default=None),
+        db: AsyncSession = Depends(get_session),
+):
+    if not init_data:
+        return HTMLResponse(f"""<!doctype html><meta charset='utf-8'>
+<script src='https://telegram.org/js/telegram-web-app.js'></script><script>
+const tg=window.Telegram.WebApp; tg.ready();
+if (!tg.initData) document.body.innerText='Откройте приложение из Telegram';
+else location.replace(location.pathname+'?club_id={club_id}&init_data='+encodeURIComponent(tg.initData));
+</script>""", status_code=401)
+    club = await db.get(Club, club_id)
+    if not club or not club.bot_token:
+        raise HTTPException(status_code=404, detail="Клуб не найден")
+    tg_user = verify_telegram_data(init_data, club.bot_token)
+    if not tg_user:
+        raise HTTPException(status_code=403, detail="Доступ запрещен")
+    user = await db.get(User, int(tg_user.get("id", 0)))
+    if not user or user.club_id != club_id:
+        raise HTTPException(status_code=403, detail="Пользователь не привязан к клубу")
+    students = (await db.execute(select(Student).where(Student.parent_id == user.user_id, Student.club_id == club_id).order_by(Student.name))).scalars().all()
+    disciplines = (club.club_settings or {}).get("disciplines", {})
+    return templates.TemplateResponse(
+        "webapp_buy_subscription.html",
+        {"request": request, "club": club, "club_id": club_id, "students": students, "disciplines": disciplines}
+    )
+
+
+@router.post("/webapp/client-cabinet/buy-subscription")
+async def webapp_buy_subscription_submit(
+        payload: WebAppBuySubscriptionPayload,
+        db: AsyncSession = Depends(get_session),
+):
+    club = await db.get(Club, payload.club_id)
+    if not club or not club.bot_token:
+        raise HTTPException(status_code=404, detail="Клуб не найден")
+    tg_user = verify_telegram_data(payload.init_data, club.bot_token)
+    if not tg_user:
+        raise HTTPException(status_code=403, detail="Доступ запрещен")
+    user_id = int(tg_user.get("id", 0))
+    user = await db.get(User, user_id)
+    if not user or user.club_id != payload.club_id:
+        raise HTTPException(status_code=403, detail="Пользователь не привязан к клубу")
+    student = await db.get(Student, payload.student_id)
+    if not student or student.club_id != payload.club_id or student.parent_id != user_id:
+        raise HTTPException(status_code=403, detail="Атлет не найден")
+
+    discipline_cfg = (club.club_settings or {}).get("disciplines", {}).get(payload.sport_type)
+    if not discipline_cfg:
+        raise HTTPException(status_code=400, detail="Направление недоступно")
+    tariffs = discipline_cfg.get("tariffs", [])
+    if payload.tariff_idx < 0 or payload.tariff_idx >= len(tariffs):
+        raise HTTPException(status_code=400, detail="Тариф недоступен")
+    selected_tariff = tariffs[payload.tariff_idx]
+
+    today = date.today()
+    if student.birthday:
+        student_age = today.year - student.birthday.year - ((today.month, today.day) < (student.birthday.month, student.birthday.day))
+        min_age_limit = selected_tariff.get("min_age", 0)
+        if student_age < min_age_limit:
+            raise HTTPException(status_code=400, detail="Возраст не подходит для выбранного тарифа")
+
+    price = selected_tariff.get("price")
+    days = selected_tariff.get("days", 30)
+    count = selected_tariff.get("count", 0)
+    amount_kopecks = int(float(price) * 100)
+    pay_settings = (club.club_settings or {}).get("payments", {})
+    shop_id = pay_settings.get("yookassa_shop_id")
+    secret_key = pay_settings.get("yookassa_secret_key")
+    if not shop_id or not secret_key:
+        raise HTTPException(status_code=400, detail="ЮKassa не настроена")
+
+    order_id = f"WEB_{uuid.uuid4().hex[:12].upper()}"
+    order = PaymentOrder(
+        id=order_id,
+        user_id=user_id,
+        student_id=student.id,
+        club_id=club.id,
+        amount_kopecks=amount_kopecks,
+        lesson_count=count,
+        days_to_add=days,
+        discipline=payload.sport_type,
+        status="NEW",
+        type="FIRST"
+    )
+    db.add(order)
+    await db.commit()
+    yookassa_node = YooKassaClient(shop_id=shop_id, secret_key=secret_key, proxy_url=PROXY_URL)
+    payment_data = await yookassa_node.init_payment(order_id=order_id, amount_kopecks=amount_kopecks, user_id=user_id, bot_username=club.bot_token)
+    if not payment_data.get("Success"):
+        raise HTTPException(status_code=400, detail=payment_data.get("Message", "Ошибка создания платежа"))
+    return {"ok": True, "payment_url": payment_data["PaymentURL"]}
+
+
+@router.get("/webapp/client-cabinet/auth", response_class=HTMLResponse)
+async def webapp_auth_help_page(
+        request: Request,
+        club_id: int,
+        init_data: str | None = Query(default=None),
+        db: AsyncSession = Depends(get_session),
+):
+    if not init_data:
+        return HTMLResponse(f"""<!doctype html><meta charset='utf-8'>
+<script src='https://telegram.org/js/telegram-web-app.js'></script><script>
+const tg=window.Telegram.WebApp; tg.ready();
+if (!tg.initData) document.body.innerText='Откройте приложение из Telegram';
+else location.replace(location.pathname+'?club_id={club_id}&init_data='+encodeURIComponent(tg.initData));
+</script>""", status_code=401)
+    club = await db.get(Club, club_id)
+    if not club or not club.bot_token:
+        raise HTTPException(status_code=404, detail="Клуб не найден")
+    if not verify_telegram_data(init_data, club.bot_token):
+        raise HTTPException(status_code=403, detail="Доступ запрещен")
+    return templates.TemplateResponse("webapp_bind_phone.html", {"request": request, "club": club, "club_id": club_id})
+
+
+@router.post("/webapp/client-cabinet/auth")
+async def webapp_bind_phone_submit(
+        payload: WebAppBindPhonePayload,
+        db: AsyncSession = Depends(get_session),
+):
+    club = await db.get(Club, payload.club_id)
+    if not club or not club.bot_token:
+        raise HTTPException(status_code=404, detail="Клуб не найден")
+    tg_user = verify_telegram_data(payload.init_data, club.bot_token)
+    if not tg_user:
+        raise HTTPException(status_code=403, detail="Доступ запрещен")
+    raw_phone = (payload.phone or "").replace("+", "").strip()
+    if len(raw_phone) < 10:
+        raise HTTPException(status_code=400, detail="Введите номер телефона")
+    clean_phone_10 = raw_phone[-10:]
+    stmt = select(Student).where(Student.parent_phone.contains(clean_phone_10), Student.club_id == club.id)
+    students = (await db.execute(stmt)).scalars().all()
+    if not students:
+        raise HTTPException(status_code=404, detail="Атлеты с этим номером не найдены")
+    user_id = int(tg_user.get("id", 0))
+    user = await db.get(User, user_id)
+    if not user:
+        user = User(user_id=user_id, club_id=club.id, full_name=tg_user.get("first_name") or "", is_accepted=False, is_biometric_enabled=False)
+        db.add(user)
+        await db.flush()
+    user.club_id = club.id
+    for student in students:
+        student.parent_id = user_id
+        db.add(student)
+    await db.commit()
+    return {"ok": True, "message": f"Привязаны атлеты: {', '.join(s.name for s in students)}"}
+
+
+@router.get("/webapp/client-cabinet/buy-freeze", response_class=HTMLResponse)
+async def webapp_buy_freeze_page(
+        request: Request,
+        club_id: int,
+        student_id: int,
+        init_data: str | None = Query(default=None),
+        db: AsyncSession = Depends(get_session),
+):
+    if not init_data:
+        return HTMLResponse(f"""<!doctype html><meta charset='utf-8'>
+<script src='https://telegram.org/js/telegram-web-app.js'></script><script>
+const tg=window.Telegram.WebApp; tg.ready();
+if (!tg.initData) document.body.innerText='Откройте приложение из Telegram';
+else location.replace(location.pathname+'?club_id={club_id}&student_id={student_id}&init_data='+encodeURIComponent(tg.initData));
+</script>""", status_code=401)
+    club = await db.get(Club, club_id)
+    if not club or not club.bot_token:
+        raise HTTPException(status_code=404, detail="Клуб не найден")
+    tg_user = verify_telegram_data(init_data, club.bot_token)
+    if not tg_user:
+        raise HTTPException(status_code=403, detail="Доступ запрещен")
+    student = await db.get(Student, student_id)
+    if not student or student.club_id != club_id or student.parent_id != int(tg_user.get("id", 0)):
+        raise HTTPException(status_code=403, detail="Атлет не найден")
+    price = (club.club_settings or {}).get("limits", {}).get("freeze_price_per_day", 0)
+    return templates.TemplateResponse("webapp_buy_freeze.html", {"request": request, "club": club, "student": student, "club_id": club_id, "price": price})
+
+
+@router.post("/webapp/client-cabinet/buy-freeze")
+async def webapp_buy_freeze_submit(
+        payload: WebAppActionPayload,
+        days: int,
+        db: AsyncSession = Depends(get_session),
+):
+    club = await db.get(Club, payload.club_id)
+    if not club or not club.bot_token:
+        raise HTTPException(status_code=404, detail="Клуб не найден")
+    tg_user = verify_telegram_data(payload.init_data, club.bot_token)
+    if not tg_user:
+        raise HTTPException(status_code=403, detail="Доступ запрещен")
+    student = await db.get(Student, payload.student_id)
+    if not student or student.club_id != payload.club_id or student.parent_id != int(tg_user.get("id", 0)):
+        raise HTTPException(status_code=403, detail="Атлет не найден")
+    price_per_day = float((club.club_settings or {}).get("limits", {}).get("freeze_price_per_day", 0))
+    if price_per_day <= 0:
+        raise HTTPException(status_code=400, detail="Покупка заморозки отключена")
+    if not 1 <= days <= 365:
+        raise HTTPException(status_code=400, detail="Неверное количество дней")
+    amount_kopecks = int(round(price_per_day * days * 100))
+    shop_id = getattr(club, "yookassa_shop_id", None) or (club.club_settings or {}).get("payments", {}).get("yookassa_shop_id")
+    secret_key = getattr(club, "yookassa_secret_key", None) or (club.club_settings or {}).get("payments", {}).get("yookassa_secret_key")
+    if not shop_id or not secret_key:
+        raise HTTPException(status_code=400, detail="ЮKassa не настроена")
+    order_id = f"WEBFZ-{club.id}-{student.id}-{uuid.uuid4().hex[:12]}"
+    yookassa_node = YooKassaClient(shop_id=shop_id, secret_key=secret_key, proxy_url=PROXY_URL)
+    bot_username = club.bot_token
+    payment_data = await yookassa_node.init_payment(order_id=order_id, amount_kopecks=amount_kopecks, user_id=int(tg_user.get("id", 0)), bot_username=bot_username)
+    if not payment_data.get("Success"):
+        raise HTTPException(status_code=400, detail=payment_data.get("Message", "Ошибка создания платежа"))
+    return {"ok": True, "payment_url": payment_data["PaymentURL"]}
+
 # 2. РОУТ ДЛЯ ОБРАБОТКИ НАЖАТИЯ И ОТКРЫТИЯ ТУРНИКЕТА
 
 from services.gate_control import process_athlete_gate_pass
 
 
-@router.post("/open-turnstile")
-async def open_turnstile(
-        payload: dict,
-        db: AsyncSession = Depends(get_session),
-        _: str = Depends(get_api_key),
-):
-    student_id = payload.get("student_id")
-
-    # 1. Тянем клубные настройки (короткий запрос)
-    student_club = await db.execute(select(Student.club_id).where(Student.id == student_id))
-    club_id = student_club.scalar()
-    club_res = await db.execute(select(Club.club_settings).where(Club.id == club_id))
-    club_settings = club_res.scalar() or {}
-
-    # 2. Вызываем наш единый сервис!
-    res = await process_athlete_gate_pass(
-        student_id, db, club_settings, expected_club_id=club_id
-    )
-
-    if not res["success"]:
-        return {"success": False, "message": res["message"]}
-
-    final_msg = f"{res['message']} | {res['turnstile_status']}"
-    return {"success": True, "message": final_msg}
-
-
-@router.post("/webapp/open-turnstile")
-async def open_webapp_turnstile(
-        payload: BiometricCheckIn,
-        request: Request,
-        db: AsyncSession = Depends(get_session)
-):
-    """
-    Принимает сигнал об успешном FaceID из Telegram WebApp родителя.
-    Вызывает центральный сервис СКУД и возвращает статус.
-    """
-    from database.db import Student, Club, User
-
-    # Базовая валидация (оставляем ее в хендлере, так как она привязана к payload веба)
-    student_res = await db.execute(select(Student).where(Student.id == payload.student_id))
-    student = student_res.scalar_one_or_none()
-    if not student:
-        raise HTTPException(status_code=404, detail="Студент не найден")
-
-    club_res = await db.execute(select(Club).where(Club.id == student.club_id))
-    club = club_res.scalar_one_or_none()
-    if not club or not club.bot_token:
-        raise HTTPException(status_code=400, detail="Конфигурация клуба не найдена")
-
-    # Валидация init_data из Telegram
-    tg_user = verify_telegram_data(payload.init_data, club.bot_token)
-    if not tg_user or "id" not in tg_user:
-        raise HTTPException(status_code=403, detail="Ошибка безопасности: Неверные данные WebApp")
-
-    if student.parent_id != tg_user["id"]:
-        raise HTTPException(status_code=403, detail="Доступ запрещен: Вы не родитель этого атлета")
-
-    # Вызываем наш центральный сервис прохода!
-    club_settings = club.club_settings or {}
-    res = await process_athlete_gate_pass(
-        payload.student_id, db, club_settings, expected_club_id=club.id
-    )
-
-    if not res["success"]:
-        return {"success": False, "message": res["message"]}
-
-    # Дополнительно шлем пуш в бота родителю, если сессия новая (не внутри текущей)
-    if not res["is_inside_session"] and student.parent_id:
-        try:
-            bots_dict = getattr(request.app.state, "bots_dict", {})
-            bot = bots_dict.get(club.bot_token)
-            if bot:
-                await bot.send_message(
-                    chat_id=int(student.parent_id),
-                    text=f"🔔 <b>{club.name}</b>: {res['student_name']} вошел в зал (через WebApp кнопку).",
-                    parse_mode="HTML"
-                )
-        except Exception as e_msg:
-            logger.warning(f"Не удалось отправить пуш через WebApp хендлер: {e_msg}")
-
-    # Возвращаем красивый ответ на фронтенд WebApp
-    final_text = f"{res['message']}\n{res['turnstile_status']}"
-    return {"success": True, "message": final_text}
-
-#Enabled biometri!!!!!
-
-
-class BiometricEnable(BaseModel):
-    init_data: str
-
-
-@router.post("/webapp/enable-biometry")
-async def enable_biometry(payload: BiometricEnable, db: AsyncSession = Depends(get_session)):
-    """
-    Эндпоинт вызывается один раз, когда родитель включает FaceID в приложении.
-    Ставит флаг is_biometric_enabled = True в базу данных.
-    """
-    # 1. Достаем временный токен бота для проверки (в данном контексте можно через релейшн или по club_id из init_data)
-    # Для упрощения сначала парсим юзера, чтобы найти его в БД
-    parsed_data = dict(parse_qsl(payload.init_data))
-    tg_user = json.loads(parsed_data.get("user", "{}"))
-    telegram_user_id = tg_user.get("id")
-
-    if not telegram_user_id:
-        raise HTTPException(status_code=400, detail="Неверные данные Telegram")
-
-    # 2. Ищем родителя в базе данных
-    user_query = select(User).where(User.user_id == telegram_user_id)
-    user_res = await db.execute(user_query)
-    parent_user = user_res.scalar_one_or_none()
-
-    if not parent_user:
-        raise HTTPException(status_code=404, detail="Пользователь не найден")
-
-    # 3. Достаем клуб, чтобы верифицировать init_data по токену бота
-    club_query = select(Club).where(Club.id == parent_user.club_id)
-    club_res = await db.execute(club_query)
-    club = club_res.scalar_one_or_none()
-
-    if not club or not verify_telegram_data(payload.init_data, club.bot_token):
-        raise HTTPException(status_code=430, detail="Ошибка безопасности данных")
-
-    # 4. Включаем биометрию в базе данных!
-    parent_user.is_biometric_enabled = True
-    await db.commit()
-
-    return {"success": True, "message": "Биометрия успешно активирована в профиле!"}
+from admin_module.turnstile_biometry import *  # noqa: F401,F403
 
 #PAYMENT PAYMENT
 
@@ -916,208 +1266,3 @@ async def enable_biometry(payload: BiometricEnable, db: AsyncSession = Depends(g
 # Используй существующий router из твоего api.py
 
 
-@router.post("/v1/payments/yookassa/webhook")
-async def yookassa_webhook(request: Request, session: AsyncSession = Depends(get_session)):
-    """
-    Прием уведомлений об оплатах (вебхуков) от ЮKassa.
-    Маршрут защищен токеном авторизации для безопасной пересылки РФ -> Вена.
-    """
-    # Читаем JSON от ЮKassa
-    payload = await request.json()
-
-    event = payload.get("event")  # 'payment.succeeded'
-    object_data = payload.get("object", {})  # Данные платежа
-
-    if event != "payment.succeeded" or object_data.get("status") != "succeeded":
-        return {"status": "ignored"}
-
-    amount_data = object_data.get("amount") or {}
-    if amount_data.get("currency") != "RUB":
-        return {"status": "ignored"}
-
-    metadata = object_data.get("metadata", {})
-    order_id = metadata.get("order_id")
-
-    if not order_id:
-        return {"status": "ignored"}
-
-    payment_id = object_data.get("id")
-    if not payment_id:
-        return {"status": "ignored"}
-
-    # 2. Обрабатываем только подтверждённую оплату.
-    if event == "payment.succeeded":
-        # Используем with_for_update() для защиты от двойного начисления (Бот + Вебхук одновременно)
-        order_query = select(PaymentOrder).where(PaymentOrder.id == order_id).with_for_update()
-        order_result = await session.execute(order_query)
-        order = order_result.scalar_one_or_none()
-
-        if not order:
-            return {"status": "ignored"}
-
-        # Payload webhook не принимаем на доверии: сверяем платёж с API ЮKassa.
-        club_result = await session.execute(select(Club).where(Club.id == order.club_id))
-        payment_club = club_result.scalar_one_or_none()
-        pay_cfg = (payment_club.club_settings or {}).get("payments", {}) if payment_club else {}
-        shop_id = pay_cfg.get("yookassa_shop_id")
-        secret_key = pay_cfg.get("yookassa_secret_key")
-        if not shop_id or not secret_key:
-            return {"status": "ignored"}
-        try:
-            async with httpx.AsyncClient(auth=(shop_id, secret_key), timeout=10.0) as client:
-                verify_response = await client.get(f"https://api.yookassa.ru/v3/payments/{payment_id}")
-            if verify_response.status_code != 200:
-                return {"status": "ignored"}
-            verified_payment = verify_response.json()
-            if (verified_payment.get("status") != "succeeded" or
-                    verified_payment.get("metadata", {}).get("order_id") != str(order.id)):
-                return {"status": "ignored"}
-        except httpx.HTTPError:
-            logger.exception("Не удалось проверить платеж %s через API ЮKassa", payment_id)
-            return {"status": "retry"}
-
-        try:
-            received_amount = int(Decimal(str(verified_payment.get("amount", {}).get("value"))) * 100)
-        except (InvalidOperation, TypeError, ValueError):
-            return {"status": "ignored"}
-        if (verified_payment.get("amount", {}).get("currency") != "RUB" or
-                received_amount != order.amount_kopecks):
-            logger.error(f"Сумма webhook не совпала с заказом {order.id}")
-            return {"status": "ignored"}
-
-        # Если заказ найден и он еще обрабатывается
-        if order and order.status != "CONFIRMED":
-            order.status = "CONFIRMED"
-
-            # Вытаскиваем данные метода оплаты строго по структуре ЮKassa
-            payment_method = object_data.get("payment_method", {})
-            payment_method_id = payment_method.get("id")
-
-            # ⚡ ИСПРАВЛЕНО: Флаг saved лежит ВНУТРИ объекта payment_method!
-            saved_card_flag = payment_method.get("saved", False)
-
-            # Если это первая оплата (FIRST) и карта успешно привязалась для рекуррентов
-            if order.type == "FIRST" and payment_method_id and saved_card_flag:
-                sub_query = select(Subscription).where(
-                    Subscription.student_id == order.student_id,
-                    Subscription.club_id == order.club_id
-                ).with_for_update()
-
-                sub_result = await session.execute(sub_query)
-                subscription = sub_result.scalar_one_or_none()
-
-                # Сдвигаем дату следующего списания на 30 дней вперед в наивном UTC для Postgres на Аэзе
-                next_charge_naive = (datetime.now(timezone.utc) + timedelta(days=30)).replace(tzinfo=None)
-
-                if subscription:
-                    # Обновляем токен сохраненной карты ЮKassa
-                    subscription.rebill_id = str(payment_method_id)
-                    subscription.next_charge_at = next_charge_naive
-                    subscription.is_active = True
-                    subscription.amount_kopecks = order.amount_kopecks
-                else:
-                    # Создаем чистую подписку под автосписания по крону
-                    new_sub = Subscription(
-                        user_id=order.user_id,
-                        student_id=order.student_id,
-                        club_id=order.club_id,
-                        rebill_id=str(payment_method_id),  # Сохраняем ID карты
-                        amount_kopecks=order.amount_kopecks,
-                        next_charge_at=next_charge_naive,
-                        is_active=True
-                    )
-                    session.add(new_sub)
-
-            # Достаем объект клуба для настроек
-            club_result = await session.execute(select(Club).where(Club.id == order.club_id))
-            club = club_result.scalar_one_or_none()
-            club_settings = club.club_settings if club else {}
-
-            # 3. НАЧИСЛЯЕМ АБОНЕМЕНТ УЧЕНИКУ
-            if order.type.startswith("FREEZE"):
-                abon_result = await purchase_student_freeze(
-                    order.student_id, order.club_id, order.days_to_add, session
-                )
-            else:
-                abon_result = await add_abon(
-                    student_id=order.student_id,
-                    lessons_count=order.lesson_count,
-                    session=session,
-                    club_id=order.club_id,
-                    club_settings=club_settings,
-                    days_to_add=order.days_to_add,
-                    discipline=order.discipline
-                )
-
-            # Сохраняем транзакцию. Блокировка with_for_update снимется автоматически
-            await session.commit()
-
-            # 4. ОТПРАВЛЯЕМ SaaS-УВЕДОМЛЕНИЕ РОДИТЕЛЮ ЧЕРЕЗ БОТА КЛУБА
-            if abon_result:
-                new_expire, parent_id = abon_result
-                try:
-                    bots_dict = getattr(request.app.state, "bots_dict", {})
-                    bot = bots_dict.get(club.bot_token) if club else None
-
-                    if bot:
-                        # === ДОБАВЛЕНО: Догружаем студента из базы для вывода его имени в алерте ===
-                        student_res = await session.execute(
-                            select(Student).where(Student.id == order.student_id)
-                        )
-                        student_obj = student_res.scalar_one_or_none()
-                        student_name = student_obj.name if student_obj else f"ID {order.student_id}"
-                        # =========================================================================
-
-                        desc = (f"заморозка на {order.days_to_add} дн." if order.type.startswith("FREEZE")
-                                else ("БЕЗЛИМИТ" if order.lesson_count == 999 else f"{order.lesson_count} зан."))
-                        ui_cfg = club_settings.get("ui", {})
-                        club_name = ui_cfg.get("club_name", club.name if club else "Фитнес-клуб")
-
-                        # Переводим копейки из базы в рубли для красивого текста
-                        amount_rub = (order.amount_kopecks or 0) / 100
-                        discipline_raw = getattr(order, 'discipline', 'boxing')
-
-                        discipline_names = {
-                            "boxing": "🥊 Бокс",
-                            "kickboxing": "🤼‍♂️ Кикбоксинг",
-                            "bjj": "🥋 БЖЖ",
-                            "yoga": "🧘‍♂️ Йога"
-                        }
-                        disc_name = ("❄️ Заморозка абонемента" if order.type.startswith("FREEZE")
-                                     else discipline_names.get(discipline_raw, f"🏃‍♂️ {discipline_raw}"))
-                        card_saved = order.type == "FIRST" and payment_method_id and saved_card_flag
-                        client_card_text = (
-                            "Карта привязана к системе автопродления. Следующее списание пройдет автоматически."
-                            if card_saved else
-                            "Оплата успешно зачислена."
-                        )
-
-                        # --- А) Сообщение Родителю ---
-                        await bot.send_message(
-                            chat_id=parent_id,
-                            text=f"🥳 <b>Отличные новости!</b>\n\n"
-                                 f"Ваша официальная оплата в фитнес-клуб <b>{club_name}</b> успешно получена.\n"
-                                 f"Абонемент (<b>{desc}</b>) успешно активирован и действует до: <b>{new_expire}</b>. 🔥\n"
-                                 f"{client_card_text}\n\n"
-                                 f"<i>Ждем вас на тренировках!</i>",
-                            parse_mode="HTML"
-                        )
-
-                        # --- Б) Сообщение Владельцу Клуба (Тебе) ---
-                        if club.owner_id:
-                            await bot.send_message(
-                                chat_id=int(club.owner_id),
-                                text=f"💰 <b>НОВАЯ ОПЛАТА В СИСТЕМЕ!</b>\n\n"
-                                     f"🏰 Клуб: <b>{club_name}</b>\n"
-                                # ПРАВКА: Теперь выводим реальное имя, которое догрузили выше
-                                     f"👤 Атлет: <b>{student_name}</b>\n"
-                                     f"📦 Пакет: <b>{desc}</b>\n"
-                                     f"🏷 Направление: <b>{disc_name}</b>\n"
-                                     f"💳 Сумма: <code>{amount_rub:,.2f} ₽</code>\n"
-                                     f"📅 Действует до: <b>{new_expire}</b>\n\n"
-                                     f"📈 <i>Деньги зачислены на баланс, касса клуба обновлена автоматически.</i>",
-                                parse_mode="HTML"
-                            )
-
-                except Exception as e:
-                    logger.error(f"Ошибка отправки сообщения родителю/owner в бот: {e}")

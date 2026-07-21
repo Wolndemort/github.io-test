@@ -77,6 +77,7 @@ def get_main_menu_keyboard(club_settings: dict, club_id: int):
 
     # 2. СТАТИЧЕСКИЕ / НАСТРОЙКИ UI
     ui = club_settings.get("ui", {})
+    base_url = f"https://{club_id}.speedycrm.ru"
 
     # Кнопка сайта (берем из конфига или ставим заглушку)
     site_url = ui.get("site_url", "https://aemaykop.ru")
@@ -84,6 +85,11 @@ def get_main_menu_keyboard(club_settings: dict, club_id: int):
 
     # Контакты (можно тоже через конфиг, чтобы у каждого клуба свой саппорт)
     builder.button(text="📞 Контакты", callback_data="contact")
+
+    builder.row(types.InlineKeyboardButton(
+        text="🖥 Кабинет клиента",
+        web_app=types.WebAppInfo(url=f"{base_url}/webapp/client-cabinet?club_id={club_id}")
+    ))
 
     # 3. ГЛАВНАЯ КНОПКА (Профиль)
     builder.row(types.InlineKeyboardButton(text='👤 МОЙ ПРОФИЛЬ', callback_data='profile'))

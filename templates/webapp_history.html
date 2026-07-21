@@ -1,0 +1,33 @@
+{% extends "webapp_base.html" %}
+{% block title %}История{% endblock %}
+{% block header %}История{% endblock %}
+{% block subheader %}{{ club.name }}{% endblock %}
+{% block content %}
+<div class="mono-card">
+    <a class="mono-action" href="/webapp/client-cabinet?club_id={{ club_id }}">← Назад в кабинет</a>
+</div>
+<div class="mono-card">
+    <div class="mono-kicker"><div class="name">Подписки</div><span>последние</span></div>
+    {% if subscriptions %}
+        <ul>
+        {% for sub in subscriptions %}
+            <li>{{ sub.created_at.strftime('%d.%m.%Y') if sub.created_at else '' }} — {{ 'активна' if sub.is_active else 'неактивна' }}</li>
+        {% endfor %}
+        </ul>
+    {% else %}
+        <p>Подписок нет.</p>
+    {% endif %}
+</div>
+<div class="mono-card">
+    <div class="mono-kicker"><div class="name">Платежи</div><span>последние 30</span></div>
+    {% if orders %}
+        <ul>
+        {% for order in orders %}
+            <li>{{ order.created_at.strftime('%d.%m.%Y %H:%M') if order.created_at else '' }} — {{ order.type }} — {{ (order.amount_kopecks or 0) / 100 }} ₽ — {{ order.status }}</li>
+        {% endfor %}
+        </ul>
+    {% else %}
+        <p>Платежей нет.</p>
+    {% endif %}
+</div>
+{% endblock %}

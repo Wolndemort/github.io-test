@@ -1,0 +1,29 @@
+{% extends "webapp_base.html" %}
+{% block title %}Заморозка{% endblock %}
+{% block header %}Заморозка абонемента{% endblock %}
+{% block subheader %}{{ club.name }} · {{ student.name }}{% endblock %}
+{% block content %}
+<div class="mono-card">
+    <div class="mono-grid-2">
+        <div class="mono-pill"><div class="label">Стандартный шаг</div><div class="value">{{ freeze_days }} дн.</div></div>
+        <div class="mono-pill"><div class="label">Статус</div><div class="value">{% if can_freeze %}Можно{% else %}Недоступна{% endif %}</div></div>
+    </div>
+    <div class="mono-divider"></div>
+    <button id="btn" class="mono-action dark" style="width:100%;" {% if not can_freeze %}disabled{% endif %}>Заморозить</button>
+    <a class="mono-action" style="margin-top:10px;" href="/webapp/client-cabinet/student?club_id={{ club_id }}&student_id={{ student.id }}">Назад к атлету</a>
+    <p id="msg"></p>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+document.getElementById('btn')?.addEventListener('click', async () => {
+  const res = await fetch('/webapp/client-cabinet/freeze', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({init_data: window.Telegram?.WebApp?.initData || '', club_id: {{ club_id }}, student_id: {{ student.id }}})
+  });
+  const data = await res.json();
+  document.getElementById('msg').innerText = res.ok ? `Готово. Новая дата: ${data.new_expire}` : (data.detail || 'Ошибка');
+});
+</script>
+{% endblock %}

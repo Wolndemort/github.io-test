@@ -1,0 +1,37 @@
+{% extends "webapp_base.html" %}
+{% block title %}Атлет{% endblock %}
+{% block header %}{{ student.name }}{% endblock %}
+{% block subheader %}{{ club.name }}{% endblock %}
+{% block content %}
+<div class="mono-card">
+    <div class="mono-grid-2">
+        <div class="mono-pill"><div class="label">Абонемент</div><div class="value">{{ student.expire_date.strftime('%d.%m.%Y') if student.expire_date else 'не указан' }}</div></div>
+        <div class="mono-pill"><div class="label">Баланс</div><div class="value">{{ student.balance_lessons if student.balance_lessons is not none else 0 }}</div></div>
+        <div class="mono-pill"><div class="label">Статус</div><div class="value">{% if student.is_frozen %}Заморожен{% else %}{% if student.expire_date and student.expire_date > now %}Активен{% else %}Истек{% endif %}{% endif %}</div></div>
+        <div class="mono-pill"><div class="label">Freezes</div><div class="value">{{ student.can_freeze if student.can_freeze is not none else 0 }}</div></div>
+    </div>
+</div>
+<div class="mono-card">
+    <div class="mono-grid-2">
+        <a class="mono-action" href="/webapp/biometric-pass?club_id={{ club_id }}&user_id={{ student.parent_id }}">FaceID / QR</a>
+        <a class="mono-action" href="/webapp/client-cabinet/history?club_id={{ club_id }}&student_id={{ student.id }}">История по атлету</a>
+        <a class="mono-action" href="/webapp/client-cabinet/freeze?club_id={{ club_id }}&student_id={{ student.id }}">Заморозить</a>
+        {% if freeze_price_per_day and freeze_price_per_day > 0 %}
+        <a class="mono-action dark" href="/webapp/client-cabinet/buy-freeze?club_id={{ club_id }}&student_id={{ student.id }}">Купить заморозку</a>
+        {% endif %}
+        <a class="mono-action" href="/webapp/client-cabinet?club_id={{ club_id }}">Назад в кабинет</a>
+    </div>
+</div>
+<div class="mono-card">
+    <div class="mono-kicker"><div class="name">Последние посещения</div><span>20</span></div>
+    {% if visits %}
+        <ul>
+        {% for visit in visits %}
+            <li>{{ visit.visited_at.strftime('%d.%m.%Y %H:%M') }}</li>
+        {% endfor %}
+        </ul>
+    {% else %}
+        <p>Пока нет посещений.</p>
+    {% endif %}
+</div>
+{% endblock %}

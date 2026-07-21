@@ -10,17 +10,21 @@
     <link rel="stylesheet" href="{{ url_for('static', path='css/mono.css') }}?v=1.0.0">
 </head>
 <body class="mono-theme">
-    <h2>Панель Администратора</h2>
-    <div class="welcome">Клуб ID: {{ club_id }}</div>
+    <div class="mono-shell">
+    <div class="mono-hero" style="margin-bottom:12px;">
+        <div class="mono-eyebrow">Checkmat admin</div>
+        <h1 class="mono-title" style="margin-bottom:6px;">Панель администратора</h1>
+        <div class="welcome" style="margin:0;">Клуб ID: {{ club_id }}</div>
+    </div>
 
     {% if empty %}
-    <div class="card empty-card">
+    <div class="card empty-card mono-card">
         В клубе пока нет атлетов.
     </div>
     {% else %}
 
     <!-- 🔍 1. ИНТЕРАКТИВНЫЙ ПОИСК АТЛЕТОВ -->
-    <div class="card">
+    <div class="card mono-card">
         <div class="label">Быстрый поиск атлета по базе</div>
         <input type="text" id="searchInput" class="search-input" placeholder="Введите имя атлета...">
         <div class="scroll-box" id="searchResultBox" style="display: none; max-height: 200px; border-top: 1px solid #eee; margin-top: 10px;">
@@ -44,19 +48,19 @@
 
     <!-- 🎉 2. ИМЕНИННИКИ СЕГОДНЯ -->
     {% if birthdays_today %}
-    <div class="card birthday-card">
-        <div class="label white-label">🎉 Сегодня день рождения!</div>
+    <div class="card birthday-card mono-card" style="background:#fff;color:#111;border:1px solid #d9d9d9;">
+        <div class="label white-label" style="color:#666 !important;">🎉 Сегодня день рождения!</div>
         <div class="birthday-list">
             {% for student in birthdays_today %}
                 🎂 {{ student.name }} (Родитель: {{ student.username or 'Не указан' }})<br>
             {% endfor %}
         </div>
-        <div class="birthday-footer">Не забудьте поздравить атлета на ресепшене!</div>
+        <div class="birthday-footer" style="color:#666;">Не забудьте поздравить атлета на ресепшене!</div>
     </div>
     {% endif %}
 
     <!-- 🟢 3. СКУД: КТО СЕЙЧАС В ЗАЛЕ (АКТИВНЫЕ СЕССИИ) -->
-    <div class="card">
+    <div class="card mono-card">
         <div class="label flex-label">
             <span class="green-text">🟢 Сейчас в зале (Активные сессии)</span>
             <span class="badge-count">{{ active_sessions|length }} чел.</span>
@@ -86,7 +90,7 @@
     </div>
 
     <!-- 📜 4. СКУД: ПОСЛЕДНИЕ ПОСЕЩЕНИЯ (ИСТОРИЯ СЕССИЙ) -->
-    <div class="card">
+    <div class="card mono-card">
         <details>
             <summary>📜 История последних посещений (Топ-20)</summary>
             <div class="scroll-box long-scroll">
@@ -110,7 +114,7 @@
     </div>
 
     <!-- 💤 5. СПЯЩИЕ КЛИЕНТЫ (АНАЛИЗ ОТТОКА) -->
-    <div class="card">
+    <div class="card mono-card">
         <div class="label purple-label">💤 Спящие клиенты (Не были > 14 дней)</div>
         {% if sleeping_students %}
         <details>
@@ -135,14 +139,14 @@
     </div>
 
     <!-- 👥 6. ОПЕРАТИВНЫЙ СТАТУС -->
-    <div class="card">
+    <div class="card mono-card">
         <div class="label">Текущий статус базы</div>
         <div class="value">👥 Всего атлетов: {{ total_athletes }}</div>
         <div class="value mt-5">🟢 Активных сейчас: {{ active_now_count }}</div>
     </div>
 
     <!-- ❌ 7. ЗАКОНЧИЛИСЬ ЗАНЯТИЯ (БАЛАНС 0) -->
-    <div class="card">
+    <div class="card mono-card">
         <div class="label red-label">❌ Закончились занятия (Баланс 0)</div>
         {% if expired_students %}
         <details>
@@ -196,7 +200,7 @@
     {% endif %}
 
     <!-- СЕКЦИЯ НАВИГАЦИИ -->
-    <div class="card mt-15" style="margin-bottom: 30px;"> <!-- Добавлен отступ для iOS -->
+    <div class="card mono-card mt-15" style="margin-bottom: 30px;"> <!-- Добавлен отступ для iOS -->
         <div class="label">Другие разделы</div>
         <!-- ФИКС: Явная передача контекста club_id для SaaS-изоляции -->
         <a href="/stats/export/excel?club_id={{ club_id }}" class="btn">📊 Скачать Excel-отчет</a>
@@ -238,5 +242,6 @@
             }
         });
     </script>
+    </div>
 </body>
 </html>

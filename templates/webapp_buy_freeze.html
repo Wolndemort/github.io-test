@@ -1,0 +1,31 @@
+{% extends "webapp_base.html" %}
+{% block title %}Покупка заморозки{% endblock %}
+{% block header %}Покупка заморозки{% endblock %}
+{% block subheader %}{{ club.name }} · {{ student.name }}{% endblock %}
+{% block content %}
+<div class="mono-card">
+    <div class="mono-pill"><div class="label">Цена</div><div class="value">{{ price }} ₽/день</div></div>
+    <label style="display:block;margin-top:12px;">Дней
+        <input id="days" type="number" min="1" max="365" value="7" style="width:100%;padding:12px;margin-top:6px;">
+    </label>
+    <div class="mono-divider"></div>
+    <button id="pay" class="mono-action dark" style="width:100%;">Перейти к оплате</button>
+    <a class="mono-action" style="margin-top:10px;" href="/webapp/client-cabinet/student?club_id={{ club_id }}&student_id={{ student.id }}">Назад к атлету</a>
+    <p id="msg"></p>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+document.getElementById('pay')?.addEventListener('click', async () => {
+  const days = document.getElementById('days').value;
+  const res = await fetch('/webapp/client-cabinet/buy-freeze?days=' + encodeURIComponent(days), {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({init_data: window.Telegram?.WebApp?.initData || '', club_id: {{ club_id }}, student_id: {{ student.id }}})
+  });
+  const data = await res.json();
+  if (res.ok && data.payment_url) location.href = data.payment_url;
+  else document.getElementById('msg').innerText = data.detail || 'Ошибка';
+});
+</script>
+{% endblock %}

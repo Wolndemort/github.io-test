@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
@@ -7,143 +7,90 @@
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <link rel="stylesheet" href="{{ url_for('static', path='css/mono.css') }}?v=1.0.0">
     <style>
-        {% if loading.enabled %}
-        body { visibility: hidden; }
-        #app-loader { visibility: visible; position: fixed; inset: 0; z-index: 10; display: flex; flex-direction: column; align-items: center; justify-content: center; background: #f0f0f0; }
-        #app-loader img { width: 96px; height: 96px; object-fit: contain; border-radius: 22px; margin-bottom: 18px; }
-        #app-loader .spinner { width: 28px; height: 28px; border: 3px solid #d5d5d5; border-top-color: #0088cc; border-radius: 50%; animation: spin .8s linear infinite; }
-        @keyframes spin { to { transform: rotate(360deg); } }
-        {% endif %}
-        body { font-family: sans-serif; background: #f0f0f0; padding: 20px; text-align: center; }
-        .btn { display: block; width: 100%; padding: 15px; margin: 10px 0; background: #0088cc; color: white; border: none; border-radius: 8px; font-size: 16px; cursor: pointer; }
-        .student-card { background: white; padding: 15px; margin-bottom: 10px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); border: 2px solid transparent; transition: 0.3s; }
-        .selected-card { border-color: #0088cc; background: #e6f7ff; }
+        {% if loading.enabled %}body { visibility: hidden; } #app-loader { visibility: visible; position: fixed; inset: 0; z-index: 10; display: flex; flex-direction: column; align-items: center; justify-content: center; background: #f4f4f4; } #app-loader img { width: 96px; height: 96px; object-fit: contain; border-radius: 22px; margin-bottom: 18px; filter: grayscale(1); } #app-loader .spinner { width: 28px; height: 28px; border: 3px solid #d5d5d5; border-top-color: #111111; border-radius: 50%; animation: spin .8s linear infinite; } @keyframes spin { to { transform: rotate(360deg); } }{% endif %}
+        body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f4f4f4; color: #111; padding: 18px; text-align: center; }
+        .wrap { max-width: 760px; margin: 0 auto; }
+        .top { background: linear-gradient(180deg,#fff,#fafafa); border: 1px solid #d9d9d9; border-radius: 24px; padding: 20px; box-shadow: 0 14px 40px rgba(0,0,0,.06); margin-bottom: 12px; text-align: left; }
+        .eyebrow { text-transform: uppercase; letter-spacing: .18em; font-size: 11px; color: #666; }
+        h2 { font-size: 30px; letter-spacing: -.03em; margin: 8px 0 4px; }
+        .btn { display: block; width: 100%; padding: 15px; margin: 10px 0; background: #111; color: white; border: 1px solid #111; border-radius: 16px; font-size: 16px; cursor: pointer; font-weight: 700; }
+        .student-card { background: white; padding: 15px; margin-bottom: 10px; border-radius: 18px; box-shadow: 0 10px 24px rgba(0,0,0,0.05); border: 1px solid #ddd; transition: 0.2s; text-align: left; }
+        .selected-card { border-color: #111; background: #f7f7f7; }
+        .mono-action { display: block; text-decoration: none; padding: 15px 16px; border-radius: 16px; border: 1px solid #111; color: #111; background: #fff; font-weight: 700; margin: 10px 0; }
+        .cardlist { display: grid; gap: 10px; }
     </style>
 </head>
 <body class="mono-theme">
-    {% if loading.enabled %}<div id="app-loader"><img src="{{ logo_url or url_for('static', path='img/logo.png') }}" onerror="this.style.display='none'"><div>{{ loading.message }}</div><div class="spinner"></div></div>{% endif %}
-    <h2>Пропускной пункт клуба</h2>
-
-    <div id="setup-biometry-box" style="display: none; background: #ffeeba; padding: 15px; margin-bottom: 20px; border-radius: 8px;">
-        <p style="margin: 0 0 10px 0; color: #856404;">🔒 Для активации прохода необходимо связать FaceID с ботом</p>
-        <button class="btn" style="background: #28a745; margin: 0;" onclick="setupBiometrics()">Зарегистрировать FaceID</button>
+{% if loading.enabled %}<div id="app-loader"><img src="{{ logo_url or url_for('static', path='img/logo.png') }}" onerror="this.style.display='none'"><div>{{ loading.message }}</div><div class="spinner"></div></div>{% endif %}
+<div class="wrap">
+    <div class="top">
+        <div class="eyebrow">Checkmat access</div>
+        <h2>Пропускной пункт клуба</h2>
+        <p style="color:#666;margin:0;">Биометрический вход и QR-проход</p>
     </div>
-
-    <p style="color: #666;" id="status-hint">Выберите атлета для прохода:</p>
+    <div id="setup-biometry-box" style="display:none; background:#fff; padding:15px; margin-bottom:20px; border-radius:18px; border:1px solid #ddd;">
+        <p style="margin:0 0 10px 0; color:#444;">🔒 Для активации прохода необходимо связать FaceID с ботом</p>
+        <button class="btn" style="margin:0;" onclick="setupBiometrics()">Зарегистрировать FaceID</button>
+    </div>
+    <p style="color:#666;" id="status-hint">Выберите атлета для прохода:</p>
     <div id="students-list">
         {% for student in students %}
         <div class="student-card" id="card-{{ student.id }}" onclick="selectStudent('{{ student.id }}', '{{ student.name }}')">
-            <h3>{{ student.name }}</h3>
-            <p>Баланс: {{ student.balance_lessons }} занятий</p>
+            <h3 style="margin:0 0 6px 0;">{{ student.name }}</h3>
+            <p style="margin:0;color:#666;">Баланс: {{ student.balance_lessons }} занятий</p>
         </div>
         {% endfor %}
     </div>
-
-    <script>
-        {% if loading.enabled %}setTimeout(() => { document.body.style.visibility = 'visible'; document.getElementById('app-loader')?.remove(); }, {{ loading.duration_ms }});{% endif %}
-        const tg = window.Telegram.WebApp;
-        tg.expand();
-
-        const bm = tg.BiometricManager;
-        let selectedStudentId = null;
-        let isBiometricReady = false;
-
-        // Инициализируем биометрию при старте
-        bm.init(() => {
-            isBiometricReady = true;
-            // ИСПРАВЛЕНО: Если доступ к биометрии в Телеграме для этого бота еще не выдан на устройстве
-            if (!bm.isAccessGranted) {
-                document.getElementById('setup-biometry-box').style.display = 'block';
-                document.getElementById('students-list').style.opacity = '0.5';
-            }
-        });
-
-        // Функция первой настройки биометрии (РЕГИСТРАЦИЯ ТОКЕНА НА АЙФОНЕ)
-        function setupBiometrics() {
-            if (!isBiometricReady) return;
-
-            // Запрашиваем доступ. Айфон ОБЯЗАН выкинуть системное окно FaceID для создания ключа!
-            bm.requestAccess({ reason: "Создание безопасного ключа устройства для прохода" }, (accessGranted) => {
-                if (accessGranted) {
-                    // Активируем токен на бэкенде
-                    fetch('/webapp/enable-biometry', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ init_data: tg.initData })
-                    })
-                    .then(res => res.json())
-                    .then(data => {
-                        tg.showAlert("Устройство успешно связано! Теперь вы можете проходить в клуб.");
-                        location.reload(); // Перезагружаем, чтобы открыть список детей
-                    });
-                } else {
-                    tg.showAlert("Доступ к FaceID отклонен. Без этого проход невозможен.");
-                }
-            });
+</div>
+<script>
+{% if loading.enabled %}setTimeout(() => { document.body.style.visibility = 'visible'; document.getElementById('app-loader')?.remove(); }, {{ loading.duration_ms }});{% endif %}
+const tg = window.Telegram.WebApp;
+tg.expand();
+const bm = tg.BiometricManager;
+let selectedStudentId = null;
+let isBiometricReady = false;
+bm.init(() => {
+    isBiometricReady = true;
+    if (!bm.isAccessGranted) {
+        document.getElementById('setup-biometry-box').style.display = 'block';
+        document.getElementById('students-list').style.opacity = '0.5';
+    }
+});
+function setupBiometrics() {
+    if (!isBiometricReady) return;
+    bm.requestAccess({ reason: "Создание безопасного ключа устройства для прохода" }, (accessGranted) => {
+        if (accessGranted) {
+            fetch('/webapp/enable-biometry', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ init_data: tg.initData }) })
+            .then(res => res.json())
+            .then(() => { tg.showAlert("Устройство успешно связано! Теперь вы можете проходить в клуб."); location.reload(); });
+        } else {
+            tg.showAlert("Доступ к FaceID отклонен. Без этого проход невозможен.");
         }
-
-        // Выбор студента
-        function selectStudent(studentId, studentName) {
-            // Если биометрия еще не привязана, не даем кликать по детям
-            if (!bm.isAccessGranted) {
-                tg.showAlert("Сначала активируйте FaceID по кнопке сверху!");
-                return;
-            }
-
-            selectedStudentId = studentId;
-            document.querySelectorAll('.student-card').forEach(c => c.classList.remove('selected-card'));
-            document.getElementById(`card-${studentId}`).classList.add('selected-card');
-
-            tg.MainButton.text = `ПРОПУСТИТЬ: ${studentName.toUpperCase()}`;
-            tg.MainButton.textColor = "#FFFFFF";
-            tg.MainButton.color = "#0088cc";
-            tg.MainButton.show();
+    });
+}
+function selectStudent(studentId, studentName) {
+    if (!bm.isAccessGranted) { tg.showAlert("Сначала активируйте FaceID по кнопке сверху!"); return; }
+    selectedStudentId = studentId;
+    document.querySelectorAll('.student-card').forEach(c => c.classList.remove('selected-card'));
+    document.getElementById(`card-${studentId}`).classList.add('selected-card');
+    tg.MainButton.text = `ПРОПУСТИТЬ: ${studentName.toUpperCase()}`;
+    tg.MainButton.textColor = "#FFFFFF";
+    tg.MainButton.color = "#111111";
+    tg.MainButton.show();
+}
+tg.onEvent('mainButtonClicked', function() {
+    if (!selectedStudentId) return;
+    tg.MainButton.disable();
+    bm.authenticate({ reason: "Подтвердите личность для прохода" }, (isAuthenticated, biometricToken) => {
+        if (isAuthenticated) {
+            fetch('/webapp/open-turnstile', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ student_id: parseInt(selectedStudentId), biometric_token: biometricToken || "verified_by_device", init_data: tg.initData }) })
+            .then(res => res.json())
+            .then(data => { if (data.success) { tg.showAlert(data.message || "Турникет открыт!"); setTimeout(() => tg.close(), 1500); } else { tg.showAlert("Ошибка СКУД: " + data.message); } });
+        } else {
+            tg.showAlert("Биометрия не пройдена.");
         }
-
-        // КЛИК ПО НАТИВНОЙ КНОПКЕ ТЕЛЕГРАМА
-        tg.onEvent('mainButtonClicked', function() {
-            if (!selectedStudentId) return;
-
-            tg.MainButton.disable();
-            tg.MainButton.text = "Авторизация FaceID...";
-
-            // Теперь, когда токен устройства железно зарегистрирован через requestAccess,
-            // метод authenticate отработает на Айфоне мгновенно и без зависаний!
-            bm.authenticate({ reason: "Подтвердите личность для прохода" }, (isAuthenticated, biometricToken) => {
-                if (isAuthenticated) {
-                    tg.MainButton.text = "Открытие турникета...";
-
-                    fetch('/webapp/open-turnstile', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            student_id: parseInt(selectedStudentId),
-                            biometric_token: biometricToken || "verified_by_device",
-                            init_data: tg.initData
-                        })
-                    })
-                    .then(res => res.json())
-                    .then(data => {
-                        if (data.success) {
-                            tg.showAlert(data.message || "Турникет открыт! Проходите.");
-                            setTimeout(() => { tg.close(); }, 1500);
-                        } else {
-                            tg.showAlert("Ошибка СКУД: " + data.message);
-                            tg.MainButton.enable();
-                            tg.MainButton.text = "Повторить попытку";
-                        }
-                    })
-                    .catch(err => {
-                        tg.showAlert("Ошибка сети.");
-                        tg.MainButton.enable();
-                    });
-                } else {
-                    tg.showAlert("Биометрия не пройдена.");
-                    tg.MainButton.enable();
-                    tg.MainButton.text = "Попробовать снова";
-                }
-            });
-        });
-    </script>
+    });
+});
+</script>
 </body>
 </html>

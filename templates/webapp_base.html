@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}WebApp{% endblock %}</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <link rel="stylesheet" href="{{ url_for('static', path='css/mono.css') }}?v=1.0.0">
+    {% block head_extra %}{% endblock %}
+</head>
+<body class="mono-theme">
+<div class="mono-shell">
+    <div class="mono-hero">
+        <div class="mono-kicker">
+            <div class="mono-eyebrow">{% block eyebrow %}Checkmat Jiu-Jitsu{% endblock %}</div>
+            <a class="mono-action" style="padding:8px 12px;border-radius:999px;font-size:12px;" href="#" onclick="window.Telegram?.WebApp?.close(); return false;">Закрыть</a>
+        </div>
+        <h1 class="mono-title">{% block header %}WebApp{% endblock %}</h1>
+        <p style="margin:0;color:#666;">{% block subheader %}{% endblock %}</p>
+    </div>
+
+    {% block content %}{% endblock %}
+</div>
+<script>
+const tg = window.Telegram?.WebApp;
+if (tg) { tg.ready(); tg.expand(); }
+</script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

@@ -6,6 +6,9 @@
     --mono-soft: #f4f4f4;
     --mono-line: #d9d9d9;
     --mono-muted: #666666;
+    --mono-radius-xl: 24px;
+    --mono-radius-lg: 18px;
+    --mono-radius-md: 14px;
 }
 
 body.mono-theme,
@@ -34,6 +37,108 @@ body.mono-theme .lesson-card {
     background: var(--mono-white) !important;
     border-color: var(--mono-line) !important;
     box-shadow: 0 2px 10px rgba(0, 0, 0, 0.06) !important;
+}
+
+body.mono-theme .mono-shell {
+    max-width: 760px;
+    margin: 0 auto;
+    padding: 16px;
+}
+
+body.mono-theme .mono-hero,
+body.mono-theme .mono-card {
+    background: linear-gradient(180deg, #ffffff 0%, #fafafa 100%) !important;
+    border: 1px solid var(--mono-line) !important;
+    border-radius: var(--mono-radius-xl) !important;
+    box-shadow: 0 14px 40px rgba(0, 0, 0, 0.06) !important;
+}
+
+body.mono-theme .mono-card {
+    padding: 16px !important;
+    margin-bottom: 12px !important;
+}
+
+body.mono-theme .mono-title {
+    font-size: 28px !important;
+    font-weight: 800 !important;
+    letter-spacing: -0.03em !important;
+    margin: 0 0 8px !important;
+}
+
+body.mono-theme .mono-eyebrow {
+    text-transform: uppercase;
+    letter-spacing: .18em;
+    font-size: 11px;
+    color: var(--mono-muted) !important;
+}
+
+body.mono-theme .mono-grid-2 {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+}
+
+body.mono-theme .mono-grid-4 {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 10px;
+}
+
+body.mono-theme .mono-pill {
+    border: 1px solid var(--mono-line);
+    border-radius: var(--mono-radius-md);
+    padding: 12px;
+    background: #fff;
+}
+
+body.mono-theme .mono-pill .value {
+    font-size: 22px;
+    font-weight: 800;
+    line-height: 1;
+}
+
+body.mono-theme .mono-pill .label {
+    color: var(--mono-muted) !important;
+    font-size: 12px;
+    margin-top: 6px;
+    text-transform: uppercase;
+    letter-spacing: .08em;
+}
+
+body.mono-theme .mono-action {
+    display: block;
+    text-align: center;
+    text-decoration: none;
+    padding: 15px 16px;
+    border-radius: var(--mono-radius-md);
+    border: 1px solid var(--mono-black);
+    color: var(--mono-black);
+    background: var(--mono-white);
+    font-weight: 700;
+    transition: transform .15s ease, background .15s ease, border-color .15s ease;
+}
+
+body.mono-theme .mono-action:hover {
+    transform: translateY(-1px);
+    background: var(--mono-soft);
+}
+
+body.mono-theme .mono-action.dark {
+    background: var(--mono-black);
+    color: var(--mono-white);
+}
+
+body.mono-theme .mono-divider {
+    height: 1px;
+    background: linear-gradient(90deg, transparent, var(--mono-line), transparent);
+    margin: 14px 0;
+}
+
+body.mono-theme .mono-kicker {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 10px;
 }
 
 body.mono-theme .search-input,
