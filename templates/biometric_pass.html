@@ -37,8 +37,8 @@
 <div class="wrap">
     <div class="top">
         <div class="eyebrow">{{ club_name or 'Клуб' }} · Access</div>
-        <h2>FaceID / QR</h2>
-        <p style="color:#666;margin:0;">Биометрический вход и быстрый проход</p>
+        <h2>Face ID</h2>
+        <p style="color:#666;margin:0;">Безопасный проход по биометрии</p>
     </div>
     <a class="mono-action" href="/webapp/client-cabinet?club_id={{ club_id }}"
        onclick="if (window.history.length > 1) { window.history.back(); return false; } if (window.Telegram?.WebApp) { window.Telegram.WebApp.close(); return false; } return true;">← Назад в кабинет</a>
@@ -84,7 +84,7 @@ let isBiometricReady = false;
 if (!bm || typeof bm.init !== 'function') {
     const hint = document.getElementById('status-hint');
     if (hint) {
-        hint.textContent = 'На этом устройстве биометрический API Telegram WebApp недоступен. Используйте кабинет на поддерживаемом устройстве или QR-режим.';
+        hint.textContent = 'На этом устройстве биометрический API Telegram WebApp недоступен. Используйте QR-пропуск из меню бота.';
         hint.className = 'hint';
     }
     const setupBox = document.getElementById('setup-biometry-box');
@@ -95,8 +95,8 @@ if (!bm || typeof bm.init !== 'function') {
         if (!bm.isAccessGranted) {
             const setupBox = document.getElementById('setup-biometry-box');
             if (setupBox) setupBox.style.display = 'block';
-            const list = document.getElementById('students-list');
-            if (list) list.style.opacity = '0.5';
+            const hint = document.getElementById('status-hint');
+            if (hint) hint.textContent = 'Выберите атлета, затем активируйте Face ID сверху.';
         }
     });
 }
@@ -113,10 +113,14 @@ function setupBiometrics() {
     });
 }
 function selectStudent(studentId, studentName) {
-    if (!bm || !bm.isAccessGranted) { tg?.showAlert("Сначала активируйте доступ по кнопке сверху."); return; }
     selectedStudentId = studentId;
     document.querySelectorAll('.student-card').forEach(c => c.classList.remove('selected-card'));
     document.getElementById(`card-${studentId}`).classList.add('selected-card');
+    if (!tg) return;
+    if (!bm || !bm.isAccessGranted) {
+        tg.showAlert("Атлет выбран. Сначала активируйте Face ID по кнопке сверху.");
+        return;
+    }
     tg.MainButton.text = `ПРОПУСТИТЬ: ${studentName.toUpperCase()}`;
     tg.MainButton.textColor = "#FFFFFF";
     tg.MainButton.color = "#111111";

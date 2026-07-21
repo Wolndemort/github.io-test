@@ -797,7 +797,11 @@ async def handle_gen_qr(
 
 
 @router.callback_query(F.data == "back_profile_del")
-async def back_to_profile_and_delete_qr(callback: types.CallbackQuery, handler, data):
+async def back_to_profile_and_delete_qr(
+        callback: types.CallbackQuery,
+        club: Club,
+        club_settings: dict,
+):
     await callback.answer()
 
     # 1. Жестко удаляем сообщение с картинкой QR-кода
@@ -806,9 +810,12 @@ async def back_to_profile_and_delete_qr(callback: types.CallbackQuery, handler, 
     except Exception:
         pass
 
-    # 2. Перенаправляем управление в хэндлер "profile"
-    new_callback = callback.model_copy(update={"data": "profile"})
-    return await handler(new_callback, data)
+    # 2. Отправляем новое меню профиля. Нельзя вручную вызывать другой
+    # aiogram-handler: dispatcher не передаёт ему внутренние handler/data.
+    await callback.message.answer(
+        "Возвращаемся в профиль 👇",
+        reply_markup=get_main_menu_keyboard(club_settings, club.id),
+    )
 
 
 @router.callback_query(F.data == "add_athlete")
