@@ -36,6 +36,20 @@ def generate_signature(user_id, time_salt):
     return signature[:10]
 
 
+def _default_student_discipline(club_settings: dict) -> str:
+    disciplines = club_settings.get("disciplines", {})
+    if isinstance(disciplines, dict) and disciplines:
+        active_codes = [
+            code
+            for code, info in disciplines.items()
+            if isinstance(info, dict) and info.get("active")
+        ]
+        if active_codes:
+            return active_codes[0]
+        return next(iter(disciplines.keys()))
+    return "boxing"
+
+
 router = Router()
 
 
@@ -887,7 +901,7 @@ async def process_athlete_birthday(
             balance_lessons=0,
             can_freeze=1,
             is_frozen=0,
-            discipline="boxing"
+            discipline=_default_student_discipline(club_settings)
         )
         session.add(new_student)
         await session.commit()  # Сохраняем в БД
@@ -1074,25 +1088,13 @@ async def show_discipline_schedule(
     await callback.answer()
     
     
-@router.callback_query(F.data == "show_android_instructions")
-async def process_android_instruction(callback: types.CallbackQuery):
-    """
-    Ловит нажатие кнопки Android и отправляет инструкцию в чат.
-    """
-    instruction_text = (
-        "🤖 **Инструкция для Android:**\n\n"
-        "1. Перейди прямо сейчас в профиль нашего бота (нажми на его аватарку или имя в самом верху экрана).\n"
-        "2. В правом верхнем углу профиля нажмите на **три вертикальные точки** (меню).\n"
-        "3. Выбери пункт **«Добавить на главный экран»** (Add to Home screen).\n\n"
-        "📸 _Иконка с логотипом создастся автоматически! Если захочешь её изменить, можешь сделать скриншот логотипа прямо из этого чата._\n\n"
-        "🔥 Готово! Теперь бот всегда под рукой."
-    )
-    
-    # Отправляем текст в чат
-    await callback.message.answer(text=instruction_text, parse_mode="Markdown")
-    
-    # Гасим часики на кнопке, чтобы она не «зависала»
-    await callback.answer()
+# @router.callback_query(F.data == "show_android_instructions")
+# async def process_android_instruction(callback: types.CallbackQuery):
+#     """
+#     Раньше показывала инструкцию для Android-установки.
+#     Сейчас не используется, потому что профиль открывается через WebApp напрямую.
+#     """
+#     await callback.answer()
 
 
 

@@ -26,10 +26,6 @@ def get_profile_keyboard(user, club_settings: dict, is_authorized: bool = False)
         text="📱 Проход по FaceID",
         web_app=WebAppInfo(url=f"{base_url}/webapp/biometric-pass?club_id={user.club_id}&user_id={user.user_id}")
     ))
-    builder.row(
-        types.InlineKeyboardButton(text="🍏 Установить на iPhone", url="https://www.icloud.com/shortcuts/124940b85ce8437191757a95b928c59c"),
-        types.InlineKeyboardButton(text="🤖 Android", callback_data="show_android_instructions"),
-    )
 
     builder.row(
         types.InlineKeyboardButton(text="📲 QR-пропуск", callback_data="show_qr"),
