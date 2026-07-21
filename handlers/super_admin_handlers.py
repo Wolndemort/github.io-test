@@ -23,8 +23,11 @@ router = Router()
 @router.callback_query(F.data == "super", F.from_user.id.in_(ADMIN_IDS))
 async def super_admin_main(
         event: types.Message | types.CallbackQuery,
-        is_super_admin: bool
+        is_super_admin: bool,
+        state: FSMContext
 ):
+    await state.clear()
+
     # Если это нажатие кнопки — убираем часики
     if isinstance(event, types.CallbackQuery):
         await event.answer()

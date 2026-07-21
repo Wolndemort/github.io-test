@@ -43,10 +43,13 @@ async def admin_panel(
         club_settings: dict,
         is_owner: bool,
         is_super_admin: bool,
-        session: AsyncSession
+        session: AsyncSession,
+        state: FSMContext
 ):
     if not (is_owner or is_super_admin):
         return
+
+    await state.clear()
 
     message = event.message if isinstance(event, types.CallbackQuery) else event
 
