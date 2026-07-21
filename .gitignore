@@ -22,3 +22,6 @@ env/
 
 #папка айде
 .idea/
+
+# личные заметки и оценки
+PERSONAL_PRICE_ESTIMATE.md
