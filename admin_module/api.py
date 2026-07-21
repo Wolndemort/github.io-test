@@ -32,6 +32,7 @@ from database.db import get_session
 from config import fastapi_key
 from middlewares.db_saas_midleware import SUPER_ADMIN_IDS
 from admin_module.router_base import router, templates
+from admin_module.webapp_client_cabinet import _ensure_webapp_user_linked
 import admin_module.webapp_client_cabinet  # noqa: F401
 import admin_module.admin_pages  # noqa: F401
 import admin_module.payments_webhook  # noqa: F401
@@ -802,9 +803,9 @@ else location.replace(location.pathname+'?club_id={club_id}&init_data='+encodeUR
         raise HTTPException(status_code=403, detail="Доступ запрещен")
 
     user_id = int(tg_user.get("id", 0))
-    user = await db.get(User, user_id)
-    if not user or user.club_id != club_id:
-        raise HTTPException(status_code=403, detail="Пользователь не привязан к клубу")
+    user = await _ensure_webapp_user_linked(db, user_id, club_id)
+    if not user:
+        return await webapp_auth_help_page(request=request, club_id=club_id, init_data=init_data, db=db)
 
     settings = (club.club_settings or {}) if club else {}
     ui = settings.get("ui", {}) if isinstance(settings.get("ui", {}), dict) else {}
@@ -966,9 +967,9 @@ else location.replace(location.pathname+'?club_id={club_id}&student_id={student_
     if not tg_user:
         raise HTTPException(status_code=403, detail="Доступ запрещен")
     user_id = int(tg_user.get("id", 0))
-    user = await db.get(User, user_id)
-    if not user or user.club_id != club_id:
-        raise HTTPException(status_code=403, detail="Пользователь не привязан к клубу")
+    user = await _ensure_webapp_user_linked(db, user_id, club_id)
+    if not user:
+        return await webapp_auth_help_page(request=request, club_id=club_id, init_data=init_data, db=db)
 
     student_ids_stmt = select(Student.id).where(Student.parent_id == user_id, Student.club_id == club_id)
     student_ids = [row[0] for row in (await db.execute(student_ids_stmt)).all()]
@@ -1058,9 +1059,9 @@ else location.replace(location.pathname+'?club_id={club_id}&init_data='+encodeUR
     tg_user = verify_telegram_data(init_data, club.bot_token)
     if not tg_user:
         raise HTTPException(status_code=403, detail="Доступ запрещен")
-    user = await db.get(User, int(tg_user.get("id", 0)))
-    if not user or user.club_id != club_id:
-        raise HTTPException(status_code=403, detail="Пользователь не привязан к клубу")
+    user = await _ensure_webapp_user_linked(db, int(tg_user.get("id", 0)), club_id)
+    if not user:
+        return await webapp_auth_help_page(request=request, club_id=club_id, init_data=init_data, db=db)
     students = (await db.execute(select(Student).where(Student.parent_id == user.user_id, Student.club_id == club_id).order_by(Student.name))).scalars().all()
     disciplines = (club.club_settings or {}).get("disciplines", {})
     return templates.TemplateResponse(
@@ -1081,8 +1082,8 @@ async def webapp_buy_subscription_submit(
     if not tg_user:
         raise HTTPException(status_code=403, detail="Доступ запрещен")
     user_id = int(tg_user.get("id", 0))
-    user = await db.get(User, user_id)
-    if not user or user.club_id != payload.club_id:
+    user = await _ensure_webapp_user_linked(db, user_id, payload.club_id)
+    if not user:
         raise HTTPException(status_code=403, detail="Пользователь не привязан к клубу")
     student = await db.get(Student, payload.student_id)
     if not student or student.club_id != payload.club_id or student.parent_id != user_id:

@@ -216,8 +216,8 @@ async def webapp_buy_subscription_submit(payload: WebAppBuySubscriptionPayload, 
     if not tg_user:
         raise HTTPException(status_code=403, detail="Доступ запрещен")
     user_id = int(tg_user.get("id", 0))
-    user = await db.get(User, user_id)
-    if not user or user.club_id != payload.club_id:
+    user = await _ensure_webapp_user_linked(db, user_id, payload.club_id)
+    if not user:
         raise HTTPException(status_code=403, detail="Пользователь не привязан к клубу")
     student = await db.get(Student, payload.student_id, with_for_update=True)
     if not student or student.club_id != payload.club_id or student.parent_id != user_id:
