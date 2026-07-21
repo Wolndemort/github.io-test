@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -20,7 +20,7 @@ def make_session(student):
                 SimpleNamespace(scalar_one_or_none=lambda: SimpleNamespace(id=10, name="Клуб")),
             ]
         ),
-        add=AsyncMock(),
+        add=MagicMock(),
     )
 
 
