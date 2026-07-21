@@ -6,7 +6,7 @@ from sqladmin import Admin, ModelView, BaseView, expose
 from sqladmin.authentication import AuthenticationBackend
 from sqlalchemy.ext.asyncio import async_sessionmaker
 from starlette.responses import RedirectResponse
-from database.db import Club, Student, User
+from database.db import Club, Student, User, VisitLog
 
 
 class AdminAuth(AuthenticationBackend):
@@ -44,7 +44,9 @@ class UserAdmin(ModelView, model=User):
     name = "Родитель"
     name_plural = "Родители"
     page_size = 10
-    can_delete = True
+    # У User есть связь со студентами через delete-orphan. Физическое
+    # удаление родителя может удалить всех его атлетов.
+    can_delete = False
     can_edit = True
     can_create = True
 
@@ -115,9 +117,23 @@ class ClubAdmin(ModelView, model=Club):
     name = "Клуб"
     name_plural = "Клубы"
     page_size = 10
-    # У User есть связь со студентами через delete-orphan. Физическое
-    # удаление родителя может удалить всех его атлетов.
-    can_delete = False
+    can_delete = True
+    can_edit = True
+    can_create = True
+
+
+class VisitLogAdmin(ModelView, model=VisitLog):
+    """Ручной импорт/коррекция исторических посещений.
+
+    Исторические посещения хранятся здесь, а Student.last_visit не меняется:
+    это поле является маркером только текущей незакрытой сессии.
+    """
+    column_list = [VisitLog.id, VisitLog.student_id, VisitLog.club_id, VisitLog.visited_at, VisitLog.source]
+    form_columns = ["student_id", "club_id", "visited_at", "source"]
+    name = "Посещение"
+    name_plural = "История посещений"
+    page_size = 20
+    can_delete = True
     can_edit = True
     can_create = True
 
@@ -142,5 +158,6 @@ def setup_admin(app, engine):
     )
     admin.add_view(UserAdmin)
     admin.add_view(StudentAdmin)
+    admin.add_view(VisitLogAdmin)
     admin.add_view(ClubAdmin)
     admin.add_view(AnalyticsAdmin)
