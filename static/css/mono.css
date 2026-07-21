@@ -56,6 +56,7 @@ body.mono-theme .mono-card {
 body.mono-theme .mono-card {
     padding: 16px !important;
     margin-bottom: 12px !important;
+    overflow: hidden;
 }
 
 body.mono-theme .mono-title {
@@ -76,12 +77,19 @@ body.mono-theme .mono-grid-2 {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 10px;
+    align-items: stretch;
 }
 
 body.mono-theme .mono-grid-4 {
     display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 10px;
+    align-items: stretch;
+}
+
+body.mono-theme .mono-grid-2 > *,
+body.mono-theme .mono-grid-4 > * {
+    min-width: 0;
 }
 
 body.mono-theme .mono-pill {
@@ -89,6 +97,7 @@ body.mono-theme .mono-pill {
     border-radius: var(--mono-radius-md);
     padding: 12px;
     background: #fff;
+    overflow-wrap: anywhere;
 }
 
 body.mono-theme .mono-pill .value {
@@ -116,6 +125,9 @@ body.mono-theme .mono-action {
     background: var(--mono-white);
     font-weight: 700;
     transition: transform .15s ease, background .15s ease, border-color .15s ease;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-word;
 }
 
 body.mono-theme .mono-action:hover {
@@ -139,6 +151,19 @@ body.mono-theme .mono-kicker {
     align-items: center;
     justify-content: space-between;
     margin-bottom: 10px;
+    gap: 12px;
+    min-width: 0;
+}
+
+body.mono-theme .mono-kicker > * {
+    min-width: 0;
+}
+
+body.mono-theme .mono-eyebrow,
+body.mono-theme .mono-title,
+body.mono-theme .subtitle {
+    overflow-wrap: anywhere;
+    word-break: break-word;
 }
 
 body.mono-theme .search-input,
@@ -286,6 +311,30 @@ body.mono-theme .spinner {
 
 body.mono-theme a {
     color: var(--mono-black);
+}
+
+@media (max-width: 600px) {
+    body.mono-theme .mono-shell {
+        padding: 12px;
+    }
+
+    body.mono-theme .mono-hero,
+    body.mono-theme .mono-card {
+        border-radius: 20px !important;
+    }
+
+    body.mono-theme .mono-title {
+        font-size: 24px !important;
+    }
+
+    body.mono-theme .mono-grid-2,
+    body.mono-theme .mono-grid-4 {
+        grid-template-columns: 1fr;
+    }
+
+    body.mono-theme .mono-action {
+        padding: 14px 14px;
+    }
 }
 
 @media (prefers-color-scheme: dark) {

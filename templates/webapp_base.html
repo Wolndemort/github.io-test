@@ -16,7 +16,7 @@
             <a class="mono-action" style="padding:8px 12px;border-radius:999px;font-size:12px;" href="#" onclick="window.Telegram?.WebApp?.close(); return false;">Закрыть</a>
         </div>
         <h1 class="mono-title">{% block header %}WebApp{% endblock %}</h1>
-        <p style="margin:0;color:#666;">{% block subheader %}{% endblock %}</p>
+        <p style="margin:0;color:#666;overflow-wrap:anywhere;word-break:break-word;">{% block subheader %}{% endblock %}</p>
     </div>
 
     {% block content %}{% endblock %}
