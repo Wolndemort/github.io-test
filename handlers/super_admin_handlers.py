@@ -15,6 +15,7 @@ from database.db import Club, Student
 from database.constants import DEFAULT_CLUB_SETTINGS
 from config import ADMIN_IDS
 from handlers.states import AddClub
+from services.telegram_menu import configure_profile_menu_button
 
 router = Router()
 
@@ -127,11 +128,14 @@ async def process_token(message: types.Message, state: FSMContext, session: Asyn
         await session.commit()
         await session.refresh(new_club)
 
+        async with Bot(token=bot_token).context() as temp_bot:
+            await configure_profile_menu_button(temp_bot, new_club.id)
+
         await message.answer(
             f"✅ <b>Клуб успешно создан!</b>\n\n"
             f"🆔 ID в SaaS: <code>{new_club.id}</code>\n"
             f"🏢 Название: <code>{club_name}</code>\n"
-            f"🚀 Перезапустите систему для активации бота.",
+            f"🚀 Меню бота уже настроено на вход в профиль.",
             parse_mode="HTML"
         )
         await state.clear()
