@@ -1,7 +1,7 @@
 import asyncio
 import os
 import uuid
-import time
+import time as time_module
 
 from starlette.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
@@ -134,7 +134,7 @@ dp = Dispatcher(storage=storage)
 
 @app.middleware("http")
 async def request_monitoring_middleware(request: Request, call_next):
-    started = time.perf_counter()
+    started = time_module.perf_counter()
     try:
         response = await call_next(request)
     except Exception as exc:
@@ -144,7 +144,7 @@ async def request_monitoring_middleware(request: Request, call_next):
             request.method,
         )
         raise
-    duration_ms = (time.perf_counter() - started) * 1000
+    duration_ms = (time_module.perf_counter() - started) * 1000
     logger.info(
         "HTTP %s %s -> %s (%.1f ms)",
         request.method,
