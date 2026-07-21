@@ -1,6 +1,7 @@
 import asyncio
 import os
 import uuid
+import time
 
 from starlette.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
@@ -13,6 +14,7 @@ import sys
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 from contextlib import asynccontextmanager
 from fastapi import Request
+from fastapi.responses import JSONResponse
 from datetime import datetime
 from aiogram import Bot, Dispatcher, types
 from aiogram.client.default import DefaultBotProperties
@@ -127,6 +129,72 @@ setup_admin(app, engine)
 # Глобальный маппинг ботов
 bots_dict = {}
 dp = Dispatcher(storage=storage)
+
+
+@app.middleware("http")
+async def request_monitoring_middleware(request: Request, call_next):
+    started = time.perf_counter()
+    try:
+        response = await call_next(request)
+    except Exception as exc:
+        logger.exception(
+            "Unhandled error in request path=%s method=%s",
+            request.url.path,
+            request.method,
+        )
+        raise
+    duration_ms = (time.perf_counter() - started) * 1000
+    logger.info(
+        "HTTP %s %s -> %s (%.1f ms)",
+        request.method,
+        request.url.path,
+        getattr(response, "status_code", 500),
+        duration_ms,
+    )
+    return response
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    logger.exception(
+        "Unhandled exception path=%s method=%s",
+        request.url.path,
+        request.method,
+    )
+    return JSONResponse(
+    {
+        "status": "error",
+        "detail": "Internal server error",
+    },
+        status_code=500,
+    )
+
+
+@app.get("/health")
+async def healthcheck():
+    return {
+        "status": "ok",
+        "service": "SpeedyCRM SaaS API",
+        "bots_active": len(bots_dict),
+        "time_utc": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@app.get("/ready")
+async def readinesscheck():
+    try:
+        async with AsyncSessionLocal() as session:
+            await session.execute(select(Club.id).limit(1))
+        db_status = "ok"
+    except Exception as exc:
+        db_status = f"error: {type(exc).__name__}"
+
+    return {
+        "status": "ok" if db_status == "ok" else "degraded",
+        "db": db_status,
+        "bots_active": len(bots_dict),
+        "redis": "ok" if redis_client else "unknown",
+    }
 
 
 async def send_backup_to_admin():

@@ -11,9 +11,11 @@ from sqlalchemy import Date
 from loguru import logger
 import asyncio
 import gzip
+import io
 from datetime import timedelta
 from sqlalchemy import select
 from database.constants import DEFAULT_CLUB_SETTINGS
+from pathlib import Path
 
 
 engine = create_async_engine(db_file, echo=False)
@@ -558,7 +560,9 @@ async def purchase_student_freeze(
 
 async def create_db_backup() -> str | None:
     # Добавляем расширение .gz, так как файл будет сжатым архивом
-    backup_path = f"backup_{datetime.now().strftime('%Y-%m-%d')}.sql.gz"
+    backup_dir = Path(".")
+    backup_name = f"backup_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.sql.gz"
+    backup_path = backup_dir / backup_name
     db_password = os.getenv("DB_PASSWORD")
     if not db_password:
         logger.error("❌ DB_PASSWORD не задан, резервная копия отменена")
@@ -576,15 +580,60 @@ async def create_db_backup() -> str | None:
             error_msg = stderr.decode().strip()
             logger.error(f"❌ Ошибка внутри pg_dump: {error_msg}")
             # Если файл успел создаться пустым, удаляем его
-            if os.path.exists(backup_path):
-                os.remove(backup_path)
+            if backup_path.exists():
+                backup_path.unlink()
             return None
 
         with gzip.open(backup_path, "wb") as backup_file:
             backup_file.write(stdout)
         logger.info(f"📦 Бэкап базы данных успешно создан: {backup_path}")
-        return backup_path
+        await prune_old_backups(keep_last=14)
+        return str(backup_path)
 
     except Exception as e:
         logger.error(f"❌ Критическая ошибка при создании бэкапа: {e}")
         return None
+
+
+async def prune_old_backups(keep_last: int = 14) -> int:
+    """
+    Удаляет старые локальные бэкапы, оставляя только последние keep_last файлов.
+    Не трогает успешную текущую копию и не влияет на отправку администратору.
+    """
+    try:
+        backup_files = sorted(
+            Path(".").glob("backup_*.sql.gz"),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+        stale_files = backup_files[keep_last:]
+        removed = 0
+        for file_path in stale_files:
+            try:
+                file_path.unlink()
+                removed += 1
+            except Exception as exc:
+                logger.warning(f"⚠️ Не удалось удалить старый бэкап {file_path}: {exc}")
+        if removed:
+            logger.info(f"🧹 Удалено старых бэкапов: {removed}")
+        return removed
+    except Exception as e:
+        logger.error(f"❌ Ошибка при очистке старых бэкапов: {e}")
+        return 0
+
+
+def validate_backup_archive(backup_path: str | Path) -> bool:
+    """
+    Безопасная проверка архива перед тестовым восстановлением.
+    Проверяет, что файл читается как gzip и похож на SQL-dump PostgreSQL.
+    """
+    try:
+        path = Path(backup_path)
+        if not path.exists() or path.stat().st_size == 0:
+            return False
+        with gzip.open(path, "rb") as fh:
+            head = fh.read(256)
+        return b"PostgreSQL database dump" in head or head.startswith(b"--")
+    except Exception as exc:
+        logger.error(f"❌ Ошибка проверки backup-архива {backup_path}: {exc}")
+        return False

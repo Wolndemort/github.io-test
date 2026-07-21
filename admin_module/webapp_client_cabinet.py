@@ -16,6 +16,7 @@ from admin_module.schemas import (
 from admin_module.webapp_verify import verify_telegram_data
 from config import PROXY_URL
 from database.db import Club, PaymentOrder, Student, Subscription, User, VisitLog, get_session, process_student_freeze
+from services.audit import audit_event
 from services.yookassa_client import YooKassaClient
 
 
@@ -26,7 +27,19 @@ def _auth_gate_html(target: str, **params):
 const tg=window.Telegram.WebApp; tg.ready();
 if (!tg.initData) document.body.innerText='Откройте приложение из Telegram';
 else location.replace(location.pathname+'?{qs}&init_data='+encodeURIComponent(tg.initData));
-</script>""", status_code=401)
+    </script>""", status_code=401)
+
+
+def _webapp_loading_config(club) -> dict:
+    settings = (club.club_settings or {}) if club else {}
+    ui = settings.get("ui", {}) if isinstance(settings.get("ui", {}), dict) else {}
+    loading = ui.get("loading", {}) if isinstance(ui.get("loading", {}), dict) else {}
+    return {
+        "enabled": bool(loading.get("enabled", False)),
+        "duration_ms": max(300, min(10000, int(loading.get("duration_ms", 1200)))),
+        "message": str(loading.get("message", "Загружаем приложение…")),
+        "logo_url": ui.get("logo_url", ""),
+    }
 
 
 @router.get("/webapp/biometric-pass", response_class=HTMLResponse)
@@ -65,13 +78,39 @@ async def get_client_cabinet_page(request, club_id: int, init_data: str | None =
     if not user or user.club_id != club_id:
         raise HTTPException(status_code=403, detail="Пользователь не привязан к клубу")
     settings = (club.club_settings or {}) if club else {}
-    ui = settings.get("ui", {}) if isinstance(settings.get("ui", {}), dict) else {}
-    loading = ui.get("loading", {}) if isinstance(ui.get("loading", {}), dict) else {}
     students = (await db.execute(select(Student).where(Student.parent_id == user_id, Student.club_id == club_id).order_by(Student.name))).scalars().all()
     active_students = sum(1 for s in students if not s.is_frozen and s.expire_date and s.expire_date > datetime.now())
     frozen_students = sum(1 for s in students if s.is_frozen)
     expired_students = sum(1 for s in students if not s.is_frozen and (not s.expire_date or s.expire_date <= datetime.now()))
-    return templates.TemplateResponse("client_cabinet.html", {"request": request, "club": club, "club_id": club_id, "user_id": user_id, "club_name": club.name if club else "", "logo_url": ui.get("logo_url", ""), "students": students, "user_name": user.full_name or tg_user.get("first_name", ""), "now": datetime.now(), "summary": {"total": len(students), "active": active_students, "frozen": frozen_students, "expired": expired_students, "free_freeze_available": any((s.can_freeze or 0) > 0 for s in students)}, "loading": {"enabled": bool(loading.get("enabled", False)), "duration_ms": max(300, min(10000, int(loading.get("duration_ms", 1200)))), "message": str(loading.get("message", "Загружаем приложение…"))}, "freeze_price_per_day": settings.get("limits", {}).get("freeze_price_per_day", 0)})
+    audit_event("webapp_cabinet_opened", club_id=club_id, user_id=user_id, students=len(students))
+    loading = _webapp_loading_config(club)
+    return templates.TemplateResponse(
+        "client_cabinet.html",
+        {
+            "request": request,
+            "club": club,
+            "club_id": club_id,
+            "user_id": user_id,
+            "club_name": club.name if club else "",
+            "logo_url": loading["logo_url"],
+            "students": students,
+            "user_name": user.full_name or tg_user.get("first_name", ""),
+            "now": datetime.now(),
+            "summary": {
+                "total": len(students),
+                "active": active_students,
+                "frozen": frozen_students,
+                "expired": expired_students,
+                "free_freeze_available": any((s.can_freeze or 0) > 0 for s in students),
+            },
+            "loading": {
+                "enabled": loading["enabled"],
+                "duration_ms": loading["duration_ms"],
+                "message": loading["message"],
+            },
+            "freeze_price_per_day": settings.get("limits", {}).get("freeze_price_per_day", 0),
+        },
+    )
 
 
 @router.get("/webapp/client-cabinet/freeze", response_class=HTMLResponse)
@@ -189,6 +228,7 @@ async def webapp_buy_subscription_submit(payload: WebAppBuySubscriptionPayload, 
     payment_data = await YooKassaClient(shop_id=shop_id, secret_key=secret_key, proxy_url=PROXY_URL).init_payment(order_id=order_id, amount_kopecks=amount_kopecks, user_id=user_id, bot_username=club.bot_token)
     if not payment_data.get("Success"):
         raise HTTPException(status_code=400, detail=payment_data.get("Message", "Ошибка создания платежа"))
+    audit_event("webapp_subscription_checkout_created", club_id=club.id, user_id=user_id, student_id=student.id, amount_kopecks=amount_kopecks, sport_type=payload.sport_type, tariff_idx=payload.tariff_idx)
     return {"ok": True, "payment_url": payment_data["PaymentURL"]}
 
 
@@ -230,6 +270,7 @@ async def webapp_bind_phone_submit(payload: WebAppBindPhonePayload, db: AsyncSes
         student.parent_id = user_id
         db.add(student)
     await db.commit()
+    audit_event("webapp_phone_bound", club_id=club.id, user_id=user_id, students=[s.id for s in students], phone_tail=clean_phone_10[-4:])
     return {"ok": True, "message": f"Привязаны атлеты: {', '.join(s.name for s in students)}"}
 
 
@@ -275,4 +316,5 @@ async def webapp_buy_freeze_submit(payload: WebAppActionPayload, days: int, db: 
     payment_data = await YooKassaClient(shop_id=shop_id, secret_key=secret_key, proxy_url=PROXY_URL).init_payment(order_id=order_id, amount_kopecks=amount_kopecks, user_id=int(tg_user.get("id", 0)), bot_username=club.bot_token)
     if not payment_data.get("Success"):
         raise HTTPException(status_code=400, detail=payment_data.get("Message", "Ошибка создания платежа"))
+    audit_event("webapp_freeze_checkout_created", club_id=club.id, user_id=int(tg_user.get("id", 0)), student_id=student.id, days=days, amount_kopecks=amount_kopecks)
     return {"ok": True, "payment_url": payment_data["PaymentURL"]}

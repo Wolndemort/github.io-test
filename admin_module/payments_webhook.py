@@ -10,6 +10,7 @@ from admin_module.router_base import router
 from config import PROXY_URL
 from database.db import PaymentOrder, Student, Subscription, Club, add_abon, purchase_student_freeze, get_session
 from loguru import logger
+from services.audit import audit_event
 from services.yookassa_client import YooKassaClient
 
 
@@ -88,4 +89,5 @@ async def yookassa_webhook(request: Request, session: AsyncSession = Depends(get
         else:
             abon_result = await add_abon(student_id=order.student_id, lessons_count=order.lesson_count, session=session, club_id=order.club_id, club_settings=club_settings, days_to_add=order.days_to_add, discipline=order.discipline)
         await session.commit()
+        audit_event("yookassa_webhook_confirmed", club_id=order.club_id, order_id=order.id, student_id=order.student_id, amount_kopecks=order.amount_kopecks, order_type=order.type)
     return {"status": "ok"}
