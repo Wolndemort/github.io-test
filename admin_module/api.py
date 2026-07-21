@@ -9,6 +9,8 @@ from config import PROXY_URL
 from fastapi import Query
 from services.analytics import generate_students_excel, calculate_admin_dashboard
 import hmac
+import os
+import time
 from datetime import datetime, timedelta, timezone
 from database.db import PaymentOrder, Subscription
 from database.db import add_abon, purchase_student_freeze
@@ -733,6 +735,11 @@ def verify_telegram_data(init_data: str, bot_token: str) -> dict | None:
         secret_key = hmac.new(b"WebAppData", bot_token.encode(), hashlib.sha256).digest()
         calculated_hash = hmac.new(secret_key, data_check_string.encode(), hashlib.sha256).hexdigest()
         if hmac.compare_digest(calculated_hash, tg_hash):
+            auth_date = int(parsed_data.get("auth_date", "0"))
+            max_age = int(os.getenv("TELEGRAM_INIT_DATA_MAX_AGE", "86400"))
+            now = int(time.time())
+            if auth_date <= 0 or auth_date > now + 300 or now - auth_date > max_age:
+                return None
             return json.loads(parsed_data.get("user", "{}"))
         return None
     except Exception:

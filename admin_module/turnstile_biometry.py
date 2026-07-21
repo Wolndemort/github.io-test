@@ -8,13 +8,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from admin_module.router_base import router
 from admin_module.schemas import BiometricCheckIn, BiometricEnable
 from admin_module.webapp_verify import verify_telegram_data
+from admin_module.security import get_api_key
 from database.db import Club, Student, User, get_session
 from handlers.skud import trigger_dingtian_turnstile
 from services.gate_control import process_athlete_gate_pass
 
 
 @router.post("/open-turnstile")
-async def open_turnstile(payload: dict, db: AsyncSession = Depends(get_session), _: str = Depends(lambda: True)):
+async def open_turnstile(payload: dict, db: AsyncSession = Depends(get_session), _: str = Depends(get_api_key)):
     student_id = payload.get("student_id")
     student_club = await db.execute(select(Student.club_id).where(Student.id == student_id))
     club_id = student_club.scalar()

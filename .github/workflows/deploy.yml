@@ -62,6 +62,18 @@ jobs:
             docker compose down
             docker compose up -d --build
             docker image prune -f
+            for i in $(seq 1 12); do
+              if curl --fail --silent --show-error http://127.0.0.1:8000/health >/dev/null && \
+                 curl --fail --silent --show-error http://127.0.0.1:8000/ready >/dev/null; then
+                break
+              fi
+              if [ "$i" -eq 12 ]; then
+                docker compose logs --tail=200 gym-api
+                exit 1
+              fi
+              sleep 5
+            done
+            SMOKE_BASE_URL=http://127.0.0.1:8000 docker compose exec -T gym-api python scripts/smoke_check.py
 
       - name: Send Telegram Notification on Failure
         if: failure()

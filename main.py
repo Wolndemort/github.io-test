@@ -192,12 +192,15 @@ async def readinesscheck():
     except Exception as exc:
         db_status = f"error: {type(exc).__name__}"
 
-    return {
+    payload = {
         "status": "ok" if db_status == "ok" else "degraded",
         "db": db_status,
         "bots_active": len(bots_dict),
         "redis": "ok" if redis_client else "unknown",
     }
+    if db_status != "ok":
+        return JSONResponse(payload, status_code=503)
+    return payload
 
 
 async def send_backup_to_admin():

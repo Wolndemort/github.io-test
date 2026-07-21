@@ -17,7 +17,9 @@ async def rate_limit(redis: Redis, key: str, limit: int, window_sec: int) -> boo
         return current <= limit
     except Exception as exc:
         logger.warning(f"Rate limit check failed for {key}: {exc}")
-        return True
+        # Платёжные и binding-операции должны быть fail-closed: при падении
+        # Redis лучше временно отказать, чем пропустить спам/дубли.
+        return False
 
 
 async def audit_block(event: str, reason: str, **fields):
