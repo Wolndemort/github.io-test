@@ -65,7 +65,7 @@ async def get_biometric_page(
 
 
 @router.get("/webapp/client-cabinet", response_class=HTMLResponse)
-async def get_client_cabinet_page(request, club_id: int, init_data: str | None = Query(default=None), db: AsyncSession = Depends(get_session)):
+async def get_client_cabinet_page(request: Request, club_id: int, init_data: str | None = Query(default=None), db: AsyncSession = Depends(get_session)):
     if not init_data:
         return _auth_gate_html("webapp/client-cabinet", club_id=club_id)
     club = await db.get(Club, club_id)
@@ -115,7 +115,7 @@ async def get_client_cabinet_page(request, club_id: int, init_data: str | None =
 
 
 @router.get("/webapp/client-cabinet/freeze", response_class=HTMLResponse)
-async def webapp_freeze_page(request, club_id: int, student_id: int, init_data: str | None = Query(default=None), db: AsyncSession = Depends(get_session)):
+async def webapp_freeze_page(request: Request, club_id: int, student_id: int, init_data: str | None = Query(default=None), db: AsyncSession = Depends(get_session)):
     if not init_data:
         return _auth_gate_html("webapp/client-cabinet/freeze", club_id=club_id, student_id=student_id)
     club = await db.get(Club, club_id)
@@ -134,7 +134,7 @@ async def webapp_freeze_page(request, club_id: int, student_id: int, init_data: 
 
 
 @router.get("/webapp/client-cabinet/student", response_class=HTMLResponse)
-async def webapp_student_page(request, club_id: int, student_id: int, init_data: str | None = Query(default=None), db: AsyncSession = Depends(get_session)):
+async def webapp_student_page(request: Request, club_id: int, student_id: int, init_data: str | None = Query(default=None), db: AsyncSession = Depends(get_session)):
     if not init_data:
         return _auth_gate_html("webapp/client-cabinet/student", club_id=club_id, student_id=student_id)
     club = await db.get(Club, club_id)
@@ -152,7 +152,7 @@ async def webapp_student_page(request, club_id: int, student_id: int, init_data:
 
 
 @router.get("/webapp/client-cabinet/history", response_class=HTMLResponse)
-async def webapp_history_page(request, club_id: int, student_id: int | None = None, init_data: str | None = Query(default=None), db: AsyncSession = Depends(get_session)):
+async def webapp_history_page(request: Request, club_id: int, student_id: int | None = None, init_data: str | None = Query(default=None), db: AsyncSession = Depends(get_session)):
     if not init_data:
         return _auth_gate_html("webapp/client-cabinet/history", club_id=club_id, student_id=student_id or "")
     club = await db.get(Club, club_id)
@@ -174,7 +174,7 @@ async def webapp_history_page(request, club_id: int, student_id: int | None = No
 
 
 @router.get("/webapp/client-cabinet/buy-subscription", response_class=HTMLResponse)
-async def webapp_buy_subscription_page(request, club_id: int, init_data: str | None = Query(default=None), db: AsyncSession = Depends(get_session)):
+async def webapp_buy_subscription_page(request: Request, club_id: int, init_data: str | None = Query(default=None), db: AsyncSession = Depends(get_session)):
     if not init_data:
         return _auth_gate_html("webapp/client-cabinet/buy-subscription", club_id=club_id)
     club = await db.get(Club, club_id)
@@ -252,7 +252,7 @@ async def webapp_buy_subscription_submit(payload: WebAppBuySubscriptionPayload, 
 
 
 @router.get("/webapp/client-cabinet/auth", response_class=HTMLResponse)
-async def webapp_auth_help_page(request, club_id: int, init_data: str | None = Query(default=None), db: AsyncSession = Depends(get_session)):
+async def webapp_auth_help_page(request: Request, club_id: int, init_data: str | None = Query(default=None), db: AsyncSession = Depends(get_session)):
     if not init_data:
         return _auth_gate_html("webapp/client-cabinet/auth", club_id=club_id)
     club = await db.get(Club, club_id)
@@ -305,7 +305,7 @@ async def webapp_bind_phone_submit(payload: WebAppBindPhonePayload, request: Req
 
 
 @router.get("/webapp/client-cabinet/buy-freeze", response_class=HTMLResponse)
-async def webapp_buy_freeze_page(request, club_id: int, student_id: int, init_data: str | None = Query(default=None), db: AsyncSession = Depends(get_session)):
+async def webapp_buy_freeze_page(request: Request, club_id: int, student_id: int, init_data: str | None = Query(default=None), db: AsyncSession = Depends(get_session)):
     if not init_data:
         return _auth_gate_html("webapp/client-cabinet/buy-freeze", club_id=club_id, student_id=student_id)
     club = await db.get(Club, club_id)
