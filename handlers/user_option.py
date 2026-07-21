@@ -7,7 +7,9 @@ from services.gate_control import process_athlete_gate_pass
 from aiogram.utils.keyboard import ReplyKeyboardBuilder
 from aiogram.filters import Command
 from sqlalchemy.ext.asyncio import AsyncSession
+from redis.asyncio import Redis
 from database.db import Student, process_student_freeze, Club, User, VisitLog
+from services.abuse_guard import rate_limit, audit_block
 from config import secret_key
 from sqlalchemy import select
 from sqlalchemy import func
@@ -479,7 +481,11 @@ async def choose_student_for_freeze(
 
 @router.callback_query(F.data == "buy_freeze")
 async def choose_student_for_paid_freeze(callback: types.CallbackQuery, session: AsyncSession, club: Club,
-                                         club_settings: dict, state: FSMContext):
+                                          club_settings: dict, state: FSMContext, redis: Redis):
+    ok = await rate_limit(redis, f"rl:buy_freeze_menu:{club.id}:{callback.from_user.id}", 5, 60)
+    if not ok:
+        await audit_block("ui_rate_limited", "buy_freeze_menu", club_id=club.id, user_id=callback.from_user.id)
+        return await callback.answer("Слишком часто. Попробуйте через минуту.", show_alert=True)
     price = club_settings.get("limits", {}).get("freeze_price_per_day", 0)
     if price <= 0:
         return await callback.answer("Покупка заморозки сейчас недоступна.", show_alert=True)
@@ -504,7 +510,11 @@ async def choose_student_for_paid_freeze(callback: types.CallbackQuery, session:
 
 
 @router.callback_query(F.data.startswith("paid_freeze_student_"))
-async def start_paid_freeze_days(callback: types.CallbackQuery, state: FSMContext, club_settings: dict):
+async def start_paid_freeze_days(callback: types.CallbackQuery, state: FSMContext, club_settings: dict, redis: Redis):
+    ok = await rate_limit(redis, f"rl:buy_freeze_pick:{callback.from_user.id}", 5, 60)
+    if not ok:
+        await audit_block("ui_rate_limited", "buy_freeze_pick", user_id=callback.from_user.id)
+        return await callback.answer("Слишком часто. Попробуйте позже.", show_alert=True)
     student_id = int(callback.data.rsplit("_", 1)[1])
     price = club_settings.get("limits", {}).get("freeze_price_per_day", 0)
     await state.update_data(student_id=student_id, payment_kind="FREEZE", freeze_price_per_day=price)

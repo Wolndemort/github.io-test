@@ -36,6 +36,8 @@ async def yookassa_webhook(request: Request, session: AsyncSession = Depends(get
     order = order_result.scalar_one_or_none()
     if not order:
         return {"status": "ignored"}
+    if order.status == "CONFIRMED":
+        return {"status": "ok"}
 
     club_result = await session.execute(select(Club).where(Club.id == order.club_id))
     payment_club = club_result.scalar_one_or_none()
@@ -70,7 +72,11 @@ async def yookassa_webhook(request: Request, session: AsyncSession = Depends(get
         saved_card_flag = payment_method.get("saved", False)
 
         if order.type == "FIRST" and payment_method_id and saved_card_flag:
-            sub_result = await session.execute(select(Subscription).where(Subscription.student_id == order.student_id, Subscription.club_id == order.club_id).with_for_update())
+            sub_result = await session.execute(
+                select(Subscription)
+                .where(Subscription.student_id == order.student_id, Subscription.club_id == order.club_id)
+                .with_for_update()
+            )
             subscription = sub_result.scalar_one_or_none()
             next_charge_naive = (datetime.now(timezone.utc) + timedelta(days=30)).replace(tzinfo=None)
             if subscription:

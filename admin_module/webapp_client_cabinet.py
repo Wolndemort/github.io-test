@@ -202,7 +202,7 @@ async def webapp_buy_subscription_submit(payload: WebAppBuySubscriptionPayload, 
     user = await db.get(User, user_id)
     if not user or user.club_id != payload.club_id:
         raise HTTPException(status_code=403, detail="Пользователь не привязан к клубу")
-    student = await db.get(Student, payload.student_id)
+    student = await db.get(Student, payload.student_id, with_for_update=True)
     if not student or student.club_id != payload.club_id or student.parent_id != user_id:
         raise HTTPException(status_code=403, detail="Атлет не найден")
     discipline_cfg = (club.club_settings or {}).get("disciplines", {}).get(payload.sport_type)
@@ -221,6 +221,18 @@ async def webapp_buy_subscription_submit(payload: WebAppBuySubscriptionPayload, 
     secret_key = pay_settings.get("yookassa_secret_key")
     if not shop_id or not secret_key:
         raise HTTPException(status_code=400, detail="ЮKassa не настроена")
+    active_pending = (
+        await db.execute(
+            select(PaymentOrder.id).where(
+                PaymentOrder.club_id == club.id,
+                PaymentOrder.student_id == student.id,
+                PaymentOrder.type == "FIRST",
+                PaymentOrder.status == "NEW",
+            ).limit(1)
+        )
+    ).first()
+    if active_pending:
+        raise HTTPException(status_code=409, detail="Для этого атлета уже создается платеж")
     order_id = f"WEB_{uuid.uuid4().hex[:12].upper()}"
     order = PaymentOrder(id=order_id, user_id=user_id, student_id=student.id, club_id=club.id, amount_kopecks=amount_kopecks, lesson_count=count, days_to_add=days, discipline=payload.sport_type, status="NEW", type="FIRST")
     db.add(order)
@@ -256,11 +268,17 @@ async def webapp_bind_phone_submit(payload: WebAppBindPhonePayload, db: AsyncSes
     if len(raw_phone) < 10:
         raise HTTPException(status_code=400, detail="Введите номер телефона")
     clean_phone_10 = raw_phone[-10:]
-    students = (await db.execute(select(Student).where(Student.parent_phone.contains(clean_phone_10), Student.club_id == club.id))).scalars().all()
+    students = (
+        await db.execute(
+            select(Student)
+            .where(Student.parent_phone.contains(clean_phone_10), Student.club_id == club.id)
+            .with_for_update()
+        )
+    ).scalars().all()
     if not students:
         raise HTTPException(status_code=404, detail="Атлеты с этим номером не найдены")
     user_id = int(tg_user.get("id", 0))
-    user = await db.get(User, user_id)
+    user = await db.get(User, user_id, with_for_update=True)
     if not user:
         user = User(user_id=user_id, club_id=club.id, full_name=tg_user.get("first_name") or "", is_accepted=False, is_biometric_enabled=False)
         db.add(user)
@@ -299,7 +317,7 @@ async def webapp_buy_freeze_submit(payload: WebAppActionPayload, days: int, db: 
     tg_user = verify_telegram_data(payload.init_data, club.bot_token)
     if not tg_user:
         raise HTTPException(status_code=403, detail="Доступ запрещен")
-    student = await db.get(Student, payload.student_id)
+    student = await db.get(Student, payload.student_id, with_for_update=True)
     if not student or student.club_id != payload.club_id or student.parent_id != int(tg_user.get("id", 0)):
         raise HTTPException(status_code=403, detail="Атлет не найден")
     price_per_day = float((club.club_settings or {}).get("limits", {}).get("freeze_price_per_day", 0))
@@ -312,6 +330,18 @@ async def webapp_buy_freeze_submit(payload: WebAppActionPayload, days: int, db: 
     secret_key = getattr(club, "yookassa_secret_key", None) or (club.club_settings or {}).get("payments", {}).get("yookassa_secret_key")
     if not shop_id or not secret_key:
         raise HTTPException(status_code=400, detail="ЮKassa не настроена")
+    active_pending = (
+        await db.execute(
+            select(PaymentOrder.id).where(
+                PaymentOrder.club_id == club.id,
+                PaymentOrder.student_id == student.id,
+                PaymentOrder.type.like("FREEZE%"),
+                PaymentOrder.status == "NEW",
+            ).limit(1)
+        )
+    ).first()
+    if active_pending:
+        raise HTTPException(status_code=409, detail="Для этой заморозки уже создается платеж")
     order_id = f"WEBFZ-{club.id}-{student.id}-{uuid.uuid4().hex[:12]}"
     payment_data = await YooKassaClient(shop_id=shop_id, secret_key=secret_key, proxy_url=PROXY_URL).init_payment(order_id=order_id, amount_kopecks=amount_kopecks, user_id=int(tg_user.get("id", 0)), bot_username=club.bot_token)
     if not payment_data.get("Success"):
