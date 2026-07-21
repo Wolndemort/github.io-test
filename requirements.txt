@@ -26,6 +26,7 @@ python-multipart>=0.0.9
 cryptography>=42.0.0
 httpx
 openpyxl>=3.1.0
+sentry-sdk[fastapi]>=2.20.0
 
 
 

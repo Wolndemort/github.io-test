@@ -11,6 +11,10 @@ from datetime import timedelta, time, timezone
 import logging as logging
 from database.db import Subscription, PaymentOrder, User
 import sys
+try:
+    import sentry_sdk
+except ImportError:  # optional locally; requirements installs it in production
+    sentry_sdk = None
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 from contextlib import asynccontextmanager
 from fastapi import Request
@@ -39,6 +43,33 @@ logger.remove()
 logger.add(sys.stderr, level='INFO')
 logger.add('logs/bot_log.log', rotation='1 MB', retention='10 days', compression="zip", enqueue=True)
 logger = logging.getLogger("uvicorn.error")
+
+
+def _scrub_sentry_event(event, hint):
+    """Do not send Telegram initData or credentials to Sentry."""
+    request = event.get("request")
+    if isinstance(request, dict):
+        if request.get("url"):
+            request["url"] = str(request["url"]).split("?", 1)[0]
+        request.pop("query_string", None)
+        headers = request.get("headers")
+        if isinstance(headers, dict):
+            for name in list(headers):
+                if str(name).lower() in {"authorization", "cookie", "x-api-key"}:
+                    headers[name] = "[Filtered]"
+    return event
+
+
+SENTRY_DSN = os.getenv("SENTRY_DSN")
+if SENTRY_DSN and sentry_sdk is not None:
+    sentry_sdk.init(
+        dsn=SENTRY_DSN,
+        environment=os.getenv("SENTRY_ENVIRONMENT", "production"),
+        release=os.getenv("SENTRY_RELEASE"),
+        send_default_pii=False,
+        traces_sample_rate=float(os.getenv("SENTRY_TRACES_SAMPLE_RATE", "0.0")),
+        before_send=_scrub_sentry_event,
+    )
 
 
 # Инициализация Redis и FSM
