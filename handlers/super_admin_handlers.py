@@ -315,7 +315,7 @@ async def handle_list_clubs(
 ):
     # Проверка прав (если список клубов только для админов)
     if not is_super_admin:
-        await callback.answer("У вас нет прав для просмотра всех клубов.", show_alert=True)
+        return await callback.answer("У вас нет прав для просмотра всех клубов.", show_alert=True)
     await callback.answer()
 
     # Получаем все клубы из базы
