@@ -122,15 +122,9 @@ async def process_athlete_gate_pass(
         source="gate" if not is_inside_session else "repeat"
     ))
 
-    # 7. ФИКСИРУЕМ ИЗМЕНЕНИЯ В БАЗЕ ДО ЗАПРОСА К ЖЕЛЕЗУ
-    try:
-        await db.commit()
-    except Exception as db_err:
-        logger.error(f"Ошибка коммита СКУД сервиса: {db_err}")
-        await db.rollback()
-        return {"success": False, "message": "Ошибка сохранения данных визита."}
-
-    # 8. ИНТЕГРАЦИЯ ТУРНИКЕТА DINGTIAN
+    # 7. СНАЧАЛА ПОДТВЕРЖДАЕМ ОТКРЫТИЕ ЖЕЛЕЗА, НЕ МЕНЯЯ ЛОГИКУ СЕССИИ.
+    # Если реле отказало, откатываем last_visit/VisitLog и позволяем повторить
+    # попытку. При успешном открытии ниже будет тот же commit, что и раньше.
     relay_config = dict(club_settings.get("turnstile", {}) or {})
     turnstile_status = "ℹ️ СКУД отключен"
     if relay_config.get("enabled", False):
@@ -143,11 +137,22 @@ async def process_athlete_gate_pass(
             from handlers.skud import trigger_dingtian_turnstile  # Сверь путь импорта!
             is_opened = await trigger_dingtian_turnstile(relay_config)
             if not is_opened:
+                await db.rollback()
                 return {"success": False, "message": "Реле отклонило команду на открытие."}
             turnstile_status = "✅ Турникет открыт"
         except Exception as sku_err:
+            await db.rollback()
             logger.warning(f"Микросбой сети турникета: {sku_err}. Проход разрешен.")
-            turnstile_status = "⚠️ Микросбой сети железа. Проход разрешен."
+            return {"success": False, "message": "Ошибка связи с турникетом. Попробуйте ещё раз."}
+
+    # 8. После успешного открытия фиксируем ровно те же изменения сессии,
+    # что и раньше. При выключенном СКУД commit выполняется сразу.
+    try:
+        await db.commit()
+    except Exception as db_err:
+        logger.error(f"Ошибка коммита СКУД сервиса: {db_err}")
+        await db.rollback()
+        return {"success": False, "message": "Ошибка сохранения данных визита."}
 
     # Готовим дополнительные флаги для вывода красивых уведомлений в ТГ
     return {

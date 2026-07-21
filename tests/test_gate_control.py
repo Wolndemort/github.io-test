@@ -133,3 +133,25 @@ async def test_gate_early_unfreeze_legacy_freeze_uses_club_step():
 
     assert result["success"] is True
     assert result["returned_early_days"] == 7
+
+
+@pytest.mark.asyncio
+async def test_gate_rolls_back_session_when_turnstile_rejects():
+    student = make_student()
+    db = make_db(student, SimpleNamespace(id=10, name="Клуб"))
+    with pytest.MonkeyPatch.context() as mp:
+        async def reject_turnstile(config):
+            return False
+
+        mp.setattr("handlers.skud.trigger_dingtian_turnstile", reject_turnstile)
+        result = await process_athlete_gate_pass(
+            1,
+            db,
+            {"turnstile": {"enabled": True, "base_url": "http://gate"}},
+            expected_club_id=10,
+        )
+
+    assert result["success"] is False
+    assert "Реле" in result["message"]
+    db.rollback.assert_awaited_once()
+    db.commit.assert_not_awaited()

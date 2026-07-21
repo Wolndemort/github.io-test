@@ -1,4 +1,5 @@
 import pytest
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
 from handlers.user_option import parse_qr_scan
 
@@ -33,7 +34,7 @@ async def test_parse_qr_scan_new_session_success(mock_gate_service, mock_gen_sig
     club_settings = {"limits": {"session_timeout_minutes": 150}}
 
     message = AsyncMock()
-    message.web_app_data.data = "student:1:salt:valid_sig"
+    message.web_app_data.data = f"student:1:{datetime.now(timezone.utc):%Y-%m-%d-%H}:valid_sig"
     message.answer = AsyncMock()
     message.bot.send_message = AsyncMock()
 
@@ -81,7 +82,7 @@ async def test_parse_qr_scan_inside_session_success(mock_gate_service, mock_gen_
     club_settings = {"limits": {"session_timeout_minutes": 150}}
 
     message = AsyncMock()
-    message.web_app_data.data = "student:1:salt:valid_sig"
+    message.web_app_data.data = f"student:1:{datetime.now(timezone.utc):%Y-%m-%d-%H}:valid_sig"
     message.answer = AsyncMock()
     message.bot.send_message = AsyncMock()
 
@@ -106,10 +107,27 @@ async def test_parse_qr_scan_rejects_invalid_signature(mock_gate_service, _mock_
     club = AsyncMock()
     club.id = 1
     message = AsyncMock()
-    message.web_app_data.data = "student:1:salt:forged_sig"
+    message.web_app_data.data = f"student:1:{datetime.now(timezone.utc):%Y-%m-%d-%H}:forged_sig"
     message.answer = AsyncMock()
 
     await parse_qr_scan(message, session, club, {})
 
     mock_gate_service.assert_not_awaited()
     assert "Недействительный QR" in message.answer.await_args.args[0]
+
+
+@pytest.mark.asyncio
+@patch("handlers.user_option.generate_signature", return_value="expected_sig")
+@patch("handlers.user_option.process_athlete_gate_pass")
+async def test_parse_qr_scan_rejects_expired_qr(mock_gate_service, _mock_gen_sig):
+    session = AsyncMock()
+    club = AsyncMock()
+    club.id = 1
+    message = AsyncMock()
+    message.web_app_data.data = "student:1:2020-01-01-00:expected_sig"
+    message.answer = AsyncMock()
+
+    await parse_qr_scan(message, session, club, {})
+
+    mock_gate_service.assert_not_awaited()
+    assert "истёк" in message.answer.await_args.args[0]

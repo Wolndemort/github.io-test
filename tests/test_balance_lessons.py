@@ -1,4 +1,5 @@
 import pytest
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
 from handlers.user_option import parse_qr_scan
 
@@ -21,7 +22,7 @@ async def test_parse_qr_scan_no_lessons(mock_gate_service, mock_gen_sig):
     club_settings = {"limits": {"session_timeout_minutes": 150}}
 
     message = AsyncMock()
-    message.web_app_data.data = "student:1:salt:valid_sig"
+    message.web_app_data.data = f"student:1:{datetime.now(timezone.utc):%Y-%m-%d-%H}:valid_sig"
     message.answer = AsyncMock()
 
     # Запуск
@@ -60,7 +61,7 @@ async def test_parse_qr_scan_unlimited_success(mock_gate_service, mock_gen_sig):
     club_settings = {"limits": {"session_timeout_minutes": 150}}
 
     message = AsyncMock()
-    message.web_app_data.data = "student:1:salt:valid_sig"
+    message.web_app_data.data = f"student:1:{datetime.now(timezone.utc):%Y-%m-%d-%H}:valid_sig"
     message.answer = AsyncMock()
     message.bot.send_message = AsyncMock()
 

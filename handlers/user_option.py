@@ -675,6 +675,13 @@ async def _handle_qr_scan_data(
     # Подпись нельзя игнорировать: иначе любой пользователь может подставить ID
     # любого атлета вручную. Сравнение через compare_digest защищает от timing-атак.
     time_salt, provided_signature = parts[2], parts[3]
+    try:
+        qr_time = datetime.strptime(time_salt, "%Y-%m-%d-%H").replace(tzinfo=timezone.utc)
+        qr_age = (datetime.now(timezone.utc) - qr_time).total_seconds()
+        if qr_age < -300 or qr_age > 2 * 60 * 60:
+            return await message.answer("❌ Срок действия QR-пропуска истёк. Сформируйте новый QR.")
+    except ValueError:
+        return await message.answer("❌ Ошибка: срок действия QR невозможно проверить")
     expected_signature = generate_signature(scanned_id, time_salt)
     if not hmac.compare_digest(provided_signature, expected_signature):
         return await message.answer("❌ Ошибка: Недействительный QR-пропуск")
@@ -751,7 +758,7 @@ async def handle_gen_qr(
         return await callback.answer("❌ Ошибка: атлет не найден!", show_alert=True)
 
     # 2. Генерация данных (твоя логика с HMAC)
-    now = datetime.now()
+    now = datetime.now(timezone.utc)
     time_salt = now.strftime('%Y-%m-%d-%H')
     signature = generate_signature(student_id, time_salt)
     qr_data = f"student:{student_id}:{time_salt}:{signature}"
