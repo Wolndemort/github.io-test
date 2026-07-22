@@ -18,6 +18,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import InlineKeyboardButton, BufferedInputFile
 from datetime import timedelta, timezone
 from aiogram import Router, F, types
+from aiogram.exceptions import TelegramBadRequest
 from datetime import datetime
 from loguru import logger
 import hashlib
@@ -1145,15 +1146,19 @@ async def show_discipline_schedule(
             final_schedule_text = "⏳ <i>Расписание на эту неделю пока не заполнено.</i>"
 
     # 4. Выводим итоговый красивый результат пользователю (атлету или родителю)
-    await callback.message.edit_text(
-        text=(
-            f"📅 <b>Расписание секции: {name}</b>\n\n"
-            f"{final_schedule_text}\n"
-            "<i>Используйте меню ниже для записи на занятия:</i>"
-        ),
-        reply_markup=get_section_menu_kb(discipline_code, name),
-        parse_mode="HTML"
-    )
+    try:
+        await callback.message.edit_text(
+            text=(
+                f"📅 <b>Расписание секции: {name}</b>\n\n"
+                f"{final_schedule_text}\n"
+                "<i>Используйте меню ниже для записи на занятия:</i>"
+            ),
+            reply_markup=get_section_menu_kb(discipline_code, name),
+            parse_mode="HTML"
+        )
+    except TelegramBadRequest as exc:
+        if "message is not modified" not in str(exc).lower():
+            raise
 
     await callback.answer()
     
