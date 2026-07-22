@@ -157,6 +157,11 @@ async def admin_settings_menu(callback: types.CallbackQuery, club_settings: dict
         text="🛒 Управление товарами",
         web_app=types.WebAppInfo(url=f"https://{club_id}.speedycrm.ru/webapp/admin-products?club_id={club_id}")
     ))
+    ui = club_settings.get("ui", {})
+    site_mark = "✅" if ui.get("site_enabled", False) else "❌"
+    support_mark = "✅" if ui.get("support_enabled", True) else "❌"
+    builder.row(types.InlineKeyboardButton(text=f"{site_mark} Сайт клуба", callback_data="toggle_site_link"), types.InlineKeyboardButton(text=f"{support_mark} Поддержка", callback_data="toggle_support_link"))
+    builder.row(types.InlineKeyboardButton(text="✏️ Изменить сайт", callback_data="edit_site_url"), types.InlineKeyboardButton(text="✏️ Изменить username", callback_data="edit_support_username"))
 
     # ⚙️ НАША НОВАЯ КНОПКА: Переход в меню изменения сессий СКУД и шага заморозок
     builder.row(types.InlineKeyboardButton(
@@ -920,6 +925,57 @@ async def process_manual_checkin(
     res = await process_athlete_gate_pass(
         student_id, session, club_settings, expected_club_id=club.id
     )
+
+@router.callback_query(F.data == "admin_public_links")
+async def admin_public_links_start(callback: types.CallbackQuery, state: FSMContext, club_settings: dict):
+    ui = club_settings.get("ui", {})
+    await state.set_state(AdminSettingsSG.waiting_for_public_links)
+    await callback.message.answer(
+        "Введите одной строкой через |:\nsite_url | support_username | site_on (1/0) | support_on (1/0)\n\n"
+        f"Текущие: {ui.get('site_url','')} | {ui.get('support_link','')} | {int(ui.get('site_enabled', False))} | {int(ui.get('support_enabled', True))}"
+    )
+    await callback.answer()
+
+@router.callback_query(F.data.in_({"toggle_site_link", "toggle_support_link"}))
+async def toggle_public_link(callback: types.CallbackQuery, club: Club, club_settings: dict, session: AsyncSession, redis: Redis):
+    key = "site_enabled" if callback.data == "toggle_site_link" else "support_enabled"
+    ui = club_settings.setdefault("ui", {}); ui[key] = not ui.get(key, key == "support_enabled")
+    await session.execute(update(Club).where(Club.id == club.id).values(club_settings=club_settings)); await session.commit(); await redis.delete(f"club_config:{callback.bot.token}")
+    await callback.answer("✅ Переключено")
+    await admin_settings_menu(callback, club_settings, club.id)
+
+@router.callback_query(F.data == "edit_site_url")
+async def edit_site_url(callback: types.CallbackQuery, state: FSMContext):
+    await state.set_state(AdminSettingsSG.waiting_for_site_url); await callback.message.answer("Отправьте URL сайта (https://...):"); await callback.answer()
+
+@router.callback_query(F.data == "edit_support_username")
+async def edit_support_username(callback: types.CallbackQuery, state: FSMContext):
+    await state.set_state(AdminSettingsSG.waiting_for_support_username); await callback.message.answer("Отправьте Telegram username поддержки, например @admin:"); await callback.answer()
+
+@router.message(AdminSettingsSG.waiting_for_site_url)
+async def save_site_url(message: types.Message, state: FSMContext, club: Club, club_settings: dict, session: AsyncSession, redis: Redis):
+    value = (message.text or "").strip()
+    if not value.startswith(("https://", "http://")): return await message.answer("URL должен начинаться с https:// или http://")
+    club_settings.setdefault("ui", {})["site_url"] = value
+    await session.execute(update(Club).where(Club.id == club.id).values(club_settings=club_settings)); await session.commit(); await redis.delete(f"club_config:{message.bot.token}"); await state.clear(); await message.answer("✅ Сайт сохранён")
+
+@router.message(AdminSettingsSG.waiting_for_support_username)
+async def save_support_username(message: types.Message, state: FSMContext, club: Club, club_settings: dict, session: AsyncSession, redis: Redis):
+    value = (message.text or "").strip().lstrip("@")
+    if not value or any(ch.isspace() for ch in value): return await message.answer("Введите корректный username Telegram")
+    club_settings.setdefault("ui", {})["support_link"] = value
+    await session.execute(update(Club).where(Club.id == club.id).values(club_settings=club_settings)); await session.commit(); await redis.delete(f"club_config:{message.bot.token}"); await state.clear(); await message.answer("✅ Username поддержки сохранён")
+
+@router.message(AdminSettingsSG.waiting_for_public_links)
+async def admin_public_links_save(message: types.Message, state: FSMContext, club: Club, club_settings: dict, session: AsyncSession, redis: Redis):
+    parts = [x.strip() for x in (message.text or "").split("|")]
+    if len(parts) != 4 or parts[2] not in {"0", "1"} or parts[3] not in {"0", "1"}:
+        return await message.answer("Неверный формат. Нужно: сайт | @поддержка | 1/0 | 1/0")
+    site, support = parts[0], parts[1].lstrip("@")
+    if site and not site.startswith(("https://", "http://")): return await message.answer("Сайт должен начинаться с https:// или http://")
+    club_settings.setdefault("ui", {}).update({"site_url": site, "support_link": support, "site_enabled": parts[2] == "1", "support_enabled": parts[3] == "1"})
+    await session.execute(update(Club).where(Club.id == club.id).values(club_settings=club_settings)); await session.commit(); await redis.delete(f"club_config:{message.bot.token}")
+    await state.clear(); await message.answer("✅ Сайт и поддержка сохранены")
 
     if not res["success"]:
         # Если абонемент кончился или ошибка — красиво выводим админу

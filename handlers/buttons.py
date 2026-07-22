@@ -87,11 +87,13 @@ def get_main_menu_keyboard(club_settings: dict, club_id: int):
     base_url = f"https://{club_id}.speedycrm.ru"
 
     # Кнопка сайта (берем из конфига или ставим заглушку)
-    site_url = ui.get("site_url", "https://aemaykop.ru")
-    builder.button(text="🌐 Наш сайт", url=site_url)
+    site_url = str(ui.get("site_url", "")).strip()
+    if ui.get("site_enabled", False) and site_url.startswith(("https://", "http://")):
+        builder.button(text="🌐 Наш сайт", url=site_url)
 
     # Контакты (можно тоже через конфиг, чтобы у каждого клуба свой саппорт)
-    builder.button(text="📞 Контакты", callback_data="contact")
+    if ui.get("support_enabled", True) and str(ui.get("support_link", "")).strip():
+        builder.button(text="🆘 Поддержка", url=f"https://t.me/{str(ui['support_link']).strip().lstrip('@')}")
 
     builder.row(types.InlineKeyboardButton(
         text="🖥 Кабинет клиента",

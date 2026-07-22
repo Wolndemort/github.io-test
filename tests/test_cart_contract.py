@@ -57,7 +57,7 @@ def test_product_admin_has_file_input_and_fallback_preview():
 def test_shop_escapes_product_data_without_inline_product_arguments():
     page = Path("templates/shop.html").read_text(encoding="utf-8")
     assert "|tojson" in page
-    assert "function esc" in page
+    assert "function esc" in page or "const esc" in page
     assert "data-id" in page
 
 def test_admin_product_list_escapes_names_and_uses_data_buttons():

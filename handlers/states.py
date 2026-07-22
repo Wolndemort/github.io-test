@@ -77,6 +77,9 @@ class YooKassaSetupStates(StatesGroup):
 
 
 class AdminSettingsSG(StatesGroup):
+    waiting_for_public_links = State()
+    waiting_for_site_url = State()
+    waiting_for_support_username = State()
     # Твои старые состояния (например, для ввода ключей ЮKassa)
     waiting_for_session_timeout = State()  # Ждем ввод минут сессии
     waiting_for_freeze_step = State()      # Ждем ввод дней заморозки

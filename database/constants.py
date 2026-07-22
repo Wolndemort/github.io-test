@@ -13,6 +13,9 @@ DEFAULT_CLUB_SETTINGS = {
         "welcome_text": "Добро пожаловать! Выберите направление:",
         "payment_info": "+79000000000 (Имя Получателя)",  # СБП
         "support_link": "@admin_username",
+        "support_enabled": True,
+        "site_url": "",
+        "site_enabled": False,
         "logo_url": "",
         "loading": {
             "enabled": False,
