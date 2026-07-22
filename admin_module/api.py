@@ -81,6 +81,13 @@ class WebAppHistoryQuery(BaseModel):
     club_id: int
     student_id: int | None = None
 
+
+@router.get("/webapp/scanner", response_class=HTMLResponse)
+async def get_qr_scanner(request: Request, club_id: int = Query(...)):
+    return templates.TemplateResponse(
+        "scanner.html", {"request": request, "club_id": club_id}
+    )
+
 API_KEY_NAME = "X-API-Key"
 API_KEY = fastapi_key
 
