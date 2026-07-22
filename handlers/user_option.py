@@ -86,27 +86,18 @@ async def universal_profile_handler(
         event: types.Message | types.CallbackQuery,
         session: AsyncSession,
         club: Club,
-        club_settings: dict
+        club_settings: dict,
+        club_id: int
 ):
     user_id = event.from_user.id
 
     # Приводим время к наивному UTC
     now_naive = datetime.now(timezone.utc).replace(tzinfo=None)
 
-    # =========================================================================
-    # Безопасный пробив кэша без закрытия транзакции.
-    # Заставляем SQLAlchemy забыть старые слепки объектов и гарантированно
-    # перечитать свежие is_frozen и balance_lessons прямо из Postgres.
-    try:
-        session.expire_all()
-    except Exception as cache_err:
-        logger.warning(f"Ошибка сброса кэша объектов: {cache_err}")
-    # =========================================================================
-
     # Запрашиваем студентов этого родителя для текущего клуба
     stmt = select(Student).where(
         Student.parent_id == user_id,
-        Student.club_id == club.id
+        Student.club_id == club_id
     ).order_by(Student.name).execution_options(populate_existing=True)
 
     result = await session.execute(stmt)
