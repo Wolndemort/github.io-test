@@ -227,6 +227,10 @@ def admin_keyboard(club_id: int, club_settings: dict, subscription_date: datetim
         text="👥 Атлеты и ДР",
         web_app=types.WebAppInfo(url=f"{base_url}/admin/students?club_id={club_id}")
     ))
+    builder.row(types.InlineKeyboardButton(
+        text="📋 Быстрый список атлетов",
+        callback_data="admin_quick_athletes"
+    ))
     builder.row(types.InlineKeyboardButton(text='🔙 Назад', callback_data='begin'))
     return builder.as_markup()
 

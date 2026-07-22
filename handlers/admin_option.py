@@ -35,6 +35,47 @@ from PIL import Image, UnidentifiedImageError
 router = Router()
 
 
+@router.callback_query(F.data == "admin_quick_athletes")
+async def admin_quick_athletes(
+    callback: types.CallbackQuery,
+    session: AsyncSession,
+    club: Club,
+):
+    students = (await session.execute(
+        select(Student).where(Student.club_id == club.id).order_by(Student.name)
+    )).scalars().all()
+    parent_ids = {s.parent_id for s in students if s.parent_id}
+    parents = {}
+    if parent_ids:
+        parent_rows = (await session.execute(select(User).where(User.user_id.in_(parent_ids)))).scalars().all()
+        parents = {u.user_id: u.full_name for u in parent_rows}
+    if not students:
+        return await callback.answer("В клубе пока нет атлетов.", show_alert=True)
+
+    lines = [f"👥 <b>Атлеты клуба: {club.name}</b>", f"Всего: <b>{len(students)}</b>\n"]
+    for number, student in enumerate(students, 1):
+        balance = "безлимит" if student.balance_lessons == 999 else str(student.balance_lessons or 0)
+        expire = student.expire_date.strftime("%d.%m.%Y") if student.expire_date else "не указан"
+        parent = parents.get(student.parent_id, "не привязан") if student.parent_id else "не привязан"
+        if student.is_frozen:
+            status = "❄️ заморожен"
+        elif student.expire_date and student.expire_date > datetime.now():
+            status = "✅ активен"
+        else:
+            status = "⚠️ истёк"
+        lines.append(
+            f"<b>{number}. {student.name}</b> — {status}\n"
+            f"   Родитель: {parent}\n"
+            f"   Дисциплина: {student.discipline or 'не указана'}\n"
+            f"   Баланс: {balance} | До: {expire}"
+        )
+    text = "\n".join(lines)
+    chunks = [text[i:i + 3800] for i in range(0, len(text), 3800)]
+    await callback.answer()
+    for chunk in chunks:
+        await callback.message.answer(chunk, parse_mode="HTML")
+
+
 @router.message(Command('admin'))
 @router.callback_query(F.data == "admin")
 async def admin_panel(
