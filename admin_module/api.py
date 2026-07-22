@@ -626,7 +626,8 @@ async def client_shop(request: Request, club_id: int = Query(...), init_data: st
     if not init_data: return _telegram_init_gate('/webapp/shop', club_id, 'Откройте магазин из Telegram')
     if not club or not verify_telegram_data(init_data, club.bot_token): raise HTTPException(403, "Доступ запрещён")
     products = (await session.execute(select(ClubProduct).where(ClubProduct.club_id == club_id, ClubProduct.is_active.is_(True), ClubProduct.stock > 0).order_by(ClubProduct.category, ClubProduct.name))).scalars().all()
-    return templates.TemplateResponse("shop.html", {"request": request, "club": club, "club_id": club_id, "products": products})
+    product_data = [{"id": p.id, "name": p.name, "category": p.category, "price_kopecks": p.price_kopecks, "stock": p.stock, "image_url": p.image_url} for p in products]
+    return templates.TemplateResponse("shop.html", {"request": request, "club": club, "club_id": club_id, "products": product_data})
 
 @router.get("/webapp/admin-products", response_class=HTMLResponse)
 async def admin_products_page(request: Request, club_id: int = Query(...), init_data: str | None = Query(None), session: AsyncSession = Depends(get_session)):
@@ -634,7 +635,8 @@ async def admin_products_page(request: Request, club_id: int = Query(...), init_
     if not init_data: return _telegram_init_gate('/webapp/admin-products', club_id, 'Откройте каталог из Telegram')
     await verify_webapp_admin(club, init_data)
     products = (await session.execute(select(ClubProduct).where(ClubProduct.club_id == club_id).order_by(ClubProduct.id.desc()))).scalars().all()
-    return templates.TemplateResponse("admin_products.html", {"request": request, "club": club, "club_id": club_id, "products": products})
+    product_data = [{"id": p.id, "name": p.name, "category": p.category, "price_kopecks": p.price_kopecks, "stock": p.stock, "is_active": p.is_active, "image_url": p.image_url} for p in products]
+    return templates.TemplateResponse("admin_products.html", {"request": request, "club": club, "club_id": club_id, "products": product_data})
 
 @router.post("/webapp/admin-products")
 async def create_product(payload: ProductPayload, session: AsyncSession = Depends(get_session)):
