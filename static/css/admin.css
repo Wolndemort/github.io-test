@@ -273,3 +273,65 @@ summary {
 .mt-15 {
     margin-top: 15px;
 }
+
+body.mono-theme {
+    background: #090909;
+    color: #f7f7f7;
+}
+
+body.mono-theme h2,
+body.mono-theme .welcome,
+body.mono-theme .empty-card,
+body.mono-theme .label,
+body.mono-theme .value,
+body.mono-theme .sub-text,
+body.mono-theme .gray-bold,
+body.mono-theme .center-muted-text,
+body.mono-theme .check-chat-text,
+body.mono-theme .green-text,
+body.mono-theme .badge-count,
+body.mono-theme .red-badge,
+body.mono-theme .purple-label,
+body.mono-theme .red-label,
+body.mono-theme .orange-label,
+body.mono-theme .green-success-text,
+body.mono-theme .birthday-footer {
+    color: #f7f7f7;
+}
+
+body.mono-theme .card,
+body.mono-theme .empty-card,
+body.mono-theme .birthday-card {
+    background: #151515;
+    color: #f7f7f7;
+    border-color: #2d2d2d;
+    box-shadow: 0 16px 42px rgba(0, 0, 0, 0.28);
+}
+
+body.mono-theme .search-input {
+    background: #101010;
+    color: #f7f7f7;
+    border-color: #444;
+}
+
+body.mono-theme .list-item,
+body.mono-theme details summary {
+    color: #f7f7f7;
+}
+
+body.mono-theme .btn {
+    background: #fff;
+    color: #090909;
+    border-color: #fff;
+}
+
+body.mono-theme .btn-secondary,
+body.mono-theme .tg-link {
+    background: #1b1b1b;
+    color: #f7f7f7;
+    border-color: #444;
+}
+
+body.mono-theme .red-badge {
+    background: rgba(255, 255, 255, 0.08);
+}

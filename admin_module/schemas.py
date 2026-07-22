@@ -58,3 +58,13 @@ class AdminStudentUpdate(BaseModel):
     frozen_at: str | None = None
     frozen_days: int | None = None
     discipline: str | None = None
+
+
+class AdminStudentCreate(BaseModel):
+    init_data: str
+    club_id: int
+    name: str
+    phone: str | None = None
+    birthday: str | None = None
+    discipline: str
+    tariff_idx: int | None = None

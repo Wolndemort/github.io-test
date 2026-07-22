@@ -48,7 +48,7 @@ def _default_student_discipline(club_settings: dict) -> str:
         if active_codes:
             return active_codes[0]
         return next(iter(disciplines.keys()))
-    return "boxing"
+    return ""
 
 
 router = Router()
@@ -935,6 +935,19 @@ async def process_athlete_birthday(
     # Если там пусто, используем inspect или берём из __dict__ объекта club, чтобы не триггерить lazy load
     club_id = data.get('current_club_id') or club.__dict__.get('id')
     user_id = message.from_user.id
+
+    existing_students = (await session.execute(
+        select(Student).where(Student.club_id == club_id, Student.parent_id == user_id)
+    )).scalars().all()
+    duplicate = next((student for student in existing_students
+                      if student.name.strip().casefold() == (name or "").strip().casefold()
+                      and student.birthday == birthday_date), None)
+    if duplicate:
+        await state.clear()
+        return await message.answer(
+            f"⚠️ Атлет <b>{duplicate.name}</b> с такими данными уже есть в базе клуба.",
+            parse_mode="HTML",
+        )
 
     # Берем имя родителя из ТГ, чтобы full_name в таблице users не был NULL
     user_full_name = message.from_user.full_name or "Не указано"

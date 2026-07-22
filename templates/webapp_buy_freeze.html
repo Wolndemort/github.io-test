@@ -23,10 +23,11 @@ document.getElementById('pay')?.addEventListener('click', async () => {
   const items = JSON.parse(localStorage.getItem('speedy_cart') || '[]');
   items.push({item_type:'freeze', student_id:{{ student.id }}, days:Number(days), quantity:1, name:'Заморозка', price:Number({{ price }})*Number(days)*100});
   localStorage.setItem('speedy_cart', JSON.stringify(items));
-  location.href = '/webapp/shop?club_id={{ club_id }}';
+  button.disabled = false;
+  document.getElementById('msg').innerText = 'Заморозка добавлена в корзину. Можно продолжать покупки.';
 });
 </script>
 {% endblock %}
 <style>body.mono-theme,body.mono-theme html{background:#090909!important;color:#f7f7f7!important}body.mono-theme .hero,body.mono-theme .top,body.mono-theme .card,body.mono-theme .mono-card,body.mono-theme .mono-hero,body.mono-theme .pill,body.mono-theme .mono-pill{background:#151515!important;color:#f7f7f7!important;border-color:#2d2d2d!important;box-shadow:0 16px 42px rgba(0,0,0,.28)!important}body.mono-theme h1,body.mono-theme h2,body.mono-theme h3,body.mono-theme h4,body.mono-theme .mono-title,body.mono-theme b{color:#fff!important}body.mono-theme p,body.mono-theme .subtitle,body.mono-theme .muted,body.mono-theme .label,body.mono-theme .eyebrow,body.mono-theme .coach,body.mono-theme .hint{color:#aaa!important}body.mono-theme input,body.mono-theme select,body.mono-theme textarea{background:#101010!important;color:#fff!important;border-color:#444!important}body.mono-theme .btn,body.mono-theme button,body.mono-theme .mono-action.dark{background:#fff!important;color:#090909!important;border-color:#fff!important}</style>
 <script>(function(){const old=document.getElementById('pay'),b=document.createElement('button');b.textContent='Купить сейчас';b.className='mono-action dark';b.style='width:100%;margin-top:8px';old?.after(b);b.onclick=async()=>{b.disabled=true;const days=document.getElementById('days').value,r=await fetch('/webapp/client-cabinet/buy-freeze?days='+encodeURIComponent(days),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({init_data:window.Telegram?.WebApp?.initData||'',club_id:{{club_id}},student_id:{{student.id}}})}),d=await r.json();if(r.ok&&d.payment_url)location.href=d.payment_url;else{alert(d.detail||'Ошибка');b.disabled=false}}})();</script>
-<script>const cb=document.createElement('a');cb.textContent='🛒 Открыть корзину';cb.href='/webapp/shop?club_id={{club_id}}';cb.className='mono-action';cb.style='margin-top:8px';document.getElementById('pay')?.after(cb);</script>
+<script>const cb=document.createElement('a');cb.textContent='🛒 Открыть корзину';cb.href='/webapp/cart?club_id={{club_id}}';cb.className='mono-action';cb.style='margin-top:8px';document.getElementById('pay')?.after(cb);</script>

@@ -20,6 +20,7 @@ from fastapi.responses import StreamingResponse
 import json
 from urllib.parse import parse_qsl
 import io
+import re
 from fastapi import Request, UploadFile, File
 from fastapi.responses import HTMLResponse
 from fastapi import Depends, HTTPException, Security
@@ -31,7 +32,7 @@ from sqlalchemy.orm import selectinload
 from starlette import status
 from database.db import User, Student, Club, ClubProduct, CartOrder, CartItem
 from database.db import purchase_student_freeze
-from admin_module.schemas import AdminStudentUpdate
+from admin_module.schemas import AdminStudentUpdate, AdminStudentCreate
 from database.db import get_session
 from config import fastapi_key
 from aiogram import Bot
@@ -80,6 +81,11 @@ class CartCheckoutPayload(BaseModel):
     init_data: str
     club_id: int
     items: list[dict]
+
+
+def _student_identity_phone(value: str | None) -> str:
+    digits = re.sub(r"\D", "", value or "")
+    return digits[-10:] if len(digits) >= 10 else digits
 
 def _telegram_init_gate(path: str, club_id: int, title: str) -> HTMLResponse:
     return HTMLResponse(f"""<!doctype html><meta charset='utf-8'><script src='https://telegram.org/js/telegram-web-app.js'></script><script>const tg=window.Telegram.WebApp;tg.ready();if(!tg.initData)document.body.innerText='{title}';else location.replace('{path}?club_id={club_id}&init_data='+encodeURIComponent(tg.initData));</script>""", status_code=401)
@@ -296,6 +302,7 @@ async def admin_students_page(
         "club_id": club_id,
         "club_name": club.name,
         "students": students,
+        "club_settings": club.club_settings or {},
     })
 
 
@@ -364,6 +371,90 @@ async def admin_update_student(
         student.discipline = payload.discipline.strip()[:50] or student.discipline
     await db.commit()
     return {"ok": True}
+
+
+@router.post("/admin/students")
+async def admin_create_student(
+    payload: AdminStudentCreate,
+    db: AsyncSession = Depends(get_session),
+):
+    club = await db.get(Club, payload.club_id)
+    if not club:
+        raise HTTPException(status_code=404, detail="Клуб не найден")
+    if not verify_telegram_data(payload.init_data, club.bot_token):
+        raise HTTPException(status_code=403, detail="Доступ запрещён")
+    await verify_webapp_admin(club, payload.init_data)
+
+    disciplines = club.club_settings.get("disciplines", {})
+    disc_cfg = disciplines.get(payload.discipline)
+    if not disc_cfg or not disc_cfg.get("active"):
+        raise HTTPException(status_code=400, detail="Дисциплина недоступна")
+
+    birthday = None
+    if payload.birthday:
+        try:
+            birthday = date.fromisoformat(payload.birthday)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Некорректная дата рождения")
+
+    name = payload.name.strip()
+    phone_key = _student_identity_phone(payload.phone)
+    existing_students = (await db.execute(select(Student).where(Student.club_id == club.id))).scalars().all()
+    duplicate = next((student for student in existing_students
+                      if student.name.strip().casefold() == name.casefold()
+                      and student.birthday == birthday
+                      and (student.discipline or "").strip().casefold() == payload.discipline.strip().casefold()
+                      and _student_identity_phone(student.parent_phone) == phone_key), None)
+    if duplicate:
+        raise HTTPException(status_code=409, detail="Такой атлет уже есть в базе клуба")
+
+    count = 0
+    days = 0
+    expire_date = None
+    if payload.tariff_idx is not None:
+        tariffs = disc_cfg.get("tariffs", [])
+        if payload.tariff_idx < 0 or payload.tariff_idx >= len(tariffs):
+            raise HTTPException(status_code=400, detail="Тариф не найден")
+        tariff = tariffs[payload.tariff_idx]
+        count = int(tariff.get("count", 0) or 0)
+        days = int(tariff.get("days", 30) or 30)
+        expire_date = datetime.now() + timedelta(days=days)
+
+    new_student = Student(
+        name=name,
+        club_id=club.id,
+        parent_phone=payload.phone.strip() if payload.phone else None,
+        birthday=birthday,
+        parent_id=None,
+        balance_lessons=count,
+        expire_date=expire_date,
+        can_freeze=1,
+        is_frozen=0,
+        discipline=payload.discipline.strip()[:50] or None,
+    )
+    db.add(new_student)
+    await db.commit()
+    await db.refresh(new_student)
+    return {
+        "ok": True,
+        "student": {
+            "id": new_student.id,
+            "name": new_student.name,
+            "birthday": new_student.birthday.isoformat() if new_student.birthday else "",
+            "balance_lessons": new_student.balance_lessons or 0,
+            "expire_date": new_student.expire_date.strftime("%Y-%m-%d") if new_student.expire_date else "",
+            "can_freeze": new_student.can_freeze or 0,
+            "is_frozen": int(new_student.is_frozen or 0),
+            "frozen_days": new_student.frozen_days or "",
+            "discipline": new_student.discipline or "",
+        },
+        "meta": {
+            "count": count,
+            "days": days,
+            "has_subscription": payload.tariff_idx is not None,
+            "discipline_name": disc_cfg.get("name", payload.discipline),
+        },
+    }
 
 
 @router.get("/revenue", response_class=HTMLResponse)
@@ -597,16 +688,19 @@ async def cart_checkout(payload: CartCheckoutPayload, request: Request, session:
         elif kind in {"subscription", "freeze"}:
             student = await session.get(Student, int(raw.get("student_id")), with_for_update=True)
             if not student or student.club_id != club.id or student.parent_id != int(tg_user["id"]): raise HTTPException(403, "Атлет недоступен")
+            qty = int(raw.get("quantity", 1))
+            if qty < 1 or qty > 99:
+                raise HTTPException(400, "Некорректное количество")
             if kind == "subscription":
                 cfg = (settings.get("disciplines", {}).get(str(raw.get("sport_type"))))
                 tariffs = cfg.get("tariffs", []) if cfg else []; idx = int(raw.get("tariff_idx", -1))
                 if idx < 0 or idx >= len(tariffs): raise HTTPException(400, "Тариф недоступен")
                 t = tariffs[idx]; price = int(float(t.get("price", 0)) * 100)
-                total += price; normalized.append(("subscription", t, {"student_id": student.id, "discipline": raw.get("sport_type"), "price": price}))
+                total += price * qty; normalized.append(("subscription", t, {"student_id": student.id, "discipline": raw.get("sport_type"), "price": price, "quantity": qty}))
             else:
                 days = int(raw.get("days", 0)); price = int(float(settings.get("limits", {}).get("freeze_price_per_day", 0)) * days * 100)
                 if days <= 0 or price <= 0: raise HTTPException(400, "Заморозка недоступна")
-                total += price; normalized.append(("freeze", None, {"student_id": student.id, "days": days, "price": price}))
+                total += price * qty; normalized.append(("freeze", None, {"student_id": student.id, "days": days, "price": price, "quantity": qty}))
     order_id = f"CART_{uuid.uuid4().hex[:12].upper()}"
     order = CartOrder(id=order_id, club_id=club.id, user_id=int(tg_user["id"]), amount_kopecks=total, status="NEW")
     session.add(order)
@@ -615,8 +709,8 @@ async def cart_checkout(payload: CartCheckoutPayload, request: Request, session:
     await session.flush()
     for kind, obj, info in normalized:
         if kind == "product": session.add(CartItem(cart_order_id=order_id, product_id=obj.id, item_type=kind, title=obj.name, quantity=info, unit_price_kopecks=obj.price_kopecks, payload={"category": obj.category}))
-        elif kind == "subscription": session.add(CartItem(cart_order_id=order_id, item_type=kind, title="Абонемент", quantity=1, unit_price_kopecks=info["price"], payload=info | {"days": obj.get("days", 30), "count": obj.get("count", 0)}))
-        else: session.add(CartItem(cart_order_id=order_id, item_type=kind, title="Заморозка", quantity=1, unit_price_kopecks=info["price"], payload=info))
+        elif kind == "subscription": session.add(CartItem(cart_order_id=order_id, item_type=kind, title="Абонемент", quantity=info["quantity"], unit_price_kopecks=info["price"], payload=info | {"days": obj.get("days", 30), "count": obj.get("count", 0)}))
+        else: session.add(CartItem(cart_order_id=order_id, item_type=kind, title="Заморозка", quantity=info["quantity"], unit_price_kopecks=info["price"], payload=info))
     await session.commit()
     payment = await YooKassaClient(shop_id=pay["yookassa_shop_id"], secret_key=pay["yookassa_secret_key"], proxy_url=PROXY_URL).init_payment(order_id=order_id, amount_kopecks=total, user_id=int(tg_user["id"]), bot_username=club.bot_token)
     if not payment.get("Success"):
@@ -631,6 +725,16 @@ async def client_shop(request: Request, club_id: int = Query(...), init_data: st
     products = (await session.execute(select(ClubProduct).where(ClubProduct.club_id == club_id, ClubProduct.is_active.is_(True), ClubProduct.stock > 0).order_by(ClubProduct.category, ClubProduct.name))).scalars().all()
     product_data = [{"id": p.id, "name": p.name, "category": p.category, "price_kopecks": p.price_kopecks, "stock": p.stock, "image_url": p.image_url} for p in products]
     return templates.TemplateResponse("shop.html", {"request": request, "club": club, "club_id": club_id, "products": product_data})
+
+
+@router.get("/webapp/cart", response_class=HTMLResponse)
+async def client_cart(request: Request, club_id: int = Query(...), init_data: str | None = Query(None), session: AsyncSession = Depends(get_session)):
+    club = await session.get(Club, club_id)
+    if not init_data:
+        return _telegram_init_gate('/webapp/cart', club_id, 'Откройте корзину из Telegram')
+    if not club or not verify_telegram_data(init_data, club.bot_token):
+        raise HTTPException(403, "Доступ запрещён")
+    return templates.TemplateResponse("cart.html", {"request": request, "club": club, "club_id": club_id})
 
 @router.get("/webapp/admin-products", response_class=HTMLResponse)
 async def admin_products_page(request: Request, club_id: int = Query(...), init_data: str | None = Query(None), session: AsyncSession = Depends(get_session)):

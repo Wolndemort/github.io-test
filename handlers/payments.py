@@ -771,7 +771,20 @@ async def admin_confirm_payment(
         "yoga": "yoga"
     }
     is_paid_freeze = disc_shortcut == "frz"
-    target_discipline = shortcut_to_discipline.get(disc_shortcut, "boxing")
+    target_discipline = shortcut_to_discipline.get(disc_shortcut)
+    if not target_discipline:
+        active_disciplines = [
+            code
+            for code, info in club_settings.get("disciplines", {}).items()
+            if isinstance(info, dict) and info.get("active")
+        ]
+        if active_disciplines:
+            target_discipline = active_disciplines[0]
+        else:
+            target_discipline = next(iter(club_settings.get("disciplines", {}) or {}), "")
+
+    if not target_discipline:
+        return await callback.answer("Не удалось определить дисциплину клуба.", show_alert=True)
 
     # 4. ЛОГИКА ЗАЧИСЛЕНИЯ абонемента в СУБД (Передаем дисциплину!)
     # Чтобы логика add_abon не ломалась, мы передаем target_discipline внутрь.

@@ -54,10 +54,12 @@ async def yookassa_webhook(request: Request, session: AsyncSession = Depends(get
                 product.stock -= item.quantity
             elif item.item_type == "subscription":
                 p = item.payload or {}
-                await add_abon(student_id=int(p["student_id"]), lessons_count=int(p.get("count", 0)), session=session, club_id=cart.club_id, club_settings=club.club_settings or {}, days_to_add=int(p.get("days", 30)), discipline=p.get("discipline"))
+                for _ in range(max(1, int(item.quantity or 1))):
+                    await add_abon(student_id=int(p["student_id"]), lessons_count=int(p.get("count", 0)), session=session, club_id=cart.club_id, club_settings=club.club_settings or {}, days_to_add=int(p.get("days", 30)), discipline=p.get("discipline"))
             elif item.item_type == "freeze":
                 p = item.payload or {}
-                await purchase_student_freeze(int(p["student_id"]), cart.club_id, int(p["days"]), session)
+                for _ in range(max(1, int(item.quantity or 1))):
+                    await purchase_student_freeze(int(p["student_id"]), cart.club_id, int(p["days"]), session)
         cart.status = "CONFIRMED"; cart.provider_payment_id = payment_id
         await session.commit()
         receipt = "\n".join(f"• {i.title} × {i.quantity}" for i in items)
