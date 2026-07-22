@@ -127,7 +127,7 @@ async def back_to_admin_main_menu(
 
 
 @router.callback_query(F.data == "admin_settings")
-async def admin_settings_menu(callback: types.CallbackQuery, club_settings: dict):
+async def admin_settings_menu(callback: types.CallbackQuery, club_settings: dict, club_id: int):
     builder = InlineKeyboardBuilder()
     features = club_settings.get("features", {})
     limits = club_settings.get("limits", {})
@@ -147,12 +147,16 @@ async def admin_settings_menu(callback: types.CallbackQuery, club_settings: dict
             callback_data=f"toggle_feat_{key}")
         )
 
-    # Если онлайн-платежи включены, показываем кнопку для настройки ключей ЮKassa
-    if features.get("online_payments", False):
-        builder.row(types.InlineKeyboardButton(
-            text="🔑 Настройка ключей ЮKassa",
-            callback_data="admin_setup_yookassa"
-        ))
+    # Настройки магазина доступны всегда: сначала админ указывает ключи,
+    # затем при необходимости включает online_payments.
+    builder.row(types.InlineKeyboardButton(
+        text="🛍 Настройки магазина / YooKassa",
+        callback_data="admin_setup_yookassa"
+    ))
+    builder.row(types.InlineKeyboardButton(
+        text="🛒 Управление товарами",
+        web_app=types.WebAppInfo(url=f"https://{club_id}.speedycrm.ru/webapp/admin-products?club_id={club_id}")
+    ))
 
     # ⚙️ НАША НОВАЯ КНОПКА: Переход в меню изменения сессий СКУД и шага заморозок
     builder.row(types.InlineKeyboardButton(
@@ -266,7 +270,7 @@ async def toggle_logic(
 
     # Перерисовываем меню с ОБНОВЛЕННЫМ словарем
     if action_type == "feat":
-        await admin_settings_menu(callback, club_settings)
+        await admin_settings_menu(callback, club_settings, club.id)
     else:
         await manage_disciplines_menu(callback, club_settings)
 

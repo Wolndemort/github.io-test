@@ -81,6 +81,9 @@ class CartCheckoutPayload(BaseModel):
     club_id: int
     items: list[dict]
 
+def _telegram_init_gate(path: str, club_id: int, title: str) -> HTMLResponse:
+    return HTMLResponse(f"""<!doctype html><meta charset='utf-8'><script src='https://telegram.org/js/telegram-web-app.js'></script><script>const tg=window.Telegram.WebApp;tg.ready();if(!tg.initData)document.body.innerText='{title}';else location.replace('{path}?club_id={club_id}&init_data='+encodeURIComponent(tg.initData));</script>""", status_code=401)
+
 
 class WebAppClubPayload(BaseModel):
     init_data: str
@@ -620,7 +623,7 @@ async def cart_checkout(payload: CartCheckoutPayload, request: Request, session:
 @router.get("/webapp/shop", response_class=HTMLResponse)
 async def client_shop(request: Request, club_id: int = Query(...), init_data: str | None = Query(None), session: AsyncSession = Depends(get_session)):
     club = await session.get(Club, club_id)
-    if not init_data: return HTMLResponse("Откройте магазин из Telegram", status_code=401)
+    if not init_data: return _telegram_init_gate('/webapp/shop', club_id, 'Откройте магазин из Telegram')
     if not club or not verify_telegram_data(init_data, club.bot_token): raise HTTPException(403, "Доступ запрещён")
     products = (await session.execute(select(ClubProduct).where(ClubProduct.club_id == club_id, ClubProduct.is_active.is_(True), ClubProduct.stock > 0).order_by(ClubProduct.category, ClubProduct.name))).scalars().all()
     return templates.TemplateResponse("shop.html", {"request": request, "club": club, "club_id": club_id, "products": products})
@@ -628,7 +631,7 @@ async def client_shop(request: Request, club_id: int = Query(...), init_data: st
 @router.get("/webapp/admin-products", response_class=HTMLResponse)
 async def admin_products_page(request: Request, club_id: int = Query(...), init_data: str | None = Query(None), session: AsyncSession = Depends(get_session)):
     club = await session.get(Club, club_id)
-    if not init_data: return HTMLResponse("Откройте каталог из Telegram", status_code=401)
+    if not init_data: return _telegram_init_gate('/webapp/admin-products', club_id, 'Откройте каталог из Telegram')
     await verify_webapp_admin(club, init_data)
     products = (await session.execute(select(ClubProduct).where(ClubProduct.club_id == club_id).order_by(ClubProduct.id.desc()))).scalars().all()
     return templates.TemplateResponse("admin_products.html", {"request": request, "club": club, "club_id": club_id, "products": products})
@@ -678,7 +681,7 @@ async def webapp_admin_schedule_page(
 ):
     club = (await session.execute(select(Club).where(Club.id == club_id))).scalar_one_or_none()
     if not init_data:
-        return HTMLResponse("Откройте админское расписание из Telegram", status_code=401)
+        return _telegram_init_gate('/webapp/admin-schedule', club_id, 'Откройте админское расписание из Telegram')
     await verify_webapp_admin(club, init_data)
     return templates.TemplateResponse("admin_schedule.html", {"request": request, "club": club, "club_id": club_id, "disciplines": club.club_settings.get("disciplines", {})})
 

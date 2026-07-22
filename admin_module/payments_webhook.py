@@ -12,6 +12,7 @@ from database.db import PaymentOrder, CartOrder, CartItem, ClubProduct, Club, St
 from loguru import logger
 from services.audit import audit_event
 from services.yookassa_client import YooKassaClient
+from aiogram import Bot
 
 
 @router.post("/v1/payments/yookassa/webhook")
@@ -58,7 +59,19 @@ async def yookassa_webhook(request: Request, session: AsyncSession = Depends(get
                 p = item.payload or {}
                 await purchase_student_freeze(int(p["student_id"]), cart.club_id, int(p["days"]), session)
         cart.status = "CONFIRMED"; cart.provider_payment_id = payment_id
-        await session.commit(); audit_event("cart_payment_confirmed", club_id=cart.club_id, order_id=cart.id, amount_kopecks=cart.amount_kopecks)
+        await session.commit()
+        receipt = "\n".join(f"• {i.title} × {i.quantity}" for i in items)
+        notice = (f"✅ <b>Новая оплата</b>\nЗаказ: <code>{cart.id}</code>\n"
+                  f"Покупатель: <code>{cart.user_id}</code>\n{receipt}\n"
+                  f"Сумма: <b>{cart.amount_kopecks / 100:.2f} ₽</b>\nДата: {datetime.now().strftime('%d.%m.%Y %H:%M')}")
+        try:
+            bot = Bot(club.bot_token)
+            await bot.send_message(club.owner_id, notice, parse_mode="HTML")
+            await bot.send_message(cart.user_id, notice.replace("✅ <b>Новая оплата</b>", "✅ <b>Оплата подтверждена</b>"), parse_mode="HTML")
+            await bot.session.close()
+        except Exception:
+            logger.exception("Не удалось отправить уведомление по корзине %s", cart.id)
+        audit_event("cart_payment_confirmed", club_id=cart.club_id, order_id=cart.id, amount_kopecks=cart.amount_kopecks)
         return {"status": "ok"}
 
     order_result = await session.execute(select(PaymentOrder).where(PaymentOrder.id == order_id).with_for_update())

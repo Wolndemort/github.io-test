@@ -37,4 +37,8 @@
         <p>Платежей нет.</p>
     {% endif %}
 </div>
+<div class="mono-card">
+    <div class="mono-kicker"><div class="name">Корзина</div><span>заказы</span></div>
+    {% if cart_history %}<ul>{% for entry in cart_history %}<li><b>{{ entry.order.created_at.strftime('%d.%m.%Y %H:%M') if entry.order.created_at else '' }}</b> — {{ entry.order.status }} — {{ '%.2f'|format((entry.order.amount_kopecks or 0) / 100) }} ₽<br>{% for item in entry.items %}{{ item.title }} × {{ item.quantity }}{% if not loop.last %}, {% endif %}{% endfor %}</li>{% endfor %}</ul>{% else %}<p>Заказов корзины нет.</p>{% endif %}
+</div>
 {% endblock %}

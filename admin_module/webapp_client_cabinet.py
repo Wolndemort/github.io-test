@@ -15,7 +15,7 @@ from admin_module.schemas import (
 )
 from admin_module.webapp_verify import verify_telegram_data
 from config import PROXY_URL
-from database.db import Club, PaymentOrder, Student, Subscription, User, VisitLog, get_session, process_student_freeze
+from database.db import Club, PaymentOrder, CartOrder, CartItem, Student, Subscription, User, VisitLog, get_session, process_student_freeze
 from services.audit import audit_event
 from services.abuse_guard import rate_limit, audit_block
 from services.yookassa_client import YooKassaClient
@@ -200,8 +200,13 @@ async def webapp_history_page(request: Request, club_id: int, student_id: int | 
     if student_id:
         student_ids = [student_id] if student_id in student_ids else []
     orders = (await db.execute(select(PaymentOrder).where(PaymentOrder.club_id == club_id, PaymentOrder.student_id.in_(student_ids)).order_by(PaymentOrder.created_at.desc()).limit(30))).scalars().all()
+    cart_orders = (await db.execute(select(CartOrder).where(CartOrder.club_id == club_id, CartOrder.user_id == user_id).order_by(CartOrder.created_at.desc()).limit(30))).scalars().all()
+    cart_history = []
+    for cart in cart_orders:
+        items = (await db.execute(select(CartItem).where(CartItem.cart_order_id == cart.id))).scalars().all()
+        cart_history.append({"order": cart, "items": items})
     subscriptions = (await db.execute(select(Subscription).where(Subscription.club_id == club_id, Subscription.user_id == user_id).order_by(Subscription.created_at.desc()))).scalars().all()
-    return templates.TemplateResponse("webapp_history.html", {"request": request, "club": club, "club_id": club_id, "orders": orders, "subscriptions": subscriptions, "student_id": student_id})
+    return templates.TemplateResponse("webapp_history.html", {"request": request, "club": club, "club_id": club_id, "orders": orders, "cart_history": cart_history, "subscriptions": subscriptions, "student_id": student_id})
 
 
 @router.get("/webapp/client-cabinet/buy-subscription", response_class=HTMLResponse)
