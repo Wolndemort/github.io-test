@@ -195,9 +195,6 @@ def admin_keyboard(club_id: int, club_settings: dict, subscription_date: datetim
     if features.get("broadcast", True):
         report_buttons.append(types.InlineKeyboardButton(text='📢 Рассылка', callback_data='admin_broadcast'))
 
-    if features.get("export", True):
-        report_buttons.append(types.InlineKeyboardButton(text='📥 Выгрузка БД (CSV)', callback_data='export_db'))
-
     if report_buttons:
         builder.row(*report_buttons[:2])
         if len(report_buttons) > 2:
