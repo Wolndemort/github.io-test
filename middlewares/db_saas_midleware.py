@@ -4,6 +4,7 @@ from aiogram import BaseMiddleware, types
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy import select
 from database.db import Club
+from database.constants import DEFAULT_CLUB_SETTINGS
 from redis.asyncio import Redis
 
 SUPER_ADMIN_IDS = [1271717628]
@@ -74,6 +75,14 @@ class ClubMiddleware(BaseMiddleware):
         club_obj.subscription_expire_at = subscription_row[0]
         club_obj.owner_id = subscription_row[1]
         club_obj.id = subscription_row[2]
+
+        # Мягко добавляем новые дисциплины старым клубам, не меняя их тарифы.
+        settings = club_obj.club_settings if isinstance(club_obj.club_settings, dict) else {}
+        disciplines = settings.setdefault("disciplines", {})
+        for code, default_cfg in DEFAULT_CLUB_SETTINGS.get("disciplines", {}).items():
+            if code not in disciplines:
+                disciplines[code] = json.loads(json.dumps(default_cfg))
+        club_obj.club_settings = settings
 
         # 3. Логика проверки подписки
         now = datetime.now()

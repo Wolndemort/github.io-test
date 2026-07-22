@@ -50,6 +50,14 @@ DEFAULT_CLUB_SETTINGS = {
             "type": "lessons",
             "schedule": {"mon": [], "tue": [], "wed": [], "thu": [], "fri": [], "sat": [], "sun": []},
             "tariffs": []  # Пусто!
+        },
+        "general": {
+            "name": "Общий абонемент",
+            "active": False,
+            "type": "lessons",
+            "scope": "club",
+            "schedule": {"mon": [], "tue": [], "wed": [], "thu": [], "fri": [], "sat": [], "sun": []},
+            "tariffs": []
         }
     },
     "limits": {
