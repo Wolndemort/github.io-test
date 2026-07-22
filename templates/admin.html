@@ -202,6 +202,7 @@
     <!-- СЕКЦИЯ НАВИГАЦИИ -->
     <div class="card mono-card mt-15" style="margin-bottom: 30px;"> <!-- Добавлен отступ для iOS -->
         <div class="label">Другие разделы</div>
+        <a href="/admin/students?club_id={{ club_id }}" class="btn">👥 Управление атлетами и ДР</a>
         <!-- ФИКС: Явная передача контекста club_id для SaaS-изоляции -->
         <a href="/stats/export/excel?club_id={{ club_id }}" class="btn">📊 Скачать Excel-отчет</a>
         <a href="/revenue?club_id={{ club_id }}" class="btn btn-secondary">📈 Бизнес-аналитика и выручка</a>

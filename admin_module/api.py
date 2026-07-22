@@ -11,7 +11,7 @@ from services.analytics import generate_students_excel, calculate_admin_dashboar
 import hmac
 import os
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from database.db import PaymentOrder, Subscription
 from database.db import add_abon, purchase_student_freeze
 import hashlib
@@ -30,6 +30,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from starlette import status
 from database.db import User, Student, Club
+from admin_module.schemas import AdminStudentUpdate
 from database.db import get_session
 from config import fastapi_key
 from middlewares.db_saas_midleware import SUPER_ADMIN_IDS
@@ -154,6 +155,80 @@ else location.replace(location.pathname+'?club_id=' + encodeURIComponent(new URL
     result = await session.execute(
         select(Student).where(Student.club_id == club_id)
     )
+
+
+@router.get("/admin/students", response_class=HTMLResponse)
+async def admin_students_page(
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+    init_data: str | None = Query(default=None),
+):
+    club_id = get_club_id_from_host(request)
+    if not init_data:
+        return webapp_auth_gate(request, club_id)
+    club = (await session.execute(select(Club).where(Club.id == club_id))).scalar_one_or_none()
+    await verify_webapp_admin(club, init_data)
+    students = (await session.execute(
+        select(Student).where(Student.club_id == club_id).order_by(Student.name)
+    )).scalars().all()
+    return templates.TemplateResponse("admin_students.html", {
+        "request": request,
+        "club_id": club_id,
+        "club_name": club.name,
+        "students": students,
+    })
+
+
+@router.patch("/admin/students/{student_id}")
+async def admin_update_student(
+    student_id: int,
+    payload: AdminStudentUpdate,
+    db: AsyncSession = Depends(get_session),
+):
+    club = await db.get(Club, payload.club_id)
+    tg_user = verify_telegram_data(payload.init_data, club.bot_token if club else "")
+    student = await db.get(Student, student_id, with_for_update=True)
+    if not student:
+        raise HTTPException(status_code=404, detail="Атлет не найден")
+    if student.club_id != payload.club_id:
+        raise HTTPException(status_code=403, detail="Атлет другого клуба")
+    owner_club = await db.get(Club, student.club_id)
+    await verify_webapp_admin(owner_club, payload.init_data)
+    if not tg_user:
+        raise HTTPException(status_code=403, detail="Доступ запрещён")
+    if payload.balance_lessons is not None:
+        if payload.balance_lessons < 0 or payload.balance_lessons > 999:
+            raise HTTPException(status_code=400, detail="Баланс должен быть от 0 до 999")
+        student.balance_lessons = payload.balance_lessons
+    if payload.birthday is not None:
+        if payload.birthday == "":
+            student.birthday = None
+        else:
+            try:
+                birthday = date.fromisoformat(payload.birthday)
+                if birthday > date.today() or birthday.year < 1900:
+                    raise ValueError
+                student.birthday = birthday
+            except ValueError:
+                raise HTTPException(status_code=400, detail="Некорректная дата рождения")
+    if payload.expire_date is not None:
+        if payload.expire_date == "":
+            student.expire_date = None
+        else:
+            try:
+                student.expire_date = datetime.strptime(payload.expire_date, "%Y-%m-%d").replace()
+            except ValueError:
+                raise HTTPException(status_code=400, detail="Некорректная дата окончания")
+    if payload.can_freeze is not None:
+        if payload.can_freeze < 0 or payload.can_freeze > 99:
+            raise HTTPException(status_code=400, detail="Некорректный лимит заморозок")
+        student.can_freeze = payload.can_freeze
+    if payload.is_frozen is not None:
+        student.is_frozen = 1 if payload.is_frozen else 0
+    if payload.discipline is not None:
+        student.discipline = payload.discipline.strip()[:50] or student.discipline
+    await db.commit()
+    return {"ok": True}
     students = list(result.scalars().all())
 
 

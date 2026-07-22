@@ -61,6 +61,7 @@ class StudentAdmin(ModelView, model=Student):
         Student.birthday
     ]
     column_searchable_list = [Student.name, Student.parent_phone]
+    column_filters = [Student.club_id, Student.birthday]
 
     # ИСПРАВЛЕНО: Вместо "parent_id" мы пишем отношение "parent".
     # SQLAdmin свяжет это поле с формой AJAX-поиска, описанной ниже.

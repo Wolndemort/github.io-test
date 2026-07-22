@@ -32,6 +32,7 @@
 
 - `/webapp/client-cabinet` — главный кабинет клиента.
 - `/webapp/client-cabinet/student` — карточка атлета.
+- `/admin/students` — клубное управление атлетами для владельца клуба: ДР, баланс, срок абонемента, заморозки и дисциплина.
 - `/webapp/client-cabinet/history` — история оплат и подписок.
 - `/webapp/client-cabinet/freeze` — бесплатная заморозка.
 - `/webapp/client-cabinet/buy-freeze` — покупка заморозки.
@@ -91,6 +92,40 @@
 - При падении Redis платежи и привязка по номеру блокируются до восстановления сервиса.
 - После деплоя проверять не только контейнеры, но и результат post-deploy smoke-check.
 - При диагностике СКУД проверять, что при сетевой ошибке не появился ложный `VisitLog` и не остался `last_visit`.
+- Обычный админ не получает доступ к `/master-dashboard`: его управление идёт через подписанный Telegram WebApp и ограничено `club_id`/`owner_id`.
+- Супер-админ сохраняет полный SQLAdmin-доступ к клубам, пользователям, атлетам и истории посещений.
+
+## Production-мониторинг Sentry
+
+Sentry подключён как внешний мониторинг ошибок FastAPI-приложения.
+
+Схема подключения:
+
+1. Пакет `sentry-sdk[fastapi]` добавлен в `requirements.txt`.
+2. DSN не хранится в Git и не записывается в код.
+3. На production-сервере DSN задаётся в `.env`:
+
+```env
+SENTRY_DSN=https://...ingest.de.sentry.io/...
+SENTRY_ENVIRONMENT=production
+```
+
+4. `main.py` читает `SENTRY_DSN` через `os.getenv` и инициализирует Sentry до запуска FastAPI-приложения.
+5. Включён только Error Monitoring; tracing отключён (`SENTRY_TRACES_SAMPLE_RATE=0.0` по умолчанию).
+6. Перед отправкой события фильтруются query-параметры и чувствительные заголовки:
+   - Telegram `init_data`;
+   - cookies;
+   - `Authorization`;
+   - `X-API-Key`.
+7. Ошибки отображаются в проекте Sentry и отправляются на подтверждённый основной email аккаунта согласно настройкам Issue Alerts.
+
+Проверка после деплоя:
+
+```bash
+docker compose exec gym-api sh -c 'test -n "$SENTRY_DSN" && echo SENTRY_CONFIGURED || echo SENTRY_MISSING'
+```
+
+Если приложение работает без исключений, проект Sentry может оставаться пустым — это нормальное состояние. DSN следует менять в Sentry и на сервере, если он был опубликован за пределами защищённого `.env`.
 
 ## Что можно делать дальше
 

@@ -36,23 +36,26 @@ def get_profile_keyboard(user, club_settings: dict, is_authorized: bool = False)
         types.InlineKeyboardButton(text="💳 Абонемент", callback_data="choose_section"),
     )
 
-    # 2. Покупки и абонемент
+    # 2. Дополнительные данные атлетов
+    builder.row(types.InlineKeyboardButton(text="✏️ Данные атлетов", callback_data="edit_birthday"))
+
+    # 3. Покупки и абонемент
     if features.get("online_payments", False):
-        builder.row(types.InlineKeyboardButton(text="💳 Купить абонемент", callback_data="choose_section"))
+        pass  # Кнопка «💳 Абонемент» выше уже ведёт к покупке.
     if club_settings.get("limits", {}).get("freeze_price_per_day", 0) > 0:
         builder.row(
             types.InlineKeyboardButton(text="❄️ Купить заморозку", callback_data="buy_freeze"),
             types.InlineKeyboardButton(text="💳 Подписка", callback_data="manage_subscription"),
         )
 
-    # 3. Управление атлетами
+    # 4. Управление атлетами
     builder.row(types.InlineKeyboardButton(text="➕ Добавить атлета", callback_data="add_athlete"))
 
-    # 4. Заморозка действующего абонемента
+    # 5. Заморозка действующего абонемента
     if features.get("freeze", True):
         builder.row(types.InlineKeyboardButton(text="❄️ Заморозить абонемент", callback_data="freeze_sub"))
 
-    # 5. Навигация и авторизация
+    # 6. Навигация и авторизация
     builder.row(types.InlineKeyboardButton(text="🏠 В главное меню", callback_data="begin"))
 
     if not is_authorized:

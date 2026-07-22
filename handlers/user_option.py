@@ -833,6 +833,64 @@ async def start_add_athlete(callback: types.CallbackQuery, state: FSMContext, cl
     await callback.answer()
 
 
+@router.callback_query(F.data == "edit_birthday")
+async def choose_birthday_edit_student(callback: types.CallbackQuery, session: AsyncSession, club: Club):
+    students = (await session.execute(
+        select(Student).where(Student.parent_id == callback.from_user.id, Student.club_id == club.id).order_by(Student.name)
+    )).scalars().all()
+    if not students:
+        return await callback.answer("У вас пока нет атлетов в этом клубе.", show_alert=True)
+    builder = InlineKeyboardBuilder()
+    for student in students:
+        current = student.birthday.strftime("%d.%m.%Y") if student.birthday else "не указана"
+        builder.row(types.InlineKeyboardButton(
+            text=f"{student.name} · {current}", callback_data=f"edit_birthday_student_{student.id}"
+        ))
+    builder.row(types.InlineKeyboardButton(text="⬅️ Назад", callback_data="profile"))
+    await callback.message.edit_text("Выберите атлета для указания даты рождения:", reply_markup=builder.as_markup())
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("edit_birthday_student_"))
+async def start_birthday_edit(callback: types.CallbackQuery, state: FSMContext, session: AsyncSession, club: Club):
+    try:
+        student_id = int(callback.data.rsplit("_", 1)[1])
+    except ValueError:
+        return await callback.answer("Некорректный атлет.", show_alert=True)
+    student = await session.get(Student, student_id)
+    if not student or student.club_id != club.id or student.parent_id != callback.from_user.id:
+        return await callback.answer("Атлет не найден.", show_alert=True)
+    await state.update_data(edit_birthday_student_id=student_id)
+    await state.set_state(RegistrationStates.waiting_for_birthday_edit)
+    await callback.message.edit_text(
+        f"Атлет: <b>{student.name}</b>\n\nВведите дату в формате ДД.ММ.ГГГГ или отправьте 0, чтобы удалить дату:",
+        parse_mode="HTML"
+    )
+    await callback.answer()
+
+
+@router.message(RegistrationStates.waiting_for_birthday_edit)
+async def save_birthday_edit(message: types.Message, state: FSMContext, session: AsyncSession):
+    value = (message.text or "").strip()
+    birthday = None
+    if value != "0":
+        try:
+            birthday = datetime.strptime(value, "%d.%m.%Y").date()
+            if birthday > datetime.now().date() or birthday.year < 1900:
+                raise ValueError
+        except ValueError:
+            return await message.answer("❌ Введите корректную дату ДД.ММ.ГГГГ или 0 для удаления.")
+    data = await state.get_data()
+    student = await session.get(Student, data.get("edit_birthday_student_id"), with_for_update=True)
+    if not student or student.parent_id != message.from_user.id:
+        await state.clear()
+        return await message.answer("❌ Атлет не найден или доступ запрещён.")
+    student.birthday = birthday
+    await session.commit()
+    await state.clear()
+    await message.answer("✅ Дата рождения сохранена." if birthday else "✅ Дата рождения удалена.")
+
+
 # ШАГ 2: Поймали имя -> Запрашиваем ДЕНЬ РОЖДЕНИЯ
 @router.message(RegistrationStates.waiting_for_name)
 async def process_athlete_name(message: types.Message, state: FSMContext):

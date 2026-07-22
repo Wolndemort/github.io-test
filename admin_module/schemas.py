@@ -45,3 +45,14 @@ class BiometricCheckIn(BaseModel):
 
 class BiometricEnable(BaseModel):
     init_data: str
+
+
+class AdminStudentUpdate(BaseModel):
+    init_data: str
+    club_id: int
+    birthday: str | None = None
+    balance_lessons: int | None = None
+    expire_date: str | None = None
+    can_freeze: int | None = None
+    is_frozen: int | None = None
+    discipline: str | None = None
