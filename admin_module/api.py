@@ -33,6 +33,8 @@ from database.db import User, Student, Club
 from admin_module.schemas import AdminStudentUpdate
 from database.db import get_session
 from config import fastapi_key
+from aiogram import Bot
+from handlers.user_option import generate_signature, fix_layout
 from middlewares.db_saas_midleware import SUPER_ADMIN_IDS
 from admin_module.router_base import router, templates
 from admin_module.webapp_verify import verify_telegram_data
@@ -47,6 +49,12 @@ class WebAppActionPayload(BaseModel):
     init_data: str
     club_id: int
     student_id: int
+
+
+class ScannerPayload(BaseModel):
+    init_data: str
+    club_id: int
+    qr_data: str
 
 
 class WebAppClubPayload(BaseModel):
@@ -123,6 +131,53 @@ async def verify_webapp_admin(club: Club, init_data: str | None):
 
 # 1. Добавляем роут /admin, который просила кнопка в ТГ (убрали get_api_key!)
 
+
+
+@router.post("/webapp/scanner/scan")
+async def scanner_scan(
+    payload: ScannerPayload,
+    session: AsyncSession = Depends(get_session),
+):
+    """Обрабатывает QR без sendData, чтобы планшетный сканер не закрывался."""
+    club = (await session.execute(select(Club).where(Club.id == payload.club_id))).scalar_one_or_none()
+    if not club:
+        raise HTTPException(status_code=404, detail="Клуб не найден")
+    tg_user = verify_telegram_data(payload.init_data, club.bot_token)
+    if not tg_user or (tg_user.get("id") != club.owner_id and tg_user.get("id") not in SUPER_ADMIN_IDS):
+        raise HTTPException(status_code=403, detail="Только администратор клуба")
+
+    raw = fix_layout(payload.qr_data).strip().split(":")
+    if len(raw) != 4 or raw[0] != "student":
+        raise HTTPException(status_code=400, detail="Неверный формат QR")
+    try:
+        student_id = int(raw[1])
+        qr_time = datetime.strptime(raw[2], "%Y-%m-%d-%H").replace(tzinfo=timezone.utc)
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400, detail="Повреждённый QR")
+    age = (datetime.now(timezone.utc) - qr_time).total_seconds()
+    if age < -300 or age > 2 * 60 * 60:
+        raise HTTPException(status_code=400, detail="Срок действия QR истёк")
+    if not hmac.compare_digest(raw[3], generate_signature(student_id, raw[2])):
+        raise HTTPException(status_code=400, detail="Недействительный QR")
+
+    result = await process_athlete_gate_pass(
+        student_id, session, club.club_settings or {}, expected_club_id=club.id
+    )
+    if not result["success"]:
+        return {"success": False, "message": result["message"]}
+
+    bot = Bot(club.bot_token)
+    try:
+        admin_text = (f"🟢 <b>ПРОХОД</b>\n👤 Атлет: <b>{result['student_name']}</b>\n"
+                      f"📅 До: {result['expire_str']}\n{result['turnstile_status']}")
+        await bot.send_message(club.owner_id, admin_text, parse_mode="HTML")
+        if result.get("parent_id"):
+            await bot.send_message(int(result["parent_id"]),
+                                   f"❗ <b>{result['club_name']}</b>: {result['student_name']} вошел в зал.",
+                                   parse_mode="HTML")
+    finally:
+        await bot.session.close()
+    return {"success": True, "message": "Турникет открыт", "student_name": result["student_name"]}
 
 
 @router.get("/admin", response_class=HTMLResponse)

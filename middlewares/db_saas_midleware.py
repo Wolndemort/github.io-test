@@ -44,9 +44,6 @@ class ClubMiddleware(BaseMiddleware):
             # 2. Идем в БД
             session = data["session"]
 
-            # ФИКС: Сбрасываем внутренний кэш сессии, чтобы гарантированно пробить старые данные
-            session.expire_all()
-
             result = await session.execute(select(Club).where(Club.bot_token == bot_token))
             club_obj = result.scalar_one_or_none()
 

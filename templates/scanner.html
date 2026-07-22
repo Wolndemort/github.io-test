@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>QR-сканер</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <script src="https://unpkg.com/html5-qrcode"></script>
+  <style>
+    body { background:#1c1c1c; color:#fff; text-align:center; font-family:sans-serif; margin:0; padding:20px; }
+    #reader { width:100%; max-width:400px; margin:20px auto; border-radius:15px; overflow:hidden; background:#000; }
+    #status { min-height:24px; }
+    .ok { color:#66e39a; } .error { color:#ff7777; }
+    button { padding:12px 20px; border:0; border-radius:10px; font-size:16px; }
+  </style>
+</head>
+<body>
+  <h3>СКАНИРОВАНИЕ ПРОПУСКА</h3>
+  <div id="reader"></div>
+  <p id="status">Наведите камеру на QR-код</p>
+  <button id="stop" type="button">Завершить сканирование</button>
+  <script>
+    const tg = window.Telegram?.WebApp;
+    tg?.ready(); tg?.expand();
+    const status = document.getElementById('status');
+    const scanner = new Html5Qrcode('reader');
+    const config = { fps: 10, qrbox: { width: 250, height: 250 } };
+    let busy = false, lastCode = '', lastAt = 0, stopped = false;
+
+    function startCamera() {
+      if (stopped) return;
+      scanner.start({ facingMode: 'environment' }, config, onScanSuccess)
+        .catch(err => { status.className = 'error'; status.textContent = 'Ошибка камеры: ' + err; });
+    }
+
+    function onScanSuccess(decodedText) {
+      const now = Date.now();
+      if (busy || (decodedText === lastCode && now - lastAt < 5000)) return;
+      busy = true; lastCode = decodedText; lastAt = now;
+      status.className = 'ok'; status.textContent = 'Пропуск принят. Ожидаем следующий QR…';
+      fetch('/webapp/scanner/scan', { method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ init_data: tg?.initData || '', club_id: new URLSearchParams(location.search).get('club_id'), qr_data: decodedText })
+      }).then(async r => { const data = await r.json(); if (!r.ok) throw new Error(data.detail || 'Ошибка прохода');
+        status.textContent = data.success ? `✅ Проход: ${data.student_name}` : `❌ ${data.message}`;
+      }).catch(err => { status.className = 'error'; status.textContent = '❌ ' + err.message; })
+        .finally(() => setTimeout(() => { busy = false; status.className = ''; status.textContent = 'Наведите камеру на следующий QR-код'; }, 1800));
+    }
+
+    document.getElementById('stop').onclick = async () => {
+      stopped = true;
+      try { await scanner.stop(); } catch (_) {}
+      tg?.close();
+    };
+    startCamera();
+  </script>
+</body>
+</html>

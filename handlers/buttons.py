@@ -226,7 +226,8 @@ def get_scanner_keyboard(club_id: int):
     builder = ReplyKeyboardBuilder()
 
     # Полный путь к сканеру с большими пробелами для удобства
-    scanner_url = f"https://wolndemort.github.io/github.io-test/scanner.html?club_id={club_id}&v=105"
+    # Сканер обслуживается самим CRM-доменом, а не GitHub Pages.
+    scanner_url = f"https://{club_id}.speedycrm.ru/webapp/scanner?club_id={club_id}&v=106"
 
     builder.row(types.KeyboardButton(
         text="📸 ОТКРЫТЬ СКАНЕР (ВХОД)",

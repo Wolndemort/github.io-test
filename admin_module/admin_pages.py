@@ -12,6 +12,15 @@ from database.db import Club, PaymentOrder, Student, User, get_session
 from services.analytics import calculate_admin_dashboard, generate_students_excel
 
 
+@router.get("/webapp/scanner", response_class=HTMLResponse)
+async def get_qr_scanner(request: Request, club_id: int = Query(...)):
+    """Постоянный QR-сканер для планшета на входе в клуб."""
+    return templates.TemplateResponse(
+        "scanner.html",
+        {"request": request, "club_id": club_id},
+    )
+
+
 @router.get("/admin", response_class=HTMLResponse)
 async def get_admin_dashboard(
     request: Request,
