@@ -1,0 +1,61 @@
+import json
+from pathlib import Path
+
+from database.db import CartOrder, CartItem, ClubProduct
+
+
+def test_cart_models_have_separate_order_and_item_tables():
+    assert CartOrder.__tablename__ == "cart_orders"
+    assert CartItem.__tablename__ == "cart_items"
+    assert ClubProduct.__tablename__ == "club_products"
+
+
+def test_mixed_cart_payload_keeps_student_binding_and_product_quantity():
+    payload = [
+        {"item_type": "product", "product_id": 7, "quantity": 2},
+        {"item_type": "subscription", "student_id": 11, "sport_type": "general", "tariff_idx": 0},
+        {"item_type": "freeze", "student_id": 11, "days": 7},
+    ]
+    assert payload[0]["quantity"] == 2
+    assert payload[1]["student_id"] == payload[2]["student_id"]
+    assert {x["item_type"] for x in payload} == {"product", "subscription", "freeze"}
+
+
+def test_client_shop_has_cart_button_and_checkout_endpoint():
+    shop = Path("templates/shop.html").read_text(encoding="utf-8")
+    assert "В корзину" in shop
+    assert "/webapp/cart/checkout" in shop
+    assert "localStorage" in shop
+
+
+def test_admin_product_screen_supports_image_and_editing():
+    page = Path("templates/admin_products.html").read_text(encoding="utf-8")
+    assert "image_url" in page
+    assert "Изменить" in page
+    assert "Удалить" in page
+    assert "is_active" in page
+
+
+def test_cart_webhook_has_idempotent_confirmed_guard():
+    source = Path("admin_module/payments_webhook.py").read_text(encoding="utf-8")
+    assert 'str(order_id).startswith("CART_")' in source
+    assert 'cart.status == "CONFIRMED"' in source
+    assert 'cart.provider_payment_id = payment_id' in source
+
+def test_product_upload_contract_has_type_and_size_guards():
+    source = Path("admin_module/api.py").read_text(encoding="utf-8")
+    assert "image/jpeg" in source and "image/png" in source and "image/webp" in source
+    assert "5 * 1024 * 1024" in source
+    assert "static/uploads/products" in source
+
+def test_product_admin_has_file_input_and_fallback_preview():
+    page = Path("templates/admin_products.html").read_text(encoding="utf-8")
+    assert "type=file" in page
+    assert "upload-image" in page
+    assert "🖼️" in page
+
+def test_shop_escapes_product_data_without_inline_product_arguments():
+    page = Path("templates/shop.html").read_text(encoding="utf-8")
+    assert "|tojson" in page
+    assert "function esc" in page
+    assert "data-id" in page

@@ -31,6 +31,10 @@ def get_profile_keyboard(user, club_settings: dict, is_authorized: bool = False)
         types.InlineKeyboardButton(text="📲 QR-пропуск", callback_data="show_qr"),
         types.InlineKeyboardButton(text="🔍 Мои атлеты", callback_data="detailed_status_info"),
     )
+    builder.row(types.InlineKeyboardButton(
+        text="🛒 Магазин и корзина (WebApp)",
+        web_app=WebAppInfo(url=f"{base_url}/webapp/shop?club_id={user.club_id}")
+    ))
     builder.row(
         types.InlineKeyboardButton(text="🧾 История", callback_data="payment_history"),
         types.InlineKeyboardButton(text="💳 Абонемент", callback_data="choose_section"),
@@ -209,7 +213,7 @@ def admin_keyboard(club_id: int, club_settings: dict, subscription_date: datetim
         ),
         types.InlineKeyboardButton(
             text="🗓 Расписание (WebApp)",
-            web_app=types.WebAppInfo(url=f"{base_url}/webapp/schedule?club_id={club_id}")
+            web_app=types.WebAppInfo(url=f"{base_url}/webapp/admin-schedule?club_id={club_id}")
         )
     )
     builder.row(types.InlineKeyboardButton(

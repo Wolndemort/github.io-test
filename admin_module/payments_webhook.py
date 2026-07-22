@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from admin_module.router_base import router
 from config import PROXY_URL
-from database.db import PaymentOrder, Student, Subscription, Club, add_abon, purchase_student_freeze, get_session
+from database.db import PaymentOrder, CartOrder, CartItem, ClubProduct, Club, Student, Subscription, add_abon, purchase_student_freeze, get_session
 from loguru import logger
 from services.audit import audit_event
 from services.yookassa_client import YooKassaClient
@@ -31,6 +31,35 @@ async def yookassa_webhook(request: Request, session: AsyncSession = Depends(get
     payment_id = object_data.get("id")
     if not payment_id:
         return {"status": "ignored"}
+
+    if str(order_id).startswith("CART_"):
+        cart = (await session.execute(select(CartOrder).where(CartOrder.id == order_id).with_for_update())).scalar_one_or_none()
+        if not cart or cart.status == "CONFIRMED": return {"status": "ok" if cart else "ignored"}
+        club = await session.get(Club, cart.club_id); pay = (club.club_settings or {}).get("payments", {}) if club else {}
+        try:
+            async with httpx.AsyncClient(auth=(pay.get("yookassa_shop_id"), pay.get("yookassa_secret_key")), timeout=10) as client:
+                vr = await client.get(f"https://api.yookassa.ru/v3/payments/{payment_id}")
+            vp = vr.json()
+            amount = int(Decimal(str(vp.get("amount", {}).get("value"))) * 100)
+            if vr.status_code != 200 or vp.get("status") != "succeeded" or vp.get("metadata", {}).get("order_id") != order_id or amount != cart.amount_kopecks:
+                return {"status": "ignored"}
+        except (httpx.HTTPError, InvalidOperation, TypeError, ValueError):
+            return {"status": "retry"}
+        items = (await session.execute(select(CartItem).where(CartItem.cart_order_id == cart.id))).scalars().all()
+        for item in items:
+            if item.product_id:
+                product = await session.get(ClubProduct, item.product_id, with_for_update=True)
+                if not product or product.stock < item.quantity: cart.status = "FAILED"; await session.commit(); return {"status": "ok"}
+                product.stock -= item.quantity
+            elif item.item_type == "subscription":
+                p = item.payload or {}
+                await add_abon(student_id=int(p["student_id"]), lessons_count=int(p.get("count", 0)), session=session, club_id=cart.club_id, club_settings=club.club_settings or {}, days_to_add=int(p.get("days", 30)), discipline=p.get("discipline"))
+            elif item.item_type == "freeze":
+                p = item.payload or {}
+                await purchase_student_freeze(int(p["student_id"]), cart.club_id, int(p["days"]), session)
+        cart.status = "CONFIRMED"; cart.provider_payment_id = payment_id
+        await session.commit(); audit_event("cart_payment_confirmed", club_id=cart.club_id, order_id=cart.id, amount_kopecks=cart.amount_kopecks)
+        return {"status": "ok"}
 
     order_result = await session.execute(select(PaymentOrder).where(PaymentOrder.id == order_id).with_for_update())
     order = order_result.scalar_one_or_none()

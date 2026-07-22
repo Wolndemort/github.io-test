@@ -146,6 +146,43 @@ class PaymentOrder(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, server_default="now()")
 
 
+class ClubProduct(Base):
+    """Каталог клуба для будущей корзины: мерч, напитки и услуги."""
+    __tablename__ = "club_products"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    club_id: Mapped[int] = mapped_column(ForeignKey("clubs.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(120))
+    image_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    category: Mapped[str] = mapped_column(String(30), default="other")
+    price_kopecks: Mapped[int] = mapped_column(Integer)
+    stock: Mapped[int] = mapped_column(Integer, default=0)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class CartOrder(Base):
+    __tablename__ = "cart_orders"
+    id: Mapped[str] = mapped_column(String(50), primary_key=True)
+    club_id: Mapped[int] = mapped_column(ForeignKey("clubs.id"), index=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.user_id", ondelete="SET NULL"), nullable=True, index=True)
+    amount_kopecks: Mapped[int] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(20), default="NEW", index=True)
+    provider_payment_id: Mapped[Optional[str]] = mapped_column(String(100), unique=True, nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class CartItem(Base):
+    __tablename__ = "cart_items"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    cart_order_id: Mapped[str] = mapped_column(ForeignKey("cart_orders.id", ondelete="CASCADE"), index=True)
+    product_id: Mapped[Optional[int]] = mapped_column(ForeignKey("club_products.id", ondelete="SET NULL"), nullable=True)
+    item_type: Mapped[str] = mapped_column(String(30))
+    title: Mapped[str] = mapped_column(String(160))
+    quantity: Mapped[int] = mapped_column(Integer, default=1)
+    unit_price_kopecks: Mapped[int] = mapped_column(Integer)
+    payload: Mapped[dict] = mapped_column(JSONB, default=dict)
+
+
 class VisitLog(Base):
     __tablename__ = 'visit_logs'
 

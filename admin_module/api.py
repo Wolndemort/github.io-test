@@ -20,7 +20,7 @@ from fastapi.responses import StreamingResponse
 import json
 from urllib.parse import parse_qsl
 import io
-from fastapi import Request
+from fastapi import Request, UploadFile, File
 from fastapi.responses import HTMLResponse
 from fastapi import Depends, HTTPException, Security
 from fastapi.security import APIKeyHeader
@@ -29,7 +29,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from starlette import status
-from database.db import User, Student, Club
+from database.db import User, Student, Club, ClubProduct, CartOrder, CartItem
+from database.db import purchase_student_freeze
 from admin_module.schemas import AdminStudentUpdate
 from database.db import get_session
 from config import fastapi_key
@@ -55,6 +56,30 @@ class ScannerPayload(BaseModel):
     init_data: str
     club_id: int
     qr_data: str
+
+class ScheduleChangePayload(BaseModel):
+    init_data: str
+    club_id: int
+    action: str
+    discipline: str
+    day: str
+    index: int | None = None
+    lesson: dict | None = None
+
+class ProductPayload(BaseModel):
+    init_data: str
+    club_id: int
+    name: str
+    category: str = "other"
+    price_kopecks: int
+    stock: int = 0
+    is_active: bool = True
+    image_url: str | None = None
+
+class CartCheckoutPayload(BaseModel):
+    init_data: str
+    club_id: int
+    items: list[dict]
 
 
 class WebAppClubPayload(BaseModel):
@@ -548,6 +573,142 @@ async def export_students_to_excel(
     )
 
 
+@router.post("/webapp/cart/checkout")
+async def cart_checkout(payload: CartCheckoutPayload, request: Request, session: AsyncSession = Depends(get_session)):
+    club = await session.get(Club, payload.club_id)
+    tg_user = verify_telegram_data(payload.init_data, club.bot_token if club else "")
+    if not club or not tg_user or not payload.items:
+        raise HTTPException(400, "Корзина недоступна")
+    settings = club.club_settings or {}; pay = settings.get("payments", {})
+    if not pay.get("yookassa_shop_id") or not pay.get("yookassa_secret_key"):
+        raise HTTPException(400, "YooKassa не настроена")
+    product_ids = [int(x["product_id"]) for x in payload.items if x.get("item_type", "product") == "product"]
+    products = (await session.execute(select(ClubProduct).where(ClubProduct.club_id == club.id, ClubProduct.id.in_(product_ids), ClubProduct.is_active.is_(True)).with_for_update())).scalars().all() if product_ids else []
+    by_id = {p.id: p for p in products}; normalized=[]; total=0
+    for raw in payload.items:
+        kind = raw.get("item_type", "product")
+        if kind == "product":
+            p=by_id.get(int(raw.get("product_id"))); qty=int(raw.get("quantity", 1))
+            if not p or qty < 1 or qty > 99 or p.stock < qty: raise HTTPException(400, "Товар недоступен или закончился")
+            total += p.price_kopecks * qty; normalized.append(("product", p, qty))
+        elif kind in {"subscription", "freeze"}:
+            student = await session.get(Student, int(raw.get("student_id")), with_for_update=True)
+            if not student or student.club_id != club.id or student.parent_id != int(tg_user["id"]): raise HTTPException(403, "Атлет недоступен")
+            if kind == "subscription":
+                cfg = (settings.get("disciplines", {}).get(str(raw.get("sport_type"))))
+                tariffs = cfg.get("tariffs", []) if cfg else []; idx = int(raw.get("tariff_idx", -1))
+                if idx < 0 or idx >= len(tariffs): raise HTTPException(400, "Тариф недоступен")
+                t = tariffs[idx]; price = int(float(t.get("price", 0)) * 100)
+                total += price; normalized.append(("subscription", t, {"student_id": student.id, "discipline": raw.get("sport_type"), "price": price}))
+            else:
+                days = int(raw.get("days", 0)); price = int(float(settings.get("limits", {}).get("freeze_price_per_day", 0)) * days * 100)
+                if days <= 0 or price <= 0: raise HTTPException(400, "Заморозка недоступна")
+                total += price; normalized.append(("freeze", None, {"student_id": student.id, "days": days, "price": price}))
+    order_id = f"CART_{uuid.uuid4().hex[:12].upper()}"
+    order = CartOrder(id=order_id, club_id=club.id, user_id=int(tg_user["id"]), amount_kopecks=total, status="NEW")
+    session.add(order)
+    for kind, obj, info in normalized:
+        if kind == "product": session.add(CartItem(cart_order_id=order_id, product_id=obj.id, item_type=kind, title=obj.name, quantity=info, unit_price_kopecks=obj.price_kopecks, payload={"category": obj.category}))
+        elif kind == "subscription": session.add(CartItem(cart_order_id=order_id, item_type=kind, title="Абонемент", quantity=1, unit_price_kopecks=info["price"], payload=info | {"days": obj.get("days", 30), "count": obj.get("count", 0)}))
+        else: session.add(CartItem(cart_order_id=order_id, item_type=kind, title="Заморозка", quantity=1, unit_price_kopecks=info["price"], payload=info))
+    await session.commit()
+    payment = await YooKassaClient(shop_id=pay["yookassa_shop_id"], secret_key=pay["yookassa_secret_key"], proxy_url=PROXY_URL).init_payment(order_id=order_id, amount_kopecks=total, user_id=int(tg_user["id"]), bot_username=club.bot_token)
+    if not payment.get("Success"):
+        order.status="FAILED"; await session.commit(); raise HTTPException(400, payment.get("Message", "Не удалось создать оплату"))
+    return {"ok": True, "order_id": order_id, "payment_url": payment["PaymentURL"], "total_kopecks": total}
+
+@router.get("/webapp/shop", response_class=HTMLResponse)
+async def client_shop(request: Request, club_id: int = Query(...), init_data: str | None = Query(None), session: AsyncSession = Depends(get_session)):
+    club = await session.get(Club, club_id)
+    if not init_data: return HTMLResponse("Откройте магазин из Telegram", status_code=401)
+    if not club or not verify_telegram_data(init_data, club.bot_token): raise HTTPException(403, "Доступ запрещён")
+    products = (await session.execute(select(ClubProduct).where(ClubProduct.club_id == club_id, ClubProduct.is_active.is_(True), ClubProduct.stock > 0).order_by(ClubProduct.category, ClubProduct.name))).scalars().all()
+    return templates.TemplateResponse("shop.html", {"request": request, "club": club, "club_id": club_id, "products": products})
+
+@router.get("/webapp/admin-products", response_class=HTMLResponse)
+async def admin_products_page(request: Request, club_id: int = Query(...), init_data: str | None = Query(None), session: AsyncSession = Depends(get_session)):
+    club = await session.get(Club, club_id)
+    if not init_data: return HTMLResponse("Откройте каталог из Telegram", status_code=401)
+    await verify_webapp_admin(club, init_data)
+    products = (await session.execute(select(ClubProduct).where(ClubProduct.club_id == club_id).order_by(ClubProduct.id.desc()))).scalars().all()
+    return templates.TemplateResponse("admin_products.html", {"request": request, "club": club, "club_id": club_id, "products": products})
+
+@router.post("/webapp/admin-products")
+async def create_product(payload: ProductPayload, session: AsyncSession = Depends(get_session)):
+    club = await session.get(Club, payload.club_id); await verify_webapp_admin(club, payload.init_data)
+    if not payload.name.strip() or payload.price_kopecks <= 0 or payload.stock < 0: raise HTTPException(400, "Некорректные данные товара")
+    p = ClubProduct(club_id=payload.club_id, name=payload.name.strip()[:120], image_url=(payload.image_url or "")[:500] or None, category=payload.category[:30], price_kopecks=payload.price_kopecks, stock=payload.stock, is_active=payload.is_active)
+    session.add(p); await session.commit(); return {"success": True}
+
+@router.post("/webapp/admin-products/upload-image")
+async def upload_product_image(club_id: int, init_data: str, image: UploadFile = File(...), session: AsyncSession = Depends(get_session)):
+    club = await session.get(Club, club_id); await verify_webapp_admin(club, init_data)
+    allowed = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp"}
+    if image.content_type not in allowed: raise HTTPException(400, "Разрешены JPG, PNG и WEBP")
+    data = await image.read()
+    if len(data) > 5 * 1024 * 1024: raise HTTPException(400, "Изображение не должно быть больше 5 МБ")
+    folder = "static/uploads/products"; os.makedirs(folder, exist_ok=True)
+    filename = f"club_{club_id}_{uuid.uuid4().hex}{allowed[image.content_type]}"
+    path = os.path.join(folder, filename)
+    with open(path, "wb") as handle: handle.write(data)
+    return {"image_url": f"/static/uploads/products/{filename}"}
+
+@router.patch("/webapp/admin-products/{product_id}")
+async def update_product(product_id: int, payload: ProductPayload, session: AsyncSession = Depends(get_session)):
+    club = await session.get(Club, payload.club_id); await verify_webapp_admin(club, payload.init_data)
+    p = await session.get(ClubProduct, product_id)
+    if not p or p.club_id != payload.club_id: raise HTTPException(404, "Товар не найден")
+    if not payload.name.strip() or payload.price_kopecks <= 0 or payload.stock < 0: raise HTTPException(400, "Некорректные данные товара")
+    p.name=payload.name.strip()[:120]; p.image_url=(payload.image_url or "")[:500] or None; p.category=payload.category[:30]; p.price_kopecks=payload.price_kopecks; p.stock=payload.stock; p.is_active=payload.is_active
+    await session.commit(); return {"success": True}
+
+@router.delete("/webapp/admin-products/{product_id}")
+async def delete_product(product_id: int, club_id: int, init_data: str, session: AsyncSession = Depends(get_session)):
+    club = await session.get(Club, club_id); await verify_webapp_admin(club, init_data)
+    p = await session.get(ClubProduct, product_id)
+    if not p or p.club_id != club_id: raise HTTPException(404, "Товар не найден")
+    await session.delete(p); await session.commit(); return {"success": True}
+
+@router.get("/webapp/admin-schedule", response_class=HTMLResponse)
+async def webapp_admin_schedule_page(
+        request: Request,
+        club_id: int = Query(...),
+        session: AsyncSession = Depends(get_session),
+        init_data: str | None = Query(default=None),
+):
+    club = (await session.execute(select(Club).where(Club.id == club_id))).scalar_one_or_none()
+    if not init_data:
+        return HTMLResponse("Откройте админское расписание из Telegram", status_code=401)
+    await verify_webapp_admin(club, init_data)
+    return templates.TemplateResponse("admin_schedule.html", {"request": request, "club": club, "club_id": club_id, "disciplines": club.club_settings.get("disciplines", {})})
+
+@router.post("/webapp/admin-schedule/change")
+async def change_admin_schedule(payload: ScheduleChangePayload, session: AsyncSession = Depends(get_session)):
+    club = (await session.execute(select(Club).where(Club.id == payload.club_id))).scalar_one_or_none()
+    await verify_webapp_admin(club, payload.init_data)
+    settings = dict(club.club_settings or {})
+    disciplines = dict(settings.get("disciplines", {}))
+    block = dict(disciplines.get(payload.discipline, {}))
+    schedule = dict(block.get("schedule", {}))
+    lessons = list(schedule.get(payload.day, []))
+    if payload.action == "delete":
+        if payload.index is None or payload.index < 0 or payload.index >= len(lessons):
+            raise HTTPException(400, "Занятие не найдено")
+        lessons.pop(payload.index)
+    elif payload.action in {"add", "update"}:
+        lesson = payload.lesson or {}
+        item = {"time": str(lesson.get("time", "00:00"))[:5], "coach": str(lesson.get("coach", ""))[:100], "max_slots": max(1, min(999, int(lesson.get("max_slots", 50))))}
+        if payload.action == "add": lessons.append(item)
+        elif payload.index is not None and 0 <= payload.index < len(lessons): lessons[payload.index] = item
+        else: raise HTTPException(400, "Занятие не найдено")
+    else: raise HTTPException(400, "Неизвестное действие")
+    lessons.sort(key=lambda x: str(x.get("time", "99:99")))
+    schedule[payload.day] = lessons; block["schedule"] = schedule; disciplines[payload.discipline] = block; settings["disciplines"] = disciplines
+    club.club_settings = settings
+    await session.commit()
+    return {"success": True}
+
+
 @router.get("/webapp/schedule", response_class=HTMLResponse)
 async def webapp_schedule_page(
         request: Request,
@@ -573,14 +734,7 @@ async def webapp_schedule_page(
 
     if not club:
         return HTMLResponse(content="<h1>🏰 Клуб не найден в системе SpeedyCRM</h1>", status_code=404)
-    if not init_data:
-        return HTMLResponse(f"""<!doctype html><meta charset='utf-8'>
-<script src='https://telegram.org/js/telegram-web-app.js'></script><script>
-const tg=window.Telegram.WebApp; tg.ready();
-if (!tg.initData) document.body.innerText='Откройте приложение из Telegram';
-else location.replace(location.pathname+'?club_id={club_id}&user_id={user_id}&init_data='+encodeURIComponent(tg.initData));
-</script>""", status_code=401)
-    await verify_webapp_admin(club, init_data)
+    # Публичная клиентская страница: только чтение, без Telegram-аутентификации.
 
     settings = club.club_settings if isinstance(club.club_settings, dict) else {}
     disciplines_data = settings.get("disciplines", {})

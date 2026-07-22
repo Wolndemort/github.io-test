@@ -34,7 +34,7 @@
         <select id="tariff" style="width:100%;padding:12px;margin-top:6px;"></select>
     </label>
     <div class="mono-divider"></div>
-    <button id="create" class="mono-action dark" style="width:100%;">Перейти к оплате</button>
+    <button id="create" class="mono-action dark" style="width:100%;">Добавить в корзину</button>
     <a class="mono-action" style="margin-top:10px;" href="/webapp/client-cabinet?club_id={{ club_id }}">← Назад в кабинет</a>
     <p id="msg"></p>
 </div>
@@ -72,22 +72,11 @@ document.getElementById('create').addEventListener('click', async () => {
   const button = document.getElementById('create');
   button.disabled = true;
   button.textContent = 'Создаём ссылку...';
-  const payload = {
-    init_data: window.Telegram?.WebApp?.initData || '',
-    club_id: {{ club_id }},
-    student_id: Number(studentSelect.value),
-    sport_type: sportSelect.value,
-    tariff_idx: Number(tariffSelect.value)
-  };
-  const res = await fetch('/webapp/client-cabinet/buy-subscription', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)});
-  const data = await res.json();
-  if (res.ok && data.payment_url) {
-    location.href = data.payment_url;
-    return;
-  }
-  document.getElementById('msg').innerText = data.detail || 'Ошибка';
-  button.disabled = false;
-  button.textContent = 'Перейти к оплате';
+  const items = JSON.parse(localStorage.getItem('speedy_cart') || '[]');
+  const selected = (disciplines[sportSelect.value].tariffs || [])[Number(tariffSelect.value)];
+  items.push({item_type:'subscription', student_id:Number(studentSelect.value), sport_type:sportSelect.value, tariff_idx:Number(tariffSelect.value), quantity:1, name:'Абонемент', price:Number(selected.price)*100});
+  localStorage.setItem('speedy_cart', JSON.stringify(items));
+  location.href = '/webapp/shop?club_id={{ club_id }}';
 });
 </script>
 {% endblock %}
