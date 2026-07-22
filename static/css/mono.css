@@ -349,6 +349,14 @@ body.mono-theme .mono-pill .value,
 body.mono-theme .mono-pill strong,
 body.mono-theme .mono-card .value { color: #fff !important; }
 body.mono-theme .mono-pill { min-height: 74px; }
+body.mono-theme .value,
+body.mono-theme .title,
+body.mono-theme .name,
+body.mono-theme .status,
+body.mono-theme .status-line,
+body.mono-theme .student .name,
+body.mono-theme .section-title .name { color: #fff !important; }
+body.mono-theme .value { font-weight: 800 !important; }
 
 @media (max-width: 600px) {
     body.mono-theme .mono-shell {
