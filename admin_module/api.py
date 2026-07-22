@@ -35,6 +35,7 @@ from database.db import get_session
 from config import fastapi_key
 from middlewares.db_saas_midleware import SUPER_ADMIN_IDS
 from admin_module.router_base import router, templates
+from admin_module.webapp_verify import verify_telegram_data
 from admin_module.webapp_client_cabinet import _ensure_webapp_user_linked
 import admin_module.webapp_client_cabinet  # noqa: F401
 import admin_module.turnstile_biometry  # noqa: F401 - registers SKUD WebApp routes
@@ -156,6 +157,35 @@ else location.replace(location.pathname+'?club_id=' + encodeURIComponent(new URL
         select(Student).where(Student.club_id == club_id)
     )
 
+    students = list(result.scalars().all())
+    now_local = datetime.now(timezone.utc).replace(tzinfo=None)
+    active_sessions, past_sessions = [], []
+    for student in students:
+        if student.last_visit:
+            last_visit_naive = student.last_visit.replace(tzinfo=None)
+            time_passed = now_local - last_visit_naive
+            session_end = last_visit_naive + timedelta(minutes=timeout_minutes)
+            session_info = {
+                "student_id": student.id, "name": student.name,
+                "balance": student.balance_lessons or 0,
+                "last_visit": last_visit_naive.strftime("%d.%m.%Y %H:%M"),
+                "session_end": session_end.strftime("%H:%M"),
+                "time_passed_mins": int(time_passed.total_seconds() // 60),
+            }
+            if time_passed < timedelta(minutes=timeout_minutes):
+                session_info["mins_left"] = max(0, int((session_end - now_local).total_seconds() // 60))
+                active_sessions.append(session_info)
+            else:
+                past_sessions.append(session_info)
+    active_sessions.sort(key=lambda x: x["time_passed_mins"])
+    past_sessions.sort(key=lambda x: x["time_passed_mins"])
+    return templates.TemplateResponse("admin.html", {
+        "request": request, "club_id": club_id,
+        "active_sessions": active_sessions, "past_sessions": past_sessions[:20],
+        "timeout_minutes": timeout_minutes,
+        **calculate_admin_dashboard(students),
+    })
+
 
 @router.get("/admin/students", response_class=HTMLResponse)
 async def admin_students_page(
@@ -225,58 +255,25 @@ async def admin_update_student(
         student.can_freeze = payload.can_freeze
     if payload.is_frozen is not None:
         student.is_frozen = 1 if payload.is_frozen else 0
+        if student.is_frozen:
+            if payload.frozen_at:
+                try:
+                    student.frozen_at = datetime.strptime(payload.frozen_at, "%Y-%m-%d")
+                except ValueError:
+                    raise HTTPException(status_code=400, detail="Некорректная дата начала заморозки")
+            elif not student.frozen_at:
+                student.frozen_at = datetime.utcnow()
+        else:
+            student.frozen_at = None
+            student.frozen_days = None
+    if payload.frozen_days is not None:
+        if payload.frozen_days < 1 or payload.frozen_days > 365:
+            raise HTTPException(status_code=400, detail="Срок заморозки должен быть от 1 до 365 дней")
+        student.frozen_days = payload.frozen_days
     if payload.discipline is not None:
         student.discipline = payload.discipline.strip()[:50] or student.discipline
     await db.commit()
     return {"ok": True}
-    students = list(result.scalars().all())
-
-
-    now_local = datetime.now(timezone.utc).replace(tzinfo=None)
-
-    active_sessions = []
-    past_sessions = []
-
-    for student in students:
-        if student.last_visit:
-            last_visit_naive = student.last_visit.replace(tzinfo=None)
-            time_passed = now_local - last_visit_naive
-            session_end = last_visit_naive + timedelta(minutes=timeout_minutes)
-
-            session_info = {
-                "student_id": student.id,
-                "name": student.name,
-                "balance": student.balance_lessons or 0,
-                "last_visit": last_visit_naive.strftime("%d.%m.%Y %H:%M"),
-                "session_end": session_end.strftime("%H:%M"),
-                "time_passed_mins": int(time_passed.total_seconds() // 60)
-            }
-
-            if time_passed < timedelta(minutes=timeout_minutes):
-                delta_left = session_end - now_local
-                mins_left = int(delta_left.total_seconds() // 60)
-                session_info["mins_left"] = max(0, mins_left)
-                active_sessions.append(session_info)
-            else:
-                past_sessions.append(session_info)
-
-    active_sessions.sort(key=lambda x: x["time_passed_mins"])
-    past_sessions.sort(key=lambda x: x["time_passed_mins"])
-    past_sessions = past_sessions[:20]
-
-    admin_data = calculate_admin_dashboard(students)
-
-    return templates.TemplateResponse(
-        "admin.html",
-        {
-            "request": request,
-            "club_id": club_id,
-            "active_sessions": active_sessions,
-            "past_sessions": past_sessions,
-            "timeout_minutes": timeout_minutes,
-            **admin_data
-        }
-    )
 
 
 @router.get("/revenue", response_class=HTMLResponse)
@@ -797,28 +794,6 @@ class BiometricCheckIn(BaseModel):
     student_id: int
     biometric_token: str | None = None
     init_data: str
-
-
-def verify_telegram_data(init_data: str, bot_token: str) -> dict | None:
-    """Криптографическая проверка, что init_data пришла от реального юзера Telegram"""
-    try:
-        parsed_data = dict(parse_qsl(init_data))
-        if "hash" not in parsed_data:
-            return None
-        tg_hash = parsed_data.pop("hash")
-        data_check_string = "\n".join(f"{k}={v}" for k, v in sorted(parsed_data.items()))
-        secret_key = hmac.new(b"WebAppData", bot_token.encode(), hashlib.sha256).digest()
-        calculated_hash = hmac.new(secret_key, data_check_string.encode(), hashlib.sha256).hexdigest()
-        if hmac.compare_digest(calculated_hash, tg_hash):
-            auth_date = int(parsed_data.get("auth_date", "0"))
-            max_age = int(os.getenv("TELEGRAM_INIT_DATA_MAX_AGE", "86400"))
-            now = int(time.time())
-            if auth_date <= 0 or auth_date > now + 300 or now - auth_date > max_age:
-                return None
-            return json.loads(parsed_data.get("user", "{}"))
-        return None
-    except Exception:
-        return None
 
 
 # Используй существующий router из твоего api.py

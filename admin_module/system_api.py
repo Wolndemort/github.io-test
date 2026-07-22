@@ -6,17 +6,24 @@ from sqlalchemy.orm import selectinload
 
 from admin_module.router_base import router
 from admin_module.security import get_api_key
-from database.db import Student, User, get_session
+from database.db import Student, User, Club, get_session
 
 
 class StudentCreate(BaseModel):
     name: str
     parent_id: int
+    club_id: int
 
 
 @router.post("/stats/students")
 async def create_student(data: StudentCreate, session: AsyncSession = Depends(get_session), _=Depends(get_api_key)):
-    new_student = Student(name=data.name, parent_id=data.parent_id)
+    club = await session.get(Club, data.club_id)
+    if not club:
+        raise HTTPException(status_code=404, detail="Club not found")
+    parent = await session.get(User, data.parent_id)
+    if not parent or parent.club_id != data.club_id:
+        raise HTTPException(status_code=403, detail="Parent is not linked to this club")
+    new_student = Student(name=data.name.strip(), parent_id=data.parent_id, club_id=data.club_id)
     session.add(new_student)
     await session.commit()
     return {"status": "success", "student": new_student.name}

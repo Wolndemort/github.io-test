@@ -1,5 +1,8 @@
 #секреты
 .env
+__pycache__/
+*.py[cod]
+.pytest_cache/
 *.db
 database.db
 

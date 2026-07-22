@@ -55,4 +55,6 @@ class AdminStudentUpdate(BaseModel):
     expire_date: str | None = None
     can_freeze: int | None = None
     is_frozen: int | None = None
+    frozen_at: str | None = None
+    frozen_days: int | None = None
     discipline: str | None = None

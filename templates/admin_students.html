@@ -23,6 +23,7 @@
         <label>Бесплатных заморозок<input name="can_freeze" type="number" min="0" max="99" value="{{ s.can_freeze or 0 }}"></label>
         <label>Дисциплина<input name="discipline" value="{{ s.discipline or '' }}"></label>
         <label>Статус<select name="is_frozen"><option value="0" {% if not s.is_frozen %}selected{% endif %}>Активен</option><option value="1" {% if s.is_frozen %}selected{% endif %}>Заморожен</option></select></label>
+        <label>Дней заморозки<input name="frozen_days" type="number" min="1" max="365" value="{{ s.frozen_days or '' }}"></label>
       </div><button type="submit">Сохранить</button><span class="muted msg"></span>
     </form>
   {% else %}<p>Атлетов нет.</p>{% endfor %}
@@ -32,5 +33,5 @@
 const tg=window.Telegram?.WebApp;if(tg){tg.ready();tg.expand()}const initData=tg?.initData||'';const clubId={{ club_id }};
 function filter(){const q=document.getElementById('search').value.toLowerCase(),m=document.getElementById('missing').checked;document.querySelectorAll('.student').forEach(x=>x.style.display=(!q||x.dataset.name.includes(q))&&(!m||x.dataset.missing==='1')?'grid':'none')}
 document.getElementById('search').addEventListener('input',filter);document.getElementById('missing').addEventListener('change',filter);
-document.querySelectorAll('.student').forEach(form=>form.addEventListener('submit',async e=>{e.preventDefault();const f=new FormData(form);const payload={init_data:initData,club_id:clubId,birthday:f.get('birthday'),balance_lessons:Number(f.get('balance_lessons')),expire_date:f.get('expire_date'),can_freeze:Number(f.get('can_freeze')),is_frozen:Number(f.get('is_frozen')),discipline:f.get('discipline')};const r=await fetch('/admin/students/'+form.dataset.id,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});const msg=form.querySelector('.msg');if(r.ok){msg.textContent='Сохранено'}else{const d=await r.json();msg.textContent='Ошибка: '+(d.detail||'не удалось сохранить')}}));
+document.querySelectorAll('.student').forEach(form=>form.addEventListener('submit',async e=>{e.preventDefault();const f=new FormData(form);const payload={init_data:initData,club_id:clubId,birthday:f.get('birthday'),balance_lessons:Number(f.get('balance_lessons')),expire_date:f.get('expire_date'),can_freeze:Number(f.get('can_freeze')),is_frozen:Number(f.get('is_frozen')),frozen_days:f.get('frozen_days')?Number(f.get('frozen_days')):null,discipline:f.get('discipline')};const r=await fetch('/admin/students/'+form.dataset.id,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});const msg=form.querySelector('.msg');if(r.ok){msg.textContent='Сохранено'}else{const d=await r.json();msg.textContent='Ошибка: '+(d.detail||'не удалось сохранить')}}));
 </script></body></html>
