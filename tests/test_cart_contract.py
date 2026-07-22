@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 
 from database.db import CartOrder, CartItem, ClubProduct
+from admin_module.api import router, _student_identity_phone
 
 
 def test_cart_models_have_separate_order_and_item_tables():
@@ -26,6 +27,40 @@ def test_client_shop_has_cart_button_and_checkout_endpoint():
     assert "В корзину" in shop
     assert "/webapp/cart/checkout" in shop
     assert "localStorage" in shop
+
+
+def test_cart_is_separate_page_with_quantity_controls_and_product_limit():
+    cart = Path("templates/cart.html").read_text(encoding="utf-8")
+    routes = {(route.path, method) for route in router.routes for method in (getattr(route, "methods", None) or {"GET"})}
+    assert ("/webapp/cart", "GET") in routes
+    assert "data-plus" in cart
+    assert "x.item_type==='product'?Number(x.max||0):999" in cart
+    assert "x[i].quantity<max" in cart
+
+
+def test_service_quantities_are_processed_by_checkout_and_webhook():
+    api = Path("admin_module/api.py").read_text(encoding="utf-8")
+    webhook = Path("admin_module/payments_webhook.py").read_text(encoding="utf-8")
+    assert "qty = int(raw.get(\"quantity\", 1))" in api
+    assert "total += price * qty" in api
+    assert "quantity=info[\"quantity\"]" in api
+    assert "range(max(1, int(item.quantity or 1)))" in webhook
+
+
+def test_student_duplicate_guards_are_present_for_webapp_and_bot():
+    api = Path("admin_module/api.py").read_text(encoding="utf-8")
+    bot = Path("handlers/user_option.py").read_text(encoding="utf-8")
+    assert "Такой атлет уже есть в базе клуба" in api
+    assert "student.name.strip().casefold()" in api
+    assert "student.birthday == birthday" in api
+    assert "existing_students = (await session.execute" in bot
+    assert "student.birthday == birthday_date" in bot
+
+
+def test_student_phone_identity_uses_last_ten_digits():
+    assert _student_identity_phone("+7 (999) 111-22-33") == "9991112233"
+    assert _student_identity_phone("8 999 111 22 33") == "9991112233"
+    assert _student_identity_phone("") == ""
 
 
 def test_admin_product_screen_supports_image_and_editing():
