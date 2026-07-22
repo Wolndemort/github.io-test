@@ -179,3 +179,4 @@ docker compose exec gym-api sh -c 'test -n "$SENTRY_DSN" && echo SENTRY_CONFIGUR
 - История пользователя показывает обычные платежи и заказы корзины.
 - Включены Telegram HMAC, club isolation, Sentry, QR/СКУД-защиты и мобильный safe-area.
 - Последняя локальная проверка: 54 теста прошли, Python-компиляция и `git diff --check` успешны.
+Админские публичные ссылки: отдельные флаги `site_enabled` и `support_enabled` в `ui`, редактирование `site_url` и `support_link` через FSM. Магазин: `В корзину`, `Купить сейчас`, удаление позиции, общая оплата и история заказа.

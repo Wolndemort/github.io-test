@@ -610,6 +610,9 @@ async def cart_checkout(payload: CartCheckoutPayload, request: Request, session:
     order_id = f"CART_{uuid.uuid4().hex[:12].upper()}"
     order = CartOrder(id=order_id, club_id=club.id, user_id=int(tg_user["id"]), amount_kopecks=total, status="NEW")
     session.add(order)
+    # CartItem ссылается на CartOrder внешним ключом; фиксируем родительскую
+    # строку до добавления позиций, поскольку ORM-связь не используется.
+    await session.flush()
     for kind, obj, info in normalized:
         if kind == "product": session.add(CartItem(cart_order_id=order_id, product_id=obj.id, item_type=kind, title=obj.name, quantity=info, unit_price_kopecks=obj.price_kopecks, payload={"category": obj.category}))
         elif kind == "subscription": session.add(CartItem(cart_order_id=order_id, item_type=kind, title="Абонемент", quantity=1, unit_price_kopecks=info["price"], payload=info | {"days": obj.get("days", 30), "count": obj.get("count", 0)}))

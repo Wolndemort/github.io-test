@@ -99,6 +99,10 @@ def get_main_menu_keyboard(club_settings: dict, club_id: int):
         text="🖥 Кабинет клиента",
         web_app=types.WebAppInfo(url=f"{base_url}/webapp/client-cabinet?club_id={club_id}")
     ))
+    builder.row(types.InlineKeyboardButton(
+        text="🛒 Магазин и корзина",
+        web_app=types.WebAppInfo(url=f"{base_url}/webapp/shop?club_id={club_id}")
+    ))
 
     # 3. ГЛАВНАЯ КНОПКА (Профиль)
     builder.row(types.InlineKeyboardButton(text='👤 Профиль', callback_data='profile'))

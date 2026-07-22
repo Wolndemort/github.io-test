@@ -231,7 +231,7 @@ async def manage_disciplines_menu(callback: types.CallbackQuery, club_settings: 
     )
 
 
-@router.callback_query(F.data.startswith("toggle_"))
+@router.callback_query(F.data.startswith("toggle_feat_") | F.data.startswith("toggle_disc_"))
 async def toggle_logic(
         callback: types.CallbackQuery,
         club: Club,
