@@ -60,14 +60,13 @@ async def start_handler(
     await state.clear()
     user_id = message.from_user.id
 
-    # =========================================================================
-    # 🚨 КРИТИЧЕСКИЙ ПРОБИВ АСИНХРОННОГО КЭША И ИЗОЛЯЦИИ ТРАНЗАКЦИЙ ДЛЯ /START:
+    # Сбрасываем только незавершённую транзакцию. Не вызываем expire_all():
+    # в async SQLAlchemy это может истечь объект Club из middleware, а
+    # последующее обращение к club.id/name вызовет MissingGreenlet.
     try:
         await session.rollback()
-        session.expire_all()
     except Exception as cache_err:
-        logger.warning(f"Ошибка принудительного сброса сессии в /start: {cache_err}")
-    # =========================================================================
+        logger.warning(f"Ошибка сброса транзакции в /start: {cache_err}")
 
     # Исправлено: берем честное локальное время сервера без UTC сдвига,
     # чтобы оно идеально совпадало с логикой дат в вашей админ-панели
@@ -85,6 +84,7 @@ async def start_handler(
         )
         session.add(db_user)
         await session.commit()
+        await session.refresh(db_user)
     else:
         if db_user.club_id != club.id:
             db_user.club_id = club.id
