@@ -26,6 +26,12 @@ body.mono-theme html {
     color: var(--mono-black) !important;
 }
 
+body.mono-theme {
+    padding-top: max(10px, env(safe-area-inset-top));
+    padding-bottom: max(10px, env(safe-area-inset-bottom));
+    overflow-x: hidden;
+}
+
 body.mono-theme,
 body.mono-theme button,
 body.mono-theme input,
@@ -334,7 +340,13 @@ body.mono-theme a {
 
     body.mono-theme .mono-title {
         font-size: 24px !important;
+        line-height: 1.12 !important;
+        max-width: 100%;
     }
+
+    body.mono-theme .mono-kicker { align-items: flex-start; }
+    body.mono-theme .mono-kicker .mono-eyebrow { line-height: 1.25; }
+    body.mono-theme .mono-kicker .mono-action { flex: 0 0 auto; }
 
     body.mono-theme .mono-grid-2,
     body.mono-theme .mono-grid-4 {
