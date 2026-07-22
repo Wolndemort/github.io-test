@@ -227,8 +227,8 @@ def admin_keyboard(club_id: int, club_settings: dict, subscription_date: datetim
         )
     )
     builder.row(types.InlineKeyboardButton(
-        text="📄 Выгрузка в Excel",
-        web_app=types.WebAppInfo(url=f"{base_url}/stats/export/excel?club_id={club_id}")
+        text="👥 Атлеты и ДР",
+        web_app=types.WebAppInfo(url=f"{base_url}/admin/students?club_id={club_id}")
     ))
     builder.row(types.InlineKeyboardButton(text='🔙 Назад', callback_data='begin'))
     return builder.as_markup()
