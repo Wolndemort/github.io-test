@@ -654,7 +654,7 @@ async def upload_product_image(club_id: int, init_data: str, image: UploadFile =
     allowed = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp"}
     if image.content_type not in allowed: raise HTTPException(400, "Разрешены JPG, PNG и WEBP")
     data = await image.read()
-    if len(data) > 5 * 1024 * 1024: raise HTTPException(400, "Изображение не должно быть больше 5 МБ")
+    if len(data) > 8 * 1024 * 1024: raise HTTPException(400, "Изображение не должно быть больше 8 МБ")
     folder = "static/uploads/products"; os.makedirs(folder, exist_ok=True)
     filename = f"club_{club_id}_{uuid.uuid4().hex}{allowed[image.content_type]}"
     path = os.path.join(folder, filename)

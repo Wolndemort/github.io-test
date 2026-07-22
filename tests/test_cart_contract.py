@@ -45,7 +45,7 @@ def test_cart_webhook_has_idempotent_confirmed_guard():
 def test_product_upload_contract_has_type_and_size_guards():
     source = Path("admin_module/api.py").read_text(encoding="utf-8")
     assert "image/jpeg" in source and "image/png" in source and "image/webp" in source
-    assert "5 * 1024 * 1024" in source
+    assert "8 * 1024 * 1024" in source
     assert "static/uploads/products" in source
 
 def test_product_admin_has_file_input_and_fallback_preview():
