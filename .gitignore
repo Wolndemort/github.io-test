@@ -2,6 +2,8 @@
 .env
 certbot/conf/
 certbot/www/
+server_migrations_*/
+speedycrm-migrations.tar.gz
 __pycache__/
 *.py[cod]
 .pytest_cache/
