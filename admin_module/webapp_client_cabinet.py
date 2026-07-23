@@ -19,6 +19,7 @@ from database.db import Club, PaymentOrder, CartOrder, CartItem, Student, Subscr
 from services.audit import audit_event
 from services.abuse_guard import rate_limit, audit_block
 from services.yookassa_client import YooKassaClient
+from services.input_normalization import normalize_ru_phone
 
 
 def _auth_gate_html(target: str, **params):
@@ -313,10 +314,11 @@ async def webapp_bind_phone_submit(payload: WebAppBindPhonePayload, request: Req
     tg_user = verify_telegram_data(payload.init_data, club.bot_token)
     if not tg_user:
         raise HTTPException(status_code=403, detail="Доступ запрещен")
-    raw_phone = (payload.phone or "").replace("+", "").strip()
+    normalized_phone = normalize_ru_phone(payload.phone)
+    raw_phone = normalized_phone or ""
     if len(raw_phone) < 10:
         raise HTTPException(status_code=400, detail="Введите номер телефона")
-    clean_phone_10 = raw_phone[-10:]
+    clean_phone_10 = normalized_phone[-10:] if normalized_phone else ""
     redis = request.app.state.redis_client
     bind_key = f"rl:webapp:bind_phone:{club.id}:{tg_user.get('id', 0)}"
     if not await rate_limit(redis, bind_key, 3, 60):

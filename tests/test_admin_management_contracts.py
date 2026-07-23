@@ -5,6 +5,7 @@ from pydantic import ValidationError
 from admin_module.api import router
 from admin_module.schemas import AdminStudentUpdate
 from admin_module.system_api import StudentCreate
+from services.input_normalization import normalize_ru_phone, parse_user_date
 
 
 def route_keys():
@@ -51,6 +52,15 @@ def test_bot_manual_add_button_has_registered_flow_and_no_orphan_states():
     assert "admin_manual_no_sub_" in handler
     assert "waiting_for_lessons" not in states
     assert "waiting_for_parent_id" not in states
+
+
+def test_ru_phone_and_date_inputs_are_normalized():
+    assert normalize_ru_phone("8 (999) 111-22-33") == "79991112233"
+    assert normalize_ru_phone("+7 999 111 22 33") == "79991112233"
+    assert normalize_ru_phone("9991112233") == "79991112233"
+    assert parse_user_date("15.08.2012").isoformat() == "2012-08-15"
+    assert parse_user_date("15082012").isoformat() == "2012-08-15"
+    assert parse_user_date("15-08-2012").isoformat() == "2012-08-15"
 
 
 def test_daily_report_has_no_manual_add_fragment():

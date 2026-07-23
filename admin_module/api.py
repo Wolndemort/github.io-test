@@ -41,6 +41,7 @@ from middlewares.db_saas_midleware import SUPER_ADMIN_IDS
 from admin_module.router_base import router, templates
 from admin_module.webapp_verify import verify_telegram_data
 from admin_module.webapp_client_cabinet import _ensure_webapp_user_linked
+from services.input_normalization import normalize_ru_phone, parse_user_date
 import admin_module.webapp_client_cabinet  # noqa: F401
 import admin_module.turnstile_biometry  # noqa: F401 - registers SKUD WebApp routes
 import admin_module.payments_webhook  # noqa: F401
@@ -84,8 +85,7 @@ class CartCheckoutPayload(BaseModel):
 
 
 def _student_identity_phone(value: str | None) -> str:
-    digits = re.sub(r"\D", "", value or "")
-    return digits[-10:] if len(digits) >= 10 else digits
+    return normalize_ru_phone(value) or ""
 
 def _telegram_init_gate(path: str, club_id: int, title: str) -> HTMLResponse:
     return HTMLResponse(f"""<!doctype html><meta charset='utf-8'><script src='https://telegram.org/js/telegram-web-app.js'></script><script>const tg=window.Telegram.WebApp;tg.ready();if(!tg.initData)document.body.innerText='{title}';else location.replace('{path}?club_id={club_id}&init_data='+encodeURIComponent(tg.initData));</script>""", status_code=401)
@@ -332,7 +332,7 @@ async def admin_update_student(
             student.birthday = None
         else:
             try:
-                birthday = date.fromisoformat(payload.birthday)
+                birthday = parse_user_date(payload.birthday)
                 if birthday > date.today() or birthday.year < 1900:
                     raise ValueError
                 student.birthday = birthday
@@ -393,7 +393,7 @@ async def admin_create_student(
     birthday = None
     if payload.birthday:
         try:
-            birthday = date.fromisoformat(payload.birthday)
+                birthday = parse_user_date(payload.birthday)
         except ValueError:
             raise HTTPException(status_code=400, detail="Некорректная дата рождения")
 
@@ -423,7 +423,7 @@ async def admin_create_student(
     new_student = Student(
         name=name,
         club_id=club.id,
-        parent_phone=payload.phone.strip() if payload.phone else None,
+        parent_phone=normalize_ru_phone(payload.phone) if payload.phone else None,
         birthday=birthday,
         parent_id=None,
         balance_lessons=count,

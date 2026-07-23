@@ -31,14 +31,14 @@ from uuid import uuid4
 from pathlib import Path
 from loguru import logger
 from PIL import Image, UnidentifiedImageError
+from services.input_normalization import normalize_ru_phone, parse_user_date
 
 
 router = Router()
 
 
 def _manual_phone_key(value: str | None) -> str:
-    digits = re.sub(r"\D", "", value or "")
-    return digits[-10:] if len(digits) >= 10 else digits
+    return normalize_ru_phone(value) or ""
 
 
 @router.callback_query(F.data == "admin_add_manual")
@@ -74,7 +74,10 @@ async def manual_add_phone(message: types.Message, state: FSMContext):
     phone = (message.text or "").strip()
     if len(_manual_phone_key(phone)) < 10:
         return await message.answer("Номер должен содержать минимум 10 цифр. Попробуйте ещё раз.")
-    await state.update_data(parent_phone=phone)
+    normalized_phone = normalize_ru_phone(phone)
+    if not normalized_phone:
+        return await message.answer("Введите российский номер из 10 или 11 цифр.")
+    await state.update_data(parent_phone=normalized_phone)
     await state.set_state(AdminManualAdd.waiting_for_birthday)
     await message.answer("Введите дату рождения в формате ДД.ММ.ГГГГ или отправьте 0, если дата неизвестна.")
 
@@ -85,12 +88,10 @@ async def manual_add_birthday(message: types.Message, state: FSMContext, club_se
     birthday = None
     if value != "0":
         try:
-            birthday = datetime.strptime(value, "%d.%m.%Y").date()
-            if birthday > datetime.now().date() or birthday.year < 1900:
-                raise ValueError
+            birthday = parse_user_date(value)
         except ValueError:
             return await message.answer("Введите корректную дату ДД.ММ.ГГГГ или 0.")
-    await state.update_data(birthday=birthday)
+    await state.update_data(birthday=birthday.isoformat() if birthday else None)
     disciplines = {
         code: info for code, info in (club_settings.get("disciplines", {}) or {}).items()
         if info.get("active", True)
@@ -140,11 +141,12 @@ async def _finish_manual_add(callback: types.CallbackQuery, state: FSMContext, s
         expire_date = datetime.now() + timedelta(days=int(tariff.get("days", 30) or 30))
 
     name = data.get("athlete_name", "").strip()
+    birthday = parse_user_date(data.get("birthday"))
     phone = data.get("parent_phone")
     students = (await session.execute(select(Student).where(Student.club_id == club.id))).scalars().all()
     duplicate = next((student for student in students
                       if student.name.strip().casefold() == name.casefold()
-                      and student.birthday == data.get("birthday")
+                      and student.birthday == birthday
                       and (student.discipline or "").casefold() == discipline.casefold()
                       and _manual_phone_key(student.parent_phone) == _manual_phone_key(phone)), None)
     if duplicate:
@@ -157,7 +159,7 @@ async def _finish_manual_add(callback: types.CallbackQuery, state: FSMContext, s
         club_id=club.id,
         name=name,
         parent_phone=phone,
-        birthday=data.get("birthday"),
+        birthday=birthday,
         expire_date=expire_date,
         balance_lessons=count,
         can_freeze=1,

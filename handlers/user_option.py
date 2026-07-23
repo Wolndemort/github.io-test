@@ -25,6 +25,7 @@ import hashlib
 import hmac
 from handlers.states import RegistrationStates, PaymentStates
 from handlers.skud import trigger_dingtian_turnstile
+from services.input_normalization import parse_user_date, normalize_ru_phone
 
 
 def generate_signature(user_id, time_salt):
@@ -867,7 +868,7 @@ async def save_birthday_edit(message: types.Message, state: FSMContext, session:
     birthday = None
     if value != "0":
         try:
-            birthday = datetime.strptime(value, "%d.%m.%Y").date()
+            birthday = parse_user_date(value)
             if birthday > datetime.now().date() or birthday.year < 1900:
                 raise ValueError
         except ValueError:
@@ -920,7 +921,7 @@ async def process_athlete_birthday(
     if birthday_text != "0":
         try:
             # Валидируем формат даты
-            birthday_date = datetime.strptime(birthday_text, "%d.%m.%Y").date()
+            birthday_date = parse_user_date(birthday_text)
         except ValueError:
             return await message.answer(
                 "❌ Неверный формат! Введите дату строго в формате ДД.ММ.ГГГГ (например: 25.10.2015)\n"
@@ -1036,8 +1037,10 @@ async def process_user_contact(
         redis: Redis
 ):
     # Очищаем номер от плюсов и пробелов
-    raw_phone = message.contact.phone_number.replace("+", "").strip()
-    clean_phone_10 = raw_phone[-10:]  # Последние 10 цифр (9991112233)
+    normalized_phone = normalize_ru_phone(message.contact.phone_number)
+    if not normalized_phone:
+        return await message.answer("Не удалось распознать российский номер телефона.")
+    clean_phone_10 = normalized_phone[-10:]
     user_id = message.from_user.id
 
     if not await rate_limit(redis, f"rl:bot:bind_phone:{club.id}:{user_id}", 3, 60):

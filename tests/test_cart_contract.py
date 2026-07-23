@@ -58,8 +58,8 @@ def test_student_duplicate_guards_are_present_for_webapp_and_bot():
 
 
 def test_student_phone_identity_uses_last_ten_digits():
-    assert _student_identity_phone("+7 (999) 111-22-33") == "9991112233"
-    assert _student_identity_phone("8 999 111 22 33") == "9991112233"
+    assert _student_identity_phone("+7 (999) 111-22-33") == "79991112233"
+    assert _student_identity_phone("8 999 111 22 33") == "79991112233"
     assert _student_identity_phone("") == ""
 
 
