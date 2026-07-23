@@ -25,6 +25,7 @@
         .coach { font-size:14px; color:#666; }
         .slots { font-size:12px; color:#111; text-align:right; font-weight:700; }
         .no-lessons { color:#777; font-style:italic; font-size:13px; }
+        .discipline-picker { width:100%; padding:12px; margin-bottom:12px; border:1px solid #444; border-radius:12px; background:#101010; color:#fff; font-size:16px; }
     </style>
 </head>
 <body class="mono-theme">
@@ -36,8 +37,13 @@
     </div>
 
     <div class="mono-card" id="schedule-root">
+        <label for="discipline-picker" class="mono-eyebrow">Выберите дисциплину</label>
+        <select id="discipline-picker" class="discipline-picker">
+            <option value="">Сначала выберите дисциплину</option>
+            {% for discipline in disciplines %}<option value="discipline-{{ loop.index0 }}">{{ discipline.name }}</option>{% endfor %}
+        </select>
         {% for discipline in disciplines %}
-            <div class="discipline-section">
+            <div class="discipline-section" id="discipline-{{ loop.index0 }}" hidden>
                 <div class="discipline-title">🥋 {{ discipline.name }}</div>
                 {% for day in discipline.days %}
                     <div class="day-container">
@@ -63,6 +69,10 @@
 const tg = window.Telegram.WebApp;
 tg.ready();
 tg.expand();
+const picker = document.getElementById('discipline-picker');
+picker?.addEventListener('change', () => document.querySelectorAll('.discipline-section').forEach(section => {
+    section.hidden = section.id !== picker.value;
+}));
 </script>
 </body>
 </html>

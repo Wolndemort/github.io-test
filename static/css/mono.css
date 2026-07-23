@@ -497,3 +497,27 @@ body.mono-theme .birthday-card .label,
 body.mono-theme .birthday-card .birthday-footer {
     color: #666666 !important;
 }
+
+/* Filter controls and their captions must remain readable after the card
+   inheritance reset above. */
+body.mono-theme .filters label,
+body.mono-theme .filter-checks label,
+body.mono-theme .card > label,
+body.mono-theme .card label {
+    color: #f7f7f7 !important;
+}
+body.mono-theme .filters input,
+body.mono-theme .filters select,
+body.mono-theme .filter-checks input,
+body.mono-theme .card input,
+body.mono-theme .card select,
+body.mono-theme .card textarea {
+    background: #101010 !important;
+    color: #ffffff !important;
+    border-color: #444444 !important;
+    -webkit-text-fill-color: #ffffff !important;
+}
+body.mono-theme select option {
+    background: #101010 !important;
+    color: #ffffff !important;
+}
