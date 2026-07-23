@@ -128,7 +128,8 @@ async def lifespan(app: FastAPI):
 
     # Утренний блок (10:00) — Проверка ДР, прогульщиков и рассылка по абонементам
     scheduler.add_job(saas_daily_morning_check, 'cron', hour=10, minute=0)
-    scheduler.add_job(check_abon_mailing, 'cron', hour=10, minute=0)
+    # Вторую массовую рассылку запускаем после напоминаний о датах рождения.
+    scheduler.add_job(check_abon_mailing, 'cron', hour=10, minute=5)
 
     # Вечерний блок (22:00) — Отчет по посещениям и абонементам для владельцев клубов
     scheduler.add_job(send_daily_report_to_admins, 'cron', hour=22, minute=0)
@@ -462,6 +463,35 @@ async def saas_daily_morning_check():
         # Ищем всех студентов
         result = await session.execute(select(Student))
         students = result.scalars().all()
+
+        # Ежедневно напоминаем родителям о незаполненной дате рождения студента.
+        # Один родитель получает одно сообщение со списком, а не отдельное сообщение на каждого ребёнка.
+        missing_birthdays = {}
+        for student in students:
+            if student.parent_id and not student.birthday:
+                key = (student.club_id, student.parent_id)
+                missing_birthdays.setdefault(key, []).append(student.name)
+        missing_club_ids = {club_id for club_id, _ in missing_birthdays}
+        clubs_result = await session.execute(select(Club).where(Club.id.in_(missing_club_ids))) if missing_club_ids else None
+        clubs_by_id = {club.id: club for club in clubs_result.scalars().all()} if clubs_result else {}
+        for (club_id, parent_id), names in missing_birthdays.items():
+            club = clubs_by_id.get(club_id)
+            if not club or club.bot_token not in bots_dict:
+                continue
+            try:
+                await bots_dict[club.bot_token].send_message(
+                    chat_id=parent_id,
+                    text=(f"🎂 <b>Заполните даты рождения атлетов</b>\n\n"
+                          f"В профиле клуба <b>{club.name}</b> не указана дата рождения: "
+                          f"<b>{', '.join(names)}</b>.\n"
+                          "Это нужно для корректного возраста, тарифов и статистики."),
+                    reply_markup=types.InlineKeyboardMarkup(inline_keyboard=[[
+                        types.InlineKeyboardButton(text="Указать дату рождения", callback_data="edit_birthday")
+                    ]]),
+                    parse_mode="HTML",
+                )
+            except Exception as reminder_error:
+                logger.error("Не удалось отправить напоминание о ДР родителю %s: %s", parent_id, reminder_error)
 
         # ФИКС: Берем только чистую текущую дату (без часов и минут)
         today = datetime.now().date()

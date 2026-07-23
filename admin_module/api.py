@@ -303,7 +303,71 @@ async def admin_students_page(
         "club_name": club.name,
         "students": students,
         "club_settings": club.club_settings or {},
+        "now": datetime.now(),
     })
+
+
+@router.get("/admin/sales", response_class=HTMLResponse)
+async def admin_sales_page(
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+    init_data: str | None = Query(default=None),
+    date_from: str | None = Query(default=None),
+    date_to: str | None = Query(default=None),
+    weekday: int | None = Query(default=None),
+    payment_method: str | None = Query(default=None),
+    category: str | None = Query(default=None),
+    discipline: str | None = Query(default=None),
+):
+    club_id = get_club_id_from_host(request)
+    if not init_data:
+        return webapp_auth_gate(request, club_id)
+    club = await session.get(Club, club_id)
+    await verify_webapp_admin(club, init_data)
+
+    start = datetime.strptime(date_from, "%Y-%m-%d") if date_from else None
+    end = datetime.strptime(date_to, "%Y-%m-%d") + timedelta(days=1) if date_to else None
+    payment_query = select(PaymentOrder).where(PaymentOrder.club_id == club_id, PaymentOrder.status == "CONFIRMED")
+    cart_query = select(CartOrder).where(CartOrder.club_id == club_id, CartOrder.status == "CONFIRMED")
+    if start:
+        payment_query = payment_query.where(PaymentOrder.created_at >= start); cart_query = cart_query.where(CartOrder.created_at >= start)
+    if end:
+        payment_query = payment_query.where(PaymentOrder.created_at < end); cart_query = cart_query.where(CartOrder.created_at < end)
+    payment_orders = (await session.execute(payment_query.order_by(PaymentOrder.created_at.desc()).limit(500))).scalars().all()
+    cart_orders = (await session.execute(cart_query.order_by(CartOrder.created_at.desc()).limit(500))).scalars().all()
+    cart_ids = [order.id for order in cart_orders]
+    cart_items = (await session.execute(select(CartItem).where(CartItem.cart_order_id.in_(cart_ids)))) .scalars().all() if cart_ids else []
+    items_by_order = {}
+    for item in cart_items:
+        items_by_order.setdefault(item.cart_order_id, []).append(item)
+
+    operations = []
+    for order in payment_orders:
+        operation_category = "freeze" if str(order.type).startswith("FREEZE") else "subscription"
+        operation_method = "online" if order.provider_payment_id else "other"
+        operation_discipline = order.discipline or ""
+        operations.append({"id": order.id, "created_at": order.created_at, "amount": order.amount_kopecks or 0,
+                           "method": operation_method, "category": operation_category, "discipline": operation_discipline,
+                           "title": "Заморозка" if operation_category == "freeze" else "Абонемент", "status": order.status})
+    for order in cart_orders:
+        for item in items_by_order.get(order.id, []):
+            payload = item.payload or {}
+            operation_category = item.item_type
+            operation_discipline = payload.get("discipline", "")
+            operation_method = "online" if order.provider_payment_id else "other"
+            operations.append({"id": order.id, "created_at": order.created_at, "amount": (item.unit_price_kopecks or 0) * (item.quantity or 1),
+                               "method": operation_method, "category": operation_category, "discipline": operation_discipline,
+                               "title": item.title, "status": order.status})
+    operations = [item for item in operations
+                  if (weekday is None or item["created_at"].weekday() == weekday)
+                  and (not payment_method or item["method"] == payment_method)
+                  and (not category or item["category"] == category)
+                  and (not discipline or item["discipline"] == discipline)]
+    operations.sort(key=lambda item: item["created_at"] or datetime.min, reverse=True)
+    settings = club.club_settings or {}
+    disciplines = settings.get("disciplines", {}) if isinstance(settings, dict) else {}
+    return templates.TemplateResponse("admin_sales.html", {"request": request, "club": club, "club_id": club_id,
+        "operations": operations[:500], "disciplines": disciplines, "filters": {"date_from": date_from or "", "date_to": date_to or "", "weekday": weekday, "payment_method": payment_method or "", "category": category or "", "discipline": discipline or ""}})
 
 
 @router.patch("/admin/students/{student_id}")
@@ -369,6 +433,14 @@ async def admin_update_student(
         student.frozen_days = payload.frozen_days
     if payload.discipline is not None:
         student.discipline = payload.discipline.strip()[:50] or student.discipline
+    if payload.parent_phone is not None:
+        if not payload.parent_phone.strip():
+            student.parent_phone = None
+        else:
+            normalized_phone = normalize_ru_phone(payload.parent_phone)
+            if not normalized_phone:
+                raise HTTPException(status_code=400, detail="Некорректный номер телефона")
+            student.parent_phone = normalized_phone
     await db.commit()
     return {"ok": True}
 
@@ -447,6 +519,7 @@ async def admin_create_student(
             "is_frozen": int(new_student.is_frozen or 0),
             "frozen_days": new_student.frozen_days or "",
             "discipline": new_student.discipline or "",
+            "parent_phone": new_student.parent_phone or "",
         },
         "meta": {
             "count": count,

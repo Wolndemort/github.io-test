@@ -58,6 +58,7 @@ class AdminStudentUpdate(BaseModel):
     frozen_at: str | None = None
     frozen_days: int | None = None
     discipline: str | None = None
+    parent_phone: str | None = None
 
 
 class AdminStudentCreate(BaseModel):

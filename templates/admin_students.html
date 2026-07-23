@@ -6,17 +6,18 @@
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <link rel="stylesheet" href="{{ url_for('static', path='css/mono.css') }}?v=1.1.0">
   <style>
-    body{margin:0;background:#f4f4f4;color:#111;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}.wrap{max-width:900px;margin:auto;padding:14px}.card{background:#fff;border:1px solid #ddd;border-radius:18px;padding:14px;margin-bottom:12px}.student{display:grid;gap:9px;border-top:1px solid #eee;padding:14px 0}.student:first-child{border-top:0}.grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}label{font-size:12px;color:#666}input,select{width:100%;box-sizing:border-box;padding:10px;margin-top:4px;border:1px solid #ccc;border-radius:10px;font-size:16px}button{border:1px solid #111;border-radius:10px;padding:10px 14px;background:#111;color:#fff;font-weight:700}.muted{color:#666;font-size:13px}.missing{color:#a15c00;font-weight:700}@media(max-width:650px){.grid{grid-template-columns:1fr 1fr}.grid label:first-child{grid-column:1/-1}}
+    body{margin:0;background:#f4f4f4;color:#111;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}.wrap{max-width:900px;margin:auto;padding:14px}.card{background:#fff;border:1px solid #ddd;border-radius:18px;padding:14px;margin-bottom:12px}.student{display:grid;gap:9px;border-top:1px solid #eee;padding:14px 0}.student:first-child{border-top:0}.grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}.filter-checks{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0}.filter-checks label{display:flex;align-items:center;gap:4px;padding:7px 9px;background:#f1f1f1;border-radius:9px}.filter-checks input{width:auto;margin:0}label{font-size:12px;color:#666}input,select{width:100%;box-sizing:border-box;padding:10px;margin-top:4px;border:1px solid #ccc;border-radius:10px;font-size:16px}button{border:1px solid #111;border-radius:10px;padding:10px 14px;background:#111;color:#fff;font-weight:700}.muted{color:#666;font-size:13px}.missing{color:#a15c00;font-weight:700}@media(max-width:650px){.grid{grid-template-columns:1fr 1fr}.grid label:first-child{grid-column:1/-1}}
   </style>
 </head>
 <body class="mono-theme"><div class="wrap">
   <div class="card"><div class="muted">Клуб</div><h2>{{ club_name }}</h2><p>Управление атлетами клуба. Пользовательские и системные настройки недоступны.</p><a class="mono-action" href="/admin?club_id={{ club_id }}">← Назад в панель</a></div>
-  <div class="card"><label>Поиск<input id="search" placeholder="Имя атлета"></label><label style="display:block;margin-top:10px"><input id="missing" type="checkbox" style="width:auto"> Только без даты рождения</label></div>
+  <div class="card"><label>Поиск<input id="search" placeholder="Имя атлета"></label><div class="filter-checks"><label><input class="student-filter" data-filter="missing" id="missing" type="checkbox"> Без даты рождения</label><label><input class="student-filter" data-filter="active" type="checkbox"> С активным абонементом</label><label><input class="student-filter" data-filter="noSubscription" type="checkbox"> Без абонемента</label><label><input class="student-filter" data-filter="frozen" type="checkbox"> Замороженные</label><label><input class="student-filter age-filter" data-age-min="0" data-age-max="6" type="checkbox"> 0–6 лет</label><label><input class="student-filter age-filter" data-age-min="7" data-age-max="12" type="checkbox"> 7–12 лет</label><label><input class="student-filter age-filter" data-age-min="13" data-age-max="17" type="checkbox"> 13–17 лет</label><label><input class="student-filter age-filter" data-age-min="18" type="checkbox"> 18+ лет</label>{% for code,info in club_settings.get('disciplines', {}).items() %}<label><input class="student-filter discipline-filter" data-discipline="{{ code }}" type="checkbox"> {{ info.name if info.name else code }}</label>{% endfor %}</div><a class="mono-action" href="/admin/sales?club_id={{ club_id }}&init_data={{ request.query_params.get('init_data','')|urlencode }}">📈 Продажи</a></div>
+  <div class="card"><label style="display:inline-flex;align-items:center;gap:4px"><input class="student-filter" data-filter="noParent" type="checkbox"> Без родителя</label></div>
   <div id="list">
   {% for s in students %}
-    <form class="student card" data-name="{{ s.name|lower }}" data-missing="{{ '1' if not s.birthday else '0' }}" data-id="{{ s.id }}">
+    <form class="student card" data-name="{{ s.name|lower }}" data-birthday="{{ s.birthday.isoformat() if s.birthday else '' }}" data-parent="{{ '1' if s.parent_id else '0' }}" data-missing="{{ '1' if not s.birthday else '0' }}" data-active="{{ '1' if s.expire_date and s.expire_date > now else '0' }}" data-nosub="{{ '1' if not s.expire_date else '0' }}" data-frozen="{{ '1' if s.is_frozen else '0' }}" data-discipline="{{ s.discipline or '' }}" data-id="{{ s.id }}">
       <strong>{{ s.name }}</strong><span class="muted">ID {{ s.id }} · баланс: {{ s.balance_lessons }} · {{ s.discipline or 'без дисциплины' }}</span>
-      <div class="grid">
+      <div class="grid"><label>Телефон родителя<input name="parent_phone" value="{{ s.parent_phone or '' }}" placeholder="79990000000"></label>
         <label>ДР {% if not s.birthday %}<span class="missing">не указана</span>{% endif %}<input name="birthday" type="date" value="{{ s.birthday.isoformat() if s.birthday else '' }}"></label>
         <label>Баланс занятий<input name="balance_lessons" type="number" min="0" max="999" value="{{ s.balance_lessons or 0 }}"></label>
         <label>До даты<input name="expire_date" type="date" value="{{ s.expire_date.strftime('%Y-%m-%d') if s.expire_date else '' }}"></label>
@@ -59,9 +60,21 @@ const esc = (x) => String(x ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&
 
 function filter() {
   const q = document.getElementById('search').value.toLowerCase();
-  const m = document.getElementById('missing').checked;
+  const checked = [...document.querySelectorAll('.student-filter:checked')];
+  const disciplines = checked.filter(x => x.dataset.discipline).map(x => x.dataset.discipline);
+  const ages = checked.filter(x => x.dataset.ageMin).map(x => [Number(x.dataset.ageMin), x.dataset.ageMax ? Number(x.dataset.ageMax) : Infinity]);
+  const ageOf = birthday => { if (!birthday) return null; const b = new Date(birthday + 'T00:00:00'), now = new Date(); let age = now.getFullYear() - b.getFullYear(); if (now < new Date(now.getFullYear(), b.getMonth(), b.getDate())) age--; return age; };
   document.querySelectorAll('.student').forEach(x => {
-    x.style.display = (!q || x.dataset.name.includes(q)) && (!m || x.dataset.missing === '1') ? 'grid' : 'none';
+    const age = ageOf(x.dataset.birthday);
+    const ok = (!q || x.dataset.name.includes(q))
+      && (!checked.some(f => f.dataset.filter === 'missing') || x.dataset.missing === '1')
+      && (!checked.some(f => f.dataset.filter === 'noParent') || x.dataset.parent === '0')
+      && (!checked.some(f => f.dataset.filter === 'active') || x.dataset.active === '1')
+      && (!checked.some(f => f.dataset.filter === 'noSubscription') || x.dataset.nosub === '1')
+      && (!checked.some(f => f.dataset.filter === 'frozen') || x.dataset.frozen === '1')
+      && (!ages.length || ages.some(([min, max]) => age !== null && age >= min && age <= max))
+      && (!disciplines.length || disciplines.includes(x.dataset.discipline));
+    x.style.display = ok ? 'grid' : 'none';
   });
 }
 
@@ -78,6 +91,7 @@ function bindEdit(form) {
       can_freeze: Number(f.get('can_freeze')),
       is_frozen: Number(f.get('is_frozen')),
       frozen_days: f.get('frozen_days') ? Number(f.get('frozen_days')) : null,
+      parent_phone: f.get('parent_phone'),
       discipline: f.get('discipline')
     };
     const r = await fetch('/admin/students/' + form.dataset.id, {
@@ -97,9 +111,9 @@ function bindEdit(form) {
 
 function studentCardHtml(s) {
   return `
-    <form class="student card" data-name="${esc((s.name || '').toLowerCase())}" data-missing="${s.birthday ? '0' : '1'}" data-id="${s.id}">
+    <form class="student card" data-name="${esc((s.name || '').toLowerCase())}" data-birthday="${esc(s.birthday || '')}" data-parent="${s.parent_id ? '1' : '0'}" data-missing="${s.birthday ? '0' : '1'}" data-active="${s.expire_date ? '1' : '0'}" data-nosub="${s.expire_date ? '0' : '1'}" data-frozen="${s.is_frozen ? '1' : '0'}" data-discipline="${esc(s.discipline || '')}" data-id="${s.id}">
       <strong>${esc(s.name)}</strong><span class="muted">ID ${s.id} · баланс: ${s.balance_lessons || 0} · ${esc(s.discipline || 'без дисциплины')}</span>
-      <div class="grid">
+      <div class="grid"><label>Телефон родителя<input name="parent_phone" value="${esc(s.parent_phone || '')}" placeholder="79990000000"></label>
         <label>Дата рождения ${s.birthday ? '' : '<span class="missing">не указана</span>'}<input name="birthday" type="date" value="${esc(s.birthday || '')}"></label>
         <label>Баланс занятий<input name="balance_lessons" type="number" min="0" max="999" value="${s.balance_lessons || 0}"></label>
         <label>До даты<input name="expire_date" type="date" value="${esc(s.expire_date || '')}"></label>
@@ -175,7 +189,7 @@ async function createStudent() {
 }
 
 document.getElementById('search').addEventListener('input', filter);
-document.getElementById('missing').addEventListener('change', filter);
+document.querySelectorAll('.student-filter').forEach(x => x.addEventListener('change', filter));
 document.querySelectorAll('.student').forEach(bindEdit);
 fab.onclick = openModal;
 document.getElementById('cancelCreate').onclick = closeModal;

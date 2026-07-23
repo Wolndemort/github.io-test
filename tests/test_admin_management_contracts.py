@@ -21,6 +21,43 @@ def test_club_admin_management_routes_are_registered():
     assert ("/admin/students", "GET") in keys
     assert ("/admin/students/{student_id}", "PATCH") in keys
     assert ("/admin/students", "POST") in keys
+    assert ("/admin/sales", "GET") in keys
+
+
+def test_admin_sales_and_student_filters_are_present():
+    students = Path("templates/admin_students.html").read_text(encoding="utf-8")
+    sales = Path("templates/admin_sales.html").read_text(encoding="utf-8")
+    assert "student-filter" in students
+    assert "data-discipline" in students
+    assert "/admin/sales" in students
+    assert "payment_method" in sales
+    assert "date_from" in sales and "date_to" in sales
+    assert "weekday" in sales
+    assert "category" in sales
+    assert "discipline" in sales
+    assert "0–6 лет" in students and "18+ лет" in students
+    assert "Выручка за период" in sales
+    assert "Средний чек" in sales
+
+
+def test_daily_student_birthday_reminder_is_scheduled_and_uses_student_flow():
+    source = Path("main.py").read_text(encoding="utf-8")
+    assert "scheduler.add_job(saas_daily_morning_check" in source
+    assert "missing_birthdays" in source
+    assert "callback_data=\"edit_birthday\"" in source
+    assert "Student.birthday" not in source  # reminder reads Student instances, no parent birthday field is required
+
+
+def test_admin_can_view_and_update_parent_phone_and_mailing_is_sequenced():
+    schema = Path("admin_module/schemas.py").read_text(encoding="utf-8")
+    api = Path("admin_module/api.py").read_text(encoding="utf-8")
+    page = Path("templates/admin_students.html").read_text(encoding="utf-8")
+    main = Path("main.py").read_text(encoding="utf-8")
+    assert "parent_phone: str | None = None" in schema
+    assert "payload.parent_phone" in api and "normalize_ru_phone" in api
+    assert 'name="parent_phone"' in page
+    assert "data-filter=\"noParent\"" in page
+    assert "hour=10, minute=5" in main
 
 
 def test_admin_create_student_ui_has_complete_submit_flow():
