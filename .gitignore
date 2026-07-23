@@ -1,5 +1,7 @@
 #секреты
 .env
+certbot/conf/
+certbot/www/
 __pycache__/
 *.py[cod]
 .pytest_cache/

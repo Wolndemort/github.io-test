@@ -1,5 +1,37 @@
 # WebApp / CRM карта проекта
 
+## Operational release map
+
+Release flow: code -> tests -> clean DB/Alembic -> Docker image -> Desktop
+smoke -> backup/restore -> server deploy -> health/ready -> webhook/payment audit.
+
+### Component boundaries
+
+- `gym-api`: FastAPI, Telegram webhook, WebApp, business logic and scheduler.
+- `db`: PostgreSQL source of truth for clubs, users, visits, subscriptions and payments.
+- `redis`: rate limits, SaaS configuration cache and short-lived state.
+- `nginx`: TLS termination and public proxy to `gym-api:8000`.
+- `certbot`: production certificate renewal on the server; local Desktop uses a separate self-signed certificate.
+- `go2rtc`: video streams independent from the CRM/payment path.
+
+## Schema and migration rules
+
+Alembic is mandatory for schema changes; `Base.metadata.create_all()` is not a
+replacement. Every migration must pass both a clean-database upgrade and an
+upgrade of a copy of the existing database. Never rewrite a published migration:
+create a new compatibility migration instead. Critical invariants are
+`provider_payment_id` uniqueness, payment amount/status validation, webhook
+idempotency and `club_id` tenant isolation.
+
+## Release and final audit
+
+Before deploy: backup, `alembic current`, image tag, tests and smoke-check.
+After deploy: container status, API/Nginx/DB logs, `/health`, `/ready`, Telegram
+webhook and test-mode payment. Audit HMAC expiry/future/foreign bot, QR forgery
+and replay, RBAC, cross-club access, duplicate webhooks, concurrent checkout,
+DB restart, Redis outage and certificate renewal. Never remove the PostgreSQL
+volume as a migration fix.
+
 Краткая карта того, что уже сделано и где это лежит.
 
 ## Что уже реализовано

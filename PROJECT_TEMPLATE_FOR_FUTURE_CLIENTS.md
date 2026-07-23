@@ -1,5 +1,64 @@
 # Шаблон прод-готового проекта для будущих клиентов
 
+## Обязательный финальный gate перед передачей клиенту
+
+Проект считается готовым только после независимой проверки кода, схемы БД,
+контейнеров, TLS, backup/restore, платежей и безопасности. Локальный Desktop
+не заменяет серверную проверку DNS, firewall, сертификата и callback URL.
+
+### Порядок сдачи
+
+1. Зафиксировать commit и версию образа.
+2. Проверить чистую БД: `alembic upgrade heads`.
+3. Проверить текущую production БД командой `alembic current` без ручного SQL.
+4. Запустить unit/integration tests и post-deploy smoke-check.
+5. Выполнить test payment и повторный webhook; боевую оплату не использовать
+   как единственный тест.
+6. Создать backup и восстановить его в отдельной БД.
+7. Проверить TLS, renew, webhook, логи, restart policy и rollback.
+8. Передать клиенту только инструкцию и `.env.example`; секреты передаются
+   отдельным защищённым каналом.
+
+## Универсальный Alembic-runbook
+
+Каждая миграция должна быть маленькой, идемпотентной по смыслу и проверенной на
+копии production. Опубликованные миграции не переписываются: новый фикс — новая
+миграция. Для больших таблиц используется expand/backfill/contract. Для каждой
+платежной сущности обязательны unique provider id, amount/status validation и
+идемпотентный webhook.
+
+```powershell
+docker compose exec -T gym-api alembic current
+docker compose exec -T gym-api alembic heads
+docker compose exec -T gym-api alembic upgrade heads
+python -m pytest -q
+python scripts/smoke_check.py
+```
+
+Перед production применением: backup → staging restore → migration → smoke →
+monitoring. Никогда не удалять volume ради «починки» миграции.
+
+## TLS и сертификаты
+
+Боевой сертификат хранится только на сервере в volume Certbot. В локальном
+Desktop используется отдельный self-signed сертификат с теми же SAN, но другим
+ключом. Боевой private key нельзя коммитить, копировать в проект или передавать
+через чат. После renew проверяются `fullchain.pem`, `privkey.pem`, дата
+окончания, `nginx -t`, HTTPS и callback URLs.
+
+## Definition of done для нового клиента
+
+- [ ] tenant isolation проверена на двух клиентах;
+- [ ] роли owner/admin/superadmin проверены отрицательными сценариями;
+- [ ] Telegram initData и QR signature проверяют timestamp и replay;
+- [ ] payment webhook проверяет сумму, статус, order/provider id и повтор;
+- [ ] DB backup/restore доказан на отдельной базе;
+- [ ] миграции чистой базы и существующей базы проходят;
+- [ ] все контейнеры имеют понятные restart/health условия;
+- [ ] секреты отсутствуют в Git и логах;
+- [ ] rollback описан и проверен;
+- [ ] README, карта проекта и журнал изменений обновлены.
+
 Это личный чек-лист того, что должно быть в каждом новом проекте, если нужен не MVP, а нормальный прод с запасом.
 
 ## 1. Базовый скелет

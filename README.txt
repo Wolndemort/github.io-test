@@ -1,5 +1,126 @@
 # SpeedyCRM
 
+> Рабочая документация проекта и эксплуатационный runbook. Боевые секреты,
+> боевые сертификаты и production `.env` никогда не копируются в Desktop или Git.
+
+## Production readiness и границы аудита
+
+Перед релизом обязательны все проверки из этого раздела. Успешные реальные
+платежи подтверждают работу платежного контура, но не заменяют проверку
+миграций, резервного копирования, TLS, rollback и smoke-check.
+
+Последняя локальная проверка должна включать:
+
+```powershell
+docker compose config --quiet
+docker compose ps
+docker compose logs --tail=100 gym-api nginx db
+python -m pytest -q
+python scripts/smoke_check.py
+docker compose exec -T gym-api alembic current
+docker compose exec -T gym-api alembic heads
+```
+
+Релиз запрещён, если API или Nginx имеют `Restarting`, миграции падают,
+`/ready` не возвращает 200, smoke-check не проходит или нет проверенного
+восстановления резервной копии.
+
+## Локальный Desktop: запуск с нуля
+
+Docker Desktop должен использовать Linux engine, BuildKit и не менее 6–8 ГБ
+памяти. Адреса и порты не меняются:
+
+```powershell
+docker compose build gym-api
+docker compose up -d
+docker compose ps
+python scripts/smoke_check.py
+```
+
+Локальная база хранится в Docker volume `pg_data`. Не выполнять `docker
+compose down -v`, если нужно сохранить данные. Для локального HTTPS допускается
+self-signed сертификат в `certbot/conf`; он не является production-сертификатом,
+не должен коммититься и вызывает предупреждение браузера.
+
+## Alembic: безопасный порядок работы
+
+1. Перед изменением схемы сделать backup production и проверить restore на
+   отдельной тестовой базе.
+2. Создать новую миграцию из текущей головы:
+
+   ```powershell
+   docker compose exec -T gym-api alembic current
+   docker compose exec -T gym-api alembic heads
+   docker compose exec -T gym-api alembic revision -m "describe change"
+   ```
+
+3. Вручную проверить `upgrade()` и `downgrade()`: foreign key, индексы,
+   unique/idempotency-ограничения, nullable и обратную совместимость.
+4. Не редактировать опубликованные миграции и не менять их `revision` или
+   `down_revision`: для исправления создаётся новая идемпотентная миграция.
+5. Проверить чистую тестовую базу: `alembic upgrade heads`, затем запустить
+   приложение и smoke-check.
+6. На production миграции запускаются до старта приложения в том же release
+   процессе. Не выполнять ручные `ALTER TABLE` вместо миграции.
+
+Текущая compatibility-миграция `c3d9e7a1b2f4` идемпотентно создаёт таблицы,
+которые отсутствовали в старом baseline (`subscriptions`, `payment_orders`,
+`visit_logs`), и добавляет `provider_payment_id` только если его нет. На уже
+существующей базе она не удаляет данные и не меняет существующие таблицы без
+необходимости.
+
+## Сертификаты и Nginx
+
+Production сертификаты получает и продлевает Certbot на сервере. Локально
+сертификаты не скачиваются с сервера: создаётся отдельный self-signed ключ в
+`certbot/conf/live/speedycrm.ru/`, после чего выполняется:
+
+```powershell
+docker compose restart nginx
+docker compose ps
+docker compose logs --tail=50 nginx
+```
+
+Проверить наличие файлов можно без вывода ключа:
+
+```powershell
+Test-Path certbot/conf/live/speedycrm.ru/fullchain.pem
+Test-Path certbot/conf/live/speedycrm.ru/privkey.pem
+```
+
+Боевой `privkey.pem` не передавать через чат, Git, Desktop или архив проекта.
+После deploy проверить срок сертификата, цепочку, redirect HTTP→HTTPS и
+доступность всех webhook URL.
+
+## Release / rollback runbook
+
+До deploy: сохранить commit, backup БД, список текущих контейнеров, текущую
+версию Alembic и результат smoke-check. После deploy: проверить `ps`, логи,
+`/health`, `/ready`, Telegram webhook, callback/webhook ЮKassa, повторную
+доставку webhook и отсутствие двойного начисления.
+
+Если миграция или приложение не стартовали: не удалять volume и не запускать
+`down -v`; остановить только новый релиз, восстановить предыдущий image и
+следовать проверенному rollback-плану. Для destructive-миграций нужен отдельный
+двухфазный план expand → backfill → contract.
+
+## Финальный audit-чеклист
+
+- [ ] `docker compose config --quiet` проходит.
+- [ ] Все контейнеры `Up`, DB `healthy`, нет restart loop.
+- [ ] `alembic current` соответствует ожидаемой голове.
+- [ ] Чистая тестовая БД проходит `alembic upgrade heads`.
+- [ ] `pytest` проходит полностью.
+- [ ] `smoke_check.py` проходит.
+- [ ] `/ready` проверяет реальную БД.
+- [ ] Проверены Telegram HMAC, QR expiry/replay, tenant isolation и admin RBAC.
+- [ ] Оплата проверена в test mode; production-платежи не запускаются во время
+  технического аудита.
+- [ ] Webhook идемпотентен по provider/order id и проверяет сумму/статус.
+- [ ] Backup создан, restore реально выполнен в отдельной БД.
+- [ ] TLS, renew, firewall, DNS и webhook URL проверены на сервере владельцем.
+- [ ] В Git нет `.env`, ключей, боевых сертификатов и локальных volume-файлов.
+
 SpeedyCRM — SaaS CRM для спортивных клубов на FastAPI, Aiogram 3, PostgreSQL, Redis и Docker.
 
 ## Возможности
