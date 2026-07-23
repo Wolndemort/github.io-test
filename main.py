@@ -8,6 +8,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from services.analytics import calculate_daily_business_report, calculate_admin_dashboard
 from datetime import timedelta, time, timezone
+from zoneinfo import ZoneInfo
 import logging as logging
 from database.db import Subscription, PaymentOrder, User
 import sys
@@ -124,28 +125,30 @@ async def lifespan(app: FastAPI):
     dp.include_router(super_admin_payment.router)
 
     # 4. Фоновые SaaS-задачи (APScheduler)
-    scheduler = AsyncIOScheduler()
+    scheduler = AsyncIOScheduler(timezone=ZoneInfo("Europe/Moscow"))
 
     # Утренний блок (10:00) — Проверка ДР, прогульщиков и рассылка по абонементам
-    scheduler.add_job(saas_daily_morning_check, 'cron', hour=10, minute=0)
+    scheduler.add_job(saas_daily_morning_check, 'cron', hour=10, minute=0, id="daily_morning_notifications", replace_existing=True, coalesce=True, max_instances=1, misfire_grace_time=3600)
     # Вторую массовую рассылку запускаем после напоминаний о датах рождения.
-    scheduler.add_job(check_abon_mailing, 'cron', hour=10, minute=5)
+    scheduler.add_job(check_abon_mailing, 'cron', hour=10, minute=5, id="expiring_pass_notifications", replace_existing=True, coalesce=True, max_instances=1, misfire_grace_time=3600)
 
     # Вечерний блок (22:00) — Отчет по посещениям и абонементам для владельцев клубов
-    scheduler.add_job(send_daily_report_to_admins, 'cron', hour=22, minute=0)
+    scheduler.add_job(send_daily_report_to_admins, 'cron', hour=22, minute=0, id="daily_admin_report", replace_existing=True, coalesce=True, max_instances=1, misfire_grace_time=3600)
     # Ночной блок (01:00) — Автоматические списания по подпискам ЮKassa
     # Пока оставляем закомментированным, как ты и хотел!
     # Как закончишь тесты в ЛК ЮKassa — просто убери решетку (#) в начале строки.
     #scheduler.add_job(saas_recurrent_payments_job, 'cron', hour=3, minute=0, args=[AsyncSessionLocal])
-    scheduler.add_job(auto_close_sessions_job, 'interval', minutes=1)
+    scheduler.add_job(auto_close_sessions_job, 'interval', minutes=1, id="auto_close_sessions", replace_existing=True, coalesce=True, max_instances=1, misfire_grace_time=60)
     # Ночной блок (23:00) — Полный бэкап всей базы данных тебе в личку
-    scheduler.add_job(send_backup_to_admin, 'cron', hour=23, minute=0)
+    scheduler.add_job(send_backup_to_admin, 'cron', hour=23, minute=0, id="daily_database_backup", replace_existing=True, coalesce=True, max_instances=1, misfire_grace_time=3600)
     scheduler.start()
     logger.info(f"🔥 Все фоновые SaaS-задачи (ДР, Масс-майлинг, Отчеты, Бэкапы) успешно запущены!")
     app.state.bots_dict = bots_dict
     yield # <--- МАГИЧЕСКАЯ СТРОКА: Здесь FastAPI запускается и ждет запросы
 
     # --- ЭТО БЫВШИЙ SHUTDOWN (сработает при выключении сервера) ---
+    scheduler.shutdown(wait=False)
+    logger.info("Планировщик фоновых задач остановлен")
     logger.info("🛑 Закрытие сессий ботов...")
     for bot in bots_dict.values():
         await bot.session.close()

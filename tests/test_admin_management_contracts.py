@@ -49,6 +49,15 @@ def test_stats_and_sales_templates_have_readable_dark_surface_metrics():
     assert "color: #f7f7f7 !important" in css
 
 
+def test_background_scheduler_has_stable_moscow_schedule_and_no_overlap():
+    source = Path("main.py").read_text(encoding="utf-8")
+    assert 'AsyncIOScheduler(timezone=ZoneInfo("Europe/Moscow"))' in source
+    for job_id in ("daily_morning_notifications", "expiring_pass_notifications", "daily_admin_report", "auto_close_sessions", "daily_database_backup"):
+        assert f'id="{job_id}"' in source
+    assert "max_instances=1" in source
+    assert "scheduler.shutdown(wait=False)" in source
+
+
 def test_daily_student_birthday_reminder_is_scheduled_and_uses_student_flow():
     source = Path("main.py").read_text(encoding="utf-8")
     assert "scheduler.add_job(saas_daily_morning_check" in source
