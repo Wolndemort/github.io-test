@@ -58,6 +58,7 @@ def test_admin_can_view_and_update_parent_phone_and_mailing_is_sequenced():
     assert 'name="parent_phone"' in page
     assert "data-filter=\"noParent\"" in page
     assert "hour=10, minute=5" in main
+    assert "requestFullscreen" in page
 
 
 def test_admin_create_student_ui_has_complete_submit_flow():
