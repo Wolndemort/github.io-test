@@ -28,3 +28,7 @@ env/
 
 # личные заметки и оценки
 PERSONAL_PRICE_ESTIMATE.md
+
+# Python bytecode and local caches (never commit)
+__pycache__/
+*.py[cod]
