@@ -1432,7 +1432,8 @@ async def admin_delete_tariff(
 
     if 0 <= tariff_idx_int < len(tariffs):
         target_tariff = tariffs[tariff_idx_int]
-        count = target_tariff.get("count", 0)
+        count = int(target_tariff.get("count", 0) or 0)
+        days = int(target_tariff.get("days", 30) or 30)
 
         # Проверка активных спортсменов строго в этой дисциплине
         stmt = select(Student).where(
@@ -1443,6 +1444,30 @@ async def admin_delete_tariff(
         )
         result = await session.execute(stmt)
         active_students = result.scalars().all()
+
+        # Also protect active tariffs whose lesson balance has already been
+        # partially consumed. Their current balance no longer equals the
+        # original tariff count, so use the confirmed payment order as the
+        # durable purchase evidence as well.
+        purchased_stmt = (
+            select(Student)
+            .join(PaymentOrder, PaymentOrder.student_id == Student.id)
+            .where(
+                Student.club_id == club_id,
+                Student.discipline == disc_id,
+                Student.expire_date > datetime.now(),
+                PaymentOrder.club_id == club_id,
+                PaymentOrder.discipline == disc_id,
+                PaymentOrder.lesson_count == count,
+                PaymentOrder.days_to_add == days,
+                PaymentOrder.status.in_(("CONFIRMED", "SUCCEEDED", "PAID")),
+            )
+            .distinct()
+        )
+        purchased_result = await session.execute(purchased_stmt)
+        purchased_students = purchased_result.scalars().all()
+        known_ids = {student.id for student in active_students}
+        active_students.extend(student for student in purchased_students if student.id not in known_ids)
 
         if active_students:
             names = ", ".join([s.name for s in active_students[:3]])

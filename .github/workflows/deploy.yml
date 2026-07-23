@@ -41,6 +41,10 @@ jobs:
 
       - name: Validate Compose and migration graph
         run: |
+          cat > .env <<'EOF'
+          DB_PASSWORD=ci_dummy_password
+          SECRET_KEY=ci_dummy_secret_key
+          EOF
           docker compose config --quiet
           python - <<'PY'
           from pathlib import Path
