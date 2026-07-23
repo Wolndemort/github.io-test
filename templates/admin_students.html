@@ -46,7 +46,7 @@
 <script>
 const tg = window.Telegram?.WebApp;
 if (tg) { tg.ready(); tg.expand(); }
-const initData = tg?.initData || '';
+const initData = tg?.initData || new URLSearchParams(window.location.search).get('init_data') || '';
 const clubId = {{ club_id }};
 const disciplines = {{ club_settings.get('disciplines', {})|tojson }};
 const modal = document.getElementById('modal');
@@ -128,35 +128,50 @@ function openModal() { modal.style.display = 'block'; }
 function closeModal() { modal.style.display = 'none'; }
 
 async function createStudent() {
+  const saveButton = document.getElementById('saveCreate');
+  const name = document.getElementById('newName').value.trim();
+  if (!name) return alert('Введите имя атлета');
+  if (!discSel.value) return alert('Выберите дисциплину');
+  if (!noSub.checked && (tariffSel.value === '' || Number.isNaN(Number(tariffSel.value)))) {
+    return alert('Выберите тариф или включите «без абонемента»');
+  }
   const payload = {
     init_data: initData,
     club_id: clubId,
-    name: document.getElementById('newName').value.trim(),
+    name,
     phone: document.getElementById('newPhone').value.trim() || null,
     birthday: document.getElementById('newBirthday').value || null,
     discipline: discSel.value,
     tariff_idx: noSub.checked ? null : Number(tariffSel.value)
   };
-  const r = await fetch('/admin/students', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify(payload)
-  });
-  const d = await r.json();
-  if (!r.ok) return alert(d.detail || '??????');
+  saveButton.disabled = true;
+  try {
+    const r = await fetch('/admin/students', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload)
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) return alert(d.detail || `Ошибка создания (${r.status})`);
 
-  const s = d.student;
-  list.insertAdjacentHTML('afterbegin', studentCardHtml(s));
-  const newForm = list.querySelector(`.student[data-id="${s.id}"]`);
-  bindEdit(newForm);
-  closeModal();
-  document.getElementById('newName').value = '';
-  document.getElementById('newPhone').value = '';
-  document.getElementById('newBirthday').value = '';
-  noSub.checked = false;
-  fillTariffs();
-  filter();
-  newForm.scrollIntoView({behavior: 'smooth', block: 'center'});
+    const s = d.student;
+    list.insertAdjacentHTML('afterbegin', studentCardHtml(s));
+    const newForm = list.querySelector(`.student[data-id="${s.id}"]`);
+    bindEdit(newForm);
+    closeModal();
+    document.getElementById('newName').value = '';
+    document.getElementById('newPhone').value = '';
+    document.getElementById('newBirthday').value = '';
+    noSub.checked = false;
+    fillTariffs();
+    filter();
+    newForm.scrollIntoView({behavior: 'smooth', block: 'center'});
+  } catch (error) {
+    alert('Не удалось создать атлета. Проверьте соединение и попробуйте ещё раз.');
+    console.error(error);
+  } finally {
+    saveButton.disabled = false;
+  }
 }
 
 document.getElementById('search').addEventListener('input', filter);

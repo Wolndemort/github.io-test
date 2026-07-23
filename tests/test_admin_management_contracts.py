@@ -1,4 +1,5 @@
 import pytest
+from pathlib import Path
 from pydantic import ValidationError
 
 from admin_module.api import router
@@ -18,11 +19,44 @@ def test_club_admin_management_routes_are_registered():
     keys = route_keys()
     assert ("/admin/students", "GET") in keys
     assert ("/admin/students/{student_id}", "PATCH") in keys
+    assert ("/admin/students", "POST") in keys
+
+
+def test_admin_create_student_ui_has_complete_submit_flow():
+    page = Path("templates/admin_students.html").read_text(encoding="utf-8")
+    assert 'id="saveCreate"' in page
+    assert "document.getElementById('saveCreate').onclick = createStudent" in page
+    assert "fetch('/admin/students'" in page
+    assert "init_data: initData" in page
+    assert "list.insertAdjacentHTML('afterbegin', studentCardHtml(s))" in page
+    assert "bindEdit(newForm)" in page
+    assert "new URLSearchParams(window.location.search).get('init_data')" in page
 
 
 def test_admin_student_update_requires_club_scope():
     with pytest.raises(ValidationError):
         AdminStudentUpdate(init_data="signed", balance_lessons=10)
+
+
+def test_bot_manual_add_button_has_registered_flow_and_no_orphan_states():
+    buttons = Path("handlers/buttons.py").read_text(encoding="utf-8")
+    handler = Path("handlers/admin_option.py").read_text(encoding="utf-8")
+    states = Path("handlers/states.py").read_text(encoding="utf-8")
+    assert 'callback_data="admin_add_manual"' in buttons
+    assert '@router.callback_query(F.data == "admin_add_manual")' in handler
+    assert "AdminManualAdd.waiting_for_name" in handler
+    assert "AdminManualAdd.waiting_for_phone" in handler
+    assert "AdminManualAdd.waiting_for_discipline" in handler
+    assert "AdminManualAdd.waiting_for_tariff" in handler
+    assert "admin_manual_no_sub_" in handler
+    assert "waiting_for_lessons" not in states
+    assert "waiting_for_parent_id" not in states
+
+
+def test_daily_report_has_no_manual_add_fragment():
+    source = Path("handlers/admin_option.py").read_text(encoding="utf-8")
+    assert "по тарифу {t_label}" not in source
+    assert "sub_expire_str" not in source
 
 
 def test_admin_student_update_accepts_valid_migration_fields():

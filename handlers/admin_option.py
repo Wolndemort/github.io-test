@@ -23,6 +23,7 @@ from handlers.states import AdminManualAdd
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from datetime import timedelta
+import re
 from aiogram import Router, F, types
 import asyncio
 import json
@@ -33,6 +34,157 @@ from PIL import Image, UnidentifiedImageError
 
 
 router = Router()
+
+
+def _manual_phone_key(value: str | None) -> str:
+    digits = re.sub(r"\D", "", value or "")
+    return digits[-10:] if len(digits) >= 10 else digits
+
+
+@router.callback_query(F.data == "admin_add_manual")
+async def start_manual_add(
+        callback: types.CallbackQuery,
+        state: FSMContext,
+        is_owner: bool,
+        is_super_admin: bool,
+):
+    if not (is_owner or is_super_admin):
+        return await callback.answer("Доступ только для администратора клуба.", show_alert=True)
+    await state.clear()
+    await state.set_state(AdminManualAdd.waiting_for_name)
+    await callback.message.answer(
+        "🆕 <b>Добавление атлета</b>\n\nВведите имя и фамилию атлета:",
+        parse_mode="HTML",
+    )
+    await callback.answer()
+
+
+@router.message(AdminManualAdd.waiting_for_name)
+async def manual_add_name(message: types.Message, state: FSMContext):
+    name = (message.text or "").strip()
+    if len(name.split()) < 2:
+        return await message.answer("Введите имя и фамилию через пробел.")
+    await state.update_data(athlete_name=name)
+    await state.set_state(AdminManualAdd.waiting_for_phone)
+    await message.answer("Введите номер телефона атлета, например: +7 999 111-22-33")
+
+
+@router.message(AdminManualAdd.waiting_for_phone)
+async def manual_add_phone(message: types.Message, state: FSMContext):
+    phone = (message.text or "").strip()
+    if len(_manual_phone_key(phone)) < 10:
+        return await message.answer("Номер должен содержать минимум 10 цифр. Попробуйте ещё раз.")
+    await state.update_data(parent_phone=phone)
+    await state.set_state(AdminManualAdd.waiting_for_birthday)
+    await message.answer("Введите дату рождения в формате ДД.ММ.ГГГГ или отправьте 0, если дата неизвестна.")
+
+
+@router.message(AdminManualAdd.waiting_for_birthday)
+async def manual_add_birthday(message: types.Message, state: FSMContext, club_settings: dict):
+    value = (message.text or "").strip()
+    birthday = None
+    if value != "0":
+        try:
+            birthday = datetime.strptime(value, "%d.%m.%Y").date()
+            if birthday > datetime.now().date() or birthday.year < 1900:
+                raise ValueError
+        except ValueError:
+            return await message.answer("Введите корректную дату ДД.ММ.ГГГГ или 0.")
+    await state.update_data(birthday=birthday)
+    disciplines = {
+        code: info for code, info in (club_settings.get("disciplines", {}) or {}).items()
+        if info.get("active", True)
+    }
+    builder = InlineKeyboardBuilder()
+    for code, info in disciplines.items():
+        builder.row(InlineKeyboardButton(text=info.get("name", code), callback_data=f"admin_manual_disc_{code}"))
+    if not disciplines:
+        await state.clear()
+        return await message.answer("В клубе нет активных дисциплин для создания атлета.")
+    await state.set_state(AdminManualAdd.waiting_for_discipline)
+    await message.answer("Выберите дисциплину:", reply_markup=builder.as_markup())
+
+
+@router.callback_query(F.data.startswith("admin_manual_disc_"), AdminManualAdd.waiting_for_discipline)
+async def manual_add_discipline(callback: types.CallbackQuery, state: FSMContext, club_settings: dict):
+    discipline = callback.data.removeprefix("admin_manual_disc_")
+    config = (club_settings.get("disciplines", {}) or {}).get(discipline)
+    if not config or not config.get("active", True):
+        return await callback.answer("Дисциплина недоступна.", show_alert=True)
+    await state.update_data(discipline=discipline)
+    builder = InlineKeyboardBuilder()
+    for index, tariff in enumerate(config.get("tariffs", []) or []):
+        count = "♾" if tariff.get("count") == 999 else str(tariff.get("count", 0))
+        builder.row(InlineKeyboardButton(
+            text=f"{count} зан. / {tariff.get('days', 30)} дн. — {tariff.get('price', 0)} ₽",
+            callback_data=f"admin_manual_tariff_{discipline}_{index}",
+        ))
+    builder.row(InlineKeyboardButton(text="Без абонемента", callback_data=f"admin_manual_no_sub_{discipline}"))
+    await state.set_state(AdminManualAdd.waiting_for_tariff)
+    await callback.message.edit_text("Выберите тариф или вариант без абонемента:", reply_markup=builder.as_markup())
+    await callback.answer()
+
+
+async def _finish_manual_add(callback: types.CallbackQuery, state: FSMContext, session: AsyncSession,
+                             club: Club, discipline: str, tariff_idx: int | None):
+    data = await state.get_data()
+    config = (club.club_settings or {}).get("disciplines", {}).get(discipline, {})
+    tariffs = config.get("tariffs", []) or []
+    count = 0
+    expire_date = None
+    if tariff_idx is not None:
+        if tariff_idx < 0 or tariff_idx >= len(tariffs):
+            return await callback.answer("Тариф не найден.", show_alert=True)
+        tariff = tariffs[tariff_idx]
+        count = int(tariff.get("count", 0) or 0)
+        expire_date = datetime.now() + timedelta(days=int(tariff.get("days", 30) or 30))
+
+    name = data.get("athlete_name", "").strip()
+    phone = data.get("parent_phone")
+    students = (await session.execute(select(Student).where(Student.club_id == club.id))).scalars().all()
+    duplicate = next((student for student in students
+                      if student.name.strip().casefold() == name.casefold()
+                      and student.birthday == data.get("birthday")
+                      and (student.discipline or "").casefold() == discipline.casefold()
+                      and _manual_phone_key(student.parent_phone) == _manual_phone_key(phone)), None)
+    if duplicate:
+        await state.clear()
+        await callback.message.answer("⚠️ Такой атлет уже есть в базе клуба. Новая запись не создана.")
+        return await callback.answer()
+
+    session.add(Student(
+        parent_id=None,
+        club_id=club.id,
+        name=name,
+        parent_phone=phone,
+        birthday=data.get("birthday"),
+        expire_date=expire_date,
+        balance_lessons=count,
+        can_freeze=1,
+        is_frozen=0,
+        discipline=discipline,
+    ))
+    await session.commit()
+    await state.clear()
+    await callback.message.answer("✅ Атлет успешно добавлен в базу клуба.")
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("admin_manual_tariff_"), AdminManualAdd.waiting_for_tariff)
+async def manual_add_tariff(callback: types.CallbackQuery, state: FSMContext, session: AsyncSession, club: Club):
+    raw = callback.data.removeprefix("admin_manual_tariff_")
+    discipline, raw_index = raw.rsplit("_", 1)
+    try:
+        tariff_idx = int(raw_index)
+    except ValueError:
+        return await callback.answer("Некорректный тариф.", show_alert=True)
+    await _finish_manual_add(callback, state, session, club, discipline, tariff_idx)
+
+
+@router.callback_query(F.data.startswith("admin_manual_no_sub_"), AdminManualAdd.waiting_for_tariff)
+async def manual_add_without_subscription(callback: types.CallbackQuery, state: FSMContext, session: AsyncSession, club: Club):
+    discipline = callback.data.removeprefix("admin_manual_no_sub_")
+    await _finish_manual_add(callback, state, session, club, discipline, None)
 
 
 @router.callback_query(F.data == "admin_quick_athletes")
@@ -547,22 +699,16 @@ async def show_daily_report(
         )
 
         # 10. 🌟 ФИКС: Тянем железную дату подписки SaaS из БД для отображения в клавиатуре
-        club_db = await session.get(Club, club.id)
-        sub_expire_str = club_db.subscription_expire_at.isoformat() if club_db.subscription_expire_at else None
-
         # Обновляем инлайн-экран отчета с правильным порядком аргументов и датой подписки
         await callback.message.edit_text(
             text=report_text,
             reply_markup=admin_keyboard(
                 club.id,
                 club_settings,
-                club_db.subscription_expire_at
+                club.subscription_expire_at
             ),
             parse_mode="HTML"
         )
-
-        logger.info(f"🆕 [Клуб {club.id}] Админ вручную добавил атлета {name} по тарифу {t_label}")
-        await state.clear()
 
     except Exception as e:
         await session.rollback()
