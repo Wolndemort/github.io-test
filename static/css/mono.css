@@ -453,3 +453,11 @@ body.mono-theme .card a,
 body.mono-theme .card a:visited {
     color: #ffffff !important;
 }
+body.mono-theme .card button,
+body.mono-theme .card .btn,
+body.mono-theme .card .mono-action,
+body.mono-theme .card .mono-action.dark {
+    background: #ffffff !important;
+    color: #090909 !important;
+    border-color: #ffffff !important;
+}
