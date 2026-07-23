@@ -172,7 +172,13 @@ def admin_keyboard(club_id: int, club_settings: dict, subscription_date: datetim
         types.InlineKeyboardButton(text=sub_text, callback_data='pay_menu'),
         types.InlineKeyboardButton(text='🛠 Настройки клуба', callback_data='admin_settings')
     )
-    builder.row(types.InlineKeyboardButton(text="💵 Принять наличку", callback_data="admin_cash_list"))
+    builder.row(
+        types.InlineKeyboardButton(text="💵 Принять наличку", callback_data="admin_cash_list"),
+        types.InlineKeyboardButton(
+            text="🛒 Продать товар",
+            web_app=types.WebAppInfo(url=f"https://{club_id}.speedycrm.ru/webapp/admin-product-sale?club_id={club_id}")
+        )
+    )
 
     # --- БЛОК 2: Ежедневная работа ---
     operation_buttons = []

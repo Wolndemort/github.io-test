@@ -31,11 +31,13 @@ def test_admin_product_cash_sale_uses_cart_and_confirms_stock_sale():
     api = Path("admin_module/api.py").read_text(encoding="utf-8")
     page = Path("templates/admin_product_sale.html").read_text(encoding="utf-8")
     buttons = Path("handlers/admin_option.py").read_text(encoding="utf-8")
+    main_buttons = Path("handlers/buttons.py").read_text(encoding="utf-8")
     assert "status=\"CONFIRMED\"" in api
     assert "product.stock -= quantity" in api
     assert "item_type=\"product\"" in api
     assert "оплату наличными" in page
     assert "admin-product-sale" in buttons
+    assert "Продать товар" in main_buttons
 
 
 def test_admin_sales_and_student_filters_are_present():
