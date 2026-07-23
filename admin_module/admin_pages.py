@@ -39,7 +39,10 @@ else location.replace(location.pathname+'?club_id=' + encodeURIComponent(new URL
             last_visit_naive = student.last_visit.replace(tzinfo=None)
             time_passed = now_local - last_visit_naive
             session_end = last_visit_naive + timedelta(minutes=timeout_minutes)
-            info = {"student_id": student.id, "name": student.name, "balance": student.balance_lessons or 0, "last_visit": last_visit_naive.strftime("%d.%m.%Y %H:%M"), "session_end": session_end.strftime("%H:%M"), "time_passed_mins": int(time_passed.total_seconds() // 60)}
+            # БД хранит наивные UTC-времена; для админского интерфейса показываем МСК.
+            display_last_visit = last_visit_naive + timedelta(hours=3)
+            display_session_end = session_end + timedelta(hours=3)
+            info = {"student_id": student.id, "name": student.name, "balance": student.balance_lessons or 0, "last_visit": display_last_visit.strftime("%d.%m.%Y %H:%M"), "session_end": display_session_end.strftime("%H:%M"), "time_passed_mins": int(time_passed.total_seconds() // 60)}
             (active_sessions if time_passed < timedelta(minutes=timeout_minutes) else past_sessions).append(info)
             if time_passed < timedelta(minutes=timeout_minutes):
                 info["mins_left"] = max(0, int((session_end - now_local).total_seconds() // 60))

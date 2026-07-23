@@ -288,7 +288,7 @@ async def detailed_status_handler(
     if recent_visits_rows:
         visits_block += "\n<b>Последние 5:</b>\n"
         for visit, student_name in recent_visits_rows:
-            visit_time = visit.visited_at.strftime("%d.%m.%Y %H:%M")
+            visit_time = (visit.visited_at.replace(tzinfo=None) + timedelta(hours=3)).strftime("%d.%m.%Y %H:%M")
             visits_block += f"• <b>{student_name}</b> — <code>{visit_time}</code>\n"
     else:
         visits_block += "\n<i>Пока нет ни одного чекина.</i>\n"

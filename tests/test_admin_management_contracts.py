@@ -65,6 +65,17 @@ def test_stats_and_sales_templates_have_readable_dark_surface_metrics():
     assert "color: #f7f7f7 !important" in css
 
 
+def test_user_and_admin_history_render_database_utc_as_moscow_time():
+    student = Path("templates/webapp_student.html").read_text(encoding="utf-8")
+    history = Path("templates/webapp_history.html").read_text(encoding="utf-8")
+    admin = Path("admin_module/admin_pages.py").read_text(encoding="utf-8")
+    bot = Path("handlers/user_option.py").read_text(encoding="utf-8")
+    assert "visit.visited_at.replace(tzinfo=None) + timedelta(hours=3)" in bot
+    assert "display_last_visit = last_visit_naive + timedelta(hours=3)" in admin
+    assert "visited_at|moscow_time" in student
+    assert "created_at|moscow_time" in history
+
+
 def test_background_scheduler_has_stable_moscow_schedule_and_no_overlap():
     source = Path("main.py").read_text(encoding="utf-8")
     assert 'AsyncIOScheduler(timezone=ZoneInfo("Europe/Moscow"))' in source
