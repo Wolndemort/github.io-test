@@ -28,20 +28,20 @@
     </form>
   {% else %}<p>Атлетов нет.</p>{% endfor %}
 </div>
-  <button id="fab" title="???????? ??????">+</button>
+  <button id="fab" title="Добавить атлета">+</button>
   <div id="modal"><div class="box">
-    <h3 style="margin-top:0">????? ?????</h3>
+    <h3 style="margin-top:0">Новый атлет</h3>
     <div class="row">
-      <label>???<input id="newName" placeholder="???? ??????"></label>
-      <label>???????<input id="newPhone" placeholder="79990000000"></label>
+      <label>Имя и фамилия<input id="newName" placeholder="Иван Иванов"></label>
+      <label>Телефон<input id="newPhone" placeholder="79990000000"></label>
     </div>
     <div class="row">
-      <label>???? ????????<input id="newBirthday" type="date"></label>
-      <label>??????????<select id="newDiscipline"></select></label>
+      <label>Дата рождения<input id="newBirthday" type="date"></label>
+      <label>Дисциплина<select id="newDiscipline"></select></label>
     </div>
-    <label>?????<select id="newTariff"></select></label>
-    <label style="display:block;margin-top:10px"><input id="noSubscription" type="checkbox"> ??? ??????? ??????????</label>
-    <div class="actions"><button id="cancelCreate" type="button">??????</button><button id="saveCreate" type="button">???????</button></div>
+    <label>Тариф<select id="newTariff"></select></label>
+    <label style="display:block;margin-top:10px"><input id="noSubscription" type="checkbox"> Без абонемента</label>
+    <div class="actions"><button id="cancelCreate" type="button">Отмена</button><button id="saveCreate" type="button">Создать</button></div>
   </div></div>
 <script>
 const tg = window.Telegram?.WebApp;
@@ -87,10 +87,10 @@ function bindEdit(form) {
     });
     const msg = form.querySelector('.msg');
     if (r.ok) {
-      msg.textContent = '?????????';
+      msg.textContent = 'Сохранено';
     } else {
       const d = await r.json();
-      msg.textContent = '??????: ' + (d.detail || '?? ??????? ?????????');
+      msg.textContent = 'Ошибка: ' + (d.detail || 'не удалось сохранить');
     }
   });
 }
@@ -98,16 +98,16 @@ function bindEdit(form) {
 function studentCardHtml(s) {
   return `
     <form class="student card" data-name="${esc((s.name || '').toLowerCase())}" data-missing="${s.birthday ? '0' : '1'}" data-id="${s.id}">
-      <strong>${esc(s.name)}</strong><span class="muted">ID ${s.id} ? ??????: ${s.balance_lessons || 0} ? ${esc(s.discipline || '??? ??????????')}</span>
+      <strong>${esc(s.name)}</strong><span class="muted">ID ${s.id} · баланс: ${s.balance_lessons || 0} · ${esc(s.discipline || 'без дисциплины')}</span>
       <div class="grid">
-        <label>?? ${s.birthday ? '' : '<span class="missing">?? ???????</span>'}<input name="birthday" type="date" value="${esc(s.birthday || '')}"></label>
-        <label>?????? ???????<input name="balance_lessons" type="number" min="0" max="999" value="${s.balance_lessons || 0}"></label>
-        <label>?? ????<input name="expire_date" type="date" value="${esc(s.expire_date || '')}"></label>
-        <label>?????????? ?????????<input name="can_freeze" type="number" min="0" max="99" value="${s.can_freeze || 0}"></label>
-        <label>??????????<input name="discipline" value="${esc(s.discipline || '')}"></label>
-        <label>??????<select name="is_frozen"><option value="0" ${s.is_frozen ? '' : 'selected'}>???????</option><option value="1" ${s.is_frozen ? 'selected' : ''}>?????????</option></select></label>
-        <label>???? ?????????<input name="frozen_days" type="number" min="1" max="365" value="${esc(s.frozen_days || '')}"></label>
-      </div><button type="submit">?????????</button><span class="muted msg"></span>
+        <label>Дата рождения ${s.birthday ? '' : '<span class="missing">не указана</span>'}<input name="birthday" type="date" value="${esc(s.birthday || '')}"></label>
+        <label>Баланс занятий<input name="balance_lessons" type="number" min="0" max="999" value="${s.balance_lessons || 0}"></label>
+        <label>До даты<input name="expire_date" type="date" value="${esc(s.expire_date || '')}"></label>
+        <label>Бесплатных заморозок<input name="can_freeze" type="number" min="0" max="99" value="${s.can_freeze || 0}"></label>
+        <label>Дисциплина<input name="discipline" value="${esc(s.discipline || '')}"></label>
+        <label>Статус<select name="is_frozen"><option value="0" ${s.is_frozen ? '' : 'selected'}>Активен</option><option value="1" ${s.is_frozen ? 'selected' : ''}>Заморожен</option></select></label>
+        <label>Дней заморозки<input name="frozen_days" type="number" min="1" max="365" value="${esc(s.frozen_days || '')}"></label>
+      </div><button type="submit">Сохранить</button><span class="muted msg"></span>
     </form>`;
 }
 
@@ -120,7 +120,7 @@ function fillDisc() {
 
 function fillTariffs() {
   const d = disciplines[discSel.value] || {}, arr = d.tariffs || [];
-  tariffSel.innerHTML = arr.map((x, i) => `<option value="${i}">${x.count === 999 ? '????????' : (x.count + ' ???.')} / ${x.days || 30} ??. ? ${x.price || 0} ?</option>`).join('') || '<option value="">??? ??????</option>';
+  tariffSel.innerHTML = arr.map((x, i) => `<option value="${i}">${x.count === 999 ? 'Безлимит' : (x.count + ' зан.')} / ${x.days || 30} дн. — ${x.price || 0} ₽</option>`).join('') || '<option value="">Тарифов нет</option>';
   tariffSel.disabled = noSub.checked;
 }
 
