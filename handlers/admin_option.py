@@ -367,7 +367,12 @@ async def admin_settings_menu(callback: types.CallbackQuery, club_settings: dict
         text="⚙️ Настройка лимитов клуба",
         callback_data="manage_club_limits"  # 👈 Тот самый колбэк, который ведёт на новое меню!
     ))
-    builder.row(types.InlineKeyboardButton(text="🎨 Загрузочный экран WebApp", callback_data="configure_webapp_loading"))
+    loading_enabled = bool((ui.get("loading") or {}).get("enabled", False))
+    loading_mark = "✅" if loading_enabled else "❌"
+    builder.row(
+        types.InlineKeyboardButton(text=f"{loading_mark} Загрузочный экран", callback_data="toggle_webapp_loading"),
+        types.InlineKeyboardButton(text="⚙️ Настроить", callback_data="configure_webapp_loading"),
+    )
     builder.row(types.InlineKeyboardButton(text="🖼 Загрузить логотип WebApp", callback_data="upload_webapp_logo"))
 
     builder.row(types.InlineKeyboardButton(
@@ -2175,6 +2180,24 @@ async def configure_webapp_loading(callback: types.CallbackQuery, state: FSMCont
     await callback.answer()
 
 
+@router.callback_query(F.data == "toggle_webapp_loading")
+async def toggle_webapp_loading(callback: types.CallbackQuery, club: Club, club_settings: dict,
+                                session: AsyncSession, redis: Redis):
+    settings = dict(club_settings or {})
+    ui = dict(settings.get("ui") or {})
+    loading = dict(ui.get("loading") or {})
+    loading["enabled"] = not bool(loading.get("enabled", False))
+    ui["loading"] = loading
+    settings["ui"] = ui
+    db_club = await session.merge(club)
+    db_club.club_settings = settings
+    flag_modified(db_club, "club_settings")
+    await session.commit()
+    await redis.delete(f"club_config:{callback.bot.token}")
+    await callback.answer("Загрузочный экран включён" if loading["enabled"] else "Загрузочный экран выключен")
+    await admin_settings_menu(callback, settings, club.id)
+
+
 @router.callback_query(F.data == "upload_webapp_logo")
 async def upload_webapp_logo(callback: types.CallbackQuery, state: FSMContext):
     await state.set_state(AdminSettingsSG.waiting_for_loading_logo)
@@ -2185,8 +2208,8 @@ async def upload_webapp_logo(callback: types.CallbackQuery, state: FSMContext):
 @router.message(AdminSettingsSG.waiting_for_loading_logo, F.photo)
 async def save_webapp_logo(message: types.Message, state: FSMContext, club: Club,
                            session: AsyncSession, redis: Redis):
-    if not message.photo or (message.photo[-1].file_size and message.photo[-1].file_size > 5 * 1024 * 1024):
-        return await message.answer("❌ Логотип должен быть изображением не больше 5 МБ.")
+    if not message.photo or (message.photo[-1].file_size and message.photo[-1].file_size > 8 * 1024 * 1024):
+        return await message.answer("❌ Логотип должен быть изображением не больше 8 МБ.")
     folder = Path("static/uploads/logos")
     folder.mkdir(parents=True, exist_ok=True)
     filename = f"club_{club.id}_{uuid4().hex}.jpg"
@@ -2199,7 +2222,7 @@ async def save_webapp_logo(message: types.Message, state: FSMContext, club: Club
             image = image.convert("RGB")
             image.thumbnail((2000, 2000), Image.Resampling.LANCZOS)
             image.save(path, format="JPEG", quality=88, optimize=True)
-        if path.stat().st_size > 5 * 1024 * 1024:
+        if path.stat().st_size > 8 * 1024 * 1024:
             raise ValueError("logo is too large after conversion")
         settings = dict(club.club_settings or {})
         ui = dict(settings.get("ui") or {})
