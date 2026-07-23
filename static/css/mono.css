@@ -461,3 +461,39 @@ body.mono-theme .card .mono-action.dark {
     color: #090909 !important;
     border-color: #ffffff !important;
 }
+
+/* Contrast contract: dark surfaces contain light text; intentionally light
+   surfaces keep dark text.  This is last so legacy inline page styles cannot
+   create invisible labels or apparently empty white controls. */
+body.mono-theme .card,
+body.mono-theme .student-card,
+body.mono-theme .day-container,
+body.mono-theme .lesson-card,
+body.mono-theme .mono-card,
+body.mono-theme .mono-hero,
+body.mono-theme .mono-pill {
+    color: #f7f7f7 !important;
+}
+body.mono-theme .card *,
+body.mono-theme .student-card *,
+body.mono-theme .day-container *,
+body.mono-theme .lesson-card *,
+body.mono-theme .mono-card *,
+body.mono-theme .mono-hero *,
+body.mono-theme .mono-pill * {
+    color: inherit;
+}
+
+/* Known light cards (for example the birthday panel) are white by design. */
+body.mono-theme .birthday-card,
+body.mono-theme .birthday-card * {
+    color: #111111 !important;
+}
+body.mono-theme .birthday-card {
+    background: #ffffff !important;
+    border-color: #d9d9d9 !important;
+}
+body.mono-theme .birthday-card .label,
+body.mono-theme .birthday-card .birthday-footer {
+    color: #666666 !important;
+}
