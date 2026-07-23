@@ -24,6 +24,20 @@ def test_club_admin_management_routes_are_registered():
     assert ("/admin/sales", "GET") in keys
 
 
+def test_admin_product_cash_sale_uses_cart_and_confirms_stock_sale():
+    keys = route_keys()
+    assert ("/webapp/admin-product-sale", "GET") in keys
+    assert ("/webapp/admin-product-sale", "POST") in keys
+    api = Path("admin_module/api.py").read_text(encoding="utf-8")
+    page = Path("templates/admin_product_sale.html").read_text(encoding="utf-8")
+    buttons = Path("handlers/admin_option.py").read_text(encoding="utf-8")
+    assert "status=\"CONFIRMED\"" in api
+    assert "product.stock -= quantity" in api
+    assert "item_type=\"product\"" in api
+    assert "оплату наличными" in page
+    assert "admin-product-sale" in buttons
+
+
 def test_admin_sales_and_student_filters_are_present():
     students = Path("templates/admin_students.html").read_text(encoding="utf-8")
     sales = Path("templates/admin_sales.html").read_text(encoding="utf-8")

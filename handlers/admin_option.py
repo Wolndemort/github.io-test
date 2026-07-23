@@ -352,6 +352,10 @@ async def admin_settings_menu(callback: types.CallbackQuery, club_settings: dict
         text="🛒 Управление товарами",
         web_app=types.WebAppInfo(url=f"https://{club_id}.speedycrm.ru/webapp/admin-products?club_id={club_id}")
     ))
+    builder.row(types.InlineKeyboardButton(
+        text="💵 Продажа товаров за наличные",
+        web_app=types.WebAppInfo(url=f"https://{club_id}.speedycrm.ru/webapp/admin-product-sale?club_id={club_id}")
+    ))
     ui = club_settings.get("ui", {})
     site_mark = "✅" if ui.get("site_enabled", False) else "❌"
     support_mark = "✅" if ui.get("support_enabled", True) else "❌"

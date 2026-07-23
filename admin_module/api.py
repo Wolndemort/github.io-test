@@ -83,6 +83,11 @@ class CartCheckoutPayload(BaseModel):
     club_id: int
     items: list[dict]
 
+class AdminProductSalePayload(BaseModel):
+    init_data: str
+    club_id: int
+    items: list[dict]
+
 
 def _student_identity_phone(value: str | None) -> str:
     return normalize_ru_phone(value) or ""
@@ -817,6 +822,43 @@ async def admin_products_page(request: Request, club_id: int = Query(...), init_
     products = (await session.execute(select(ClubProduct).where(ClubProduct.club_id == club_id).order_by(ClubProduct.id.desc()))).scalars().all()
     product_data = [{"id": p.id, "name": p.name, "category": p.category, "price_kopecks": p.price_kopecks, "stock": p.stock, "is_active": p.is_active, "image_url": p.image_url} for p in products]
     return templates.TemplateResponse("admin_products.html", {"request": request, "club": club, "club_id": club_id, "products": product_data})
+
+@router.get("/webapp/admin-product-sale", response_class=HTMLResponse)
+async def admin_product_sale_page(request: Request, club_id: int = Query(...), init_data: str | None = Query(None), session: AsyncSession = Depends(get_session)):
+    club = await session.get(Club, club_id)
+    if not init_data:
+        return _telegram_init_gate('/webapp/admin-product-sale', club_id, 'Откройте продажу из Telegram')
+    await verify_webapp_admin(club, init_data)
+    products = (await session.execute(select(ClubProduct).where(ClubProduct.club_id == club_id, ClubProduct.is_active.is_(True), ClubProduct.stock > 0).order_by(ClubProduct.category, ClubProduct.name))).scalars().all()
+    product_data = [{"id": p.id, "name": p.name, "category": p.category, "price_kopecks": p.price_kopecks, "stock": p.stock} for p in products]
+    return templates.TemplateResponse("admin_product_sale.html", {"request": request, "club_id": club_id, "products": product_data})
+
+@router.post("/webapp/admin-product-sale")
+async def admin_product_sale(payload: AdminProductSalePayload, session: AsyncSession = Depends(get_session)):
+    club = await session.get(Club, payload.club_id)
+    await verify_webapp_admin(club, payload.init_data)
+    if not payload.items:
+        raise HTTPException(400, "Корзина пуста")
+    ids = [int(item.get("product_id")) for item in payload.items]
+    products = (await session.execute(select(ClubProduct).where(ClubProduct.club_id == payload.club_id, ClubProduct.id.in_(ids), ClubProduct.is_active.is_(True)).with_for_update())).scalars().all()
+    by_id = {p.id: p for p in products}
+    normalized, total = [], 0
+    for raw in payload.items:
+        product = by_id.get(int(raw.get("product_id", 0)))
+        quantity = int(raw.get("quantity", 0))
+        if not product or quantity < 1 or quantity > 99 or product.stock < quantity:
+            raise HTTPException(400, "Товар недоступен или закончился")
+        product.stock -= quantity
+        total += product.price_kopecks * quantity
+        normalized.append((product, quantity))
+    order_id = f"CASH_PRODUCT_{uuid.uuid4().hex[:12].upper()}"
+    order = CartOrder(id=order_id, club_id=payload.club_id, user_id=None, amount_kopecks=total, status="CONFIRMED", provider_payment_id=f"CASH:{order_id}")
+    session.add(order)
+    await session.flush()
+    for product, quantity in normalized:
+        session.add(CartItem(cart_order_id=order_id, product_id=product.id, item_type="product", title=product.name, quantity=quantity, unit_price_kopecks=product.price_kopecks, payload={"category": product.category, "payment_method": "cash"}))
+    await session.commit()
+    return {"ok": True, "order_id": order_id, "total_kopecks": total}
 
 @router.post("/webapp/admin-products")
 async def create_product(payload: ProductPayload, session: AsyncSession = Depends(get_session)):
