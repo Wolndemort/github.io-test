@@ -20,14 +20,14 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
       - name: Install dependencies
         run: |
-          pip install -r requirements.txt
-          pip install pytest pytest-asyncio
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
 
       - name: Run test
         env:
@@ -36,7 +36,32 @@ jobs:
           SECRET_KEY: SECRET_KEY
         run: |
           export PYTHONPATH=$PYTHONPATH:$(pwd)
-          pytest
+          python -m pytest -q
+
+      - name: Validate Compose and migration graph
+        run: |
+          docker compose config --quiet
+          python - <<'PY'
+          from pathlib import Path
+          import ast
+          revisions = {}
+          parents = set()
+          for path in Path("migrations/versions").glob("*.py"):
+              tree = ast.parse(path.read_text(encoding="utf-8"))
+              values = {}
+              for node in tree.body:
+                  if isinstance(node, ast.Assign):
+                      for target in node.targets:
+                          if isinstance(target, ast.Name) and target.id in {"revision", "down_revision"}:
+                              values[target.id] = ast.literal_eval(node.value)
+              if "revision" in values:
+                  revisions[values["revision"]] = path.name
+                  parent = values.get("down_revision")
+                  parents.update(parent if isinstance(parent, (tuple, list)) else ({parent} if parent else set()))
+          heads = sorted(set(revisions) - parents)
+          assert len(heads) == 1, f"Expected one Alembic head, got {heads}"
+          print(f"Alembic head: {heads[0]}")
+          PY
 
   deploy_production:
     needs: tests
@@ -56,12 +81,26 @@ jobs:
             backup="backups/pre_deploy_$(date +%F_%H-%M-%S).sql"
             docker exec gym_db pg_dump -U postgres -d crm_db > "$backup"
             test -s "$backup"
-            ls -t backups/pre_deploy_*.sql | tail -n +11 | xargs rm -f -- 2>/dev/null || true 
+            ls -t backups/pre_deploy_*.sql | tail -n +11 | xargs -r rm -f --
             git fetch origin master
-            git checkout --detach origin/master
-            docker compose down
-            docker compose up -d --build
-            docker image prune -f
+            git reset --hard origin/master
+            docker compose config --quiet
+            old_image="$(docker compose images -q gym-api 2>/dev/null || true)"
+            old_image="$(printf '%s' "$old_image" | head -n 1)"
+            rollback() {
+              status=$?
+              if [ "$status" -ne 0 ] && [ -n "$old_image" ]; then
+                echo "Deployment failed; restoring previous gym-api image"
+                docker tag "$old_image" "$(docker compose config --images | grep gym-api | head -n 1)" || true
+                docker compose up -d --no-build gym-api nginx || true
+              fi
+              exit "$status"
+            }
+            trap rollback EXIT
+            docker compose build gym-api
+            docker compose up -d
+            docker compose exec -T gym-api alembic upgrade heads
+            docker compose exec -T gym-api alembic heads
             for i in $(seq 1 12); do
               if curl --fail --silent --show-error http://127.0.0.1:8000/health >/dev/null && \
                  curl --fail --silent --show-error http://127.0.0.1:8000/ready >/dev/null; then
@@ -74,6 +113,9 @@ jobs:
               sleep 5
             done
             SMOKE_BASE_URL=http://127.0.0.1:8000 docker compose exec -T gym-api python scripts/smoke_check.py
+            docker compose exec -T nginx nginx -t
+            curl --fail --silent --show-error -k https://127.0.0.1/health -H 'Host: speedycrm.ru' >/dev/null
+            trap - EXIT
 
       - name: Send Telegram Notification on Failure
         if: failure()
@@ -89,5 +131,5 @@ jobs:
             Коммит: ${{ github.sha }}
             
             Бро, тесты упали или деплой не прошел. Чекни логи: 
-            https://github.com{{ github.repository }}/actions
+            https://github.com/${{ github.repository }}/actions
             
