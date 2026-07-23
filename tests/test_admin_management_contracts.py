@@ -40,6 +40,15 @@ def test_admin_sales_and_student_filters_are_present():
     assert "Средний чек" in sales
 
 
+def test_stats_and_sales_templates_have_readable_dark_surface_metrics():
+    stats = Path("templates/stats.html").read_text(encoding="utf-8")
+    css = Path("static/css/mono.css").read_text(encoding="utf-8")
+    assert "revenue_today" in stats and "revenue_week" in stats and "revenue_month" in stats
+    assert "empty-note" in stats and "muted-note" in stats
+    assert ".mono-card .list-item span" in css
+    assert "color: #f7f7f7 !important" in css
+
+
 def test_daily_student_birthday_reminder_is_scheduled_and_uses_student_flow():
     source = Path("main.py").read_text(encoding="utf-8")
     assert "scheduler.add_job(saas_daily_morning_check" in source

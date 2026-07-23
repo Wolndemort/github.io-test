@@ -348,6 +348,15 @@ body.mono-theme .mono-title { font-size: 24px !important; line-height: 1.15 !imp
 body.mono-theme .mono-pill .value,
 body.mono-theme .mono-pill strong,
 body.mono-theme .mono-card .value { color: #fff !important; }
+
+/* Dark admin cards: never force content text to black. */
+body.mono-theme .mono-card .list-item,
+body.mono-theme .mono-card .list-item span,
+body.mono-theme .mono-card summary { color: #f7f7f7 !important; }
+body.mono-theme .mono-card .list-item span[style*="color"],
+body.mono-theme .mono-card div[style*="color: #666"],
+body.mono-theme .mono-card div[style*="color: #111"] { color: #a9a9a9 !important; }
+body.mono-theme .mono-card .label { color: #a9a9a9 !important; }
 body.mono-theme .mono-pill { min-height: 74px; }
 body.mono-theme .value,
 body.mono-theme .title,

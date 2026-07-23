@@ -31,6 +31,8 @@
             margin-top: 8px;
             padding-right: 5px;
         }
+        .empty-note { font-size: 14px; color: #a9a9a9; padding-top: 5px; }
+        .muted-note { color: #a9a9a9; font-size: 13px; }
     </style>
 </head>
 <body class="mono-theme">
@@ -76,6 +78,18 @@
             <div class="label">Осталось уроков на руках</div>
             <div class="value">{{ total_lessons_left }}</div>
         </div>
+        <div class="card mono-card">
+            <div class="label">Выручка сегодня</div>
+            <div class="value">{{ '%.2f'|format(revenue_today|default(0)) }} ₽</div>
+        </div>
+        <div class="card mono-card">
+            <div class="label">Выручка за неделю</div>
+            <div class="value">{{ '%.2f'|format(revenue_week|default(0)) }} ₽</div>
+        </div>
+        <div class="card mono-card full">
+            <div class="label">Выручка за месяц</div>
+            <div class="value">{{ '%.2f'|format(revenue_month|default(0)) }} ₽</div>
+        </div>
     </div>
 
     <!-- Популярность дисциплин -->
@@ -87,7 +101,7 @@
             <span style="font-weight: bold;">{{ discipline.active_athletes }}</span>
         </div>
         {% else %}
-        <div style="font-size: 14px; color: #666; padding-top: 5px;">Нет активных дисциплин</div>
+        <div class="empty-note">Нет активных дисциплин</div>
         {% endfor %}
     </div>
 
@@ -101,13 +115,13 @@
                 {% for student in churned_students %}
                 <div class="list-item">
                     <span>{{ student.name }}</span>
-                    <span style="color: #666; font-size: 13px;">баланс: 0</span>
+                    <span class="muted-note">баланс: 0</span>
                 </div>
                 {% endfor %}
             </div>
         </details>
         {% else %}
-        <div style="font-size: 14px; color: #111; padding-top: 5px;">🎉 Все абонементы активны!</div>
+        <div class="empty-note">🎉 Все абонементы активны!</div>
         {% endif %}
     </div>
 
