@@ -45,8 +45,12 @@ class ClubMiddleware(BaseMiddleware):
             # 2. Идем в БД
             session = data["session"]
 
-            result = await session.execute(select(Club).where(Club.bot_token == bot_token))
-            club_obj = result.scalar_one_or_none()
+            # Токен должен быть уникальным, но старые данные могут содержать
+            # дубль. Профиль не должен ронять весь бот из-за MultipleResultsFound.
+            result = await session.execute(
+                select(Club).where(Club.bot_token == bot_token).order_by(Club.id).limit(1)
+            )
+            club_obj = result.scalars().first()
 
             if not club_obj:
                 return  # Если клуба нет в базе — прерываем
@@ -68,8 +72,10 @@ class ClubMiddleware(BaseMiddleware):
         subscription_result = await session.execute(
             select(Club.subscription_expire_at, Club.owner_id, Club.id)
             .where(Club.bot_token == bot_token)
+            .order_by(Club.id)
+            .limit(1)
         )
-        subscription_row = subscription_result.one_or_none()
+        subscription_row = subscription_result.first()
         if not subscription_row:
             return
         club_obj.subscription_expire_at = subscription_row[0]
