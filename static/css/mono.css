@@ -501,10 +501,13 @@ body.mono-theme .birthday-card .birthday-footer {
 /* Filter controls and their captions must remain readable after the card
    inheritance reset above. */
 body.mono-theme .filters label,
-body.mono-theme .filter-checks label,
 body.mono-theme .card > label,
 body.mono-theme .card label {
     color: #f7f7f7 !important;
+}
+/* The filter chips have a light background, so their captions need dark text. */
+body.mono-theme .filter-checks label {
+    color: #111111 !important;
 }
 body.mono-theme .filters input,
 body.mono-theme .filters select,
