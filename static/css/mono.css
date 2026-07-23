@@ -427,3 +427,29 @@ body.mono-theme .value { font-weight: 800 !important; }
         color: var(--mono-white) !important;
     }
 } */
+
+/* Final contrast guard for admin pages. Inline legacy styles and page-specific
+   rules must not produce black text on the dark admin surface. */
+body.mono-theme .card,
+body.mono-theme .card * {
+    color: #f7f7f7 !important;
+}
+body.mono-theme .card .muted,
+body.mono-theme .card .subtitle,
+body.mono-theme .card .label,
+body.mono-theme .card small,
+body.mono-theme .card [class*="muted"],
+body.mono-theme .card [class*="hint"] {
+    color: #a9a9a9 !important;
+}
+body.mono-theme .card input,
+body.mono-theme .card select,
+body.mono-theme .card textarea {
+    background: #101010 !important;
+    color: #ffffff !important;
+    border-color: #444444 !important;
+}
+body.mono-theme .card a,
+body.mono-theme .card a:visited {
+    color: #ffffff !important;
+}
