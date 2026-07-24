@@ -138,12 +138,18 @@ async def process_athlete_gate_pass(
             is_opened = await trigger_dingtian_turnstile(relay_config)
             if not is_opened:
                 await db.rollback()
-                return {"success": False, "message": "Реле отклонило команду на открытие."}
+                return {
+                    "success": False,
+                    "message": "⚠️ Реле турникета отклонило команду. Турникет сейчас недоступен: проход не записан, занятия не списаны. Сообщите администратору или попробуйте ещё раз.",
+                }
             turnstile_status = "✅ Турникет открыт"
         except Exception as sku_err:
             await db.rollback()
-            logger.warning(f"Микросбой сети турникета: {sku_err}. Проход разрешен.")
-            return {"success": False, "message": "Ошибка связи с турникетом. Попробуйте ещё раз."}
+            logger.warning(f"Микросбой сети турникета: {sku_err}. Проход отклонён без записи.")
+            return {
+                "success": False,
+                "message": "⚠️ Ошибка связи с турникетом. Проход не записан, занятия не списаны. Сообщите администратору или попробуйте ещё раз.",
+            }
 
     # 8. После успешного открытия фиксируем ровно те же изменения сессии,
     # что и раньше. При выключенном СКУД commit выполняется сразу.

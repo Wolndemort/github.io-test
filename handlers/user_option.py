@@ -699,12 +699,23 @@ async def _handle_qr_scan_data(
     if not hmac.compare_digest(provided_signature, expected_signature):
         return await message.answer("❌ Ошибка: Недействительный QR-пропуск")
 
-    res = await process_athlete_gate_pass(
-        scanned_id,
-        session,
-        club_settings,
-        expected_club_id=club.id,
-    )
+    try:
+        res = await process_athlete_gate_pass(
+            scanned_id,
+            session,
+            club_settings,
+            expected_club_id=club.id,
+        )
+    except Exception as gate_error:
+        logger.exception("Сбой обработчика прохода для athlete=%s: %s", scanned_id, gate_error)
+        try:
+            await session.rollback()
+        except Exception:
+            pass
+        return await message.answer(
+            "⚠️ Не удалось обработать проход: турникет или сервер временно недоступен. "
+            "Проход не записан, занятия не списаны. Попробуйте ещё раз или обратитесь к администратору."
+        )
     if not res["success"]:
         return await message.answer(res["message"])
 
