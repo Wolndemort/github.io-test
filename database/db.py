@@ -187,6 +187,20 @@ class CartItem(Base):
     payload: Mapped[dict] = mapped_column(JSONB, default=dict)
 
 
+class CashEntry(Base):
+    """Manual cash-register movement; sales remain recorded in their source orders."""
+    __tablename__ = "cash_entries"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    club_id: Mapped[int] = mapped_column(ForeignKey("clubs.id", ondelete="CASCADE"), index=True)
+    entry_type: Mapped[str] = mapped_column(String(16))  # income / expense
+    category: Mapped[str] = mapped_column(String(50), default="other")
+    amount_kopecks: Mapped[int] = mapped_column(Integer)
+    description: Mapped[str] = mapped_column(String(500), default="")
+    created_by: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, server_default="now()", index=True)
+    reversed_entry_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
+
 class VisitLog(Base):
     __tablename__ = 'visit_logs'
 

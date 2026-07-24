@@ -38,7 +38,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from starlette import status
-from database.db import User, Student, Club, ClubProduct, CartOrder, CartItem
+from database.db import User, Student, Club, ClubProduct, CartOrder, CartItem, CashEntry
 from database.db import purchase_student_freeze
 from admin_module.schemas import AdminStudentUpdate, AdminStudentCreate
 from database.db import get_session
@@ -50,6 +50,7 @@ from admin_module.router_base import router, templates
 from admin_module.webapp_verify import verify_telegram_data
 from admin_module.webapp_client_cabinet import _ensure_webapp_user_linked
 from services.input_normalization import normalize_ru_phone, parse_user_date
+from services.audit import audit_event
 import admin_module.webapp_client_cabinet  # noqa: F401
 import admin_module.turnstile_biometry  # noqa: F401 - registers SKUD WebApp routes
 import admin_module.payments_webhook  # noqa: F401
@@ -95,6 +96,14 @@ class AdminProductSalePayload(BaseModel):
     init_data: str
     club_id: int
     items: list[dict]
+
+class CashEntryPayload(BaseModel):
+    init_data: str
+    club_id: int
+    entry_type: str
+    category: str = "other"
+    amount_kopecks: int
+    description: str = ""
 
 
 def _student_identity_phone(value: str | None) -> str:
@@ -390,6 +399,48 @@ async def admin_sales_page(
     disciplines = settings.get("disciplines", {}) if isinstance(settings, dict) else {}
     return templates.TemplateResponse("admin_sales.html", {"request": request, "club": club, "club_id": club_id,
         "operations": operations, "disciplines": disciplines, "filters": {"date_from": date_from or "", "date_to": date_to or "", "weekday": weekday, "payment_method": payment_method or "", "category": category or "", "discipline": discipline or ""}})
+
+
+@router.get("/admin/cash", response_class=HTMLResponse)
+async def cash_register_page(request: Request, session: AsyncSession = Depends(get_session), init_data: str | None = Query(default=None), date_from: str | None = Query(default=None), date_to: str | None = Query(default=None)):
+    club_id = get_club_id_from_host(request)
+    if not init_data:
+        return webapp_auth_gate(request, club_id)
+    club = await session.get(Club, club_id)
+    await verify_webapp_admin(club, init_data)
+    start = moscow_date_boundary(date_from) if date_from else None
+    end = moscow_date_boundary(date_to) + timedelta(days=1) if date_to else None
+    manual_query = select(CashEntry).where(CashEntry.club_id == club_id)
+    if start: manual_query = manual_query.where(CashEntry.created_at >= start)
+    if end: manual_query = manual_query.where(CashEntry.created_at < end)
+    manual = (await session.execute(manual_query.order_by(CashEntry.created_at.desc()))).scalars().all()
+    income_rows = []
+    payment_query = select(PaymentOrder).where(PaymentOrder.club_id == club_id, PaymentOrder.status == "CONFIRMED", (PaymentOrder.type == "CASH") | PaymentOrder.provider_payment_id.like("CASH:%"))
+    cart_query = select(CartOrder).where(CartOrder.club_id == club_id, CartOrder.status == "CONFIRMED", CartOrder.provider_payment_id.like("CASH:%"))
+    if start: payment_query = payment_query.where(PaymentOrder.created_at >= start); cart_query = cart_query.where(CartOrder.created_at >= start)
+    if end: payment_query = payment_query.where(PaymentOrder.created_at < end); cart_query = cart_query.where(CartOrder.created_at < end)
+    for row in (await session.execute(payment_query)).scalars().all():
+        income_rows.append({"id": row.id, "created_at": row.created_at, "entry_type": "income", "category": "subscription", "amount_kopecks": row.amount_kopecks or 0, "description": "Наличный абонемент", "source": "sale"})
+    for row in (await session.execute(cart_query)).scalars().all():
+        income_rows.append({"id": row.id, "created_at": row.created_at, "entry_type": "income", "category": "product", "amount_kopecks": row.amount_kopecks or 0, "description": "Наличная продажа товара", "source": "sale"})
+    rows = income_rows + [{"id": e.id, "created_at": e.created_at, "entry_type": e.entry_type, "category": e.category, "amount_kopecks": e.amount_kopecks, "description": e.description, "source": "manual"} for e in manual]
+    rows.sort(key=lambda x: x["created_at"] or datetime.min, reverse=True)
+    income = sum(r["amount_kopecks"] for r in rows if r["entry_type"] == "income")
+    expenses = sum(r["amount_kopecks"] for r in rows if r["entry_type"] == "expense")
+    return templates.TemplateResponse("cash_register.html", {"request": request, "club_id": club_id, "rows": rows, "income": income, "expenses": expenses, "balance": income - expenses, "date_from": date_from or "", "date_to": date_to or ""})
+
+
+@router.post("/admin/cash/entries")
+async def create_cash_entry(payload: CashEntryPayload, session: AsyncSession = Depends(get_session)):
+    club = await session.get(Club, payload.club_id)
+    tg_user = await verify_webapp_admin(club, payload.init_data)
+    if payload.entry_type not in {"income", "expense"} or payload.amount_kopecks <= 0 or payload.amount_kopecks > 100_000_000_00:
+        raise HTTPException(status_code=400, detail="Некорректный тип или сумма кассовой операции")
+    entry = CashEntry(club_id=payload.club_id, entry_type=payload.entry_type, category=payload.category.strip()[:50] or "other", amount_kopecks=payload.amount_kopecks, description=payload.description.strip()[:500], created_by=int(tg_user.get("id")))
+    session.add(entry)
+    await session.commit()
+    audit_event("cash_entry_created", club_id=payload.club_id, entry_type=entry.entry_type, category=entry.category, amount_kopecks=entry.amount_kopecks, created_by=entry.created_by)
+    return {"success": True, "id": entry.id}
 
 
 @router.patch("/admin/students/{student_id}")

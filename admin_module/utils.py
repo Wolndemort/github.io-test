@@ -37,3 +37,4 @@ async def verify_webapp_admin(club: Club, init_data: str | None):
         telegram_user_id = owner_id = None
     if telegram_user_id is None or (telegram_user_id != owner_id and telegram_user_id not in {int(x) for x in SUPER_ADMIN_IDS}):
         raise HTTPException(status_code=403, detail="Доступ только для администратора клуба")
+    return tg_user
