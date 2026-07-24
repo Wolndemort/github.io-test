@@ -18,7 +18,7 @@
       <label>Имя атлета<input name="name" value="{{ s.name or '' }}" maxlength="150"></label><span class="muted">ID {{ s.id }} · баланс: {{ s.balance_lessons }} · {{ s.discipline or 'без дисциплины' }}</span>
       <div class="grid"><label>Телефон родителя<input name="parent_phone" value="{{ s.parent_phone or '' }}" placeholder="79990000000">{% if s.parent_id %}<a href="tg://user?id={{ s.parent_id }}" class="mono-action" style="display:inline-block;margin-top:6px;text-decoration:none">💬 Написать в Telegram</a>{% endif %}</label>
         <label>ДР {% if not s.birthday %}<span class="missing">не указана</span>{% endif %}<input name="birthday" type="date" value="{{ s.birthday.isoformat() if s.birthday else '' }}"></label>
-        <label>Баланс занятий<input name="balance_lessons" type="number" min="0" max="999" value="{{ s.balance_lessons or 0 }}"></label>
+        <label>Баланс занятий<input name="balance_lessons" type="number" min="0" max="999" value="{{ s.balance_lessons if s.balance_lessons else '' }}" placeholder="0"></label>
         <label>До даты<input name="expire_date" type="date" value="{{ s.expire_date.strftime('%Y-%m-%d') if s.expire_date else '' }}"></label>
         <label>Бесплатных заморозок<input name="can_freeze" type="number" min="0" max="99" value="{{ s.can_freeze or 0 }}"></label>
         <label>Дисциплина<input name="discipline" value="{{ s.discipline or '' }}"></label>
@@ -122,7 +122,7 @@ function studentCardHtml(s) {
       <label>Имя атлета<input name="name" value="${esc(s.name || '')}" maxlength="150"></label><span class="muted">ID ${s.id} · баланс: ${s.balance_lessons || 0} · ${esc(s.discipline || 'без дисциплины')}</span>
       <div class="grid"><label>Телефон родителя<input name="parent_phone" value="${esc(s.parent_phone || '')}" placeholder="79990000000">${s.parent_id ? `<a href="tg://user?id=${s.parent_id}" class="mono-action" style="display:inline-block;margin-top:6px;text-decoration:none">💬 Написать в Telegram</a>` : ''}</label>
         <label>Дата рождения ${s.birthday ? '' : '<span class="missing">не указана</span>'}<input name="birthday" type="date" value="${esc(s.birthday || '')}"></label>
-        <label>Баланс занятий<input name="balance_lessons" type="number" min="0" max="999" value="${s.balance_lessons || 0}"></label>
+        <label>Баланс занятий<input name="balance_lessons" type="number" min="0" max="999" value="${s.balance_lessons ? s.balance_lessons : ''}" placeholder="0"></label>
         <label>До даты<input name="expire_date" type="date" value="${esc(s.expire_date || '')}"></label>
         <label>Бесплатных заморозок<input name="can_freeze" type="number" min="0" max="99" value="${s.can_freeze || 0}"></label>
         <label>Дисциплина<input name="discipline" value="${esc(s.discipline || '')}"></label>
