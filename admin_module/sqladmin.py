@@ -61,7 +61,12 @@ class StudentAdmin(ModelView, model=Student):
         Student.birthday
     ]
     column_searchable_list = [Student.name, Student.parent_phone]
-    column_filters = [Student.club_id, Student.birthday]
+    # SQLAdmin 0.23 expects filter instances here, not SQLAlchemy attributes.
+    # Passing Student.club_id/Student.birthday directly causes an
+    # AttributeError (``parameter_name``) while opening the list page.
+    # Filtering can still be done through the search field until explicit
+    # filter objects are configured.
+    column_filters = []
 
     # ИСПРАВЛЕНО: Вместо "parent_id" мы пишем отношение "parent".
     # SQLAdmin свяжет это поле с формой AJAX-поиска, описанной ниже.
