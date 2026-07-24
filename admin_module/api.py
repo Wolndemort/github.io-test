@@ -415,19 +415,23 @@ async def cash_register_page(request: Request, session: AsyncSession = Depends(g
     if end: manual_query = manual_query.where(CashEntry.created_at < end)
     manual = (await session.execute(manual_query.order_by(CashEntry.created_at.desc()))).scalars().all()
     income_rows = []
-    payment_query = select(PaymentOrder).where(PaymentOrder.club_id == club_id, PaymentOrder.status == "CONFIRMED", (PaymentOrder.type == "CASH") | PaymentOrder.provider_payment_id.like("CASH:%"))
-    cart_query = select(CartOrder).where(CartOrder.club_id == club_id, CartOrder.status == "CONFIRMED", CartOrder.provider_payment_id.like("CASH:%"))
+    payment_query = select(PaymentOrder).where(PaymentOrder.club_id == club_id, PaymentOrder.status == "CONFIRMED")
+    cart_query = select(CartOrder).where(CartOrder.club_id == club_id, CartOrder.status == "CONFIRMED")
     if start: payment_query = payment_query.where(PaymentOrder.created_at >= start); cart_query = cart_query.where(CartOrder.created_at >= start)
     if end: payment_query = payment_query.where(PaymentOrder.created_at < end); cart_query = cart_query.where(CartOrder.created_at < end)
     for row in (await session.execute(payment_query)).scalars().all():
-        income_rows.append({"id": row.id, "created_at": row.created_at, "entry_type": "income", "category": "subscription", "amount_kopecks": row.amount_kopecks or 0, "description": "Наличный абонемент", "source": "sale"})
+        is_cash = str(row.provider_payment_id or "").startswith("CASH") or str(row.type).startswith("CASH")
+        income_rows.append({"id": row.id, "created_at": row.created_at, "entry_type": "income", "category": "freeze" if str(row.type).startswith("FREEZE") else "subscription", "amount_kopecks": row.amount_kopecks or 0, "description": ("Наличный" if is_cash else "Онлайн") + " платёж", "source": "sale", "method": "cash" if is_cash else "card"})
     for row in (await session.execute(cart_query)).scalars().all():
-        income_rows.append({"id": row.id, "created_at": row.created_at, "entry_type": "income", "category": "product", "amount_kopecks": row.amount_kopecks or 0, "description": "Наличная продажа товара", "source": "sale"})
-    rows = income_rows + [{"id": e.id, "created_at": e.created_at, "entry_type": e.entry_type, "category": e.category, "amount_kopecks": e.amount_kopecks, "description": e.description, "source": "manual"} for e in manual]
+        is_cash = str(row.provider_payment_id or "").startswith("CASH")
+        income_rows.append({"id": row.id, "created_at": row.created_at, "entry_type": "income", "category": "product", "amount_kopecks": row.amount_kopecks or 0, "description": ("Наличная" if is_cash else "Онлайн") + " продажа товара", "source": "sale", "method": "cash" if is_cash else "card"})
+    rows = income_rows + [{"id": e.id, "created_at": e.created_at, "entry_type": e.entry_type, "category": e.category, "amount_kopecks": e.amount_kopecks, "description": e.description, "source": "manual", "method": "cash"} for e in manual]
     rows.sort(key=lambda x: x["created_at"] or datetime.min, reverse=True)
     income = sum(r["amount_kopecks"] for r in rows if r["entry_type"] == "income")
+    cash_income = sum(r["amount_kopecks"] for r in rows if r["entry_type"] == "income" and r.get("method") == "cash")
+    online_income = sum(r["amount_kopecks"] for r in rows if r["entry_type"] == "income" and r.get("method") == "card")
     expenses = sum(r["amount_kopecks"] for r in rows if r["entry_type"] == "expense")
-    return templates.TemplateResponse("cash_register.html", {"request": request, "club_id": club_id, "rows": rows, "income": income, "expenses": expenses, "balance": income - expenses, "date_from": date_from or "", "date_to": date_to or ""})
+    return templates.TemplateResponse("cash_register.html", {"request": request, "club_id": club_id, "rows": rows, "income": income, "cash_income": cash_income, "online_income": online_income, "expenses": expenses, "balance": cash_income - expenses, "date_from": date_from or "", "date_to": date_to or ""})
 
 
 @router.post("/admin/cash/entries")
@@ -441,6 +445,24 @@ async def create_cash_entry(payload: CashEntryPayload, session: AsyncSession = D
     await session.commit()
     audit_event("cash_entry_created", club_id=payload.club_id, entry_type=entry.entry_type, category=entry.category, amount_kopecks=entry.amount_kopecks, created_by=entry.created_by)
     return {"success": True, "id": entry.id}
+
+
+@router.post("/admin/cash/entries/{entry_id}/reverse")
+async def reverse_cash_entry(entry_id: int, payload: CashEntryPayload, session: AsyncSession = Depends(get_session)):
+    club = await session.get(Club, payload.club_id)
+    tg_user = await verify_webapp_admin(club, payload.init_data)
+    entry = await session.get(CashEntry, entry_id)
+    if not entry or entry.club_id != payload.club_id:
+        raise HTTPException(status_code=404, detail="Кассовая операция не найдена")
+    if entry.reversed_entry_id:
+        raise HTTPException(status_code=409, detail="Операция уже сторнирована")
+    reversal = CashEntry(club_id=entry.club_id, entry_type="expense" if entry.entry_type == "income" else "income", category="reversal", amount_kopecks=entry.amount_kopecks, description=f"Сторно операции #{entry.id}: {entry.description}"[:500], created_by=int(tg_user.get("id")), reversed_entry_id=entry.id)
+    session.add(reversal)
+    await session.flush()
+    entry.reversed_entry_id = reversal.id
+    await session.commit()
+    audit_event("cash_entry_reversed", club_id=entry.club_id, entry_id=entry.id, reversal_id=reversal.id, created_by=int(tg_user.get("id")))
+    return {"success": True, "reversal_id": reversal.id}
 
 
 @router.patch("/admin/students/{student_id}")
@@ -516,7 +538,11 @@ async def admin_update_student(
             raise HTTPException(status_code=400, detail="Срок заморозки должен быть от 1 до 365 дней")
         student.frozen_days = payload.frozen_days
     if payload.discipline is not None:
-        student.discipline = payload.discipline.strip()[:50] or student.discipline
+        discipline_code = payload.discipline.strip()[:50]
+        discipline_cfg = (owner_club.club_settings or {}).get("disciplines", {}).get(discipline_code)
+        if not discipline_cfg or not discipline_cfg.get("active"):
+            raise HTTPException(status_code=400, detail="Дисциплина недоступна")
+        student.discipline = discipline_code or student.discipline
     if payload.parent_phone is not None:
         if not payload.parent_phone.strip():
             student.parent_phone = None
@@ -726,6 +752,8 @@ async def get_revenue_stats(
         "kickboxing": "🤼‍♂️ Кикбоксинг",
         "bjj": "🥋 Бразильское джиу-джитсу",
         "yoga": "🧘‍♂️ Йога"
+        ,"grappling": "🤼 Грэпплинг"
+        ,"crossfit": "🏋️ Кроссфит"
     }
 
     disciplines_stats = [
@@ -1040,6 +1068,8 @@ async def webapp_schedule_page(
         for disc_key, disc_content in disciplines_data.items():
             if not isinstance(disc_content, dict):
                 continue
+            if not disc_content.get("active", False):
+                continue
 
             disc_name = disc_content.get("name", "Спортивная секция")
             schedule_data = disc_content.get("schedule", {})
@@ -1079,11 +1109,13 @@ async def webapp_schedule_page(
 
                 if parsed_lessons:
                     parsed_days.append({
+                        "key": day_key,
                         "title": day_title,
                         "lessons": parsed_lessons
                     })
 
             parsed_disciplines.append({
+                "code": disc_key,
                 "name": disc_name,
                 "days": parsed_days
             })

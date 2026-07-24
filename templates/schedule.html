@@ -42,11 +42,13 @@
             <option value="">Сначала выберите дисциплину</option>
             {% for discipline in disciplines %}<option value="discipline-{{ loop.index0 }}">{{ discipline.name }}</option>{% endfor %}
         </select>
+        <label for="day-picker" class="mono-eyebrow">Выберите день</label>
+        <select id="day-picker" class="discipline-picker"><option value="">Все дни</option><option value="mon">Понедельник</option><option value="tue">Вторник</option><option value="wed">Среда</option><option value="thu">Четверг</option><option value="fri">Пятница</option><option value="sat">Суббота</option><option value="sun">Воскресенье</option></select>
         {% for discipline in disciplines %}
             <div class="discipline-section" id="discipline-{{ loop.index0 }}" hidden>
                 <div class="discipline-title">🥋 {{ discipline.name }}</div>
                 {% for day in discipline.days %}
-                    <div class="day-container">
+                    <div class="day-container" data-day="{{ day.key }}">
                         <div class="day-title">{{ day.title }}</div>
                         {% for lesson in day.lessons %}
                             <div class="lesson-card">
@@ -70,9 +72,9 @@ const tg = window.Telegram.WebApp;
 tg.ready();
 tg.expand();
 const picker = document.getElementById('discipline-picker');
-picker?.addEventListener('change', () => document.querySelectorAll('.discipline-section').forEach(section => {
-    section.hidden = section.id !== picker.value;
-}));
+const dayPicker = document.getElementById('day-picker');
+function filterSchedule(){document.querySelectorAll('.discipline-section').forEach(section => {section.hidden = section.id !== picker.value;section.querySelectorAll('.day-container').forEach(day => day.hidden = Boolean(dayPicker.value) && day.dataset.day !== dayPicker.value);});}
+picker?.addEventListener('change', filterSchedule);dayPicker?.addEventListener('change', filterSchedule);
 </script>
 </body>
 </html>

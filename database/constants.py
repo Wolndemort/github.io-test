@@ -54,6 +54,20 @@ DEFAULT_CLUB_SETTINGS = {
             "schedule": {"mon": [], "tue": [], "wed": [], "thu": [], "fri": [], "sat": [], "sun": []},
             "tariffs": []  # Пусто!
         },
+        "grappling": {
+            "name": "Грэпплинг",
+            "active": False,
+            "type": "lessons",
+            "schedule": {"mon": [], "tue": [], "wed": [], "thu": [], "fri": [], "sat": [], "sun": []},
+            "tariffs": []
+        },
+        "crossfit": {
+            "name": "Кроссфит",
+            "active": False,
+            "type": "lessons",
+            "schedule": {"mon": [], "tue": [], "wed": [], "thu": [], "fri": [], "sat": [], "sun": []},
+            "tariffs": []
+        },
         "general": {
             "name": "Общий абонемент",
             "active": False,
