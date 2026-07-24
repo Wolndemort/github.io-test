@@ -55,10 +55,11 @@ jobs:
               tree = ast.parse(path.read_text(encoding="utf-8"))
               values = {}
               for node in tree.body:
-                  if isinstance(node, ast.Assign):
-                      for target in node.targets:
-                          if isinstance(target, ast.Name) and target.id in {"revision", "down_revision"}:
-                              values[target.id] = ast.literal_eval(node.value)
+                  targets = node.targets if isinstance(node, ast.Assign) else [node.target] if isinstance(node, ast.AnnAssign) else []
+                  value = node.value if isinstance(node, (ast.Assign, ast.AnnAssign)) else None
+                  for target in targets:
+                      if isinstance(target, ast.Name) and target.id in {"revision", "down_revision"} and value is not None:
+                          values[target.id] = ast.literal_eval(value)
               if "revision" in values:
                   revisions[values["revision"]] = path.name
                   parent = values.get("down_revision")
