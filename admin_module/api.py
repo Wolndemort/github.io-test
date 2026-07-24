@@ -197,8 +197,15 @@ async def scanner_scan(
     if not club:
         raise HTTPException(status_code=404, detail="Клуб не найден")
     tg_user = verify_telegram_data(payload.init_data, club.bot_token)
-    if not tg_user or (tg_user.get("id") != club.owner_id and tg_user.get("id") not in SUPER_ADMIN_IDS):
-        raise HTTPException(status_code=403, detail="Только администратор клуба")
+    try:
+        telegram_user_id = int(tg_user.get("id")) if tg_user else None
+        owner_id = int(club.owner_id) if club.owner_id is not None else None
+    except (TypeError, ValueError):
+        telegram_user_id = owner_id = None
+    # Та же проверка, что используется в админ-панели; приведение к int
+    # устраняет отказ из-за разницы типов в старых данных клуба.
+    if telegram_user_id is None or (telegram_user_id != owner_id and telegram_user_id not in {int(x) for x in SUPER_ADMIN_IDS}):
+        raise HTTPException(status_code=403, detail="Только администратор клуба может использовать сканер")
 
     raw = fix_layout(payload.qr_data).strip().split(":")
     if len(raw) != 4 or raw[0] != "student":

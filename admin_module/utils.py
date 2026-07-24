@@ -30,5 +30,10 @@ async def verify_webapp_admin(club: Club, init_data: str | None):
     if not club or not getattr(club, "bot_token", None) or not init_data:
         raise HTTPException(status_code=403, detail="Требуется авторизация Telegram")
     tg_user = verify_telegram_data(init_data, club.bot_token)
-    if not tg_user or (tg_user.get("id") != club.owner_id and tg_user.get("id") not in SUPER_ADMIN_IDS):
+    try:
+        telegram_user_id = int(tg_user.get("id")) if tg_user else None
+        owner_id = int(club.owner_id) if club.owner_id is not None else None
+    except (TypeError, ValueError):
+        telegram_user_id = owner_id = None
+    if telegram_user_id is None or (telegram_user_id != owner_id and telegram_user_id not in {int(x) for x in SUPER_ADMIN_IDS}):
         raise HTTPException(status_code=403, detail="Доступ только для администратора клуба")
