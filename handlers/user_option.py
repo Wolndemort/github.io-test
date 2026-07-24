@@ -1,4 +1,5 @@
 import qrcode
+from html import escape
 from types import SimpleNamespace
 from aiogram.types import InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
@@ -451,6 +452,7 @@ async def finalize_freeze_action(
 
     # Достаем шаг заморозки из конфига клуба
     freeze_days = club_settings.get("limits", {}).get("freeze_days_step", 7)
+    student = await session.get(Student, student_id)
 
     # ИСПРАВЛЕНО: Порядок аргументов строго соответствует функции бд
     new_date = await process_student_freeze(
@@ -468,6 +470,24 @@ async def finalize_freeze_action(
     elif new_date:
         formatted_date = new_date.strftime('%d.%m.%Y')
         await callback.answer("✅ Абонемент заморожен!", show_alert=True)
+
+        # Уведомляем владельца клуба после успешного коммита заморозки.
+        # Ошибка отправки уведомления не должна ломать действие клиента.
+        if club.owner_id and club.owner_id != callback.from_user.id:
+            try:
+                await callback.bot.send_message(
+                    chat_id=club.owner_id,
+                    text=(
+                        f"❄️ <b>Клиент заморозил абонемент</b>\n\n"
+                        f"Атлет: <b>{escape(student.name if student else str(student_id))}</b>\n"
+                        f"Клиент: <b>{escape(callback.from_user.full_name or str(callback.from_user.id))}</b>\n"
+                        f"Срок: <b>{freeze_days} дн.</b>\n"
+                        f"Новая дата окончания: <b>{formatted_date}</b>"
+                    ),
+                    parse_mode="HTML",
+                )
+            except Exception as notify_error:
+                logger.warning(f"Не удалось уведомить владельца о заморозке: {notify_error}")
 
         await callback.message.edit_text(
             text=(

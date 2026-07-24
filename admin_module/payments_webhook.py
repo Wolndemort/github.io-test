@@ -1,4 +1,5 @@
 import httpx
+from html import escape
 from decimal import Decimal, InvalidOperation
 from datetime import datetime, timedelta, timezone
 
@@ -140,4 +141,23 @@ async def yookassa_webhook(request: Request, session: AsyncSession = Depends(get
             abon_result = await add_abon(student_id=order.student_id, lessons_count=order.lesson_count, session=session, club_id=order.club_id, club_settings=club_settings, days_to_add=order.days_to_add, discipline=order.discipline)
         await session.commit()
         audit_event("yookassa_webhook_confirmed", club_id=order.club_id, order_id=order.id, student_id=order.student_id, amount_kopecks=order.amount_kopecks, order_type=order.type)
+        if club and club.owner_id:
+            try:
+                frozen_student = await session.get(Student, order.student_id)
+                bot = Bot(club.bot_token)
+                is_freeze = order.type.startswith("FREEZE")
+                await bot.send_message(
+                    club.owner_id,
+                    (
+                        ("❄️ <b>Клиент купил заморозку</b>" if is_freeze else "✅ <b>Новая оплата абонемента</b>") + "\n\n"
+                        f"Атлет: <b>{escape(frozen_student.name if frozen_student else str(order.student_id))}</b>\n"
+                        f"Сумма: <b>{order.amount_kopecks / 100:.2f} ₽</b>\n"
+                        + (f"Срок: <b>{order.days_to_add} дн.</b>\n" if is_freeze else f"Занятий: <b>{order.lesson_count}</b>\n")
+                        + f"Дата окончания: <b>{frozen_student.expire_date.strftime('%d.%m.%Y') if frozen_student and frozen_student.expire_date else '—'}</b>"
+                    ),
+                    parse_mode="HTML",
+                )
+                await bot.session.close()
+            except Exception:
+                logger.exception("Не удалось уведомить владельца о платной заморозке %s", order.id)
     return {"status": "ok"}

@@ -1,4 +1,5 @@
 import asyncio
+from html import escape
 import os
 import uuid
 import time as time_module
@@ -701,6 +702,17 @@ async def saas_recurrent_payments_job(session_factory):
                                      f"Приятных тренировок! 💪",
                                 parse_mode="HTML"
                             )
+                            if config.get("owner_id"):
+                                await bot.send_message(
+                                    chat_id=int(config["owner_id"]),
+                                    text=(
+                                        "🔄 <b>Автопродление абонемента</b>\n\n"
+                                        f"Атлет: <b>{escape(student.name)}</b>\n"
+                                        f"Сумма: <b>{sub.amount_kopecks / 100:.2f} ₽</b>\n"
+                                        f"Продлено до: <b>{student.expire_date.strftime('%d.%m.%Y')}</b>"
+                                    ),
+                                    parse_mode="HTML",
+                                )
                         except Exception as b_err:
                             logger.error(f"Не удалось отправить уведомление об автопродлении: {b_err}")
                 else:
@@ -716,8 +728,19 @@ async def saas_recurrent_payments_job(session_factory):
                                 chat_id=sub.user_id,
                                 text="⚠️ <b>Ошибка автопродления подписки</b>\n\n"
                                      f"Не удалось автоматически списать средства за абонемент атлета <b>{student.name}</b>.\n"
-                                     "Пожалуйста, проверьте баланс карты или оплатите абонемент заново в меню бота, чтобы привязать актуальную карту."
+                                      "Пожалуйста, проверьте баланс карты или оплатите абонемент заново в меню бота, чтобы привязать актуальную карту."
                             )
+                            if config.get("owner_id"):
+                                await bot.send_message(
+                                    chat_id=int(config["owner_id"]),
+                                    text=(
+                                        "⚠️ <b>Не удалось автопродлить абонемент</b>\n\n"
+                                        f"Атлет: <b>{escape(student.name)}</b>\n"
+                                        f"Клиент ID: <code>{sub.user_id}</code>\n"
+                                        "Подписка отключена до повторной оплаты."
+                                    ),
+                                    parse_mode="HTML",
+                                )
                         except Exception as b_err:
                             logger.error(f"Не удалось отправить уведомление об отказе рекуррента: {b_err}")
 
