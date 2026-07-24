@@ -50,6 +50,7 @@ class BiometricEnable(BaseModel):
 class AdminStudentUpdate(BaseModel):
     init_data: str
     club_id: int
+    name: str | None = None
     birthday: str | None = None
     balance_lessons: int | None = None
     expire_date: str | None = None

@@ -396,6 +396,13 @@ async def admin_update_student(
     await verify_webapp_admin(owner_club, payload.init_data)
     if not tg_user:
         raise HTTPException(status_code=403, detail="Доступ запрещён")
+    if payload.name is not None:
+        name = payload.name.strip()
+        if not name:
+            raise HTTPException(status_code=400, detail="Имя атлета не может быть пустым")
+        if len(name) > 150:
+            raise HTTPException(status_code=400, detail="Имя атлета слишком длинное")
+        student.name = name
     if payload.balance_lessons is not None:
         if payload.balance_lessons < 0 or payload.balance_lessons > 999:
             raise HTTPException(status_code=400, detail="Баланс должен быть от 0 до 999")
