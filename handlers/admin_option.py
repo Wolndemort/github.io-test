@@ -976,7 +976,9 @@ async def process_manual_checkin(
     )
 
 @router.callback_query(F.data == "admin_public_links")
-async def admin_public_links_start(callback: types.CallbackQuery, state: FSMContext, club_settings: dict):
+async def admin_public_links_start(callback: types.CallbackQuery, state: FSMContext, club_settings: dict, is_owner: bool, is_super_admin: bool):
+    if not (is_owner or is_super_admin):
+        return await callback.answer("Доступ запрещён", show_alert=True)
     ui = club_settings.get("ui", {})
     await state.set_state(AdminSettingsSG.waiting_for_public_links)
     await callback.message.answer(
@@ -986,7 +988,9 @@ async def admin_public_links_start(callback: types.CallbackQuery, state: FSMCont
     await callback.answer()
 
 @router.callback_query(F.data.in_({"toggle_site_link", "toggle_support_link"}))
-async def toggle_public_link(callback: types.CallbackQuery, club: Club, club_settings: dict, session: AsyncSession, redis: Redis):
+async def toggle_public_link(callback: types.CallbackQuery, club: Club, club_settings: dict, session: AsyncSession, redis: Redis, is_owner: bool, is_super_admin: bool):
+    if not (is_owner or is_super_admin):
+        return await callback.answer("Доступ запрещён", show_alert=True)
     key = "site_enabled" if callback.data == "toggle_site_link" else "support_enabled"
     ui = club_settings.setdefault("ui", {}); ui[key] = not ui.get(key, key == "support_enabled")
     await session.execute(update(Club).where(Club.id == club.id).values(club_settings=club_settings)); await session.commit(); await redis.delete(f"club_config:{callback.bot.token}")
@@ -994,22 +998,30 @@ async def toggle_public_link(callback: types.CallbackQuery, club: Club, club_set
     await admin_settings_menu(callback, club_settings, club.id)
 
 @router.callback_query(F.data == "edit_site_url")
-async def edit_site_url(callback: types.CallbackQuery, state: FSMContext):
+async def edit_site_url(callback: types.CallbackQuery, state: FSMContext, is_owner: bool, is_super_admin: bool):
+    if not (is_owner or is_super_admin):
+        return await callback.answer("Доступ запрещён", show_alert=True)
     await state.set_state(AdminSettingsSG.waiting_for_site_url); await callback.message.answer("Отправьте URL сайта (https://...):"); await callback.answer()
 
 @router.callback_query(F.data == "edit_support_username")
-async def edit_support_username(callback: types.CallbackQuery, state: FSMContext):
+async def edit_support_username(callback: types.CallbackQuery, state: FSMContext, is_owner: bool, is_super_admin: bool):
+    if not (is_owner or is_super_admin):
+        return await callback.answer("Доступ запрещён", show_alert=True)
     await state.set_state(AdminSettingsSG.waiting_for_support_username); await callback.message.answer("Отправьте Telegram username поддержки, например @admin:"); await callback.answer()
 
 @router.message(AdminSettingsSG.waiting_for_site_url)
-async def save_site_url(message: types.Message, state: FSMContext, club: Club, club_settings: dict, session: AsyncSession, redis: Redis):
+async def save_site_url(message: types.Message, state: FSMContext, club: Club, club_settings: dict, session: AsyncSession, redis: Redis, is_owner: bool, is_super_admin: bool):
+    if not (is_owner or is_super_admin):
+        return await message.answer("Доступ запрещён")
     value = (message.text or "").strip()
     if not value.startswith(("https://", "http://")): return await message.answer("URL должен начинаться с https:// или http://")
     club_settings.setdefault("ui", {})["site_url"] = value
     await session.execute(update(Club).where(Club.id == club.id).values(club_settings=club_settings)); await session.commit(); await redis.delete(f"club_config:{message.bot.token}"); await state.clear(); await message.answer("✅ Сайт сохранён")
 
 @router.message(AdminSettingsSG.waiting_for_support_username)
-async def save_support_username(message: types.Message, state: FSMContext, club: Club, club_settings: dict, session: AsyncSession, redis: Redis):
+async def save_support_username(message: types.Message, state: FSMContext, club: Club, club_settings: dict, session: AsyncSession, redis: Redis, is_owner: bool, is_super_admin: bool):
+    if not (is_owner or is_super_admin):
+        return await message.answer("Доступ запрещён")
     value = (message.text or "").strip().lstrip("@")
     if not value or any(ch.isspace() for ch in value): return await message.answer("Введите корректный username Telegram")
     club_settings.setdefault("ui", {})["support_link"] = value
@@ -1179,7 +1191,9 @@ async def save_payment_info(message: types.Message, state: FSMContext, session, 
 
 # ИСПРАВЛЕНО: F.data вместо F.dara
 @router.callback_query(F.data == "admin_turnstile_main")
-async def admin_turnstile_main(callback: types.CallbackQuery, club_settings: dict):
+async def admin_turnstile_main(callback: types.CallbackQuery, club_settings: dict, is_owner: bool | None = None, is_super_admin: bool | None = None):
+    if not (is_owner or is_super_admin):
+        return await callback.answer("Доступ запрещён", show_alert=True)
     turnstile_config = club_settings.get("turnstile", {})
     is_enabled = turnstile_config.get("enabled", False)
     builder = InlineKeyboardBuilder()
@@ -1360,7 +1374,9 @@ async def return_to_tariff_menu(message: types.Message, club_settings: dict, dis
 # ================= НАВИГАЦИЯ И ВЫБОР СЕКЦИЙ =================
 
 @router.callback_query(F.data == "admin_tariffs_sections")
-async def admin_tariffs_sections_list(callback: types.CallbackQuery, club_settings: dict):
+async def admin_tariffs_sections_list(callback: types.CallbackQuery, club_settings: dict, is_owner: bool | None = None, is_super_admin: bool | None = None, staff=None):
+    if not (is_owner or is_super_admin or (staff and "tariffs_manage" in permissions_for_staff(staff))):
+        return await callback.answer("Доступ запрещён", show_alert=True)
     """Выводит список всех дисциплин, зарегистрированных в системе"""
     builder = InlineKeyboardBuilder()
     disciplines = club_settings.get("disciplines", {})
@@ -1379,7 +1395,9 @@ async def admin_tariffs_sections_list(callback: types.CallbackQuery, club_settin
 
 
 @router.callback_query(F.data.startswith("adm_tar_sect_"))
-async def admin_manage_section_tariffs(callback: types.CallbackQuery, club_settings: dict):
+async def admin_manage_section_tariffs(callback: types.CallbackQuery, club_settings: dict, is_owner: bool | None = None, is_super_admin: bool | None = None, staff=None):
+    if not (is_owner or is_super_admin or (staff and "tariffs_manage" in permissions_for_staff(staff))):
+        return await callback.answer("Доступ запрещён", show_alert=True)
     """Меню управления тарифами конкретной секции с защитой от сломанных возвратов"""
 
     # ИСПРАВЛЕНО: Безопасный разбор строки. Забираем ID дисциплины по четкому индексу,
@@ -1443,7 +1461,10 @@ async def admin_toggle_section_type(
         session,
         redis: Redis,
         bot,
-        club_id: int
+        club_id: int,
+        is_owner: bool,
+        is_super_admin: bool,
+        staff,
 ):
     """Переключение режима секции (Списание занятий 🔢 <-> Безлимит ♾)"""
     parts = callback.data.split("_")
@@ -1476,7 +1497,9 @@ async def admin_toggle_section_type(
 
 
 @router.callback_query(F.data.startswith("adm_tar_edit_"))
-async def admin_edit_tariff_menu(callback: types.CallbackQuery, club_settings: dict):
+async def admin_edit_tariff_menu(callback: types.CallbackQuery, club_settings: dict, is_owner: bool | None = None, is_super_admin: bool | None = None, staff=None):
+    if not (is_owner or is_super_admin or (staff and "tariffs_manage" in permissions_for_staff(staff))):
+        return await callback.answer("Доступ запрещён", show_alert=True)
     """Экран изменения конкретного выбранного тарифа с защитой от сдвига индексов"""
 
     # ИСПРАВЛЕНО: Безопасный разбор динамической строки без риска поймать пустую строку ""
@@ -1535,9 +1558,14 @@ async def admin_delete_tariff(
         session,
         redis: Redis,
         bot,
-        club_id: int
+        club_id: int,
+        is_owner: bool | None = None,
+        is_super_admin: bool | None = None,
+        staff=None
 ):
     """Удаление конкретного тарифа по индексу с жесткой защитой"""
+    if not (is_owner or is_super_admin or (staff and "tariffs_manage" in permissions_for_staff(staff))):
+        return await callback.answer("Доступ запрещён", show_alert=True)
     parts = callback.data.split("_")
     if len(parts) < 5:
         await callback.answer("❌ Ошибка структуры данных кнопки удаления", show_alert=True)
@@ -1680,7 +1708,9 @@ async def admin_save_tariff_field(message: types.Message, state: FSMContext, clu
 #Создание Тарифов
 # 1. Ловим нажатие на кнопку "➕ Добавить тариф"
 @router.callback_query(F.data.startswith("adm_tar_add_"))
-async def admin_start_add_tariff(callback: types.CallbackQuery, state: FSMContext, club_id: int, club_settings: dict):
+async def admin_start_add_tariff(callback: types.CallbackQuery, state: FSMContext, club_id: int, club_settings: dict, is_owner: bool | None = None, is_super_admin: bool | None = None, staff=None):
+    if not (is_owner or is_super_admin or (staff and "tariffs_manage" in permissions_for_staff(staff))):
+        return await callback.answer("Доступ запрещён", show_alert=True)
     disc_id = callback.data.split("_")[-1]
     d_type = club_settings["disciplines"][disc_id].get("type", "lessons")
 
@@ -1855,7 +1885,9 @@ async def admin_schedule_select_discipline(callback: types.CallbackQuery, state:
 # ШАГ 1.5: ВЫБОР ДНЯ НЕДЕЛИ
 # =====================================================================
 @router.callback_query(F.data.startswith("adm_sch_manage_"))
-async def admin_start_schedule_manage(callback: types.CallbackQuery, state: FSMContext, club_id: int, club_settings: dict):
+async def admin_start_schedule_manage(callback: types.CallbackQuery, state: FSMContext, club_id: int, club_settings: dict, is_owner: bool, is_super_admin: bool, staff):
+    if not (is_owner or is_super_admin or (staff and "schedule_edit" in permissions_for_staff(staff))):
+        return await callback.answer("Доступ запрещён", show_alert=True)
     disc_id = callback.data.split("_")[-1]
     
     await state.update_data(disc_id=disc_id, club_id=club_id)
@@ -1887,8 +1919,13 @@ async def admin_schedule_choose_day(
         callback: types.CallbackQuery,
         state: FSMContext,
         club_settings: dict,
-        manual_day: str = None  # Принимаем день напрямую при удалении
+        manual_day: str = None,  # Принимаем день напрямую при удалении
+        is_owner: bool | None = None,
+        is_super_admin: bool | None = None,
+        staff=None,
 ):
+    if not (is_owner or is_super_admin or (staff and "schedule_edit" in permissions_for_staff(staff))):
+        return await callback.answer("Доступ запрещён", show_alert=True)
     # Принудительно возвращаем админу рабочее состояние для этого экрана
     await state.set_state(AdminScheduleStates.choose_day)
 
@@ -1952,8 +1989,13 @@ async def admin_delete_schedule_lesson(
         club_settings: dict,
         session,
         redis: Redis,
-        bot
+        bot,
+        is_owner: bool | None = None,
+        is_super_admin: bool | None = None,
+        staff=None
 ):
+    if not (is_owner or is_super_admin or (staff and "schedule_edit" in permissions_for_staff(staff))):
+        return await callback.answer("Доступ запрещён", show_alert=True)
     # Отвечаем Телеграму сразу
     await callback.answer("Удалено!")
 
@@ -1987,7 +2029,9 @@ async def admin_delete_schedule_lesson(
 # ПЕРЕХОД К ВВОДУ ВРЕМЕНИ ДЛЯ НОВОГО ЗАНЯТИЯ
 # =====================================================================
 @router.callback_query(F.data == "adm_sch_start_input_time")
-async def admin_schedule_trigger_time_input(callback: types.CallbackQuery, state: FSMContext):
+async def admin_schedule_trigger_time_input(callback: types.CallbackQuery, state: FSMContext, is_owner: bool, is_super_admin: bool, staff):
+    if not (is_owner or is_super_admin or (staff and "schedule_edit" in permissions_for_staff(staff))):
+        return await callback.answer("Доступ запрещён", show_alert=True)
     await state.set_state(AdminScheduleStates.add_time)
     await callback.message.answer(
         "⏱ <b>Шаг 1 из 3: Введите время начала занятия</b>\n\n"
@@ -2043,8 +2087,13 @@ async def admin_finalize_schedule(
     club_settings: dict,
     session,
     redis: Redis,
-    bot
+    bot,
+    is_owner: bool | None = None,
+    is_super_admin: bool | None = None,
+    staff=None
 ):
+    if not (is_owner or is_super_admin or (staff and "schedule_edit" in permissions_for_staff(staff))):
+        return await message.answer("Доступ запрещён")
     if not message.text.isdigit():
         return await message.answer("❌ Лимит мест должен быть целым числом! Попробуйте еще раз:")
         
