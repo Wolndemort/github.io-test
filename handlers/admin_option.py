@@ -2,7 +2,7 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from sqlalchemy.ext.asyncio import AsyncSession
 import copy
 from datetime import time, datetime
-from sqlalchemy import  func, and_
+from sqlalchemy import func, and_, or_
 from services.gate_control import process_athlete_gate_pass
 from sqlalchemy.orm.attributes import flag_modified
 from handlers.skud import save_and_test_turnstile
@@ -15,8 +15,9 @@ import os
 from handlers.buttons import get_scanner_keyboard
 from aiogram.types import FSInputFile
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-from database.db import get_all_users_count, get_active_subs_count, User, get_daily_stats, Student, \
-    Club, PaymentOrder
+from database.db import get_all_users_count, get_total_athletes_count, get_active_subs_count, User, get_daily_stats, Student, \
+    Club, PaymentOrder, CartOrder, VisitLog
+from services.analytics import reporting_periods
 from sqlalchemy import select
 from handlers.buttons import admin_keyboard
 from handlers.states import AdminManualAdd
@@ -253,6 +254,7 @@ async def admin_panel(
 
     try:
         all_users = await get_all_users_count(club_id=club.id, session=session)
+        total_athletes = await get_total_athletes_count(club_id=club.id, session=session)
         active_subs = await get_active_subs_count(club_id=club.id, session=session)
         club_name = club.name or "Клуб"
 
@@ -266,7 +268,8 @@ async def admin_panel(
         text = (
             f"📈 <b>Панель управления: {club_name}</b>\n\n"
             f"🔐 Подписка CRM: {sub_info}\n"
-            f"👥 Всего пользователей: <code>{all_users}</code>\n"
+            f"🥋 Всего атлетов: <code>{total_athletes}</code>\n"
+            f"👥 Родителей с привязкой: <code>{all_users}</code>\n"
             f"💳 Активных абонементов: <code>{active_subs}</code>\n\n"
             "Чего желаете, босс?"
         )
@@ -610,9 +613,10 @@ async def show_daily_report(
     await redis.set(lock_key, "1", ex=5)
 
     try:
-        now = datetime.now()
-        start_of_today = datetime.combine(now.date(), time.min)
-        start_of_yesterday = start_of_today - timedelta(days=1)
+        periods = reporting_periods()
+        now = periods["now"]
+        start_of_today = periods["today"]
+        start_of_yesterday = periods["yesterday"]
         sleeping_threshold = now - timedelta(days=14)
 
         # 3. Базовые визиты и действующие абонементы
@@ -628,7 +632,14 @@ async def show_daily_report(
                 )
             )
         )
-        revenue_today = today_rev_res.scalar_one() / 100
+        today_cart_res = await session.execute(
+            select(func.coalesce(func.sum(CartOrder.amount_kopecks), 0)).where(
+                CartOrder.club_id == club.id,
+                CartOrder.status == "CONFIRMED",
+                CartOrder.created_at >= start_of_today,
+            )
+        )
+        revenue_today = (today_rev_res.scalar_one() + today_cart_res.scalar_one()) / 100
 
         # 5. Касса за ВЧЕРА (для расчета динамики)
         yesterday_rev_res = await session.execute(
@@ -641,28 +652,44 @@ async def show_daily_report(
                 )
             )
         )
-        revenue_yesterday = yesterday_rev_res.scalar_one() / 100
+        yesterday_cart_res = await session.execute(
+            select(func.coalesce(func.sum(CartOrder.amount_kopecks), 0)).where(
+                CartOrder.club_id == club.id,
+                CartOrder.status == "CONFIRMED",
+                CartOrder.created_at >= start_of_yesterday,
+                CartOrder.created_at < start_of_today,
+            )
+        )
+        revenue_yesterday = (yesterday_rev_res.scalar_one() + yesterday_cart_res.scalar_one()) / 100
 
         # 6. Общее число клиентов, просроченные и спящие одним легким SQL-запросом
         stats_res = await session.execute(
             select(
                 func.count(Student.id).label("total"),
-                func.count(Student.id).filter(Student.balance_lessons <= 0).label("expired"),
-                func.count(Student.id).filter(
-                    and_(Student.last_visit < sleeping_threshold, Student.last_visit.is_not(None))
-                ).label("sleeping")
+                 func.count(Student.id).filter(and_(
+                     func.coalesce(Student.is_frozen, 0) == 0,
+                     or_(
+                         Student.balance_lessons <= 0,
+                         Student.expire_date.is_(None),
+                         Student.expire_date <= now,
+                     ),
+                 )).label("expired"),
+                 func.count(Student.id).filter(
+                    or_(Student.last_visit.is_(None), Student.last_visit <= sleeping_threshold)
+                 ).label("sleeping"),
+                 func.count(func.distinct(Student.parent_id)).filter(Student.parent_id.is_not(None)).label("parents")
             ).where(Student.club_id == club.id)
         )
         stats = stats_res.one()
 
         # 7. 🥋 СЧИТАЕМ РЕАЛЬНЫЕ ВИЗИТЫ ПО СЕКЦИЯМ ЗА СЕГОДНЯ (Группировка SQL)
         disc_visits_res = await session.execute(
-            select(Student.discipline, func.count(Student.id))
+            select(Student.discipline, func.count(VisitLog.id))
+            .join(Student, VisitLog.student_id == Student.id)
             .where(
-                and_(
-                    Student.club_id == club.id,
-                    Student.last_visit >= start_of_today
-                )
+                VisitLog.club_id == club.id,
+                VisitLog.visited_at >= start_of_today,
+                VisitLog.visited_at < start_of_today + timedelta(days=1),
             )
             .group_by(Student.discipline)
         )
@@ -697,7 +724,8 @@ async def show_daily_report(
             f"📅 Дата: <code>{now.strftime('%d.%m.%Y')}</code>\n\n"
             f"💰 <b>Касса сегодня:</b> <code>{revenue_today:,.0f} ₽</code>\n"
             f"⚖️ <b>Динамика:</b> <code>{revenue_diff_text}</code>\n"
-            f"👤 <b>Клиентов в базе:</b> <code>{stats.total} чел.</code>\n\n"
+            f"🥋 <b>Атлетов в базе:</b> <code>{stats.total}</code>\n"
+            f"👥 <b>Родителей с привязкой:</b> <code>{stats.parents}</code>\n\n"
             f"📈 <b>АКТИВНОСТЬ ЗА ДЕНЬ:</b>\n"
             f"🚶‍♂️ Всего визитов: <code>{visits}</code>\n"
             f"💎 Активных абонементов: <code>{active_passes}</code>\n\n"

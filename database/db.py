@@ -504,9 +504,11 @@ async def add_abon(
 
 async def get_daily_stats(club_id: int, session: AsyncSession):
     """Сбор статистики посещений и активных карт конкретного клуба за сегодня"""
-    now = datetime.now()
-    # Начало текущего дня (00:00:00)
-    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    from services.analytics import reporting_periods
+
+    periods = reporting_periods()
+    now = periods["now"]
+    today_start = periods["today"]
 
     try:
         logger.debug(f"📊 Клуб {club_id}: Сбор статистики за {today_start.strftime('%d.%m.%Y')}")
@@ -526,7 +528,9 @@ async def get_daily_stats(club_id: int, session: AsyncSession):
             select(func.count(Student.id))
             .where(
                 Student.club_id == club_id,         # Фильтр по клубу
-                Student.expire_date >= now          # Фильтр по сроку
+                Student.expire_date > now,
+                Student.balance_lessons > 0,
+                func.coalesce(Student.is_frozen, 0) == 0,
             )
         )
         active_count = await session.scalar(stmt_active) or 0
@@ -540,10 +544,12 @@ async def get_daily_stats(club_id: int, session: AsyncSession):
 
 
 async def get_all_users_count(club_id: int, session: AsyncSession):
-    """Считает пользователей только конкретного клуба"""
+    """Counts unique Telegram parents linked to athletes in this club."""
     try:
-        # Считаем только тех, кто привязан к этому club_id
-        stmt = select(func.count(User.user_id)).where(User.club_id == club_id)
+        stmt = select(func.count(func.distinct(Student.parent_id))).where(
+            Student.club_id == club_id,
+            Student.parent_id.is_not(None),
+        )
         result = await session.execute(stmt)
         return result.scalar() or 0
     except Exception as e:
@@ -551,16 +557,32 @@ async def get_all_users_count(club_id: int, session: AsyncSession):
         return 0
 
 
+async def get_total_athletes_count(club_id: int, session: AsyncSession):
+    """Counts every athlete card in this club, including unlimited/no-subscription cards."""
+    try:
+        result = await session.execute(
+            select(func.count(Student.id)).where(Student.club_id == club_id)
+        )
+        return result.scalar() or 0
+    except Exception as e:
+        logger.error(f"❌ Ошибка счета атлетов для клуба {club_id}: {e}")
+        return 0
+
+
 async def get_active_subs_count(club_id: int, session: AsyncSession):
     """Считает активные абонементы только конкретного клуба"""
     try:
-        now = datetime.now()
+        from services.analytics import reporting_periods
+
+        now = reporting_periods()["now"]
         # Фильтруем и по дате, и по club_id
         stmt = (
             select(func.count(Student.id))
             .where(
                 Student.expire_date > now,
-                Student.club_id == club_id  # <--- Ключевой фильтр
+                Student.club_id == club_id,
+                Student.balance_lessons > 0,
+                func.coalesce(Student.is_frozen, 0) == 0,
             )
         )
         result = await session.execute(stmt)

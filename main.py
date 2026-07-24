@@ -7,7 +7,7 @@ import time as time_module
 from starlette.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
-from services.analytics import calculate_daily_business_report, calculate_admin_dashboard
+from services.analytics import calculate_daily_business_report, calculate_admin_dashboard, reporting_periods
 from datetime import timedelta, time, timezone
 from zoneinfo import ZoneInfo
 import logging as logging
@@ -31,7 +31,7 @@ from sqlalchemy import select
 from admin_module.sqladmin import setup_admin
 from config import ADMIN_IDS
 from database.db import init_db, get_daily_stats, get_expire_students_grouped, create_db_backup, engine, \
-    AsyncSessionLocal, Club, Student
+    AsyncSessionLocal, Club, Student, CartOrder, VisitLog
 from handlers import start, user_option, buttons, payments, admin_option, super_admin_handlers,official_payment,\
     super_admin_payment
 from handlers.buttons import get_profile_keyboard
@@ -348,11 +348,12 @@ async def send_daily_report_to_admins():
     Рассылка продвинутых вечерних ИИ-бизнес-отчетов владельцам каждого клуба.
     Сравнивает кассу со вчерашним днем, находит пиковые часы и лучшую дисциплину.
     """
-    now = datetime.utcnow()
+    periods = reporting_periods()
+    now = periods["now"]
 
     # Временные границы для фильтрации SQL
-    start_of_today = datetime.combine(now.date(), time.min)
-    start_of_yesterday = start_of_today - timedelta(days=1)
+    start_of_today = periods["today"]
+    start_of_yesterday = periods["yesterday"]
 
     async with AsyncSessionLocal() as session:
         # 1. Загружаем все активные клубы, у которых не кончилась SaaS подписка
@@ -372,16 +373,30 @@ async def send_daily_report_to_admins():
                 # 3. Достаем студентов клуба
                 student_res = await session.execute(select(Student).where(Student.club_id == club.id))
                 students = list(student_res.scalars().all())
+                visit_log_res = await session.execute(
+                    select(VisitLog).where(
+                        VisitLog.club_id == club.id,
+                        VisitLog.visited_at >= start_of_today,
+                    )
+                )
+                visit_logs = list(visit_log_res.scalars().all())
 
                 # 4. Достаем успешные платежи за СЕГОДНЯ
                 today_pay_res = await session.execute(
                     select(PaymentOrder).where(
                         PaymentOrder.club_id == club.id,
                         PaymentOrder.status == "CONFIRMED",
-                        PaymentOrder.created_at >= start_of_today
+                        PaymentOrder.created_at >= start_of_today,
                     )
                 )
-                today_payments = list(today_pay_res.scalars().all())
+                today_cart_res = await session.execute(
+                    select(CartOrder).where(
+                        CartOrder.club_id == club.id,
+                        CartOrder.status == "CONFIRMED",
+                        CartOrder.created_at >= start_of_today,
+                    )
+                )
+                today_payments = list(today_pay_res.scalars().all()) + list(today_cart_res.scalars().all())
 
                 # 5. Достаем успешные платежи за ВЧЕРА (между вчерашней полночью и сегодняшней)
                 yesterday_pay_res = await session.execute(
@@ -392,10 +407,18 @@ async def send_daily_report_to_admins():
                         PaymentOrder.created_at < start_of_today
                     )
                 )
-                yesterday_payments = list(yesterday_pay_res.scalars().all())
+                yesterday_cart_res = await session.execute(
+                    select(CartOrder).where(
+                        CartOrder.club_id == club.id,
+                        CartOrder.status == "CONFIRMED",
+                        CartOrder.created_at >= start_of_yesterday,
+                        CartOrder.created_at < start_of_today,
+                    )
+                )
+                yesterday_payments = list(yesterday_pay_res.scalars().all()) + list(yesterday_cart_res.scalars().all())
 
             # Прогоняем данные через наши Pandas-сервисы
-            biz_metrics = calculate_daily_business_report(students, today_payments, yesterday_payments)
+            biz_metrics = calculate_daily_business_report(students, today_payments, yesterday_payments, visit_logs=visit_logs)
             admin_metrics = calculate_admin_dashboard(students)
 
             # Вытаскиваем проблемные зоны для админа
@@ -415,7 +438,8 @@ async def send_daily_report_to_admins():
                 f"📅 Дата: <code>{now.strftime('%d.%m.%Y')}</code>\n\n"
                 f"💰 <b>Касса сегодня:</b> <code>{biz_metrics['revenue_today']} ₽</code>\n"
                 f"⚖️ <b>Динамика ко вчера:</b> <code>{biz_metrics['revenue_diff_text']}</code>\n"
-                f"👤 <b>Всего клиентов в базе:</b> <code>{biz_metrics['total_athletes']} чел.</code>\n\n"
+                f"🥋 <b>Всего атлетов в базе:</b> <code>{biz_metrics['total_athletes']}</code>\n"
+                f"👥 <b>Родителей с привязкой:</b> <code>{biz_metrics['total_parents']}</code>\n\n"
                 f"📈 <b>ОПЕРАТИВНЫЙ АНАЛИЗ ЗА ДЕНЬ:</b>\n"
                 f"🚶‍♂️ Посещений зала: <code>{visits}</code>\n"
                 f"⚡️ Пиковые часы сегодня: <code>{biz_metrics['peak_hours']}</code>\n"

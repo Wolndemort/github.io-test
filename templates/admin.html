@@ -125,8 +125,8 @@
                     <span>{{ student.name }}</span>
                     <div>
                         <span class="check-chat-text">Проверить чат</span>
-                        {% if student.phone %}
-                        <a href="tel:{{ student.phone }}" class="tg-link btn-call">📞 Звонок</a>
+                        {% if student.parent_id %}
+                        <a href="tg://user?id={{ student.parent_id }}" class="tg-link">💬 Написать</a>
                         {% endif %}
                     </div>
                 </div>
@@ -142,6 +142,7 @@
     <div class="card mono-card">
         <div class="label">Текущий статус базы</div>
         <div class="value">👥 Всего атлетов: {{ total_athletes }}</div>
+        <div class="value mt-5">👨‍👩‍👧 Родителей с привязкой: {{ total_parents|default(0) }}</div>
         <div class="value mt-5">🟢 Активных сейчас: {{ active_now_count }}</div>
     </div>
 
@@ -157,9 +158,8 @@
                     <span>{{ student.name }}</span>
                     <div>
                         <span class="red-bold mr-5">0 зан.</span>
-                        {% if student.username %}
-                        <!-- ФИКС: Безопасный URL для Telegram чата -->
-                        <a href="https://t.me{{ student.username|replace('@', '') }}" class="tg-link" target="_blank">💬 Написать</a>
+                        {% if student.parent_id %}
+                        <a href="tg://user?id={{ student.parent_id }}" class="tg-link">💬 Написать</a>
                         {% endif %}
                     </div>
                 </div>
@@ -183,9 +183,8 @@
                     <span>{{ student.name }}</span>
                     <div>
                         <span class="orange-bold mr-5">{{ student.balance }} зан.</span>
-                        {% if student.username %}
-                        <!-- ФИКС: Безопасный URL для Telegram чата -->
-                        <a href="https://t.me{{ student.username|replace('@', '') }}" class="tg-link" target="_blank">💬 Написать</a>
+                        {% if student.parent_id %}
+                        <a href="tg://user?id={{ student.parent_id }}" class="tg-link">💬 Написать</a>
                         {% endif %}
                     </div>
                 </div>

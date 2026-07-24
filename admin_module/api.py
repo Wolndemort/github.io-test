@@ -7,7 +7,15 @@ from services.gate_control import process_athlete_gate_pass
 from services.yookassa_client import YooKassaClient
 from config import PROXY_URL
 from fastapi import Query
-from services.analytics import generate_students_excel, calculate_admin_dashboard
+from services.analytics import (
+    generate_students_excel,
+    calculate_admin_dashboard,
+    calculate_student_metrics,
+    calculate_revenue_periods,
+    reporting_periods,
+    moscow_date_boundary,
+    moscow_weekday,
+)
 import hmac
 import os
 import time
@@ -330,16 +338,18 @@ async def admin_sales_page(
     club = await session.get(Club, club_id)
     await verify_webapp_admin(club, init_data)
 
-    start = datetime.strptime(date_from, "%Y-%m-%d") if date_from else None
-    end = datetime.strptime(date_to, "%Y-%m-%d") + timedelta(days=1) if date_to else None
+    start = moscow_date_boundary(date_from) if date_from else None
+    end = moscow_date_boundary(date_to) + timedelta(days=1) if date_to else None
     payment_query = select(PaymentOrder).where(PaymentOrder.club_id == club_id, PaymentOrder.status == "CONFIRMED")
     cart_query = select(CartOrder).where(CartOrder.club_id == club_id, CartOrder.status == "CONFIRMED")
     if start:
         payment_query = payment_query.where(PaymentOrder.created_at >= start); cart_query = cart_query.where(CartOrder.created_at >= start)
     if end:
         payment_query = payment_query.where(PaymentOrder.created_at < end); cart_query = cart_query.where(CartOrder.created_at < end)
-    payment_orders = (await session.execute(payment_query.order_by(PaymentOrder.created_at.desc()).limit(500))).scalars().all()
-    cart_orders = (await session.execute(cart_query.order_by(CartOrder.created_at.desc()).limit(500))).scalars().all()
+    # Не ограничиваем выборку до фильтрации: иначе итоговая выручка таблицы
+    # начинала расходиться с общей статистикой после первых 500 заказов.
+    payment_orders = (await session.execute(payment_query.order_by(PaymentOrder.created_at.desc()))).scalars().all()
+    cart_orders = (await session.execute(cart_query.order_by(CartOrder.created_at.desc()))).scalars().all()
     cart_ids = [order.id for order in cart_orders]
     cart_items = (await session.execute(select(CartItem).where(CartItem.cart_order_id.in_(cart_ids)))) .scalars().all() if cart_ids else []
     items_by_order = {}
@@ -364,7 +374,7 @@ async def admin_sales_page(
                                "method": operation_method, "category": operation_category, "discipline": operation_discipline,
                                "title": item.title, "status": order.status})
     operations = [item for item in operations
-                  if (weekday is None or item["created_at"].weekday() == weekday)
+                  if (weekday is None or moscow_weekday(item["created_at"]) == weekday)
                   and (not payment_method or item["method"] == payment_method)
                   and (not category or item["category"] == category)
                   and (not discipline or item["discipline"] == discipline)]
@@ -372,7 +382,7 @@ async def admin_sales_page(
     settings = club.club_settings or {}
     disciplines = settings.get("disciplines", {}) if isinstance(settings, dict) else {}
     return templates.TemplateResponse("admin_sales.html", {"request": request, "club": club, "club_id": club_id,
-        "operations": operations[:500], "disciplines": disciplines, "filters": {"date_from": date_from or "", "date_to": date_to or "", "weekday": weekday, "payment_method": payment_method or "", "category": category or "", "discipline": discipline or ""}})
+        "operations": operations, "disciplines": disciplines, "filters": {"date_from": date_from or "", "date_to": date_to or "", "weekday": weekday, "payment_method": payment_method or "", "category": category or "", "discipline": discipline or ""}})
 
 
 @router.patch("/admin/students/{student_id}")
@@ -576,11 +586,11 @@ async def get_revenue_stats(
 
     # Настройка честного времени (МСК)
 
-    now_local = datetime.now(timezone.utc).replace(tzinfo=None)
-
-    today_start = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
-    week_start = today_start - timedelta(days=now_local.weekday())
-    month_start = today_start.replace(day=1)
+    periods = reporting_periods()
+    now_local = periods["now"]
+    today_start = periods["today"]
+    week_start = periods["week"]
+    month_start = periods["month"]
 
     # ==========================================
     # БЛОК 1: ФИНАНСЫ (Для твоих графиков/отчетов)
@@ -592,23 +602,19 @@ async def get_revenue_stats(
             PaymentOrder.created_at >= month_start
         )
     )
-    all_payments = payments_res.all()
-
-    revenue_today = 0
-    revenue_week = 0
-    revenue_month = 0
-
-    for row in all_payments:
-        amt = row[0]
-        dt = row[1]
-        p_date = dt.replace(tzinfo=None) if dt else month_start
-        amount_rub = (amt or 0) / 100
-
-        revenue_month += amount_rub
-        if p_date >= week_start:
-            revenue_week += amount_rub
-        if p_date >= today_start:
-            revenue_today += amount_rub
+    cart_payments_res = await session.execute(
+        select(CartOrder.amount_kopecks, CartOrder.created_at).where(
+            CartOrder.club_id == club_id,
+            CartOrder.status == "CONFIRMED",
+            CartOrder.created_at >= month_start,
+        )
+    )
+    payment_rows = [type("PaymentRow", (), {"amount_kopecks": amount, "created_at": created_at}) for amount, created_at in payments_res.all()]
+    payment_rows.extend(type("PaymentRow", (), {"amount_kopecks": amount, "created_at": created_at}) for amount, created_at in cart_payments_res.all())
+    revenue = calculate_revenue_periods(payment_rows)
+    revenue_today = revenue["today"]
+    revenue_week = revenue["week"]
+    revenue_month = revenue["month"]
 
     # Направления по оплатам
     disc_pay_res = await session.execute(
@@ -645,34 +651,16 @@ async def get_revenue_stats(
             {"request": request, "empty": True, "club_name": club_name}
         )
 
-    total_athletes = len(students)
-    active_passes = 0
-    frozen_passes = 0
-    burning_passes = 0
-    inactive_passes = 0
-    total_lessons_left = 0
-
-    churned_students = []
-    discipline_counts = {}
-
-    for s in students:
-        total_lessons_left += s.balance_lessons
-
-        # Считаем популярность направлений по числу людей
-        disc_key = s.discipline or "boxing"
-        discipline_counts[disc_key] = discipline_counts.get(disc_key, 0) + 1
-
-        # Распределяем по статусам абонементов
-        if s.is_frozen:
-            frozen_passes += 1
-        elif s.balance_lessons <= 0:
-            inactive_passes += 1
-            churned_students.append({"name": s.name})
-        elif 0 < s.balance_lessons <= 3:
-            burning_passes += 1
-            active_passes += 1
-        else:
-            active_passes += 1
+    student_metrics = calculate_student_metrics(students, now=now_local)
+    total_athletes = student_metrics["total_athletes"]
+    total_parents = student_metrics["total_parents"]
+    active_passes = student_metrics["active_passes"]
+    frozen_passes = student_metrics["frozen_passes"]
+    burning_passes = student_metrics["burning_passes"]
+    inactive_passes = student_metrics["inactive_passes"]
+    total_lessons_left = student_metrics["total_lessons_left"]
+    churned_students = [{"name": s.name} for s in student_metrics["inactive_students"]]
+    discipline_counts = student_metrics["discipline_counts"]
 
     # Красивые имена для дисциплин в HTML
     discipline_names = {
@@ -688,11 +676,11 @@ async def get_revenue_stats(
     ]
 
     # Сортируем топ-атлетов по остатку занятий (первые 5 человек)
-    sorted_students = sorted(students, key=lambda x: x.balance_lessons, reverse=True)
-    top_students = [{"name": s.name, "balance": s.balance_lessons} for s in sorted_students[:5]]
+    sorted_students = sorted(students, key=lambda x: x.balance_lessons or 0, reverse=True)
+    top_students = [{"name": s.name, "balance": s.balance_lessons or 0} for s in sorted_students[:5]]
 
     # Считаем Retention (Удержание). Например: процент тех, у кого баланс > 0
-    retention_rate = round((active_passes / total_athletes) * 100) if total_athletes > 0 else 0
+    retention_rate = student_metrics["retention_rate"]
 
     # 5. ОТДАЕМ ПОЛНЫЙ КОМПЛЕКТ ДАННЫХ В ШАБЛОН
     return templates.TemplateResponse(
@@ -705,6 +693,7 @@ async def get_revenue_stats(
 
             # Данные для HTML-карточек
             "total_athletes": total_athletes,
+            "total_parents": total_parents,
             "retention_rate": retention_rate,
             "active_passes": active_passes,
             "frozen_passes": frozen_passes,
