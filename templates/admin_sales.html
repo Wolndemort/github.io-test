@@ -27,6 +27,7 @@
         <div class="muted">Подтверждённые оплаты клуба</div>
     </div>
     <form class="card filters" method="get">
+        <details class="filter-panel" open><summary>Фильтры</summary>
         <input type="hidden" name="club_id" value="{{ club_id }}">
         <input type="hidden" name="init_data" value="{{ request.query_params.get('init_data','') }}">
         <label>С даты<input type="date" name="date_from" value="{{ filters.date_from }}"></label>
@@ -35,7 +36,7 @@
         <label>Способ оплаты<select name="payment_method"><option value="">Все способы</option><option value="online" {% if filters.payment_method == 'online' %}selected{% endif %}>Онлайн</option><option value="other" {% if filters.payment_method == 'other' %}selected{% endif %}>Прочие</option></select></label>
         <label>Категория<select name="category"><option value="">Все категории</option>{% for value,name in [('subscription','Абонемент'),('freeze','Заморозка'),('product','Товар')] %}<option value="{{ value }}" {% if filters.category == value %}selected{% endif %}>{{ name }}</option>{% endfor %}</select></label>
         <label>Дисциплина<select name="discipline"><option value="">Все дисциплины</option>{% for code,info in disciplines.items() %}<option value="{{ code }}" {% if filters.discipline == code %}selected{% endif %}>{{ info.name if info.name else code }}</option>{% endfor %}</select></label>
-        <button type="submit">Применить фильтры</button>
+        <button type="submit">Применить фильтры</button></details>
         <a class="link" href="/admin/sales?club_id={{ club_id }}&init_data={{ request.query_params.get('init_data','')|urlencode }}">Сбросить</a>
     </form>
     <div class="card"><b>Операций: {{ operations|length }}</b>
