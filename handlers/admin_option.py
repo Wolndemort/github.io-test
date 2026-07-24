@@ -240,6 +240,7 @@ async def admin_panel(
         club_settings: dict,
         is_owner: bool,
         is_super_admin: bool,
+        is_staff: bool,
         session: AsyncSession,
         state: FSMContext
 ):
