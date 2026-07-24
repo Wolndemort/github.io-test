@@ -179,6 +179,10 @@ def admin_keyboard(club_id: int, club_settings: dict, subscription_date: datetim
             web_app=types.WebAppInfo(url=f"https://{club_id}.speedycrm.ru/webapp/admin-product-sale?club_id={club_id}")
         )
     )
+    builder.row(types.InlineKeyboardButton(
+        text="📦 Склад товаров",
+        web_app=types.WebAppInfo(url=f"https://{club_id}.speedycrm.ru/webapp/admin-products?club_id={club_id}")
+    ))
 
     # --- БЛОК 2: Ежедневная работа ---
     operation_buttons = []
