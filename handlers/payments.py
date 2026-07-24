@@ -797,6 +797,20 @@ async def admin_confirm_payment(
 
     if result:
         new_expire, parent_id = result
+        session.add(PaymentOrder(
+            id=f"CASH_SUB_{uuid.uuid4().hex[:16].upper()}",
+            user_id=int(parent_id) if parent_id else None,
+            student_id=student_id,
+            club_id=club.id,
+            amount_kopecks=int(float(selected_tariff.get("price", 0) or 0) * 100),
+            lesson_count=count,
+            days_to_add=days,
+            status="CONFIRMED",
+            type="CASH",
+            discipline=sport_type,
+            provider_payment_id=f"CASH_SUB_{uuid.uuid4().hex[:16].upper()}",
+        ))
+        await session.commit()
 
         # Красивый статус для админского экрана
         desc = f"заморозка на {days_to_add} дн." if is_paid_freeze else ("БЕЗЛИМИТ" if count == 999 else f"{count} зан.")

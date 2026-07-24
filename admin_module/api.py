@@ -366,7 +366,7 @@ async def admin_sales_page(
     operations = []
     for order in payment_orders:
         operation_category = "freeze" if str(order.type).startswith("FREEZE") else "subscription"
-        operation_method = "online" if order.provider_payment_id else "other"
+        operation_method = "cash" if str(order.provider_payment_id or "").startswith("CASH:") or str(order.type).startswith("CASH") else ("card" if order.provider_payment_id else "other")
         operation_discipline = order.discipline or ""
         operations.append({"id": order.id, "created_at": order.created_at, "amount": order.amount_kopecks or 0,
                            "method": operation_method, "category": operation_category, "discipline": operation_discipline,
@@ -376,7 +376,7 @@ async def admin_sales_page(
             payload = item.payload or {}
             operation_category = item.item_type
             operation_discipline = payload.get("discipline", "")
-            operation_method = "online" if order.provider_payment_id else "other"
+            operation_method = "cash" if str(order.provider_payment_id or "").startswith("CASH:") else ("card" if order.provider_payment_id else "other")
             operations.append({"id": order.id, "created_at": order.created_at, "amount": (item.unit_price_kopecks or 0) * (item.quantity or 1),
                                "method": operation_method, "category": operation_category, "discipline": operation_discipline,
                                "title": item.title, "status": order.status})
