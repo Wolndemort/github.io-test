@@ -33,6 +33,7 @@ from pathlib import Path
 from loguru import logger
 from PIL import Image, UnidentifiedImageError
 from services.input_normalization import normalize_ru_phone, parse_user_date
+from services.staff_permissions import permissions_for_staff
 
 
 router = Router()
@@ -241,6 +242,7 @@ async def admin_panel(
         is_owner: bool,
         is_super_admin: bool,
         is_staff: bool,
+        staff,
         session: AsyncSession,
         state: FSMContext
 ):
@@ -281,7 +283,8 @@ async def admin_panel(
             reply_markup=admin_keyboard(
                 club.id,  # 1. ID клуба
                 club_settings,  # 2. Настройки
-                club.subscription_expire_at  # 3. Дата напрямую из БД
+                club.subscription_expire_at,  # 3. Дата напрямую из БД
+                staff_permissions=permissions_for_staff(staff) if staff else None
             ),
             parse_mode="HTML"
         )
@@ -313,7 +316,8 @@ async def back_to_admin_main_menu(
         reply_markup=admin_keyboard(
             club.id,  # 1. ID клуба
             club_settings,  # 2. Настройки
-            club.subscription_expire_at  # 3. Дата напрямую из БД
+            club.subscription_expire_at,  # 3. Дата напрямую из БД
+            staff_permissions=permissions_for_staff(staff) if staff else None
         ),
         parse_mode="HTML"
     )
@@ -756,7 +760,8 @@ async def show_daily_report(
             reply_markup=admin_keyboard(
                 club.id,
                 club_settings,
-                club.subscription_expire_at
+                club.subscription_expire_at,
+                staff_permissions=permissions_for_staff(staff) if staff else None
             ),
             parse_mode="HTML"
         )

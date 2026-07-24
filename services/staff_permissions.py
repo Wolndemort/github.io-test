@@ -8,7 +8,7 @@ ROLE_PERMISSIONS = {
 
 
 def permissions_for_staff(staff) -> set[str]:
-    role_permissions = ROLE_PERMISSIONS.get(getattr(staff, "role", ""), set())
+    role_permissions = ROLE_PERMISSIONS.get(str(getattr(staff, "role", "")).strip().casefold(), set())
     custom = getattr(staff, "permissions", None) or {}
     extra = custom.get("allow", []) if isinstance(custom, dict) else []
     denied = custom.get("deny", []) if isinstance(custom, dict) else []

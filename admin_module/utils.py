@@ -1,5 +1,6 @@
 from fastapi import HTTPException, Request
 from fastapi.responses import HTMLResponse
+from sqlalchemy import select
 
 from database.db import Club, ClubStaff
 from middlewares.db_saas_midleware import SUPER_ADMIN_IDS
@@ -17,8 +18,13 @@ async def verify_webapp_staff(club: Club, init_data: str | None, session, permis
     user_id = int(tg_user.get("id"))
     if user_id == int(club.owner_id or 0) or user_id in SUPER_ADMIN_IDS:
         return tg_user
-    staff = (await session.execute(ClubStaff.__table__.select().where(ClubStaff.club_id == club.id, ClubStaff.telegram_id == user_id, ClubStaff.is_active.is_(True)))).first()
-    staff_obj = staff[0] if staff else None
+    staff_obj = (await session.execute(
+        select(ClubStaff).where(
+            ClubStaff.club_id == club.id,
+            ClubStaff.telegram_id == user_id,
+            ClubStaff.is_active.is_(True),
+        )
+    )).scalar_one_or_none()
     if not staff_can(staff_obj, permission):
         raise HTTPException(status_code=403, detail="Доступ запрещён для этой роли")
     return tg_user
