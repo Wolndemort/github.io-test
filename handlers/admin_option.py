@@ -1088,24 +1088,28 @@ async def staff_add_id(message: types.Message, state: FSMContext):
         return await message.answer("ID должен состоять только из цифр.")
     await state.update_data(staff_telegram_id=int(message.text.strip()))
     await state.set_state(AdminStates.waiting_for_staff_role)
-    await message.answer("Введите роль: cashier (бариста), coach (тренер) или manager:")
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="☕ Бариста", callback_data="staff_role_cashier")],
+        [InlineKeyboardButton(text="🥋 Тренер", callback_data="staff_role_coach")],
+        [InlineKeyboardButton(text="📋 Менеджер", callback_data="staff_role_manager")],
+    ])
+    await message.answer("Выберите роль сотрудника:", reply_markup=kb)
 
 
-@router.message(AdminStates.waiting_for_staff_role)
-async def staff_add_role(message: types.Message, state: FSMContext, club: Club, session: AsyncSession, is_owner: bool, is_super_admin: bool):
+@router.callback_query(AdminStates.waiting_for_staff_role, F.data.startswith("staff_role_"))
+async def staff_add_role(callback: types.CallbackQuery, state: FSMContext, club: Club, session: AsyncSession, is_owner: bool, is_super_admin: bool):
     if not (is_owner or is_super_admin):
-        await state.clear(); return await message.answer("Доступ запрещён")
-    role = (message.text or "").strip().lower()
-    if role not in {"cashier", "coach", "manager"}:
-        return await message.answer("Допустимые роли: cashier, coach, manager")
+        await state.clear(); return await callback.answer("Доступ запрещён", show_alert=True)
+    role = callback.data.removeprefix("staff_role_")
     data = await state.get_data()
     existing = (await session.execute(select(ClubStaff).where(ClubStaff.club_id == club.id, ClubStaff.telegram_id == data["staff_telegram_id"]))).scalar_one_or_none()
     if existing:
         existing.role = role; existing.is_active = True
     else:
-        session.add(ClubStaff(club_id=club.id, telegram_id=data["staff_telegram_id"], role=role, full_name=message.from_user.full_name))
+        session.add(ClubStaff(club_id=club.id, telegram_id=data["staff_telegram_id"], role=role, full_name=callback.from_user.full_name))
     await session.commit(); await state.clear()
-    await message.answer(f"✅ Сотрудник добавлен. Роль: {role}")
+    await callback.message.answer(f"✅ Сотрудник добавлен. Роль: {role}")
+    await callback.answer()
 
 
 @router.callback_query(F.data == 'admin_edit_payments')
