@@ -1,5 +1,6 @@
 import uuid
 from datetime import datetime, timedelta
+from html import escape
 
 from fastapi import Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
@@ -20,6 +21,7 @@ from services.audit import audit_event
 from services.abuse_guard import rate_limit, audit_block
 from services.yookassa_client import YooKassaClient
 from services.input_normalization import normalize_ru_phone
+from aiogram import Bot
 
 
 def _auth_gate_html(target: str, **params):
@@ -163,6 +165,58 @@ async def webapp_freeze_page(request: Request, club_id: int, student_id: int, in
     now = datetime.now()
     can_freeze = bool(student.expire_date and student.expire_date > now and getattr(student, "can_freeze", 0) > 0 and not getattr(student, "is_frozen", 0))
     return templates.TemplateResponse("webapp_freeze.html", {"request": request, "club": club, "student": student, "club_id": club_id, "freeze_days": freeze_days, "can_freeze": can_freeze})
+
+
+@router.post("/webapp/client-cabinet/freeze")
+async def webapp_freeze_submit(payload: WebAppActionPayload, db: AsyncSession = Depends(get_session)):
+    """Apply a free freeze from the client WebApp."""
+    club = await db.get(Club, payload.club_id)
+    if not club or not club.bot_token:
+        raise HTTPException(status_code=404, detail="Клуб не найден")
+    tg_user = verify_telegram_data(payload.init_data, club.bot_token)
+    if not tg_user:
+        raise HTTPException(status_code=403, detail="Доступ запрещен")
+
+    user_id = int(tg_user.get("id", 0))
+    student = await db.get(Student, payload.student_id, with_for_update=True)
+    if not student or student.club_id != club.id or student.parent_id != user_id:
+        raise HTTPException(status_code=403, detail="Атлет не найден")
+
+    freeze_days = int((club.club_settings or {}).get("limits", {}).get("freeze_days_step", 7))
+    new_expire = await process_student_freeze(
+        student_id=student.id,
+        club_id=club.id,
+        club_settings=club.club_settings or {},
+        session=db,
+        days=freeze_days,
+    )
+    if new_expire == "disabled":
+        raise HTTPException(status_code=400, detail="Заморозка отключена в настройках клуба")
+    if not new_expire:
+        raise HTTPException(status_code=409, detail="Заморозка недоступна: проверьте абонемент и лимит")
+
+    audit_event("webapp_freeze_applied", club_id=club.id, user_id=user_id, student_id=student.id, days=freeze_days)
+    if club.owner_id and club.owner_id != user_id:
+        bot = Bot(club.bot_token)
+        try:
+            await bot.send_message(
+                club.owner_id,
+                (
+                    "❄️ <b>Клиент заморозил абонемент через WebApp</b>\n\n"
+                    f"Атлет: <b>{escape(student.name)}</b>\n"
+                    f"Клиент ID: <code>{user_id}</code>\n"
+                    f"Срок: <b>{freeze_days} дн.</b>\n"
+                    f"Новая дата окончания: <b>{new_expire.strftime('%d.%m.%Y')}</b>"
+                ),
+                parse_mode="HTML",
+            )
+        except Exception:
+            # Уведомление не должно откатывать уже сохраненную заморозку.
+            from loguru import logger
+            logger.exception("Не удалось уведомить владельца о WebApp-заморозке")
+        finally:
+            await bot.session.close()
+    return {"ok": True, "new_expire": new_expire.strftime("%d.%m.%Y")}
 
 
 @router.get("/webapp/client-cabinet/student", response_class=HTMLResponse)

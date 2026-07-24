@@ -14,6 +14,7 @@ def test_critical_routes_are_registered():
     keys = set(_route_keys())
     assert ("/webapp/open-turnstile", "POST") in keys
     assert ("/webapp/client-cabinet", "GET") in keys
+    assert ("/webapp/client-cabinet/freeze", "POST") in keys
     assert ("/v1/payments/yookassa/webhook", "POST") in keys
     assert ("/health", "GET") not in keys  # health belongs to FastAPI app, not this router
 

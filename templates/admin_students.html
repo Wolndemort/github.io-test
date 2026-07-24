@@ -20,7 +20,7 @@
         <label>ДР {% if not s.birthday %}<span class="missing">не указана</span>{% endif %}<input name="birthday" type="date" value="{{ s.birthday.isoformat() if s.birthday else '' }}"></label>
         <label>Баланс занятий<input name="balance_lessons" type="number" min="0" max="999" value="{{ s.balance_lessons if s.balance_lessons else '' }}" placeholder="0"></label>
         <label>До даты<input name="expire_date" type="date" value="{{ s.expire_date.strftime('%Y-%m-%d') if s.expire_date else '' }}"></label>
-        <label>Бесплатных заморозок<input name="can_freeze" type="number" min="0" max="99" value="{{ s.can_freeze or 0 }}"></label>
+        <label>Бесплатных заморозок<input name="can_freeze" type="number" min="0" max="99" value="{{ s.can_freeze if s.can_freeze else '' }}" placeholder="0"></label>
         <label>Дисциплина<input name="discipline" value="{{ s.discipline or '' }}"></label>
         <label>Статус<select name="is_frozen"><option value="0" {% if not s.is_frozen %}selected{% endif %}>Активен</option><option value="1" {% if s.is_frozen %}selected{% endif %}>Заморожен</option></select></label>
         <label>Дней заморозки<input name="frozen_days" type="number" min="1" max="365" value="{{ s.frozen_days or '' }}"></label>
@@ -87,6 +87,10 @@ function filter() {
 function bindEdit(form) {
   form.addEventListener('submit', async e => {
     e.preventDefault();
+    const saveButton = form.querySelector('button[type="submit"]');
+    const originalButtonText = saveButton.textContent;
+    saveButton.disabled = true;
+    saveButton.textContent = 'Сохраняем...';
     const f = new FormData(form);
     const payload = {
       init_data: initData,
@@ -101,17 +105,24 @@ function bindEdit(form) {
       parent_phone: f.get('parent_phone'),
       discipline: f.get('discipline')
     };
-    const r = await fetch('/admin/students/' + form.dataset.id, {
-      method: 'PATCH',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify(payload)
-    });
     const msg = form.querySelector('.msg');
-    if (r.ok) {
-      msg.textContent = 'Сохранено';
-    } else {
-      const d = await r.json();
-      msg.textContent = 'Ошибка: ' + (d.detail || 'не удалось сохранить');
+    try {
+      const r = await fetch('/admin/students/' + form.dataset.id, {
+        method: 'PATCH',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload)
+      });
+      if (r.ok) {
+        msg.textContent = 'Сохранено';
+      } else {
+        const d = await r.json().catch(() => ({}));
+        msg.textContent = 'Ошибка: ' + (d.detail || 'не удалось сохранить');
+      }
+    } catch (_) {
+      msg.textContent = 'Ошибка сети. Попробуйте ещё раз.';
+    } finally {
+      saveButton.disabled = false;
+      saveButton.textContent = originalButtonText;
     }
   });
 }
@@ -124,7 +135,7 @@ function studentCardHtml(s) {
         <label>Дата рождения ${s.birthday ? '' : '<span class="missing">не указана</span>'}<input name="birthday" type="date" value="${esc(s.birthday || '')}"></label>
         <label>Баланс занятий<input name="balance_lessons" type="number" min="0" max="999" value="${s.balance_lessons ? s.balance_lessons : ''}" placeholder="0"></label>
         <label>До даты<input name="expire_date" type="date" value="${esc(s.expire_date || '')}"></label>
-        <label>Бесплатных заморозок<input name="can_freeze" type="number" min="0" max="99" value="${s.can_freeze || 0}"></label>
+      <label>Бесплатных заморозок<input name="can_freeze" type="number" min="0" max="99" value="${s.can_freeze ? s.can_freeze : ''}" placeholder="0"></label>
         <label>Дисциплина<input name="discipline" value="${esc(s.discipline || '')}"></label>
         <label>Статус<select name="is_frozen"><option value="0" ${s.is_frozen ? '' : 'selected'}>Активен</option><option value="1" ${s.is_frozen ? 'selected' : ''}>Заморожен</option></select></label>
         <label>Дней заморозки<input name="frozen_days" type="number" min="1" max="365" value="${esc(s.frozen_days || '')}"></label>

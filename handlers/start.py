@@ -143,7 +143,9 @@ async def start_handler(
         Student.parent_id == user_id,
         Student.club_id == club.id
     ).execution_options(populate_existing=True)
-    student = (await session.execute(stmt)).scalar_one_or_none()
+    # У одного родителя может быть несколько атлетов. Берём первого для
+    # стартового экрана, а подробный список показывает отдельная кнопка.
+    student = (await session.execute(stmt)).scalars().first()
 
     if student:
         is_frozen_val = int(getattr(student, 'is_frozen', 0) or 0)
@@ -182,7 +184,7 @@ async def start_handler(
 
         await message.answer(
             f"📍 <b>{club.name}</b>\n\n{welcome_text}\n\n{status_text}",
-            reply_markup=builder.as_markup(resize_keyboard=True, one_time_keyboard=True),
+            reply_markup=builder.as_markup(resize_keyboard=True, one_time_keyboard=False, is_persistent=True),
             parse_mode="HTML"
         )
 
@@ -267,7 +269,7 @@ async def accept_legal_handler(
             await callback.bot.send_message(
                 chat_id=callback.message.chat.id,
                 text=f"📍 <b>{club.name}</b>\n\n{welcome_text}\n\n{status_text}",
-                reply_markup=builder.as_markup(resize_keyboard=True, one_time_keyboard=True),
+                reply_markup=builder.as_markup(resize_keyboard=True, one_time_keyboard=False, is_persistent=True),
                 parse_mode="HTML"
             )
 

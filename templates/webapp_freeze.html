@@ -18,13 +18,23 @@
 {% block scripts %}
 <script>
 document.getElementById('btn')?.addEventListener('click', async () => {
-  const res = await fetch('/webapp/client-cabinet/freeze', {
-    method: 'POST',
-    headers: {'Content-Type':'application/json'},
-    body: JSON.stringify({init_data: window.Telegram?.WebApp?.initData || '', club_id: {{ club_id }}, student_id: {{ student.id }}})
-  });
-  const data = await res.json();
-  document.getElementById('msg').innerText = res.ok ? `Готово. Новая дата: ${data.new_expire}` : (data.detail || 'Ошибка');
+  const button = document.getElementById('btn');
+  button.disabled = true;
+  button.textContent = 'Обрабатываем...';
+  try {
+    const res = await fetch('/webapp/client-cabinet/freeze', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({init_data: window.Telegram?.WebApp?.initData || '', club_id: {{ club_id }}, student_id: {{ student.id }}})
+    });
+    const data = await res.json().catch(() => ({}));
+    document.getElementById('msg').innerText = res.ok ? `Готово. Новая дата: ${data.new_expire}` : (data.detail || 'Ошибка');
+    if (!res.ok) { button.disabled = false; button.textContent = 'Заморозить'; }
+  } catch (_) {
+    document.getElementById('msg').innerText = 'Не удалось выполнить запрос. Попробуйте ещё раз.';
+    button.disabled = false;
+    button.textContent = 'Заморозить';
+  }
 });
 </script>
 {% endblock %}
