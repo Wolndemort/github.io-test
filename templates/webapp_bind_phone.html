@@ -8,6 +8,7 @@
         <input id="phone" type="tel" placeholder="+7..." style="width:100%;padding:12px;margin-top:6px;">
     </label>
     <div class="mono-divider"></div>
+    <button id="shareContact" type="button" class="mono-action" style="width:100%;margin-bottom:10px;">📱 Поделиться контактом</button>
     <button id="bind" class="mono-action dark" style="width:100%;">Привязать номер</button>
     <a class="mono-action" style="margin-top:10px;" href="/webapp/client-cabinet?club_id={{ club_id }}">← Назад в кабинет</a>
     <p id="msg"></p>
@@ -15,6 +16,18 @@
 {% endblock %}
 {% block scripts %}
 <script>
+document.getElementById('shareContact').addEventListener('click', () => {
+  const tg = window.Telegram?.WebApp;
+  if (tg?.requestContact) {
+    tg.requestContact((result) => {
+      if (result?.status === 'sent') {
+        document.getElementById('msg').innerText = 'Контакт отправлен. Вернитесь в чат бота — профили привяжутся автоматически.';
+      }
+    });
+  } else {
+    document.getElementById('msg').innerText = 'Откройте этот раздел внутри Telegram, чтобы поделиться контактом.';
+  }
+});
 document.getElementById('bind').addEventListener('click', async () => {
   const payload = {init_data: window.Telegram?.WebApp?.initData || '', club_id: {{ club_id }}, phone: document.getElementById('phone').value};
   const res = await fetch('/webapp/client-cabinet/auth', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)});

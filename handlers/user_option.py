@@ -1022,7 +1022,10 @@ async def auth_by_phone_callback(callback: types.CallbackQuery, club: Club):
         f"Клуб: <b>{club.name}</b>\n"
         f"Нажмите кнопку <b>«📱 Поделиться контактом»</b> внизу экрана, "
         f"чтобы система проверила ваш номер телефона в базе данных.",
-        reply_markup=builder.as_markup(resize_keyboard=True, one_time_keyboard=True),
+        # Кнопка остаётся видимой в нижней клавиатуре, пока пользователь
+        # явно не поделится контактом; раньше Telegram скрывал её после
+        # первого действия, из-за чего люди не находили авторизацию.
+        reply_markup=builder.as_markup(resize_keyboard=True, one_time_keyboard=False, is_persistent=True),
         parse_mode="HTML"
     )
     await callback.answer()
