@@ -3,7 +3,7 @@ from typing import Optional, List
 from sqlalchemy.ext.mutable import MutableDict
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, DeclarativeBase, mapped_column, relationship
-from sqlalchemy import BigInteger, DateTime, String, func, Integer, ForeignKey,Boolean
+from sqlalchemy import BigInteger, DateTime, String, func, Integer, ForeignKey, Boolean, or_
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from config import db_file
 from datetime import datetime, date, timezone
@@ -288,7 +288,9 @@ async def get_expire_students_grouped(session):
     Достает студентов, у которых кончается абонемент,
     и сразу подтягивает данные их Клуба (чтобы знать, с какого токена писать)
     """
-    today = datetime.now()
+    from services.analytics import reporting_periods
+
+    today = reporting_periods()["now"]
     three_days_limit = today + timedelta(days=3)
 
     try:
@@ -298,7 +300,10 @@ async def get_expire_students_grouped(session):
             .where(
                 Student.expire_date <= three_days_limit,
                 Student.expire_date >= today,
-                Club.subscription_expire_at >= today  # Поменял == True на проверку даты
+                Student.parent_id.is_not(None),
+                Student.balance_lessons > 0,
+                or_(Student.is_frozen == 0, Student.is_frozen.is_(None)),
+                Club.subscription_expire_at >= today
             )
         )
         result = await session.execute(stmt)

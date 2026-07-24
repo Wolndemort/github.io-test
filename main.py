@@ -314,9 +314,10 @@ async def check_abon_mailing():
 
                 # Формируем текст уведомления
                 expire_str = student.expire_date.strftime('%d.%m.%Y') if student.expire_date else "Не указана"
+                notification_key = f"notify:expire:{student.club_id}:{student.id}:{student.expire_date.date().isoformat()}"
                 text = (
                     f"⚠️ <b>Внимание!</b>\n\n"
-                    f"У атлета <b>{student.name}</b> скоро истекает абонемент.\n"
+                    f"У атлета <b>{escape(student.name)}</b> скоро истекает абонемент.\n"
                     f"Дата окончания: <code>{expire_str}</code>\n\n"
                     f"Не забудьте продлить его в меню! 🥊"
                 )
@@ -329,6 +330,8 @@ async def check_abon_mailing():
                     is_authorized=True
                 )
 
+                if not await _notification_once(notification_key, ttl=7 * 86400):
+                    continue
                 await current_bot.send_message(
                     chat_id=student.parent_id,
                     text=text,
@@ -340,6 +343,8 @@ async def check_abon_mailing():
                 await asyncio.sleep(0.05) # Защита от лимитов Telegram API (Anti-flood)
 
             except Exception as e:
+                if 'notification_key' in locals():
+                    await _notification_forget(notification_key)
                 logger.error(f"❌ Ошибка отправки (Student ID {student.id}): {e}")
 
 
@@ -484,6 +489,23 @@ async def handle_telegram_webhook(token: str, request: Request):
 
 
 # --- НОВЫЕ БИЗНЕС-ФИЧИ ИЗ ТВОЕГО ТЗ ---
+async def _notification_once(key: str, ttl: int = 86400) -> bool:
+    """Protect scheduled Telegram notifications from duplicate sends."""
+    try:
+        return bool(await redis_client.set(key, "1", ex=ttl, nx=True))
+    except Exception as error:
+        logger.warning("Не удалось проверить idempotency уведомления %s: %s", key, error)
+        return True
+
+
+async def _notification_forget(key: str) -> None:
+    """Release an idempotency lock when delivery failed, without masking the error."""
+    try:
+        await redis_client.delete(key)
+    except Exception as error:
+        logger.warning("Не удалось снять блокировку уведомления %s: %s", key, error)
+
+
 async def saas_daily_morning_check():
     """Ежедневная фоновая проверка: Дни рождения и Прогульщики (10 дней без посещений)"""
     logger.info("📊 Запуск фонового анализа базы атлетов...")
@@ -492,26 +514,42 @@ async def saas_daily_morning_check():
         result = await session.execute(select(Student))
         students = result.scalars().all()
 
+        periods = reporting_periods()
+        now_datetime = periods["now"]
+        today = periods["local_now"].date()
+
         # Ежедневно напоминаем родителям о незаполненной дате рождения студента.
         # Один родитель получает одно сообщение со списком, а не отдельное сообщение на каждого ребёнка.
         missing_birthdays = {}
+        missing_subscriptions = {}
         for student in students:
             if student.parent_id and not student.birthday:
                 key = (student.club_id, student.parent_id)
                 missing_birthdays.setdefault(key, []).append(student.name)
-        missing_club_ids = {club_id for club_id, _ in missing_birthdays}
+            has_subscription = bool(
+                student.expire_date
+                and student.expire_date > now_datetime
+                and (student.balance_lessons or 0) > 0
+            )
+            if student.parent_id and not has_subscription:
+                key = (student.club_id, student.parent_id)
+                missing_subscriptions.setdefault(key, []).append(student.name)
+        missing_club_ids = {club_id for club_id, _ in missing_birthdays} | {club_id for club_id, _ in missing_subscriptions}
         clubs_result = await session.execute(select(Club).where(Club.id.in_(missing_club_ids))) if missing_club_ids else None
         clubs_by_id = {club.id: club for club in clubs_result.scalars().all()} if clubs_result else {}
         for (club_id, parent_id), names in missing_birthdays.items():
             club = clubs_by_id.get(club_id)
-            if not club or club.bot_token not in bots_dict:
+            if not club or not club.subscription_expire_at or club.subscription_expire_at < now_datetime or club.bot_token not in bots_dict:
                 continue
+            notification_key = f"notify:birthday-missing:{club_id}:{parent_id}:{today.isoformat()}"
             try:
+                if not await _notification_once(notification_key):
+                    continue
                 await bots_dict[club.bot_token].send_message(
                     chat_id=parent_id,
                     text=(f"🎂 <b>Заполните даты рождения атлетов</b>\n\n"
-                          f"В профиле клуба <b>{club.name}</b> не указана дата рождения: "
-                          f"<b>{', '.join(names)}</b>.\n"
+                          f"В профиле клуба <b>{escape(club.name)}</b> не указана дата рождения: "
+                          f"<b>{escape(', '.join(names))}</b>.\n"
                           "Это нужно для корректного возраста, тарифов и статистики."),
                     reply_markup=types.InlineKeyboardMarkup(inline_keyboard=[[
                         types.InlineKeyboardButton(text="Указать дату рождения", callback_data="edit_birthday")
@@ -519,17 +557,37 @@ async def saas_daily_morning_check():
                     parse_mode="HTML",
                 )
             except Exception as reminder_error:
+                await _notification_forget(notification_key)
                 logger.error("Не удалось отправить напоминание о ДР родителю %s: %s", parent_id, reminder_error)
 
-        # ФИКС: Берем только чистую текущую дату (без часов и минут)
-        today = datetime.now().date()
-        now_datetime = datetime.now() # Оставляем datetime для вычитания из last_visit
+        for (club_id, parent_id), names in missing_subscriptions.items():
+            club = clubs_by_id.get(club_id)
+            if not club or not club.subscription_expire_at or club.subscription_expire_at < now_datetime or club.bot_token not in bots_dict:
+                continue
+            notification_key = f"notify:no-subscription:{club_id}:{parent_id}:{today.isoformat()}"
+            try:
+                if not await _notification_once(notification_key):
+                    continue
+                await bots_dict[club.bot_token].send_message(
+                    chat_id=parent_id,
+                    text=(f"💳 <b>Нет активного абонемента</b>\n\n"
+                          f"У атлета(ов) <b>{escape(', '.join(names))}</b> в клубе "
+                          f"<b>{escape(club.name)}</b> нет действующего абонемента.\n"
+                          "Выберите тариф в меню, чтобы продолжить тренировки."),
+                    reply_markup=types.InlineKeyboardMarkup(inline_keyboard=[[
+                        types.InlineKeyboardButton(text="💳 Выбрать абонемент", callback_data="choose_section")
+                    ]]),
+                    parse_mode="HTML",
+                )
+            except Exception as subscription_error:
+                await _notification_forget(notification_key)
+                logger.error("Не удалось отправить напоминание об абонементе родителю %s: %s", parent_id, subscription_error)
 
         for student in students:
             # Вытаскиваем токен клуба этого студента для отправки сообщения
             club_result = await session.execute(select(Club).where(Club.id == student.club_id))
             club = club_result.scalar_one_or_none()
-            if not club or club.bot_token not in bots_dict:
+            if not club or not club.subscription_expire_at or club.subscription_expire_at < now_datetime or club.bot_token not in bots_dict:
                 continue
             bot = bots_dict[club.bot_token]
 
@@ -541,29 +599,36 @@ async def saas_daily_morning_check():
             if hasattr(student, 'birthday') and student.birthday:
                 if student.birthday.month == today.month and student.birthday.day == today.day:
                     try:
-                        await bot.send_message(
-                            chat_id=student.parent_id,
-                            text=f"🎂 Клуб <b>{club.name}</b> поздравляет атлета <b>{student.name}</b> с Днём Рождения! 🎉\n"
-                                 f"Желаем новых спортивных побед и крепкого здоровья!",
-                            parse_mode="HTML"
-                        )
-                        logger.info(f"🎉 Поздравление с ДР отправлено атлету {student.name} (Родитель: {student.parent_id})")
+                        birthday_key = f"notify:birthday:{student.club_id}:{student.id}:{today.year}"
+                        if await _notification_once(birthday_key, ttl=370 * 86400):
+                            await bot.send_message(
+                                chat_id=student.parent_id,
+                                text=f"🎂 Клуб <b>{escape(club.name)}</b> поздравляет атлета <b>{escape(student.name)}</b> с Днём Рождения! 🎉\n"
+                                     f"Желаем новых спортивных побед и крепкого здоровья!",
+                                parse_mode="HTML"
+                            )
+                            logger.info(f"🎉 Поздравление с ДР отправлено атлету {student.name} (Родитель: {student.parent_id})")
                     except Exception as e:
+                        await _notification_forget(birthday_key)
                         logger.error(f"Не удалось отправить ДР сообщение родителю {student.parent_id}: {e}")
 
-            # 🏃‍♂️ Фича 2: Контроль прогульщиков (Не было 10 дней, но есть активный абонемент)
+            # 🏃‍♂️ Фича 2: Контроль прогульщиков (10+ дней, но есть активный абонемент)
             if student.last_visit and student.balance_lessons > 0 and not student.is_frozen:
-                # student.last_visit — это datetime, так что вычитаем из такого же datetime
-                days_absent = (now_datetime - student.last_visit).days
-                if days_absent == 10:
+                last_visit = student.last_visit.replace(tzinfo=None)
+                days_absent = max(0, (now_datetime - last_visit).days)
+                if days_absent >= 10:
                     try:
+                        notice_key = f"notify:absent:{student.club_id}:{student.id}:{last_visit.date().isoformat()}:10"
+                        if not await _notification_once(notice_key, ttl=45 * 86400):
+                            continue
                         await bot.send_message(
                             chat_id=student.parent_id,
-                            text=f"👋 Здравствуйте! Мы заметили, что атлет <b>{student.name}</b> не посещал тренировки уже 10 дней. Мы соскучились! Ждём вас на занятиях. 😉",
+                            text=f"👋 Здравствуйте! Мы заметили, что атлет <b>{escape(student.name)}</b> не посещал тренировки уже {days_absent} дней. Мы соскучились! Ждём вас на занятиях. 😉",
                             parse_mode="HTML"
                         )
                         logger.info(f"📢 Уведомление о прогуле (10 дней) отправлено атлету {student.name}")
                     except Exception as e:
+                        await _notification_forget(notice_key)
                         logger.error(f"Не удалось отправить уведомление прогульщику: {e}")
 
 # замок и двери есть инфа в скринах
