@@ -98,6 +98,14 @@ class AdminProductSalePayload(BaseModel):
     club_id: int
     items: list[dict]
 
+class TariffChangePayload(BaseModel):
+    init_data: str
+    club_id: int
+    discipline: str
+    action: str
+    index: int | None = None
+    tariff: dict | None = None
+
 class CashEntryPayload(BaseModel):
     init_data: str
     club_id: int
@@ -977,6 +985,55 @@ async def delete_product(product_id: int, club_id: int, init_data: str, session:
     p = await session.get(ClubProduct, product_id)
     if not p or p.club_id != club_id: raise HTTPException(404, "Товар не найден")
     await session.delete(p); await session.commit(); return {"success": True}
+
+@router.get("/webapp/admin-tariffs", response_class=HTMLResponse)
+async def webapp_admin_tariffs_page(request: Request, club_id: int = Query(...), init_data: str | None = Query(default=None), session: AsyncSession = Depends(get_session)):
+    club = await session.get(Club, club_id)
+    if not init_data:
+        return _telegram_init_gate('/webapp/admin-tariffs', club_id, 'Откройте тарифы из Telegram')
+    await verify_webapp_staff(club, init_data, session, "tariffs_manage")
+    return templates.TemplateResponse("admin_tariffs.html", {"request": request, "club": club, "club_id": club_id, "disciplines": (club.club_settings or {}).get("disciplines", {})})
+
+
+@router.post("/webapp/admin-tariffs/change")
+async def change_admin_tariff(payload: TariffChangePayload, request: Request, session: AsyncSession = Depends(get_session)):
+    club = await session.get(Club, payload.club_id)
+    await verify_webapp_staff(club, payload.init_data, session, "tariffs_manage")
+    settings = dict(club.club_settings or {})
+    disciplines = dict(settings.get("disciplines", {}))
+    block = dict(disciplines.get(payload.discipline, {}))
+    if not block:
+        raise HTTPException(404, "Направление не найдено")
+    tariffs = list(block.get("tariffs", []) or [])
+    if payload.action == "toggle_active":
+        block["active"] = not bool(block.get("active", False))
+    elif payload.action == "toggle_type":
+        block["type"] = "lessons" if block.get("type", "lessons") == "unlimited" else "unlimited"
+    elif payload.action == "add":
+        tariff = payload.tariff or {}
+        tariffs.append({"price": float(tariff.get("price", 0)), "days": int(tariff.get("days", 30)), "count": 999 if block.get("type") == "unlimited" else int(tariff.get("count", 0)), "min_age": int(tariff.get("min_age", 0))})
+    elif payload.action in {"update", "delete"}:
+        if payload.index is None or payload.index < 0 or payload.index >= len(tariffs):
+            raise HTTPException(400, "Тариф не найден")
+        if payload.action == "delete":
+            tariffs.pop(payload.index)
+        else:
+            tariff = payload.tariff or {}
+            tariffs[payload.index] = {"price": float(tariff.get("price", 0)), "days": int(tariff.get("days", 30)), "count": 999 if block.get("type") == "unlimited" else int(tariff.get("count", 0)), "min_age": int(tariff.get("min_age", 0))}
+    else:
+        raise HTTPException(400, "Неизвестное действие")
+    if any(float(t.get("price", 0)) <= 0 or int(t.get("days", 0)) <= 0 or int(t.get("count", 0)) < 0 for t in tariffs):
+        raise HTTPException(400, "Цена, срок и количество должны быть положительными")
+    block["tariffs"] = tariffs
+    disciplines[payload.discipline] = block
+    settings["disciplines"] = disciplines
+    await session.execute(update(Club).where(Club.id == club.id).values(club_settings=settings))
+    await session.commit()
+    redis = getattr(request.app.state, "redis_client", None)
+    if redis:
+        await redis.delete(f"club_config:{club.bot_token}")
+    return {"success": True}
+
 
 @router.get("/webapp/admin-schedule", response_class=HTMLResponse)
 async def webapp_admin_schedule_page(

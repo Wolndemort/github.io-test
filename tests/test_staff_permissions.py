@@ -31,3 +31,13 @@ def test_staff_management_supports_owner_and_super_admin_and_delete():
     assert "is_super_admin" in source
     assert "super_staff_add" in super_source
     assert "ClubStaff" in source and "ClubStaff" in super_source
+
+
+def test_manager_tariff_webapp_is_present_and_uses_shared_settings():
+    api = Path("admin_module/api.py").read_text(encoding="utf-8")
+    page = Path("templates/admin_tariffs.html").read_text(encoding="utf-8")
+    assert '"tariffs_manage"' in api
+    assert "/webapp/admin-tariffs" in api
+    assert 'settings["disciplines"]' in api
+    assert "tg.initData" in page
+    assert "/webapp/admin-tariffs/change" in page

@@ -327,7 +327,9 @@ async def back_to_admin_main_menu(
 
 
 @router.callback_query(F.data == "admin_settings")
-async def admin_settings_menu(callback: types.CallbackQuery, club_settings: dict, club_id: int):
+async def admin_settings_menu(callback: types.CallbackQuery, club_settings: dict, club_id: int, is_owner: bool | None = None, is_super_admin: bool | None = None):
+    if is_owner is False and is_super_admin is False:
+        return await callback.answer("Доступ запрещён: настройки клуба доступны только главному администратору.", show_alert=True)
     builder = InlineKeyboardBuilder()
     features = club_settings.get("features", {})
     limits = club_settings.get("limits", {})
@@ -387,6 +389,10 @@ async def admin_settings_menu(callback: types.CallbackQuery, club_settings: dict
     builder.row(types.InlineKeyboardButton(
         text="💰 Настройка тарифов",
         callback_data="admin_tariffs_sections"
+    ))
+    builder.row(types.InlineKeyboardButton(
+        text="💰 Тарифы (WebApp)",
+        web_app=types.WebAppInfo(url=f"https://{club_id}.speedycrm.ru/webapp/admin-tariffs?club_id={club_id}")
     ))
 
     builder.row(types.InlineKeyboardButton(

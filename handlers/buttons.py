@@ -230,6 +230,10 @@ def admin_keyboard(club_id: int, club_settings: dict, subscription_date: datetim
         )
     )
     builder.row(types.InlineKeyboardButton(
+        text="💰 Тарифы клуба (WebApp)",
+        web_app=types.WebAppInfo(url=f"{base_url}/webapp/admin-tariffs?club_id={club_id}")
+    ))
+    builder.row(types.InlineKeyboardButton(
         text="👥 Атлеты и ДР",
         web_app=types.WebAppInfo(url=f"{base_url}/admin/students?club_id={club_id}")
     ))

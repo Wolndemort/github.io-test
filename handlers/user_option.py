@@ -1120,6 +1120,9 @@ async def process_user_contact(
         # Привязываем Telegram ID ко всем найденным карточкам атлетов
         for student in students:
             student.parent_id = user_id
+            # Сохраняем номер в карточке атлета, чтобы админ видел его
+            # после успешной привязки, а последующие поиски были стабильными.
+            student.parent_phone = normalized_phone
             session.add(student)
 
         await session.commit()
