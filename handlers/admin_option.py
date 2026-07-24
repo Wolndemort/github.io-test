@@ -197,7 +197,12 @@ async def admin_quick_athletes(
     callback: types.CallbackQuery,
     session: AsyncSession,
     club: Club,
+    is_owner: bool,
+    is_super_admin: bool,
+    staff,
 ):
+    if not (is_owner or is_super_admin or (staff and "athletes_view" in permissions_for_staff(staff))):
+        return await callback.answer("Доступ запрещён", show_alert=True)
     students = (await session.execute(
         select(Student).where(Student.club_id == club.id).order_by(Student.name)
     )).scalars().all()
@@ -880,7 +885,9 @@ async def cash_search_results(
 
 
 @router.callback_query(F.data == "admin_manual_visit")
-async def start_manual_visit_search(callback: types.CallbackQuery, state: FSMContext):
+async def start_manual_visit_search(callback: types.CallbackQuery, state: FSMContext, is_owner: bool, is_super_admin: bool, staff):
+    if not (is_owner or is_super_admin or (staff and "qr_checkin" in permissions_for_staff(staff))):
+        return await callback.answer("Доступ запрещён", show_alert=True)
     # Без этой строки следующий хендлер (который ты скинул) не увидит твой текст
     await state.set_state(AdminManualAdd.waiting_for_search_visit)
     await callback.message.answer("🔍 Введите имя или фамилию атлета для поиска:")
@@ -1815,7 +1822,9 @@ async def admin_add_tariff_min_age_final(
 # ШАГ 1: ВЫБОР СЕКЦИИ (Сохраняем club_id, чтобы не терялся)
 # =====================================================================
 @router.callback_query(F.data == "admin_schedule_main")
-async def admin_schedule_select_discipline(callback: types.CallbackQuery, state: FSMContext, club: Club, club_settings: dict):
+async def admin_schedule_select_discipline(callback: types.CallbackQuery, state: FSMContext, club: Club, club_settings: dict, is_owner: bool, is_super_admin: bool, staff):
+    if not (is_owner or is_super_admin or (staff and "schedule_view" in permissions_for_staff(staff))):
+        return await callback.answer("Доступ запрещён", show_alert=True)
     disciplines = club_settings.get("disciplines", {})
     
     if not disciplines:
