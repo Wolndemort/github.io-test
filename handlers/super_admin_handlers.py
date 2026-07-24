@@ -202,7 +202,7 @@ async def process_extend(
         callback: types.CallbackQuery,
         session: AsyncSession,
         is_super_admin: bool,
-        redis: Redis  # Добавь redis в аргументы (он прилетает из мидлвари)
+        redis: Redis | None = None
 ):
     await callback.answer()
     if not is_super_admin:
@@ -229,7 +229,7 @@ async def process_extend(
 
         # 🔥 ОЧИСТКА КЭША REDIS
         # После ручного продления нужно снести старый конфиг из кэша
-        if club.bot_token:
+        if redis is not None and club.bot_token:
             await redis.delete(f"club_config:{club.bot_token}")
             logger.info(f"Супер-админ продлил клуб {club.id}, кэш сброшен.")
 

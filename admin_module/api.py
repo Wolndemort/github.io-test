@@ -381,7 +381,11 @@ async def admin_update_student(
     payload: AdminStudentUpdate,
     db: AsyncSession = Depends(get_session),
 ):
-    club = await db.get(Club, payload.club_id)
+    # Блокируем клуб до конца транзакции: два параллельных запроса не должны
+    # одновременно пройти проверку и создать одинаковых атлетов.
+    club = (await db.execute(
+        select(Club).where(Club.id == payload.club_id).with_for_update()
+    )).scalar_one_or_none()
     tg_user = verify_telegram_data(payload.init_data, club.bot_token if club else "")
     student = await db.get(Student, student_id, with_for_update=True)
     if not student:
@@ -455,7 +459,11 @@ async def admin_create_student(
     payload: AdminStudentCreate,
     db: AsyncSession = Depends(get_session),
 ):
-    club = await db.get(Club, payload.club_id)
+    # Сериализуем создание внутри клуба: иначе два одновременных запроса
+    # могут оба пройти проверку дубля до того, как первый закоммитится.
+    club = (await db.execute(
+        select(Club).where(Club.id == payload.club_id).with_for_update()
+    )).scalar_one_or_none()
     if not club:
         raise HTTPException(status_code=404, detail="Клуб не найден")
     if not verify_telegram_data(payload.init_data, club.bot_token):

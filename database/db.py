@@ -41,6 +41,10 @@ class User(Base):
     students: Mapped[List["Student"]] = relationship(back_populates='parent', cascade="all, delete-orphan")
     is_biometric_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
 
+    def __str__(self) -> str:
+        """Readable label for SQLAdmin relationship/AJAX selectors."""
+        return self.full_name or str(self.user_id)
+
 
 class Student(Base):
     __tablename__ = 'students'

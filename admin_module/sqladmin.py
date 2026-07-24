@@ -96,6 +96,8 @@ class StudentAdmin(ModelView, model=Student):
     can_delete = True
     can_edit = True
     can_create = True
+    can_view_details = True
+    can_export = True
 
 
 class ClubAdmin(ModelView, model=Club):
@@ -121,6 +123,8 @@ class ClubAdmin(ModelView, model=Club):
     can_delete = True
     can_edit = True
     can_create = True
+    can_view_details = True
+    can_export = True
 
 
 class VisitLogAdmin(ModelView, model=VisitLog):
