@@ -16,7 +16,7 @@ from handlers.buttons import get_scanner_keyboard
 from aiogram.types import FSInputFile
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from database.db import get_all_users_count, get_total_athletes_count, get_active_subs_count, User, get_daily_stats, Student, \
-    Club, PaymentOrder, CartOrder, VisitLog
+    Club, PaymentOrder, CartOrder, VisitLog, ClubStaff
 from services.analytics import reporting_periods
 from sqlalchemy import select
 from handlers.buttons import admin_keyboard
@@ -48,6 +48,7 @@ async def start_manual_add(
         state: FSMContext,
         is_owner: bool,
         is_super_admin: bool,
+        is_staff: bool,
 ):
     if not (is_owner or is_super_admin):
         return await callback.answer("Доступ только для администратора клуба.", show_alert=True)
@@ -242,8 +243,8 @@ async def admin_panel(
         session: AsyncSession,
         state: FSMContext
 ):
-    if not (is_owner or is_super_admin):
-        return
+    if not (is_owner or is_super_admin or is_staff):
+        return await (event.answer("Доступ запрещён", show_alert=True) if isinstance(event, types.CallbackQuery) else event.answer("Доступ запрещён"))
 
     await state.clear()
 
@@ -1041,6 +1042,70 @@ async def admin_public_links_save(message: types.Message, state: FSMContext, clu
 
     await callback.answer("Посещение зафиксировано")
     await state.clear()
+
+
+@router.callback_query(F.data == "staff_manage")
+async def staff_manage(callback: types.CallbackQuery, club: Club, session: AsyncSession, is_owner: bool, is_super_admin: bool):
+    if not (is_owner or is_super_admin):
+        return await callback.answer("Доступ запрещён: персоналом управляет владелец клуба.", show_alert=True)
+    staff = (await session.execute(select(ClubStaff).where(ClubStaff.club_id == club.id).order_by(ClubStaff.id))).scalars().all()
+    text = "👔 <b>Персонал клуба</b>\n\n" + ("\n".join(f"• <code>{x.telegram_id}</code> — {x.full_name or 'без имени'} — <b>{x.role}</b> — {'✅' if x.is_active else '❌'}" for x in staff) or "Сотрудников пока нет.")
+    kb = InlineKeyboardBuilder()
+    for item in staff:
+        kb.button(text=f"🗑 Удалить {item.telegram_id}", callback_data=f"staff_delete_{item.id}")
+    kb.button(text="➕ Добавить сотрудника", callback_data="staff_add")
+    kb.button(text="⬅️ Назад", callback_data="admin")
+    kb.adjust(1)
+    await callback.message.edit_text(text, reply_markup=kb.as_markup(), parse_mode="HTML")
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("staff_delete_"))
+async def staff_delete(callback: types.CallbackQuery, club: Club, session: AsyncSession, is_owner: bool, is_super_admin: bool):
+    if not (is_owner or is_super_admin):
+        return await callback.answer("Доступ запрещён", show_alert=True)
+    staff_id = int(callback.data.rsplit("_", 1)[1])
+    staff = await session.get(ClubStaff, staff_id)
+    if not staff or (not is_super_admin and staff.club_id != club.id):
+        return await callback.answer("Сотрудник не найден", show_alert=True)
+    await session.delete(staff)
+    await session.commit()
+    await staff_manage(callback, club=club, session=session, is_owner=is_owner, is_super_admin=is_super_admin)
+
+
+@router.callback_query(F.data == "staff_add")
+async def staff_add_start(callback: types.CallbackQuery, state: FSMContext, is_owner: bool, is_super_admin: bool):
+    if not (is_owner or is_super_admin):
+        return await callback.answer("Доступ запрещён", show_alert=True)
+    await state.set_state(AdminStates.waiting_for_staff_telegram_id)
+    await callback.message.answer("Введите Telegram ID сотрудника:")
+    await callback.answer()
+
+
+@router.message(AdminStates.waiting_for_staff_telegram_id)
+async def staff_add_id(message: types.Message, state: FSMContext):
+    if not (message.text or "").strip().isdigit():
+        return await message.answer("ID должен состоять только из цифр.")
+    await state.update_data(staff_telegram_id=int(message.text.strip()))
+    await state.set_state(AdminStates.waiting_for_staff_role)
+    await message.answer("Введите роль: cashier (бариста), coach (тренер) или manager:")
+
+
+@router.message(AdminStates.waiting_for_staff_role)
+async def staff_add_role(message: types.Message, state: FSMContext, club: Club, session: AsyncSession, is_owner: bool, is_super_admin: bool):
+    if not (is_owner or is_super_admin):
+        await state.clear(); return await message.answer("Доступ запрещён")
+    role = (message.text or "").strip().lower()
+    if role not in {"cashier", "coach", "manager"}:
+        return await message.answer("Допустимые роли: cashier, coach, manager")
+    data = await state.get_data()
+    existing = (await session.execute(select(ClubStaff).where(ClubStaff.club_id == club.id, ClubStaff.telegram_id == data["staff_telegram_id"]))).scalar_one_or_none()
+    if existing:
+        existing.role = role; existing.is_active = True
+    else:
+        session.add(ClubStaff(club_id=club.id, telegram_id=data["staff_telegram_id"], role=role, full_name=message.from_user.full_name))
+    await session.commit(); await state.clear()
+    await message.answer(f"✅ Сотрудник добавлен. Роль: {role}")
 
 
 @router.callback_query(F.data == 'admin_edit_payments')

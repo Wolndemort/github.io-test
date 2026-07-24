@@ -78,6 +78,19 @@ class Club(Base):
     subscription_expire_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
 
 
+class ClubStaff(Base):
+    """Staff accounts are separate from the club owner and never inherit owner rights."""
+    __tablename__ = "club_staff"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    club_id: Mapped[int] = mapped_column(ForeignKey("clubs.id", ondelete="CASCADE"), index=True)
+    telegram_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    full_name: Mapped[Optional[str]] = mapped_column(String(150), nullable=True)
+    role: Mapped[str] = mapped_column(String(32), default="cashier")
+    permissions: Mapped[dict] = mapped_column(JSONB, default=dict)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="1")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, server_default="now()")
+
+
 class Subscription(Base):
     __tablename__ = 'subscriptions'
 

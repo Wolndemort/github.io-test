@@ -6,7 +6,7 @@ from sqladmin import Admin, ModelView, BaseView, expose
 from sqladmin.authentication import AuthenticationBackend
 from sqlalchemy.ext.asyncio import async_sessionmaker
 from starlette.responses import RedirectResponse
-from database.db import Club, Student, User, VisitLog
+from database.db import Club, Student, User, VisitLog, ClubStaff
 
 
 class AdminAuth(AuthenticationBackend):
@@ -148,6 +148,18 @@ class VisitLogAdmin(ModelView, model=VisitLog):
     can_create = True
 
 
+class ClubStaffAdmin(ModelView, model=ClubStaff):
+    column_list = [ClubStaff.id, ClubStaff.club_id, ClubStaff.telegram_id, ClubStaff.full_name, ClubStaff.role, ClubStaff.is_active]
+    column_searchable_list = [ClubStaff.full_name]
+    form_columns = ["club_id", "telegram_id", "full_name", "role", "permissions", "is_active"]
+    name = "Сотрудник клуба"
+    name_plural = "Сотрудники клубов"
+    can_delete = True
+    can_edit = True
+    can_create = True
+    can_view_details = True
+
+
 class AnalyticsAdmin(BaseView):
     name = "Статистика"
     icon = "fa-solid fa-chart-line"
@@ -169,5 +181,6 @@ def setup_admin(app, engine):
     admin.add_view(UserAdmin)
     admin.add_view(StudentAdmin)
     admin.add_view(VisitLogAdmin)
+    admin.add_view(ClubStaffAdmin)
     admin.add_view(ClubAdmin)
     admin.add_view(AnalyticsAdmin)

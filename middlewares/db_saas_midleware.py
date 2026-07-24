@@ -3,7 +3,7 @@ from datetime import datetime
 from aiogram import BaseMiddleware, types
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy import select
-from database.db import Club
+from database.db import Club, ClubStaff
 from database.constants import DEFAULT_CLUB_SETTINGS
 from redis.asyncio import Redis
 
@@ -95,6 +95,14 @@ class ClubMiddleware(BaseMiddleware):
         sub_end = club_obj.subscription_expire_at
         is_owner = (user_id == club_obj.owner_id)
         is_super = (user_id in SUPER_ADMIN_IDS)
+        staff_result = await session.execute(
+            select(ClubStaff).where(
+                ClubStaff.club_id == club_obj.id,
+                ClubStaff.telegram_id == user_id,
+                ClubStaff.is_active.is_(True),
+            )
+        )
+        staff = staff_result.scalar_one_or_none()
 
         # Флаг оплаты: активна ли подписка прямо сейчас
         is_sub_active = sub_end is not None and sub_end > now
@@ -139,6 +147,8 @@ class ClubMiddleware(BaseMiddleware):
         data["club_id"] = club_obj.id
         data["is_owner"] = is_owner
         data["is_super_admin"] = is_super
+        data["is_staff"] = staff is not None
+        data["staff"] = staff
         data["redis"] = self.redis
         data["club_settings"] = club_obj.club_settings
         return await handler(event, data)

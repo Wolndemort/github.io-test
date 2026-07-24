@@ -47,6 +47,7 @@ from aiogram import Bot
 from handlers.user_option import generate_signature, fix_layout
 from middlewares.db_saas_midleware import SUPER_ADMIN_IDS
 from admin_module.router_base import router, templates
+from admin_module.utils import verify_webapp_staff
 from admin_module.webapp_verify import verify_telegram_data
 from admin_module.webapp_client_cabinet import _ensure_webapp_user_linked
 from services.input_normalization import normalize_ru_phone, parse_user_date
@@ -205,16 +206,7 @@ async def scanner_scan(
     club = (await session.execute(select(Club).where(Club.id == payload.club_id))).scalar_one_or_none()
     if not club:
         raise HTTPException(status_code=404, detail="Клуб не найден")
-    tg_user = verify_telegram_data(payload.init_data, club.bot_token)
-    try:
-        telegram_user_id = int(tg_user.get("id")) if tg_user else None
-        owner_id = int(club.owner_id) if club.owner_id is not None else None
-    except (TypeError, ValueError):
-        telegram_user_id = owner_id = None
-    # Та же проверка, что используется в админ-панели; приведение к int
-    # устраняет отказ из-за разницы типов в старых данных клуба.
-    if telegram_user_id is None or (telegram_user_id != owner_id and telegram_user_id not in {int(x) for x in SUPER_ADMIN_IDS}):
-        raise HTTPException(status_code=403, detail="Только администратор клуба может использовать сканер")
+    tg_user = await verify_webapp_staff(club, payload.init_data, session, "qr_checkin")
 
     raw = fix_layout(payload.qr_data).strip().split(":")
     if len(raw) != 4 or raw[0] != "student":
@@ -322,7 +314,7 @@ async def admin_students_page(
     if not init_data:
         return webapp_auth_gate(request, club_id)
     club = (await session.execute(select(Club).where(Club.id == club_id))).scalar_one_or_none()
-    await verify_webapp_admin(club, init_data)
+    await verify_webapp_staff(club, init_data, session, "athletes_view")
     students = (await session.execute(
         select(Student).where(Student.club_id == club_id).order_by(Student.name)
     )).scalars().all()
@@ -407,7 +399,7 @@ async def cash_register_page(request: Request, session: AsyncSession = Depends(g
     if not init_data:
         return webapp_auth_gate(request, club_id)
     club = await session.get(Club, club_id)
-    await verify_webapp_admin(club, init_data)
+    await verify_webapp_staff(club, init_data, session, "cash_view")
     start = moscow_date_boundary(date_from) if date_from else None
     end = moscow_date_boundary(date_to) + timedelta(days=1) if date_to else None
     manual_query = select(CashEntry).where(CashEntry.club_id == club_id)
@@ -908,7 +900,7 @@ async def client_cart(request: Request, club_id: int = Query(...), init_data: st
 async def admin_products_page(request: Request, club_id: int = Query(...), init_data: str | None = Query(None), session: AsyncSession = Depends(get_session)):
     club = await session.get(Club, club_id)
     if not init_data: return _telegram_init_gate('/webapp/admin-products', club_id, 'Откройте каталог из Telegram')
-    await verify_webapp_admin(club, init_data)
+    await verify_webapp_staff(club, init_data, session, "products_view")
     products = (await session.execute(select(ClubProduct).where(ClubProduct.club_id == club_id).order_by(ClubProduct.id.desc()))).scalars().all()
     product_data = [{"id": p.id, "name": p.name, "category": p.category, "price_kopecks": p.price_kopecks, "stock": p.stock, "is_active": p.is_active, "image_url": p.image_url} for p in products]
     return templates.TemplateResponse("admin_products.html", {"request": request, "club": club, "club_id": club_id, "products": product_data})
@@ -918,7 +910,7 @@ async def admin_product_sale_page(request: Request, club_id: int = Query(...), i
     club = await session.get(Club, club_id)
     if not init_data:
         return _telegram_init_gate('/webapp/admin-product-sale', club_id, 'Откройте продажу из Telegram')
-    await verify_webapp_admin(club, init_data)
+    await verify_webapp_staff(club, init_data, session, "cash_sale")
     products = (await session.execute(select(ClubProduct).where(ClubProduct.club_id == club_id, ClubProduct.is_active.is_(True), ClubProduct.stock > 0).order_by(ClubProduct.category, ClubProduct.name))).scalars().all()
     product_data = [{"id": p.id, "name": p.name, "category": p.category, "price_kopecks": p.price_kopecks, "stock": p.stock} for p in products]
     return templates.TemplateResponse("admin_product_sale.html", {"request": request, "club_id": club_id, "products": product_data})
@@ -926,7 +918,7 @@ async def admin_product_sale_page(request: Request, club_id: int = Query(...), i
 @router.post("/webapp/admin-product-sale")
 async def admin_product_sale(payload: AdminProductSalePayload, session: AsyncSession = Depends(get_session)):
     club = await session.get(Club, payload.club_id)
-    await verify_webapp_admin(club, payload.init_data)
+    await verify_webapp_staff(club, payload.init_data, session, "cash_sale")
     if not payload.items:
         raise HTTPException(400, "Корзина пуста")
     ids = [int(item.get("product_id")) for item in payload.items]
@@ -952,14 +944,14 @@ async def admin_product_sale(payload: AdminProductSalePayload, session: AsyncSes
 
 @router.post("/webapp/admin-products")
 async def create_product(payload: ProductPayload, session: AsyncSession = Depends(get_session)):
-    club = await session.get(Club, payload.club_id); await verify_webapp_admin(club, payload.init_data)
+    club = await session.get(Club, payload.club_id); await verify_webapp_staff(club, payload.init_data, session, "products_manage")
     if not payload.name.strip() or payload.price_kopecks <= 0 or payload.stock < 0: raise HTTPException(400, "Некорректные данные товара")
     p = ClubProduct(club_id=payload.club_id, name=payload.name.strip()[:120], image_url=(payload.image_url or "")[:500] or None, category=payload.category[:30], price_kopecks=payload.price_kopecks, stock=payload.stock, is_active=payload.is_active)
     session.add(p); await session.commit(); return {"success": True}
 
 @router.post("/webapp/admin-products/upload-image")
 async def upload_product_image(club_id: int, init_data: str, image: UploadFile = File(...), session: AsyncSession = Depends(get_session)):
-    club = await session.get(Club, club_id); await verify_webapp_admin(club, init_data)
+    club = await session.get(Club, club_id); await verify_webapp_staff(club, init_data, session, "products_manage")
     allowed = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp"}
     if image.content_type not in allowed: raise HTTPException(400, "Разрешены JPG, PNG и WEBP")
     data = await image.read()
@@ -972,7 +964,7 @@ async def upload_product_image(club_id: int, init_data: str, image: UploadFile =
 
 @router.patch("/webapp/admin-products/{product_id}")
 async def update_product(product_id: int, payload: ProductPayload, session: AsyncSession = Depends(get_session)):
-    club = await session.get(Club, payload.club_id); await verify_webapp_admin(club, payload.init_data)
+    club = await session.get(Club, payload.club_id); await verify_webapp_staff(club, payload.init_data, session, "products_manage")
     p = await session.get(ClubProduct, product_id)
     if not p or p.club_id != payload.club_id: raise HTTPException(404, "Товар не найден")
     if not payload.name.strip() or payload.price_kopecks <= 0 or payload.stock < 0: raise HTTPException(400, "Некорректные данные товара")
@@ -981,7 +973,7 @@ async def update_product(product_id: int, payload: ProductPayload, session: Asyn
 
 @router.delete("/webapp/admin-products/{product_id}")
 async def delete_product(product_id: int, club_id: int, init_data: str, session: AsyncSession = Depends(get_session)):
-    club = await session.get(Club, club_id); await verify_webapp_admin(club, init_data)
+    club = await session.get(Club, club_id); await verify_webapp_staff(club, init_data, session, "products_manage")
     p = await session.get(ClubProduct, product_id)
     if not p or p.club_id != club_id: raise HTTPException(404, "Товар не найден")
     await session.delete(p); await session.commit(); return {"success": True}
@@ -996,13 +988,13 @@ async def webapp_admin_schedule_page(
     club = (await session.execute(select(Club).where(Club.id == club_id))).scalar_one_or_none()
     if not init_data:
         return _telegram_init_gate('/webapp/admin-schedule', club_id, 'Откройте админское расписание из Telegram')
-    await verify_webapp_admin(club, init_data)
+    await verify_webapp_staff(club, init_data, session, "schedule_view")
     return templates.TemplateResponse("admin_schedule.html", {"request": request, "club": club, "club_id": club_id, "disciplines": club.club_settings.get("disciplines", {})})
 
 @router.post("/webapp/admin-schedule/change")
 async def change_admin_schedule(payload: ScheduleChangePayload, session: AsyncSession = Depends(get_session)):
     club = (await session.execute(select(Club).where(Club.id == payload.club_id))).scalar_one_or_none()
-    await verify_webapp_admin(club, payload.init_data)
+    await verify_webapp_staff(club, payload.init_data, session, "schedule_edit")
     settings = dict(club.club_settings or {})
     disciplines = dict(settings.get("disciplines", {}))
     block = dict(disciplines.get(payload.discipline, {}))

@@ -24,6 +24,8 @@ class AdminManualAdd(StatesGroup):
 
 class AdminStates(StatesGroup):
     waiting_for_broadcast_text = State()
+    waiting_for_staff_telegram_id = State()
+    waiting_for_staff_role = State()
 
 # --- ДОБАВЛЯЕМ ДЛЯ SAAS СИСТЕМЫ ---
 
@@ -35,6 +37,8 @@ class AddClub(StatesGroup):
 
 
 class SuperAdminStates(StatesGroup):
+    waiting_for_staff_telegram_id = State()
+    waiting_for_staff_role = State()
     waiting_for_broadcast_text = State()
     waiting_for_extend_days = State()    # Если захочешь вводить дни продления вручную
     waiting_for_club_search = State()    # Поиск клуба по ID или названию

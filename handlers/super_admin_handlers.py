@@ -11,7 +11,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
-from database.db import Club, Student
+from database.db import Club, Student, ClubStaff
 from database.constants import DEFAULT_CLUB_SETTINGS
 from config import ADMIN_IDS
 from handlers.states import AddClub
@@ -43,6 +43,7 @@ async def super_admin_main(
     # --- Остальные кнопки управления SaaS ---
     builder.row(types.InlineKeyboardButton(text="➕ Добавить клуб", callback_data="add_new_club"))
     builder.row(types.InlineKeyboardButton(text="📋 Список всех клубов", callback_data="list_clubs"))
+    builder.row(types.InlineKeyboardButton(text="👔 Добавить сотрудника клубу", callback_data="super_staff_add"))
     builder.row(types.InlineKeyboardButton(text="💳 Продлить подписку клуба", callback_data="extend_club_sub"))
     builder.row(types.InlineKeyboardButton(text="📊 Общая статистика системы", callback_data="system_stats"))
     builder.row(types.InlineKeyboardButton(text="📢 Рассылка ВСЕМ владельцам", callback_data="broadcast_to_owners"))
@@ -57,6 +58,49 @@ async def super_admin_main(
         await event.answer(text, reply_markup=builder.as_markup(), parse_mode="HTML")
     else:
         await event.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
+
+
+@router.callback_query(F.data == "super_staff_add", F.from_user.id.in_(ADMIN_IDS))
+async def super_staff_add_start(callback: types.CallbackQuery, session: AsyncSession, state: FSMContext):
+    clubs = (await session.execute(select(Club).order_by(Club.id))).scalars().all()
+    kb = InlineKeyboardBuilder()
+    for club in clubs:
+        kb.button(text=f"{club.id}: {club.name}", callback_data=f"super_staff_club_{club.id}")
+    kb.adjust(1)
+    await callback.message.edit_text("Выберите клуб для сотрудника:", reply_markup=kb.as_markup())
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("super_staff_club_"), F.from_user.id.in_(ADMIN_IDS))
+async def super_staff_choose_club(callback: types.CallbackQuery, state: FSMContext):
+    await state.update_data(staff_club_id=int(callback.data.rsplit("_", 1)[1]))
+    await state.set_state(SuperAdminStates.waiting_for_staff_telegram_id)
+    await callback.message.answer("Введите Telegram ID сотрудника:")
+    await callback.answer()
+
+
+@router.message(SuperAdminStates.waiting_for_staff_telegram_id, F.from_user.id.in_(ADMIN_IDS))
+async def super_staff_id(message: types.Message, state: FSMContext):
+    if not (message.text or "").strip().isdigit():
+        return await message.answer("ID должен состоять только из цифр.")
+    await state.update_data(staff_telegram_id=int(message.text.strip()))
+    await state.set_state(SuperAdminStates.waiting_for_staff_role)
+    await message.answer("Введите роль: cashier, coach или manager:")
+
+
+@router.message(SuperAdminStates.waiting_for_staff_role, F.from_user.id.in_(ADMIN_IDS))
+async def super_staff_role(message: types.Message, state: FSMContext, session: AsyncSession):
+    role = (message.text or "").strip().lower()
+    if role not in {"cashier", "coach", "manager"}:
+        return await message.answer("Допустимые роли: cashier, coach, manager")
+    data = await state.get_data()
+    staff = (await session.execute(select(ClubStaff).where(ClubStaff.club_id == data["staff_club_id"], ClubStaff.telegram_id == data["staff_telegram_id"]))).scalar_one_or_none()
+    if staff:
+        staff.role = role; staff.is_active = True
+    else:
+        session.add(ClubStaff(club_id=data["staff_club_id"], telegram_id=data["staff_telegram_id"], role=role, full_name=message.from_user.full_name))
+    await session.commit(); await state.clear()
+    await message.answer(f"✅ Сотрудник добавлен в клуб. Роль: {role}")
 
 
 @router.callback_query(F.data == "add_new_club", F.from_user.id.in_(ADMIN_IDS))

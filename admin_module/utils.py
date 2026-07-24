@@ -1,9 +1,27 @@
 from fastapi import HTTPException, Request
 from fastapi.responses import HTMLResponse
 
-from database.db import Club
+from database.db import Club, ClubStaff
 from middlewares.db_saas_midleware import SUPER_ADMIN_IDS
 from .webapp_verify import verify_telegram_data
+from services.staff_permissions import staff_can
+
+
+async def verify_webapp_staff(club: Club, init_data: str | None, session, permission: str):
+    """Owner/super keep full access; staff receives only an explicit permission."""
+    if not club or not getattr(club, "bot_token", None) or not init_data:
+        raise HTTPException(status_code=403, detail="Требуется авторизация Telegram")
+    tg_user = verify_telegram_data(init_data, club.bot_token)
+    if not tg_user:
+        raise HTTPException(status_code=403, detail="Недействительные данные Telegram")
+    user_id = int(tg_user.get("id"))
+    if user_id == int(club.owner_id or 0) or user_id in SUPER_ADMIN_IDS:
+        return tg_user
+    staff = (await session.execute(ClubStaff.__table__.select().where(ClubStaff.club_id == club.id, ClubStaff.telegram_id == user_id, ClubStaff.is_active.is_(True)))).first()
+    staff_obj = staff[0] if staff else None
+    if not staff_can(staff_obj, permission):
+        raise HTTPException(status_code=403, detail="Доступ запрещён для этой роли")
+    return tg_user
 
 
 def get_club_id_from_host(request: Request) -> int:
