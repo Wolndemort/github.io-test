@@ -296,15 +296,28 @@ async def check_abon_mailing():
                     logger.error(f"❌ Родтель с ID {student.parent_id} не найден в базе данных.")
                     continue
 
-                # Формируем текст уведомления
-                expire_str = student.expire_date.strftime('%d.%m.%Y') if student.expire_date else "Не указана"
-                notification_key = f"notify:expire:{student.club_id}:{student.id}:{student.expire_date.date().isoformat()}"
-                text = (
-                    f"⚠️ <b>Внимание!</b>\n\n"
-                    f"У атлета <b>{escape(student.name)}</b> скоро истекает абонемент.\n"
-                    f"Дата окончания: <code>{expire_str}</code>\n\n"
-                    f"Не забудьте продлить его в меню! 🥊"
-                )
+                reminder_flags = _subscription_reminder_flags(student, now_datetime)
+                if not reminder_flags:
+                    continue
+
+                expire_str = student.expire_date.strftime('%d.%m.%Y') if student.expire_date else None
+                reminder_codes = "-".join(f"{kind}{value}" for kind, value in reminder_flags)
+                notification_key = f"notify:expire:{student.club_id}:{student.id}:{today.isoformat()}:{reminder_codes}"
+                lines = [
+                    "⚠️ <b>Внимание!</b>",
+                    "",
+                    f"У атлета <b>{escape(student.name)}</b> скоро закончится абонемент.",
+                ]
+                if expire_str:
+                    lines.append(f"Дата окончания: <code>{expire_str}</code>")
+                days_left = [value for kind, value in reminder_flags if kind == "days"]
+                if days_left:
+                    lines.append(f"Осталось по дате: <b>{min(days_left)} дн.</b>")
+                lessons_left = [value for kind, value in reminder_flags if kind == "lessons"]
+                if lessons_left:
+                    lines.append(f"Осталось занятий: <b>{min(lessons_left)}</b>")
+                lines.extend(["", "Не забудьте продлить его в меню! 🥊"])
+                text = "\n".join(lines)
 
                 # 4. ФИКС КЛАВИАТУРЫ: Передаем все обязательные параметры
                 # Так как это рассылка авторизованному родителю, ставим is_authorized=True
@@ -488,6 +501,24 @@ async def _notification_forget(key: str) -> None:
         await redis_client.delete(key)
     except Exception as error:
         logger.warning("Не удалось снять блокировку уведомления %s: %s", key, error)
+
+
+def _subscription_reminder_flags(student, now_datetime: datetime) -> list[tuple[str, int]]:
+    """Build reminder triggers for active subscriptions."""
+    expire_date = getattr(student, "expire_date", None)
+    balance = int(getattr(student, "balance_lessons", 0) or 0)
+    flags: list[tuple[str, int]] = []
+
+    if expire_date:
+        expire_naive = expire_date.replace(tzinfo=None)
+        days_left = (expire_naive.date() - now_datetime.date()).days
+        if days_left in {3, 2, 1}:
+            flags.append(("days", days_left))
+
+    if balance and balance != 999 and balance <= 2:
+        flags.append(("lessons", balance))
+
+    return flags
 
 
 async def saas_daily_morning_check():

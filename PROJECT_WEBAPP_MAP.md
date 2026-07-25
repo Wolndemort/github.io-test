@@ -10,6 +10,7 @@ smoke -> backup/restore -> server deploy -> health/ready -> webhook/payment audi
 - `gym-api`: FastAPI, Telegram webhook, WebApp, business logic and scheduler.
 - `db`: PostgreSQL source of truth for clubs, users, visits, subscriptions and payments.
 - `redis`: rate limits, SaaS configuration cache and short-lived state.
+- `bot registry`: live registry of club bot tokens so new clubs attach without Docker restart.
 - `nginx`: TLS termination and public proxy to `gym-api:8000`.
 - `certbot`: production certificate renewal on the server; local Desktop uses a separate self-signed certificate.
 - `go2rtc`: video streams independent from the CRM/payment path.
@@ -37,6 +38,7 @@ volume as a migration fix.
 ## Что уже реализовано
 
 - Telegram-бот и старый профиль клиента остаются рабочими параллельно.
+- Новые клубы и боты подхватываются через общий реестр без перезапуска контейнеров.
 - Добавлен WebApp-клиентский кабинет в чёрно-белом премиальном стиле.
 - Есть экран атлета, история посещений, история оплат и подписок.
 - Есть покупка абонемента, покупка заморозки, бесплатная заморозка.
@@ -50,6 +52,8 @@ volume as a migration fix.
 - По ролям сотрудников теперь разделены кассовые и управленческие действия.
 - Бариста получает отдельные алерты по товарным заказам, а полный чек остаётся у владельца.
 - Фильтр магазина по категориям работает на уже существующих товарах без переноса или переименования данных.
+- Нижняя панель быстрых действий в кабинете клиента теперь сворачивается.
+- `reload_cache` дополняет только недостающие значения и не затирает ручные настройки клуба.
 - Добавлен безопасный backup retention: локально хранятся только последние 14 архивов.
 - Добавлен отдельный `restore-check` для тестовой базы: он проверяет восстановление копии без риска для прода.
 - Тестовый restore-check явно отделён от боевого потока бэкапа и описан в README.
@@ -61,7 +65,7 @@ volume as a migration fix.
 - Ручной `/open-turnstile` защищён `X-API-Key`; `/webapp/open-turnstile` проверяет Telegram-подпись и владельца атлета.
 - `/ready` возвращает HTTP 503 при проблеме с БД.
 - CI/CD после пересборки ждёт `/health` и `/ready`, затем запускает production smoke-check.
-- Историческая проверка: 45 тестов прошли успешно.
+- Историческая проверка: 45 тестов прошли успешно; последняя локальная проверка — 100 тестов.
 - При отказе турникета транзакция прохода откатывается: `last_visit` и `VisitLog` не фиксируются до успешного ответа реле.
 - QR-коды проверяют формат и возраст часового `time_salt`; срок действия — до двух часов.
 
@@ -89,7 +93,7 @@ volume as a migration fix.
 - `services/abuse_guard.py` — rate-limit в Redis и audit для заблокированных попыток; критичные операции fail-closed.
 - `scripts/smoke_check.py` — post-deploy smoke-check.
 - `tests/test_smoke_check.py` — unit-тесты smoke-check обёртки.
-- `README.txt` — описание политики бэкапов и запуска restore-check.
+- `README.txt` — описание политики бэкапов, bot registry и запуска restore-check.
 
 ## Основные файлы
 
@@ -97,6 +101,7 @@ volume as a migration fix.
 - `handlers/payments.py` — существующая рабочая логика оплат в боте.
 - `handlers/user_option.py` — профиль, QR, привязка по номеру, заморозки.
 - `handlers/buttons.py` — клавиатуры и WebApp-кнопки.
+- `services/bot_registry.py` — реестр клубных ботов и безопасное подключение новых токенов без рестарта.
 - `templates/client_cabinet.html` — главный кабинет клиента.
 - `templates/webapp_base.html` — общий WebApp layout с верхним баром.
 - `templates/webapp_student.html` — карточка атлета.
@@ -162,8 +167,8 @@ volume as a migration fix.
 - Турникет и камеры установлены самостоятельно.
 - Кабельная инфраструктура и подключение оборудования выполнены самостоятельно.
 - СКУД реально используется в клубе примерно месяц.
-- Проведены реальные платежи и проверены webhook-сценарии.
-- В тестовой группе около 10 пользователей.
+- В боевой базе сейчас около 95 клиентов.
+- Реально проходят оплаты, продажи товаров и покупка абонементов.
 - Sentry подключён для production Error Monitoring; намеренные ошибки в production не создаются.
 
 ## Production-мониторинг Sentry

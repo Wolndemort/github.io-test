@@ -14,13 +14,24 @@ def test_scheduler_has_all_required_client_notification_flows():
     assert "days_absent >= 10" in source
     assert "Указать дату рождения" in source
     assert "Выбрать абонемент" in source
+    assert "scheduler.add_job(saas_daily_morning_check, 'cron', hour=10, minute=0" in source
+    assert "scheduler.add_job(check_abon_mailing, 'cron', hour=10, minute=5" in source
 
 
 def test_expiring_scheduler_requires_real_active_subscription():
     source = (ROOT / "database" / "db.py").read_text(encoding="utf-8")
     assert "Student.parent_id.is_not(None)" in source
     assert "Student.balance_lessons > 0" in source
+    assert "Student.balance_lessons <= 2" in source
     assert "Student.expire_date <= three_days_limit" in source
+
+
+def test_expiring_reminders_cover_days_and_lessons():
+    source = (ROOT / "main.py").read_text(encoding="utf-8")
+    assert "_subscription_reminder_flags" in source
+    assert "days_left in {3, 2, 1}" in source
+    assert "Осталось занятий" in source
+    assert "notify:expire:" in source
 
 
 def test_schedule_normalizer_keeps_all_lessons_and_legacy_shapes():

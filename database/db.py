@@ -3,7 +3,7 @@ from typing import Optional, List
 from sqlalchemy.ext.mutable import MutableDict
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, DeclarativeBase, mapped_column, relationship
-from sqlalchemy import BigInteger, DateTime, String, func, Integer, ForeignKey, Boolean, or_
+from sqlalchemy import BigInteger, DateTime, String, func, Integer, ForeignKey, Boolean, or_, and_
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from config import db_file
 from datetime import datetime, date, timezone
@@ -330,7 +330,8 @@ async def get_all_subscriptions(user_id: int, club_id: int, session: AsyncSessio
 
 async def get_expire_students_grouped(session):
     """
-    Достает студентов, у которых кончается абонемент,
+    Достает студентов, у которых скоро кончается абонемент
+    или осталось мало занятий,
     и сразу подтягивает данные их Клуба (чтобы знать, с какого токена писать)
     """
     from services.analytics import reporting_periods
@@ -343,12 +344,14 @@ async def get_expire_students_grouped(session):
             select(Student, Club.bot_token)
             .join(Club, Student.club_id == Club.id)
             .where(
-                Student.expire_date <= three_days_limit,
-                Student.expire_date >= today,
                 Student.parent_id.is_not(None),
-                Student.balance_lessons > 0,
+                Student.expire_date >= today,
                 or_(Student.is_frozen == 0, Student.is_frozen.is_(None)),
-                Club.subscription_expire_at >= today
+                Club.subscription_expire_at >= today,
+                or_(
+                    and_(Student.expire_date <= three_days_limit, Student.expire_date >= today),
+                    and_(Student.balance_lessons > 0, Student.balance_lessons <= 2),
+                ),
             )
         )
         result = await session.execute(stmt)
