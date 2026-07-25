@@ -15,6 +15,7 @@ from config import secret_key
 from sqlalchemy import select
 from sqlalchemy import func
 from handlers.buttons import get_main_menu_keyboard, get_profile_keyboard, get_section_menu_kb
+from services.schedule_utils import normalize_schedule_block
 from aiogram.fsm.context import FSMContext
 from aiogram.types import InlineKeyboardButton, BufferedInputFile
 from datetime import timedelta, timezone
@@ -1161,7 +1162,7 @@ async def show_discipline_schedule(
         return await callback.answer("Упс! Данные этой секции не найдены 🛠", show_alert=True)
 
     name = discipline_cfg.get("name", discipline_code.upper())
-    schedule_data = discipline_cfg.get("schedule")
+    schedule_data = normalize_schedule_block(discipline_cfg.get("schedule"))
 
     # 3. Парсим наше новое структурированное JSONB-расписание
     # Если там старая строка или вообще пусто — выводим красивую заглушку
@@ -1186,8 +1187,9 @@ async def show_discipline_schedule(
                     # Считаем свободные места (всего минус занято)
                     free_slots = max(0, lesson.get("max_slots", 15) - lesson.get("taken_slots", 0))
                     
+                    info = lesson.get("coach", "").strip()
                     lines.append(
-                        f"  ⏱ <code>{lesson['time']}</code> — {lesson['coach']}\n"
+                        f"  ⏱ <code>{lesson['time']}</code> — {info or 'Информация не указана'}\n"
                         f"  └ 👥 Мест осталось: <b>{free_slots}</b> из {lesson.get('max_slots', 15)}\n"
                     )
                 lines.append("") # Делаем пустую строку-отступ между днями для читаемости

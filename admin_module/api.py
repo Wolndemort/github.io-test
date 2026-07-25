@@ -16,6 +16,7 @@ from services.analytics import (
     moscow_date_boundary,
     moscow_weekday,
 )
+from services.schedule_utils import normalize_schedule_block
 import hmac
 import os
 import time
@@ -892,7 +893,8 @@ async def client_shop(request: Request, club_id: int = Query(...), init_data: st
     if not club or not verify_telegram_data(init_data, club.bot_token): raise HTTPException(403, "Доступ запрещён")
     products = (await session.execute(select(ClubProduct).where(ClubProduct.club_id == club_id, ClubProduct.is_active.is_(True), ClubProduct.stock > 0).order_by(ClubProduct.category, ClubProduct.name))).scalars().all()
     product_data = [{"id": p.id, "name": p.name, "category": p.category, "price_kopecks": p.price_kopecks, "stock": p.stock, "image_url": p.image_url} for p in products]
-    return templates.TemplateResponse("shop.html", {"request": request, "club": club, "club_id": club_id, "products": product_data})
+    categories = sorted({(p.category or "other").strip() or "other" for p in products})
+    return templates.TemplateResponse("shop.html", {"request": request, "club": club, "club_id": club_id, "products": product_data, "categories": categories})
 
 
 @router.get("/webapp/cart", response_class=HTMLResponse)
@@ -1055,7 +1057,7 @@ async def change_admin_schedule(payload: ScheduleChangePayload, session: AsyncSe
     settings = dict(club.club_settings or {})
     disciplines = dict(settings.get("disciplines", {}))
     block = dict(disciplines.get(payload.discipline, {}))
-    schedule = dict(block.get("schedule", {}))
+    schedule = normalize_schedule_block(block.get("schedule", {}))
     lessons = list(schedule.get(payload.day, []))
     if payload.action == "delete":
         if payload.index is None or payload.index < 0 or payload.index >= len(lessons):
@@ -1063,7 +1065,16 @@ async def change_admin_schedule(payload: ScheduleChangePayload, session: AsyncSe
         lessons.pop(payload.index)
     elif payload.action in {"add", "update"}:
         lesson = payload.lesson or {}
-        item = {"time": str(lesson.get("time", "00:00"))[:5], "coach": str(lesson.get("coach", ""))[:100], "max_slots": max(1, min(999, int(lesson.get("max_slots", 50))))}
+        raw_max_slots = lesson.get("max_slots", lesson.get("slots", lesson.get("limit", 0)))
+        try:
+            parsed_max_slots = int(raw_max_slots if raw_max_slots is not None else 0)
+        except (ValueError, TypeError):
+            parsed_max_slots = 0
+        item = {
+            "time": str(lesson.get("time", "00:00"))[:5],
+            "coach": str(lesson.get("coach", lesson.get("info", "")))[:100],
+            "max_slots": max(0, min(999, parsed_max_slots)),
+        }
         if payload.action == "add": lessons.append(item)
         elif payload.index is not None and 0 <= payload.index < len(lessons): lessons[payload.index] = item
         else: raise HTTPException(400, "Занятие не найдено")
@@ -1121,9 +1132,7 @@ async def webapp_schedule_page(
                 continue
 
             disc_name = disc_content.get("name", "Спортивная секция")
-            schedule_data = disc_content.get("schedule", {})
-            if not isinstance(schedule_data, dict):
-                schedule_data = {}
+            schedule_data = normalize_schedule_block(disc_content.get("schedule", {}))
 
             parsed_days = []
             for day_key, day_title in day_names.items():

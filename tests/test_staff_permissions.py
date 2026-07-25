@@ -4,14 +4,49 @@ from services.staff_permissions import ROLE_PERMISSIONS
 
 
 def test_staff_roles_have_separate_least_privilege_permissions():
-    assert "products_manage" in ROLE_PERMISSIONS["cashier"]
-    assert "schedule_edit" in ROLE_PERMISSIONS["coach"]
-    assert "products_manage" in ROLE_PERMISSIONS["manager"]
-    assert "schedule_edit" in ROLE_PERMISSIONS["manager"]
+    assert ROLE_PERMISSIONS["cashier"] == {"cash_sale", "products_view", "products_manage"}
+    assert ROLE_PERMISSIONS["coach"] == {"schedule_view", "schedule_edit", "qr_checkin"}
+    assert ROLE_PERMISSIONS["manager"] == {
+        "cash_sale",
+        "products_view",
+        "products_manage",
+        "cash_view",
+        "schedule_view",
+        "schedule_edit",
+        "tariffs_manage",
+        "qr_checkin",
+    }
     for role in ROLE_PERMISSIONS:
         assert "athletes_view" not in ROLE_PERMISSIONS[role]
         assert "settings_manage" not in ROLE_PERMISSIONS[role]
         assert "payments_manage" not in ROLE_PERMISSIONS[role]
+        assert "staff_manage" not in ROLE_PERMISSIONS[role]
+
+
+def test_permissions_for_staff_normalizes_roles_and_respects_custom_deny():
+    class Staff:
+        role = " Manager "
+        is_active = True
+        permissions = {"allow": ["athletes_view"], "deny": ["cash_view"]}
+
+    from services.staff_permissions import permissions_for_staff, staff_can
+
+    perms = permissions_for_staff(Staff())
+    assert "athletes_view" in perms
+    assert "cash_view" not in perms
+    assert staff_can(Staff(), "schedule_edit") is True
+    assert staff_can(Staff(), "cash_view") is False
+
+
+def test_unknown_role_gets_no_default_permissions():
+    class Staff:
+        role = "intern"
+        is_active = True
+        permissions = {}
+
+    from services.staff_permissions import permissions_for_staff
+
+    assert permissions_for_staff(Staff()) == set()
 
 
 def test_staff_webapp_actions_require_signed_init_data_and_permission():

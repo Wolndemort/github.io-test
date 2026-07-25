@@ -53,7 +53,7 @@
                         {% for lesson in day.lessons %}
                             <div class="lesson-card">
                                 <div class="time">{{ lesson.time }}</div>
-                                <div class="info"><div class="coach">👤 {{ lesson.coach }}</div></div>
+                                <div class="info"><div class="coach">ℹ️ {{ lesson.coach or 'Информация не указана' }}</div></div>
                                 <div class="slots"><div>Свободно</div><b>{{ lesson.free_slots }} / {{ lesson.max_slots }}</b></div>
                             </div>
                         {% endfor %}

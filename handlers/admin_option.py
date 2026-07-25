@@ -365,16 +365,12 @@ async def admin_settings_menu(callback: types.CallbackQuery, club_settings: dict
         callback_data="admin_setup_yookassa"
     ))
     builder.row(types.InlineKeyboardButton(
-        text="🛒 Управление товарами",
-        web_app=types.WebAppInfo(url=f"https://{club_id}.speedycrm.ru/webapp/admin-products?club_id={club_id}")
-    ))
-    builder.row(types.InlineKeyboardButton(
-        text="💵 Продажа товаров за наличные",
+        text="🛒 Продажа товаров за наличные",
         web_app=types.WebAppInfo(url=f"https://{club_id}.speedycrm.ru/webapp/admin-product-sale?club_id={club_id}")
     ))
     builder.row(types.InlineKeyboardButton(
-        text="💰 Касса и отчёт по наличным",
-        web_app=types.WebAppInfo(url=f"https://{club_id}.speedycrm.ru/admin/cash?club_id={club_id}")
+        text="📦 Склад товаров",
+        web_app=types.WebAppInfo(url=f"https://{club_id}.speedycrm.ru/webapp/admin-products?club_id={club_id}")
     ))
     ui = club_settings.get("ui", {})
     site_mark = "✅" if ui.get("site_enabled", False) else "❌"
@@ -2034,7 +2030,7 @@ async def admin_schedule_trigger_time_input(callback: types.CallbackQuery, state
         return await callback.answer("Доступ запрещён", show_alert=True)
     await state.set_state(AdminScheduleStates.add_time)
     await callback.message.answer(
-        "⏱ <b>Шаг 1 из 3: Введите время начала занятия</b>\n\n"
+        "⏱ <b>Шаг 1 из 2: Введите время начала занятия</b>\n\n"
         "Отправьте текст в формате ЧЧ:ММ (например: <code>19:30</code>):",
         parse_mode="HTML"
     )
@@ -2042,7 +2038,7 @@ async def admin_schedule_trigger_time_input(callback: types.CallbackQuery, state
 
 
 # ==========================================
-# ШАГ 3: Ловим ввод ВРЕМЕНИ и просим тренера
+# ШАГ 3: Ловим ввод ВРЕМЕНИ и просим информацию
 # ==========================================
 @router.message(AdminScheduleStates.add_time)
 async def admin_add_schedule_time(message: types.Message, state: FSMContext):
@@ -2056,25 +2052,20 @@ async def admin_add_schedule_time(message: types.Message, state: FSMContext):
     await state.set_state(AdminScheduleStates.add_coach)
     
     await message.answer(
-        "👤 <b>Шаг 2 из 3: Введите имя тренера или название группы</b>\n\n"
-        "Например: <i>Омаров А.</i> или <i>Общая группа</i>:",
+        "ℹ️ <b>Шаг 2 из 2: Введите информацию о занятии</b>\n\n"
+        "Например: <i>спарринги</i>, <i>техника</i>, <i>общая группа</i>:",
         parse_mode="HTML"
     )
 
 
 # ==========================================
-# ШАГ 4: Ловим ввод ТРЕНЕРА и просим места
+# ШАГ 4: Ловим ввод ИНФОРМАЦИИ и сохраняем
 # ==========================================
 @router.message(AdminScheduleStates.add_coach)
 async def admin_add_schedule_coach(message: types.Message, state: FSMContext):
     await state.update_data(new_coach=message.text.strip())
     await state.set_state(AdminScheduleStates.add_slots)
-    
-    await message.answer(
-        "🔢 <b>Шаг 3 из 3: Укажите лимит свободных мест на занятие</b>\n\n"
-        "Введите максимальное количество атлетов (только число, например: 15):",
-        parse_mode="HTML"
-    )
+    await message.answer("✅ Информация сохранена. Занятие будет добавлено без лимита мест.")
 
 
 # ==========================================
@@ -2094,10 +2085,9 @@ async def admin_finalize_schedule(
 ):
     if not (is_owner or is_super_admin or (staff and "schedule_edit" in permissions_for_staff(staff))):
         return await message.answer("Доступ запрещён")
-    if not message.text.isdigit():
-        return await message.answer("❌ Лимит мест должен быть целым числом! Попробуйте еще раз:")
-        
-    max_slots = int(message.text)
+    max_slots = 0
+    if (message.text or "").strip().isdigit():
+        max_slots = int(message.text.strip())
     s_data = await state.get_data()
     
     disc_id = s_data["disc_id"]
@@ -2136,8 +2126,8 @@ async def admin_finalize_schedule(
         f"✅ <b>Занятие успешно добавлено в расписание!</b>\n\n"
         f"📅 День: <b>{day_names[day]}</b>\n"
         f"⏱ Время: <b>{time_text}</b>\n"
-        f"👤 Инструктор: <b>{coach_text}</b>\n"
-        f"🔢 Мест в группе: <b>{max_slots}</b>",
+        f"ℹ️ Информация: <b>{coach_text or 'не указана'}</b>\n"
+        f"🔢 Лимит мест: <b>{max_slots if max_slots else 'не задан'}</b>",
         parse_mode="HTML"
     )
 
