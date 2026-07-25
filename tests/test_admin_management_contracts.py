@@ -38,6 +38,7 @@ def test_admin_product_cash_sale_uses_cart_and_confirms_stock_sale():
     assert "оплату наличными" in page
     assert "admin-product-sale" in buttons
     assert "Продать товар" in main_buttons
+    assert '"image_url": p.image_url' in api
 
 
 def test_admin_sales_and_student_filters_are_present():

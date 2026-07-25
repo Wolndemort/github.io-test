@@ -18,8 +18,9 @@ button,.link{display:inline-block;padding:9px 12px;border:0;border-radius:8px;ba
 #cart-link{position:fixed;left:14px;right:14px;bottom:14px;z-index:4;display:block;text-align:center;margin:0;padding:12px 14px;border-radius:14px;box-shadow:0 8px 28px rgba(0,0,0,.35)}
 #back{background:#1b1b1b;color:#fff;border:1px solid #444}
 small{color:#aaa}
-.pay-box{background:#151515;border:1px solid #2d2d2d;border-radius:14px;padding:12px;margin:10px 0}
-.pay-box select{width:100%;box-sizing:border-box}
+.pay-badge{display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border-radius:999px;border:1px solid #2d2d2d;background:#111;color:#fff;font-size:12px;line-height:1}
+.pay-badge.sbp{background:#12381f;border-color:#1f5d31;color:#9af0b4}
+.actions{display:flex;gap:6px;flex-wrap:wrap}
 </style>
 <a id="back" class="link" href="/webapp/client-cabinet?club_id={{ club_id }}">← В кабинет</a>
 <h2>Магазин {{ club.name }}</h2>
@@ -32,13 +33,6 @@ small{color:#aaa}
   </div>
 </div>
 <div id="message" style="color:#aaa;min-height:20px"></div>
-<div class="pay-box">
-  <div style="margin-bottom:6px;font-weight:700">Способ оплаты</div>
-  <select id="payment_method">
-    <option value="bank_card">Картой</option>
-    <option value="sbp" {% if not sbp_enabled %}disabled{% endif %}>СБП{% if not sbp_enabled %} (недоступно){% endif %}</option>
-  </select>
-</div>
 <div id="items"></div>
 <a id="cart-link" class="link" href="/webapp/cart?club_id={{ club_id }}">🛒 Открыть корзину</a>
 <script>
@@ -53,11 +47,33 @@ const thumbHtml=p=>p.image_url?`<div class="thumb"><img src="${esc(p.image_url)}
 const read=()=>JSON.parse(localStorage.getItem('speedy_cart')||'[]'),save=x=>localStorage.setItem('speedy_cart',JSON.stringify(x));
 function updateCartLink(){const n=read().reduce((s,x)=>s+Number(x.quantity||1),0);document.getElementById('cart-link').textContent=`🛒 Открыть корзину (${n})`}
 function added(){document.getElementById('message').textContent='Добавлено в корзину — можно продолжать покупки.'}
+function checkoutProduct(productId, paymentMethod){
+  const p=products.find(x=>x.id===Number(productId));
+  if(!p) return;
+  fetch('/webapp/cart/checkout',{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({init_data:tg.initData,club_id:{{club_id}},items:[{item_type:'product',product_id:p.id,quantity:1}],payment_method:paymentMethod})
+  }).then(async r=>{
+    const d=await r.json();
+    if(!r.ok) return alert(d.detail||'Ошибка');
+    if(d.payment_url){
+      localStorage.removeItem('speedy_cart');
+      location.href=d.payment_url;
+    } else if(d.charged){
+      localStorage.removeItem('speedy_cart');
+      alert(d.message||'Оплата прошла по сохраненной карте.');
+    } else {
+      alert(d.message||'Готово');
+    }
+  });
+}
 function render(){
   const list=products.filter(p=>!currentCategory||normalizeCategory(p.category)===currentCategory);
-  itemsEl.innerHTML=list.map(p=>`<div class="item">${thumbHtml(p)}<div class="row2"><b>${esc(p.name)}</b><span>${(p.price_kopecks/100).toFixed(2)} ₽</span></div><small>${esc(p.category)} · осталось ${p.stock}</small><br><button data-id="${p.id}">В корзину</button><button data-buy="${p.id}">Купить сейчас</button></div>`).join('')||'<p>Товаров пока нет.</p>';
+  itemsEl.innerHTML=list.map(p=>`<div class="item">${thumbHtml(p)}<div class="row2"><b>${esc(p.name)}</b><span>${(p.price_kopecks/100).toFixed(2)} ₽</span></div><small>${esc(p.category)} · осталось ${p.stock}</small><div class="actions" style="margin-top:8px"><span class="pay-badge ${sbp_enabled?'sbp':''}">СБП${sbp_enabled?' доступна':' недоступна'}</span><button data-id="${p.id}">В корзину</button><button data-buy="${p.id}">Купить сейчас</button><button data-sbp="${p.id}" ${sbp_enabled?'':'disabled'}>СБП</button></div></div>`).join('')||'<p>Товаров пока нет.</p>';
   itemsEl.querySelectorAll('[data-id]').forEach(b=>b.onclick=()=>{const p=products.find(x=>x.id===Number(b.dataset.id)),items=read(),x=items.find(x=>x.item_type==='product'&&x.product_id===p.id);if(x){if(x.quantity<p.stock)x.quantity++}else items.push({item_type:'product',product_id:p.id,name:p.name,price:p.price_kopecks,max:p.stock,quantity:1});save(items);updateCartLink();added()});
-  itemsEl.querySelectorAll('[data-buy]').forEach(b=>b.onclick=async()=>{const p=products.find(x=>x.id===Number(b.dataset.buy)),r=await fetch('/webapp/cart/checkout',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({init_data:tg.initData,club_id:{{club_id}},items:[{item_type:'product',product_id:p.id,quantity:1}],payment_method:document.getElementById('payment_method').value})}),d=await r.json();if(!r.ok)return alert(d.detail||'Ошибка');if(d.payment_url){localStorage.removeItem('speedy_cart');location.href=d.payment_url}else if(d.charged){localStorage.removeItem('speedy_cart');alert(d.message||'Оплата прошла по сохраненной карте.')}else alert(d.message||'Готово')})
+  itemsEl.querySelectorAll('[data-buy]').forEach(b=>b.onclick=()=>checkoutProduct(Number(b.dataset.buy),'bank_card'));
+  itemsEl.querySelectorAll('[data-sbp]').forEach(b=>b.onclick=()=>checkoutProduct(Number(b.dataset.sbp),'sbp'));
 }
 document.getElementById('filters').onclick=e=>{const btn=e.target.closest('[data-cat]');if(!btn)return;currentCategory=normalizeCategory(btn.dataset.cat);document.querySelectorAll('.chip').forEach(x=>x.classList.toggle('active',x===btn));render()};
 render();updateCartLink();

@@ -1152,7 +1152,7 @@ async def admin_product_sale_page(request: Request, club_id: int = Query(...), i
         return _telegram_init_gate('/webapp/admin-product-sale', club_id, 'Откройте продажу из Telegram')
     await verify_webapp_staff(club, init_data, session, "cash_sale")
     products = (await session.execute(select(ClubProduct).where(ClubProduct.club_id == club_id, ClubProduct.is_active.is_(True), ClubProduct.stock > 0).order_by(ClubProduct.category, ClubProduct.name))).scalars().all()
-    product_data = [{"id": p.id, "name": p.name, "category": p.category, "price_kopecks": p.price_kopecks, "stock": p.stock} for p in products]
+    product_data = [{"id": p.id, "name": p.name, "category": p.category, "price_kopecks": p.price_kopecks, "stock": p.stock, "image_url": p.image_url} for p in products]
     categories = sorted({(p.category or "other").strip() or "other" for p in products})
     return templates.TemplateResponse("admin_product_sale.html", {"request": request, "club_id": club_id, "products": product_data, "categories": categories})
 
