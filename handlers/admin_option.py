@@ -34,6 +34,7 @@ from loguru import logger
 from PIL import Image, UnidentifiedImageError
 from services.input_normalization import normalize_ru_phone, parse_user_date
 from services.staff_permissions import permissions_for_staff
+from services.audit import audit_event
 
 
 router = Router()
@@ -41,6 +42,20 @@ router = Router()
 
 def _manual_phone_key(value: str | None) -> str:
     return normalize_ru_phone(value) or ""
+
+
+def _actor_context_from_admin(flags: dict[str, bool], staff=None, actor_id: int | None = None) -> dict:
+    if flags.get("is_super_admin"):
+        role = "super_admin"
+    elif flags.get("is_owner"):
+        role = "owner"
+    else:
+        role = str(getattr(staff, "role", "")).strip().casefold() if staff else "staff"
+    return {
+        "actor_user_id": actor_id,
+        "actor_role": role,
+        "actor_name": getattr(staff, "full_name", None) if staff else None,
+    }
 
 
 @router.callback_query(F.data == "admin_add_manual")
@@ -494,6 +509,21 @@ async def toggle_logic(
 
     # Чистим кэш
     await redis.delete(f"club_config:{callback.bot.token}")
+
+    audit_event(
+        "club_setting_toggled",
+        club_id=club.id,
+        action="toggle",
+        object_type="club_setting",
+        object_id=target_key,
+        location="bot/admin_settings",
+        **_actor_context_from_admin(
+            {"is_owner": False, "is_super_admin": False},
+            actor_id=callback.from_user.id,
+        ),
+        setting_type=action_type,
+        enabled=(club_settings.get("features", {}) if action_type == "feat" else club_settings.get("disciplines", {}).get(target_key, {}).get("active")),
+    )
 
     await callback.answer("✅ Настройки обновлены")
 
@@ -958,7 +988,10 @@ async def process_manual_checkin(
         session: AsyncSession,
         club: Club,
         club_settings: dict,
-        redis: Redis
+        redis: Redis,
+        is_owner: bool,
+        is_super_admin: bool,
+        staff,
 ):
     # 1. Защита от двойного клика в интерфейсе ТГ
     if any(word in (callback.message.text or "") for word in
@@ -970,6 +1003,18 @@ async def process_manual_checkin(
     # 2. Передаем задачу нашему универсальному сервису прохода!
     res = await process_athlete_gate_pass(
         student_id, session, club_settings, expected_club_id=club.id, redis=redis
+    )
+    audit_event(
+        "manual_checkin",
+        club_id=club.id,
+        action="create",
+        object_type="visit",
+        object_id=student_id,
+        location="bot/manual_checkin",
+        **_actor_context_from_admin({"is_owner": is_owner, "is_super_admin": is_super_admin}, staff=staff, actor_id=callback.from_user.id),
+        success=bool(res.get("success")),
+        turnstile_status=res.get("turnstile_status"),
+        message=res.get("message"),
     )
 
 @router.callback_query(F.data == "admin_public_links")
@@ -1096,8 +1141,20 @@ async def staff_delete(callback: types.CallbackQuery, club: Club, session: Async
     staff = await session.get(ClubStaff, staff_id)
     if not staff or (not is_super_admin and staff.club_id != club.id):
         return await callback.answer("Сотрудник не найден", show_alert=True)
+    deleted_staff = {"telegram_id": staff.telegram_id, "role": staff.role, "id": staff.id}
     await session.delete(staff)
     await session.commit()
+    audit_event(
+        "staff_deleted",
+        club_id=club.id,
+        action="delete",
+        object_type="staff",
+        object_id=deleted_staff["id"],
+        location="bot/staff_manage",
+        **_actor_context_from_admin({"is_owner": is_owner, "is_super_admin": is_super_admin}, actor_id=callback.from_user.id),
+        deleted_telegram_id=deleted_staff["telegram_id"],
+        deleted_role=deleted_staff["role"],
+    )
     await staff_manage(callback, club=club, session=session, is_owner=is_owner, is_super_admin=is_super_admin)
 
 
@@ -1108,6 +1165,14 @@ async def staff_add_start(callback: types.CallbackQuery, state: FSMContext, is_o
     await state.set_state(AdminStates.waiting_for_staff_telegram_id)
     await callback.message.answer("Введите Telegram ID сотрудника:")
     await callback.answer()
+    audit_event(
+        "staff_add_started",
+        club_id=callback.message.chat.id if callback.message else None,
+        action="create",
+        object_type="staff",
+        location="bot/staff_manage",
+        **_actor_context_from_admin({"is_owner": is_owner, "is_super_admin": is_super_admin}, actor_id=callback.from_user.id),
+    )
 
 
 @router.message(AdminStates.waiting_for_staff_telegram_id)
@@ -1138,6 +1203,17 @@ async def staff_add_role(callback: types.CallbackQuery, state: FSMContext, club:
     await session.commit(); await state.clear()
     await callback.message.answer(f"✅ Сотрудник добавлен. Роль: {role}")
     await callback.answer()
+    audit_event(
+        "staff_saved",
+        club_id=club.id,
+        action="create" if not existing else "update",
+        object_type="staff",
+        object_id=getattr(existing, "id", None) or data["staff_telegram_id"],
+        location="bot/staff_manage",
+        **_actor_context_from_admin({"is_owner": is_owner, "is_super_admin": is_super_admin}, actor_id=callback.from_user.id),
+        staff_telegram_id=data["staff_telegram_id"],
+        role=role,
+    )
 
 
 @router.callback_query(F.data == 'admin_edit_payments')
@@ -1219,6 +1295,18 @@ async def admin_turnstile_main(callback: types.CallbackQuery, club_settings: dic
             reply_markup=builder.as_markup(),
             parse_mode="HTML"
         )
+    audit_event(
+        "turnstile_panel_opened",
+        club_id=None,
+        action="view",
+        object_type="turnstile_config",
+        object_id="turnstile",
+        location="bot/admin_turnstile",
+        actor_user_id=callback.from_user.id,
+        actor_role="super_admin" if is_super_admin else "owner",
+        actor_name=callback.from_user.full_name,
+        enabled=is_enabled,
+    )
 
 
 # Заполнение данных
@@ -1235,6 +1323,16 @@ async def setup_turnstile_url_step(callback: types.CallbackQuery, state: FSMCont
         "⚠️ Протокол (http://) и порты указывать не нужно, бот подставит их сам.",
         reply_markup=builder.as_markup(),
         parse_mode="HTML"
+    )
+    audit_event(
+        "turnstile_setup_started",
+        actor_user_id=callback.from_user.id,
+        actor_role="owner",
+        actor_name=callback.from_user.full_name,
+        action="create",
+        object_type="turnstile_config",
+        object_id="turnstile",
+        location="bot/admin_turnstile",
     )
 
 
@@ -1486,6 +1584,18 @@ async def admin_toggle_section_type(
                     t["count"] = 8
 
         await save_club_settings(session, redis, bot.token, club_id, club_settings)
+        audit_event(
+            "tariff_section_type_toggled",
+            club_id=club_id,
+            action="toggle",
+            object_type="discipline",
+            object_id=disc_id,
+            location="bot/tariffs",
+            actor_user_id=callback.from_user.id,
+            actor_role="super_admin" if is_super_admin else ("owner" if is_owner else (str(getattr(staff, "role", "")).strip().casefold() if staff else "staff")),
+            actor_name=callback.from_user.full_name,
+            new_type=new_type,
+        )
         await callback.answer("Тип направления изменен! ✨")
 
         # 🔥 ИСПРАВЛЕНО: Безопасный обход заморозки Pydantic v2 через создание копии объекта
@@ -1639,6 +1749,19 @@ async def admin_delete_tariff(
         club_settings["disciplines"][disc_id]["tariffs"] = tariffs
 
         await save_club_settings(session, redis, bot.token, club_id, club_settings)
+        audit_event(
+            "tariff_deleted",
+            club_id=club_id,
+            action="delete",
+            object_type="tariff",
+            object_id=f"{disc_id}:{tariff_idx_int}",
+            location="bot/tariffs",
+            actor_user_id=callback.from_user.id,
+            actor_role="super_admin" if is_super_admin else ("owner" if is_owner else (str(getattr(staff, "role", "")).strip().casefold() if staff else "staff")),
+            actor_name=callback.from_user.full_name,
+            discipline=disc_id,
+            tariff=target_tariff,
+        )
         await callback.answer("Тариф успешно удален! 👌")
 
     # 🔥 ИСПРАВЛЕНО: Безопасный обход заморозки Pydantic v2 через создание копии объекта
@@ -1836,6 +1959,19 @@ async def admin_add_tariff_min_age_final(
 
     # Сохраняем в базу данных Postgres и очищаем Redis-кэш мидлвари
     await save_club_settings(session, redis, bot.token, club_id, club_settings)
+    audit_event(
+        "tariff_created",
+        club_id=club_id,
+        action="create",
+        object_type="tariff",
+        object_id=f"{disc_id}:{len(club_settings['disciplines'][disc_id].get('tariffs', [])) - 1}",
+        location="bot/tariffs",
+        actor_user_id=message.from_user.id,
+        actor_role="staff",
+        actor_name=message.from_user.full_name,
+        discipline=disc_id,
+        tariff=new_tariff,
+    )
     await state.clear()
 
     await message.answer("✨ <b>Новый тариф успешно создан и запущен!</b>", parse_mode="HTML")
@@ -2011,6 +2147,19 @@ async def admin_delete_schedule_lesson(
 
             # И ТОЛЬКО ПОСЛЕ ЭТОГО сохраняем изменения в БД и Redis
             await save_club_settings(session, redis, bot.token, club_id, club_settings)
+            audit_event(
+                "schedule_lesson_deleted",
+                club_id=club_id,
+                action="delete",
+                object_type="schedule_lesson",
+                object_id=f"{disc_id}:{day}:{lesson_idx}",
+                location="bot/schedule",
+                actor_user_id=callback.from_user.id,
+                actor_role="staff",
+                actor_name=callback.from_user.full_name,
+                discipline=disc_id,
+                day=day,
+            )
             logger.success(f"🗑 Изменения расписания успешно сохранены в БД (Клуб {club_id})")
 
         else:
@@ -2120,6 +2269,22 @@ async def admin_finalize_schedule(
     # Твоя родная функция сохранения в Postgres + автоматический пуш в Redis!
     await save_club_settings(session, redis, bot.token, club_id, club_settings)
     await state.clear()
+    audit_event(
+        "schedule_lesson_created",
+        club_id=club_id,
+        action="create",
+        object_type="schedule_lesson",
+        object_id=f"{disc_id}:{day}:{time_text}",
+        location="bot/schedule",
+        actor_user_id=message.from_user.id,
+        actor_role="staff",
+        actor_name=message.from_user.full_name,
+        discipline=disc_id,
+        day=day,
+        time=time_text,
+        info=coach_text,
+        max_slots=max_slots,
+    )
     
     day_names = {"mon": "Понедельник", "tue": "Вторник", "wed": "Среда", "thu": "Четверг", "fri": "Пятница", "sat": "Суббота", "sun": "Воскресенье"}
     

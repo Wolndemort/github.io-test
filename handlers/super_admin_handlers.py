@@ -15,6 +15,7 @@ from database.db import Club, Student, ClubStaff
 from database.constants import DEFAULT_CLUB_SETTINGS
 from config import ADMIN_IDS
 from handlers.states import AddClub
+from services.audit import audit_event
 
 router = Router()
 
@@ -43,6 +44,7 @@ async def super_admin_main(
     # --- Остальные кнопки управления SaaS ---
     builder.row(types.InlineKeyboardButton(text="➕ Добавить клуб", callback_data="add_new_club"))
     builder.row(types.InlineKeyboardButton(text="📋 Список всех клубов", callback_data="list_clubs"))
+    builder.row(types.InlineKeyboardButton(text="📜 Аудит", callback_data="super_audit"))
     builder.row(types.InlineKeyboardButton(text="👔 Добавить сотрудника клубу", callback_data="super_staff_add"))
     builder.row(types.InlineKeyboardButton(text="💳 Продлить подписку клуба", callback_data="extend_club_sub"))
     builder.row(types.InlineKeyboardButton(text="📊 Общая статистика системы", callback_data="system_stats"))
@@ -68,6 +70,32 @@ async def super_staff_add_start(callback: types.CallbackQuery, session: AsyncSes
         kb.button(text=f"{club.id}: {club.name}", callback_data=f"super_staff_club_{club.id}")
     kb.adjust(1)
     await callback.message.edit_text("Выберите клуб для сотрудника:", reply_markup=kb.as_markup())
+    await callback.answer()
+
+
+@router.callback_query(F.data == "super_audit", F.from_user.id.in_(ADMIN_IDS))
+async def super_audit_start(callback: types.CallbackQuery, session: AsyncSession):
+    clubs = (await session.execute(select(Club).order_by(Club.id))).scalars().all()
+    kb = InlineKeyboardBuilder()
+    for club in clubs:
+        kb.button(text=f"{club.id}: {club.name}", callback_data=f"super_audit_club_{club.id}")
+    kb.adjust(1)
+    kb.row(types.InlineKeyboardButton(text="⬅️ Назад", callback_data="super"))
+    await callback.message.edit_text("Выберите клуб для просмотра аудита:", reply_markup=kb.as_markup())
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("super_audit_club_"), F.from_user.id.in_(ADMIN_IDS))
+async def super_audit_choose_club(callback: types.CallbackQuery):
+    club_id = int(callback.data.rsplit("_", 1)[1])
+    await callback.message.answer(
+        f"Откройте аудит клуба <code>{club_id}</code> в WebApp:",
+        reply_markup=types.InlineKeyboardMarkup(inline_keyboard=[
+            [types.InlineKeyboardButton(text="📜 Открыть аудит", web_app=types.WebAppInfo(url=f"https://{club_id}.speedycrm.ru/webapp/admin-audit?club_id={club_id}"))],
+            [types.InlineKeyboardButton(text="⬅️ Назад", callback_data="super_audit")]
+        ]),
+        parse_mode="HTML"
+    )
     await callback.answer()
 
 
@@ -105,6 +133,19 @@ async def super_staff_role(callback: types.CallbackQuery, state: FSMContext, ses
     await session.commit(); await state.clear()
     await callback.message.answer(f"✅ Сотрудник добавлен в клуб. Роль: {role}")
     await callback.answer()
+    audit_event(
+        "super_staff_saved",
+        club_id=data["staff_club_id"],
+        action="create" if not staff else "update",
+        object_type="staff",
+        object_id=getattr(staff, "id", None) or data["staff_telegram_id"],
+        location="super/staff",
+        actor_user_id=callback.from_user.id,
+        actor_role="super_admin",
+        actor_name=callback.from_user.full_name,
+        staff_telegram_id=data["staff_telegram_id"],
+        role=role,
+    )
 
 
 @router.callback_query(F.data == "add_new_club", F.from_user.id.in_(ADMIN_IDS))
@@ -181,6 +222,19 @@ async def process_token(message: types.Message, state: FSMContext, session: Asyn
             f"🏢 Название: <code>{club_name}</code>\n"
             f"🚀 Клуб добавлен. Меню бота можно настроить вручную в BotFather.",
             parse_mode="HTML"
+        )
+        audit_event(
+            "club_created",
+            club_id=new_club.id,
+            action="create",
+            object_type="club",
+            object_id=new_club.id,
+            location="super/create_club",
+            actor_user_id=message.from_user.id,
+            actor_role="super_admin",
+            actor_name=message.from_user.full_name,
+            name=club_name,
+            owner_id=owner_id,
         )
         await state.clear()
 
@@ -280,6 +334,20 @@ async def process_extend(
         if redis is not None and club.bot_token:
             await redis.delete(f"club_config:{club.bot_token}")
             logger.info(f"Супер-админ продлил клуб {club.id}, кэш сброшен.")
+        audit_event(
+            "club_subscription_extended",
+            club_id=club.id,
+            action="update",
+            object_type="club_subscription",
+            object_id=club.id,
+            location="super/extend_sub",
+            actor_user_id=callback.from_user.id,
+            actor_role="super_admin",
+            actor_name=callback.from_user.full_name,
+            previous_expire=current_expire.isoformat() if current_expire else None,
+            new_expire=club.subscription_expire_at.isoformat() if club.subscription_expire_at else None,
+            days=30,
+        )
 
         await callback.answer(
             f"✅ Продлен до {club.subscription_expire_at.strftime('%d.%m.%Y')}",
@@ -438,6 +506,19 @@ async def reload_all_system_configs(
             await session.commit()
             # Очищаем кэш текущей сессии SQLAlchemy, чтобы принудительно перечитать свежий JSON
             session.expire_all()
+        audit_event(
+            "system_config_reloaded",
+            club_id=None,
+            action="update",
+            object_type="system_config",
+            object_id="all_clubs",
+            location="super/reload_cache",
+            actor_user_id=callback.from_user.id,
+            actor_role="super_admin",
+            actor_name=callback.from_user.full_name,
+            updated_clubs_count=updated_clubs_count,
+            cache_deleted=True,
+        )
 
     except Exception as e:
         await session.rollback()

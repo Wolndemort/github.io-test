@@ -90,6 +90,19 @@ async def yookassa_webhook(request: Request, session: AsyncSession = Depends(get
                 amount_kopecks=cart.amount_kopecks,
                 badge="☕",
             )
+        audit_event(
+            "cart_payment_confirmed",
+            club_id=cart.club_id,
+            actor_user_id=cart.user_id,
+            actor_role="client",
+            action="create",
+            object_type="cart_order",
+            object_id=cart.id,
+            amount_kopecks=cart.amount_kopecks,
+            method="card" if not str(cart.provider_payment_id or "").startswith("CASH:") else "cash",
+            location="payments_webhook",
+            items=[{"title": i.title, "quantity": i.quantity, "product_id": i.product_id} for i in items],
+        )
         try:
             bot = Bot(club.bot_token)
             if club.owner_id:
@@ -105,7 +118,6 @@ async def yookassa_webhook(request: Request, session: AsyncSession = Depends(get
             await bot.session.close()
         except Exception:
             logger.exception("Не удалось отправить уведомление по корзине %s", cart.id)
-        audit_event("cart_payment_confirmed", club_id=cart.club_id, order_id=cart.id, amount_kopecks=cart.amount_kopecks)
         return {"status": "ok"}
 
     order_result = await session.execute(select(PaymentOrder).where(PaymentOrder.id == order_id).with_for_update())
@@ -193,4 +205,19 @@ async def yookassa_webhook(request: Request, session: AsyncSession = Depends(get
                 await bot.session.close()
             except Exception:
                 logger.exception("Не удалось уведомить владельца о платной заморозке %s", order.id)
+        audit_event(
+            "yookassa_webhook_confirmed",
+            club_id=order.club_id,
+            actor_user_id=order.user_id,
+            actor_role="client",
+            action="create",
+            object_type="payment_order",
+            object_id=order.id,
+            amount_kopecks=order.amount_kopecks,
+            method="cash" if str(order.provider_payment_id or "").startswith("CASH:") or str(order.type).startswith("CASH") else "card",
+            location="payments_webhook",
+            order_type=order.type,
+            student_id=order.student_id,
+            payer_label=payer_label,
+        )
     return {"status": "ok"}

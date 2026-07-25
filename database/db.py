@@ -214,6 +214,24 @@ class CashEntry(Base):
     reversed_entry_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
 
+class AuditEntry(Base):
+    """Structured audit trail for admin, staff and payment actions."""
+    __tablename__ = "audit_entries"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    club_id: Mapped[Optional[int]] = mapped_column(ForeignKey("clubs.id", ondelete="CASCADE"), index=True, nullable=True)
+    event: Mapped[str] = mapped_column(String(80), index=True)
+    actor_user_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True, index=True)
+    actor_role: Mapped[Optional[str]] = mapped_column(String(32), nullable=True, index=True)
+    action: Mapped[Optional[str]] = mapped_column(String(80), nullable=True, index=True)
+    object_type: Mapped[Optional[str]] = mapped_column(String(80), nullable=True, index=True)
+    object_id: Mapped[Optional[str]] = mapped_column(String(80), nullable=True, index=True)
+    location: Mapped[Optional[str]] = mapped_column(String(120), nullable=True, index=True)
+    amount_kopecks: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    method: Mapped[Optional[str]] = mapped_column(String(32), nullable=True, index=True)
+    payload: Mapped[dict] = mapped_column(JSONB, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, server_default="now()", index=True)
+
+
 class VisitLog(Base):
     __tablename__ = 'visit_logs'
 

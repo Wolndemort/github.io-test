@@ -45,7 +45,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from starlette import status
-from database.db import User, Student, Club, ClubProduct, CartOrder, CartItem, CashEntry
+from database.db import User, Student, Club, ClubStaff, ClubProduct, CartOrder, CartItem, CashEntry, AuditEntry
 from database.db import purchase_student_freeze
 from admin_module.schemas import AdminStudentUpdate, AdminStudentCreate
 from database.db import get_session
@@ -206,6 +206,44 @@ async def verify_webapp_admin(club: Club, init_data: str | None):
     tg_user = verify_telegram_data(init_data, club.bot_token)
     if not tg_user or (tg_user.get("id") != club.owner_id and tg_user.get("id") not in SUPER_ADMIN_IDS):
         raise HTTPException(status_code=403, detail="Доступ только для администратора клуба")
+    return tg_user
+
+
+async def _audit_actor_context(session: AsyncSession, club: Club, tg_user: dict | None, action_location: str | None = None) -> dict:
+    user_id = int((tg_user or {}).get("id") or 0)
+    actor_name = (tg_user or {}).get("first_name") or (tg_user or {}).get("username") or (tg_user or {}).get("last_name")
+    owner_id = int(club.owner_id or 0)
+    if user_id and user_id == owner_id:
+        return {
+            "actor_user_id": user_id,
+            "actor_role": "owner",
+            "actor_name": actor_name or "owner",
+            "location": action_location,
+        }
+    if user_id in {int(x) for x in SUPER_ADMIN_IDS}:
+        return {
+            "actor_user_id": user_id,
+            "actor_role": "super_admin",
+            "actor_name": actor_name or "super_admin",
+            "location": action_location,
+        }
+    staff = None
+    if user_id:
+        staff = (
+            await session.execute(
+                select(ClubStaff).where(
+                    ClubStaff.club_id == club.id,
+                    ClubStaff.telegram_id == user_id,
+                    ClubStaff.is_active.is_(True),
+                )
+            )
+        ).scalar_one_or_none()
+    return {
+        "actor_user_id": user_id or None,
+        "actor_role": str(getattr(staff, "role", "")).strip().casefold() if staff else "client",
+        "actor_name": getattr(staff, "full_name", None) or actor_name,
+        "location": action_location,
+    }
 
 
 # 1. Добавляем роут /admin, который просила кнопка в ТГ (убрали get_api_key!)
@@ -443,6 +481,63 @@ async def cash_register_page(request: Request, session: AsyncSession = Depends(g
     return templates.TemplateResponse("cash_register.html", {"request": request, "club_id": club_id, "rows": rows, "income": income, "cash_income": cash_income, "online_income": online_income, "expenses": expenses, "balance": cash_income - expenses, "date_from": date_from or "", "date_to": date_to or ""})
 
 
+@router.get("/webapp/admin-audit", response_class=HTMLResponse)
+async def admin_audit_page(
+    request: Request,
+    club_id: int = Query(...),
+    init_data: str | None = Query(default=None),
+    date_from: str | None = Query(default=None),
+    date_to: str | None = Query(default=None),
+    actor_role: str | None = Query(default=None),
+    event: str | None = Query(default=None),
+    session: AsyncSession = Depends(get_session),
+):
+    club = await session.get(Club, club_id)
+    if not init_data:
+        return _telegram_init_gate('/webapp/admin-audit', club_id, 'Откройте аудит из Telegram')
+    await verify_webapp_admin(club, init_data)
+    start = moscow_date_boundary(date_from) if date_from else None
+    end = moscow_date_boundary(date_to) + timedelta(days=1) if date_to else None
+    query = select(AuditEntry).where(AuditEntry.club_id == club_id)
+    if start:
+        query = query.where(AuditEntry.created_at >= start)
+    if end:
+        query = query.where(AuditEntry.created_at < end)
+    if actor_role:
+        query = query.where(AuditEntry.actor_role == actor_role.strip().casefold())
+    if event:
+        query = query.where(AuditEntry.event == event.strip())
+    entries = (await session.execute(query.order_by(AuditEntry.created_at.desc()).limit(300))).scalars().all()
+    rows = []
+    for entry in entries:
+        payload = entry.payload or {}
+        rows.append({
+            "id": entry.id,
+            "created_at": entry.created_at,
+            "event": entry.event,
+            "actor_user_id": entry.actor_user_id,
+            "actor_role": entry.actor_role or "",
+            "actor_name": payload.get("actor_name") or "",
+            "action": entry.action or payload.get("action") or "",
+            "object_type": entry.object_type or "",
+            "object_id": entry.object_id or "",
+            "location": entry.location or payload.get("location") or "",
+            "amount_kopecks": entry.amount_kopecks,
+            "method": entry.method or "",
+            "payload": payload,
+        })
+    return templates.TemplateResponse(
+        "admin_audit.html",
+        {
+            "request": request,
+            "club": club,
+            "club_id": club_id,
+            "rows": rows,
+            "filters": {"date_from": date_from or "", "date_to": date_to or "", "actor_role": actor_role or "", "event": event or ""},
+        },
+    )
+
+
 @router.post("/admin/cash/entries")
 async def create_cash_entry(payload: CashEntryPayload, session: AsyncSession = Depends(get_session)):
     club = await session.get(Club, payload.club_id)
@@ -452,7 +547,18 @@ async def create_cash_entry(payload: CashEntryPayload, session: AsyncSession = D
     entry = CashEntry(club_id=payload.club_id, entry_type=payload.entry_type, category=payload.category.strip()[:50] or "other", amount_kopecks=payload.amount_kopecks, description=payload.description.strip()[:500], created_by=int(tg_user.get("id")))
     session.add(entry)
     await session.commit()
-    audit_event("cash_entry_created", club_id=payload.club_id, entry_type=entry.entry_type, category=entry.category, amount_kopecks=entry.amount_kopecks, created_by=entry.created_by)
+    audit_event(
+        "cash_entry_created",
+        **await _audit_actor_context(session, club, tg_user, "admin/cash/entries"),
+        club_id=payload.club_id,
+        action="create",
+        object_type="cash_entry",
+        object_id=entry.id,
+        entry_type=entry.entry_type,
+        category=entry.category,
+        amount_kopecks=entry.amount_kopecks,
+        description=entry.description,
+    )
     return {"success": True, "id": entry.id}
 
 
@@ -470,7 +576,18 @@ async def reverse_cash_entry(entry_id: int, payload: CashEntryPayload, session: 
     await session.flush()
     entry.reversed_entry_id = reversal.id
     await session.commit()
-    audit_event("cash_entry_reversed", club_id=entry.club_id, entry_id=entry.id, reversal_id=reversal.id, created_by=int(tg_user.get("id")))
+    audit_event(
+        "cash_entry_reversed",
+        **await _audit_actor_context(session, club, tg_user, "admin/cash/entries/reverse"),
+        club_id=entry.club_id,
+        action="reverse",
+        object_type="cash_entry",
+        object_id=entry.id,
+        entry_id=entry.id,
+        reversal_id=reversal.id,
+        amount_kopecks=entry.amount_kopecks,
+        category=entry.category,
+    )
     return {"success": True, "reversal_id": reversal.id}
 
 
@@ -495,6 +612,18 @@ async def admin_update_student(
     await verify_webapp_admin(owner_club, payload.init_data)
     if not tg_user:
         raise HTTPException(status_code=403, detail="Доступ запрещён")
+    before = {
+        "name": student.name,
+        "balance_lessons": student.balance_lessons,
+        "birthday": student.birthday.isoformat() if student.birthday else None,
+        "expire_date": student.expire_date.isoformat() if student.expire_date else None,
+        "can_freeze": student.can_freeze,
+        "is_frozen": student.is_frozen,
+        "frozen_at": student.frozen_at.isoformat() if student.frozen_at else None,
+        "frozen_days": student.frozen_days,
+        "discipline": student.discipline,
+        "parent_phone": student.parent_phone,
+    }
     if payload.name is not None:
         name = payload.name.strip()
         if not name:
@@ -561,6 +690,27 @@ async def admin_update_student(
                 raise HTTPException(status_code=400, detail="Некорректный номер телефона")
             student.parent_phone = normalized_phone
     await db.commit()
+    after = {
+        "name": student.name,
+        "balance_lessons": student.balance_lessons,
+        "birthday": student.birthday.isoformat() if student.birthday else None,
+        "expire_date": student.expire_date.isoformat() if student.expire_date else None,
+        "can_freeze": student.can_freeze,
+        "is_frozen": student.is_frozen,
+        "frozen_at": student.frozen_at.isoformat() if student.frozen_at else None,
+        "frozen_days": student.frozen_days,
+        "discipline": student.discipline,
+        "parent_phone": student.parent_phone,
+    }
+    audit_event(
+        "student_updated",
+        **await _audit_actor_context(db, owner_club, tg_user, "admin/students/{student_id}"),
+        club_id=payload.club_id,
+        action="update",
+        object_type="student",
+        object_id=student.id,
+        changes={key: {"before": before[key], "after": after[key]} for key in before if before[key] != after[key]},
+    )
     return {"ok": True}
 
 
@@ -630,6 +780,20 @@ async def admin_create_student(
     db.add(new_student)
     await db.commit()
     await db.refresh(new_student)
+    audit_event(
+        "student_created",
+        **await _audit_actor_context(db, club, verify_telegram_data(payload.init_data, club.bot_token), "admin/students"),
+        club_id=club.id,
+        action="create",
+        object_type="student",
+        object_id=new_student.id,
+        student_name=new_student.name,
+        discipline=new_student.discipline,
+        balance_lessons=new_student.balance_lessons,
+        expire_date=new_student.expire_date.isoformat() if new_student.expire_date else None,
+        has_subscription=payload.tariff_idx is not None,
+        parent_phone=new_student.parent_phone,
+    )
     return {
         "ok": True,
         "student": {
@@ -936,7 +1100,7 @@ async def admin_product_sale_page(request: Request, club_id: int = Query(...), i
 @router.post("/webapp/admin-product-sale")
 async def admin_product_sale(payload: AdminProductSalePayload, session: AsyncSession = Depends(get_session)):
     club = await session.get(Club, payload.club_id)
-    await verify_webapp_staff(club, payload.init_data, session, "cash_sale")
+    tg_user = await verify_webapp_staff(club, payload.init_data, session, "cash_sale")
     if not payload.items:
         raise HTTPException(400, "Корзина пуста")
     ids = [int(item.get("product_id")) for item in payload.items]
@@ -958,6 +1122,18 @@ async def admin_product_sale(payload: AdminProductSalePayload, session: AsyncSes
     for product, quantity in normalized:
         session.add(CartItem(cart_order_id=order_id, product_id=product.id, item_type="product", title=product.name, quantity=quantity, unit_price_kopecks=product.price_kopecks, payload={"category": product.category, "payment_method": "cash"}))
     await session.commit()
+    audit_event(
+        "product_sale_cash_created",
+        **await _audit_actor_context(session, club, tg_user, "webapp/admin-product-sale"),
+        club_id=club.id,
+        action="create",
+        object_type="cart_order",
+        object_id=order_id,
+        source="cash_sale",
+        method="cash",
+        amount_kopecks=total,
+        items=[{"product_id": product.id, "name": product.name, "quantity": quantity} for product, quantity in normalized],
+    )
     try:
         bot = Bot(club.bot_token)
         notice_items = [
@@ -994,10 +1170,24 @@ async def admin_product_sale(payload: AdminProductSalePayload, session: AsyncSes
 
 @router.post("/webapp/admin-products")
 async def create_product(payload: ProductPayload, session: AsyncSession = Depends(get_session)):
-    club = await session.get(Club, payload.club_id); await verify_webapp_staff(club, payload.init_data, session, "products_manage")
+    club = await session.get(Club, payload.club_id); tg_user = await verify_webapp_staff(club, payload.init_data, session, "products_manage")
     if not payload.name.strip() or payload.price_kopecks <= 0 or payload.stock < 0: raise HTTPException(400, "Некорректные данные товара")
     p = ClubProduct(club_id=payload.club_id, name=payload.name.strip()[:120], image_url=(payload.image_url or "")[:500] or None, category=payload.category[:30], price_kopecks=payload.price_kopecks, stock=payload.stock, is_active=payload.is_active)
-    session.add(p); await session.commit(); return {"success": True}
+    session.add(p); await session.commit()
+    audit_event(
+        "product_created",
+        **await _audit_actor_context(session, club, tg_user, "webapp/admin-products"),
+        club_id=payload.club_id,
+        action="create",
+        object_type="product",
+        object_id=p.id,
+        name=p.name,
+        category=p.category,
+        price_kopecks=p.price_kopecks,
+        stock=p.stock,
+        is_active=p.is_active,
+    )
+    return {"success": True}
 
 @router.post("/webapp/admin-products/upload-image")
 async def upload_product_image(club_id: int, init_data: str, image: UploadFile = File(...), session: AsyncSession = Depends(get_session)):
@@ -1014,19 +1204,43 @@ async def upload_product_image(club_id: int, init_data: str, image: UploadFile =
 
 @router.patch("/webapp/admin-products/{product_id}")
 async def update_product(product_id: int, payload: ProductPayload, session: AsyncSession = Depends(get_session)):
-    club = await session.get(Club, payload.club_id); await verify_webapp_staff(club, payload.init_data, session, "products_manage")
+    club = await session.get(Club, payload.club_id); tg_user = await verify_webapp_staff(club, payload.init_data, session, "products_manage")
     p = await session.get(ClubProduct, product_id)
     if not p or p.club_id != payload.club_id: raise HTTPException(404, "Товар не найден")
     if not payload.name.strip() or payload.price_kopecks <= 0 or payload.stock < 0: raise HTTPException(400, "Некорректные данные товара")
+    before = {"name": p.name, "image_url": p.image_url, "category": p.category, "price_kopecks": p.price_kopecks, "stock": p.stock, "is_active": p.is_active}
     p.name=payload.name.strip()[:120]; p.image_url=(payload.image_url or "")[:500] or None; p.category=payload.category[:30]; p.price_kopecks=payload.price_kopecks; p.stock=payload.stock; p.is_active=payload.is_active
-    await session.commit(); return {"success": True}
+    await session.commit()
+    audit_event(
+        "product_updated",
+        **await _audit_actor_context(session, club, tg_user, "webapp/admin-products"),
+        club_id=payload.club_id,
+        action="update",
+        object_type="product",
+        object_id=p.id,
+        changes={k: {"before": before[k], "after": getattr(p, k)} for k in before if before[k] != getattr(p, k)},
+    )
+    return {"success": True}
 
 @router.delete("/webapp/admin-products/{product_id}")
 async def delete_product(product_id: int, club_id: int, init_data: str, session: AsyncSession = Depends(get_session)):
-    club = await session.get(Club, club_id); await verify_webapp_staff(club, init_data, session, "products_manage")
+    club = await session.get(Club, club_id); tg_user = await verify_webapp_staff(club, init_data, session, "products_manage")
     p = await session.get(ClubProduct, product_id)
     if not p or p.club_id != club_id: raise HTTPException(404, "Товар не найден")
-    await session.delete(p); await session.commit(); return {"success": True}
+    await session.delete(p); await session.commit()
+    audit_event(
+        "product_deleted",
+        **await _audit_actor_context(session, club, tg_user, "webapp/admin-products"),
+        club_id=club_id,
+        action="delete",
+        object_type="product",
+        object_id=product_id,
+        name=p.name,
+        category=p.category,
+        price_kopecks=p.price_kopecks,
+        stock=p.stock,
+    )
+    return {"success": True}
 
 @router.get("/webapp/admin-tariffs", response_class=HTMLResponse)
 async def webapp_admin_tariffs_page(request: Request, club_id: int = Query(...), init_data: str | None = Query(default=None), session: AsyncSession = Depends(get_session)):
@@ -1040,7 +1254,7 @@ async def webapp_admin_tariffs_page(request: Request, club_id: int = Query(...),
 @router.post("/webapp/admin-tariffs/change")
 async def change_admin_tariff(payload: TariffChangePayload, request: Request, session: AsyncSession = Depends(get_session)):
     club = await session.get(Club, payload.club_id)
-    await verify_webapp_staff(club, payload.init_data, session, "tariffs_manage")
+    tg_user = await verify_webapp_staff(club, payload.init_data, session, "tariffs_manage")
     settings = dict(club.club_settings or {})
     disciplines = dict(settings.get("disciplines", {}))
     block = dict(disciplines.get(payload.discipline, {}))
@@ -1074,6 +1288,17 @@ async def change_admin_tariff(payload: TariffChangePayload, request: Request, se
     redis = getattr(request.app.state, "redis_client", None)
     if redis:
         await redis.delete(f"club_config:{club.bot_token}")
+    audit_event(
+        "tariff_changed",
+        **await _audit_actor_context(session, club, tg_user, "webapp/admin-tariffs/change"),
+        club_id=club.id,
+        action=payload.action,
+        object_type="tariff",
+        object_id=payload.discipline,
+        discipline=payload.discipline,
+        tariff_index=payload.index,
+        tariff=payload.tariff,
+    )
     return {"success": True}
 
 
@@ -1093,7 +1318,7 @@ async def webapp_admin_schedule_page(
 @router.post("/webapp/admin-schedule/change")
 async def change_admin_schedule(payload: ScheduleChangePayload, session: AsyncSession = Depends(get_session)):
     club = (await session.execute(select(Club).where(Club.id == payload.club_id))).scalar_one_or_none()
-    await verify_webapp_staff(club, payload.init_data, session, "schedule_edit")
+    tg_user = await verify_webapp_staff(club, payload.init_data, session, "schedule_edit")
     settings = dict(club.club_settings or {})
     disciplines = dict(settings.get("disciplines", {}))
     block = dict(disciplines.get(payload.discipline, {}))
@@ -1123,6 +1348,18 @@ async def change_admin_schedule(payload: ScheduleChangePayload, session: AsyncSe
     schedule[payload.day] = lessons; block["schedule"] = schedule; disciplines[payload.discipline] = block; settings["disciplines"] = disciplines
     club.club_settings = settings
     await session.commit()
+    audit_event(
+        "schedule_changed",
+        **await _audit_actor_context(session, club, tg_user, "webapp/admin-schedule/change"),
+        club_id=club.id,
+        action=payload.action,
+        object_type="schedule",
+        object_id=f"{payload.discipline}:{payload.day}",
+        discipline=payload.discipline,
+        day=payload.day,
+        lesson=payload.lesson,
+        index=payload.index,
+    )
     return {"success": True}
 
 

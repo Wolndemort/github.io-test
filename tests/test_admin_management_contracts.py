@@ -85,6 +85,16 @@ def test_background_scheduler_has_stable_moscow_schedule_and_no_overlap():
     assert "scheduler.shutdown(wait=False)" in source
 
 
+def test_admin_audit_screen_and_button_are_registered():
+    keys = route_keys()
+    assert ("/webapp/admin-audit", "GET") in keys
+    buttons = Path("handlers/buttons.py").read_text(encoding="utf-8")
+    page = Path("templates/admin_audit.html").read_text(encoding="utf-8")
+    assert "📜 Аудит" in buttons
+    assert "actor_role" in page
+    assert "Показываются последние 300 записей" in page
+
+
 def test_daily_student_birthday_reminder_is_scheduled_and_uses_student_flow():
     source = Path("main.py").read_text(encoding="utf-8")
     assert "scheduler.add_job(saas_daily_morning_check" in source

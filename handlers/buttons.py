@@ -249,6 +249,13 @@ def admin_keyboard(club_id: int, club_settings: dict, subscription_date: datetim
                 web_app=types.WebAppInfo(url=f"{base_url}/webapp/admin-schedule?club_id={club_id}")
             )
         )
+    if is_full_access:
+        builder.row(
+            types.InlineKeyboardButton(
+                text="📜 Аудит",
+                web_app=types.WebAppInfo(url=f"{base_url}/webapp/admin-audit?club_id={club_id}")
+            )
+        )
     if is_full_access or "tariffs_manage" in allowed:
         builder.row(types.InlineKeyboardButton(
             text="💰 Тарифы клуба (WebApp)",
