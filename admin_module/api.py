@@ -99,6 +99,7 @@ class CartCheckoutPayload(BaseModel):
     init_data: str
     club_id: int
     items: list[dict]
+    payment_method: str = "bank_card"
 
 class AdminProductSalePayload(BaseModel):
     init_data: str
@@ -1017,6 +1018,13 @@ async def cart_checkout(payload: CartCheckoutPayload, request: Request, session:
     settings = club.club_settings or {}; pay = settings.get("payments", {})
     if not pay.get("yookassa_shop_id") or not pay.get("yookassa_secret_key"):
         raise HTTPException(400, "YooKassa не настроена")
+    payment_method = (payload.payment_method or "bank_card").strip().lower()
+    if payment_method in {"yookassa_sbp", "sbp"}:
+        payment_method = "sbp"
+    else:
+        payment_method = "bank_card"
+    if payment_method == "sbp" and not bool(pay.get("yookassa_sbp_enabled", True)):
+        raise HTTPException(400, "СБП отключена в настройках клуба")
     product_ids = [int(x["product_id"]) for x in payload.items if x.get("item_type", "product") == "product"]
     products = (await session.execute(select(ClubProduct).where(ClubProduct.club_id == club.id, ClubProduct.id.in_(product_ids), ClubProduct.is_active.is_(True)).with_for_update())).scalars().all() if product_ids else []
     by_id = {p.id: p for p in products}; normalized=[]; total=0
@@ -1053,10 +1061,58 @@ async def cart_checkout(payload: CartCheckoutPayload, request: Request, session:
         elif kind == "subscription": session.add(CartItem(cart_order_id=order_id, item_type=kind, title="Абонемент", quantity=info["quantity"], unit_price_kopecks=info["price"], payload=info | {"days": obj.get("days", 30), "count": obj.get("count", 0)}))
         else: session.add(CartItem(cart_order_id=order_id, item_type=kind, title="Заморозка", quantity=info["quantity"], unit_price_kopecks=info["price"], payload=info))
     await session.commit()
-    payment = await YooKassaClient(shop_id=pay["yookassa_shop_id"], secret_key=pay["yookassa_secret_key"], proxy_url=PROXY_URL).init_payment(order_id=order_id, amount_kopecks=total, user_id=int(tg_user["id"]), bot_username=club.bot_token)
+    saved_subscription = (
+        await session.execute(
+            select(Subscription)
+            .where(Subscription.club_id == club.id, Subscription.user_id == int(tg_user["id"]), Subscription.rebill_id.is_not(None))
+            .order_by(Subscription.created_at.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if (payload.payment_method or "bank_card").strip().lower() in {"bank_card", "card", "bank-card"} and saved_subscription and saved_subscription.rebill_id:
+        charge = await YooKassaClient(shop_id=pay["yookassa_shop_id"], secret_key=pay["yookassa_secret_key"], proxy_url=PROXY_URL).charge_payment(
+            order_id=order_id,
+            amount_kopecks=total,
+            payment_method_id=saved_subscription.rebill_id,
+            club_name=club.name,
+        )
+        if charge.get("Success") and charge.get("Status") == "succeeded":
+            payment_id = charge.get("PaymentId")
+            order.status = "CONFIRMED"
+            order.provider_payment_id = payment_id
+            items = (await session.execute(select(CartItem).where(CartItem.cart_order_id == order_id))).scalars().all()
+            for item in items:
+                if item.product_id:
+                    product = await session.get(ClubProduct, item.product_id, with_for_update=True)
+                    if not product or product.stock < item.quantity:
+                        order.status = "FAILED"
+                        await session.commit()
+                        raise HTTPException(400, "Товар недоступен или закончился")
+                    product.stock -= item.quantity
+                elif item.item_type == "subscription":
+                    p = item.payload or {}
+                    for _ in range(max(1, int(item.quantity or 1))):
+                        await add_abon(student_id=int(p["student_id"]), lessons_count=int(p.get("count", 0)), session=session, club_id=club.id, club_settings=club.club_settings or {}, days_to_add=int(p.get("days", 30)), discipline=p.get("discipline"))
+                elif item.item_type == "freeze":
+                    p = item.payload or {}
+                    for _ in range(max(1, int(item.quantity or 1))):
+                        await purchase_student_freeze(int(p["student_id"]), club.id, int(p["days"]), session)
+            await session.commit()
+            return {"ok": True, "order_id": order_id, "charged": True, "status": "succeeded", "message": "Оплата прошла по сохраненной карте", "total_kopecks": total}
+        if charge.get("Success") and charge.get("Status") == "pending":
+            order.provider_payment_id = charge.get("PaymentId")
+            await session.commit()
+            return {"ok": True, "order_id": order_id, "charged": False, "status": "pending", "message": "Оплата обрабатывается YooKassa", "total_kopecks": total}
+    payment = await YooKassaClient(shop_id=pay["yookassa_shop_id"], secret_key=pay["yookassa_secret_key"], proxy_url=PROXY_URL).init_payment(
+        order_id=order_id,
+        amount_kopecks=total,
+        user_id=int(tg_user["id"]),
+        bot_username=club.bot_token,
+        payment_method_type=payment_method,
+    )
     if not payment.get("Success"):
         order.status="FAILED"; await session.commit(); raise HTTPException(400, payment.get("Message", "Не удалось создать оплату"))
-    return {"ok": True, "order_id": order_id, "payment_url": payment["PaymentURL"], "total_kopecks": total}
+    return {"ok": True, "order_id": order_id, "payment_url": payment["PaymentURL"], "charged": False, "total_kopecks": total}
 
 @router.get("/webapp/shop", response_class=HTMLResponse)
 async def client_shop(request: Request, club_id: int = Query(...), init_data: str | None = Query(None), session: AsyncSession = Depends(get_session)):
@@ -1066,7 +1122,8 @@ async def client_shop(request: Request, club_id: int = Query(...), init_data: st
     products = (await session.execute(select(ClubProduct).where(ClubProduct.club_id == club_id, ClubProduct.is_active.is_(True), ClubProduct.stock > 0).order_by(ClubProduct.category, ClubProduct.name))).scalars().all()
     product_data = [{"id": p.id, "name": p.name, "category": p.category, "price_kopecks": p.price_kopecks, "stock": p.stock, "image_url": p.image_url} for p in products]
     categories = sorted({(p.category or "other").strip() or "other" for p in products})
-    return templates.TemplateResponse("shop.html", {"request": request, "club": club, "club_id": club_id, "products": product_data, "categories": categories})
+    sbp_enabled = bool((club.club_settings or {}).get("payments", {}).get("yookassa_sbp_enabled", True))
+    return templates.TemplateResponse("shop.html", {"request": request, "club": club, "club_id": club_id, "products": product_data, "categories": categories, "sbp_enabled": sbp_enabled})
 
 
 @router.get("/webapp/cart", response_class=HTMLResponse)
@@ -1076,7 +1133,8 @@ async def client_cart(request: Request, club_id: int = Query(...), init_data: st
         return _telegram_init_gate('/webapp/cart', club_id, 'Откройте корзину из Telegram')
     if not club or not verify_telegram_data(init_data, club.bot_token):
         raise HTTPException(403, "Доступ запрещён")
-    return templates.TemplateResponse("cart.html", {"request": request, "club": club, "club_id": club_id})
+    sbp_enabled = bool((club.club_settings or {}).get("payments", {}).get("yookassa_sbp_enabled", True))
+    return templates.TemplateResponse("cart.html", {"request": request, "club": club, "club_id": club_id, "sbp_enabled": sbp_enabled})
 
 @router.get("/webapp/admin-products", response_class=HTMLResponse)
 async def admin_products_page(request: Request, club_id: int = Query(...), init_data: str | None = Query(None), session: AsyncSession = Depends(get_session)):

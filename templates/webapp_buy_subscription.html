@@ -33,6 +33,12 @@
     <label style="display:block;margin-top:12px;">Тариф
         <select id="tariff" style="width:100%;padding:12px;margin-top:6px;"></select>
     </label>
+    <label style="display:block;margin-top:12px;">Способ оплаты
+        <select id="payment_method" style="width:100%;padding:12px;margin-top:6px;">
+            <option value="bank_card">Картой</option>
+            <option value="sbp" {% if not sbp_enabled %}disabled{% endif %}>СБП{% if not sbp_enabled %} (недоступно){% endif %}</option>
+        </select>
+    </label>
     <div class="mono-divider"></div>
     <div class="mono-grid-2">
         <button id="create" class="mono-action" style="width:100%;">В корзину</button>
@@ -97,6 +103,7 @@ document.getElementById('buyNow').addEventListener('click', async () => {
     student_id: Number(studentSelect.value),
     sport_type: sportSelect.value,
     tariff_idx: Number(tariffSelect.value),
+    payment_method: document.getElementById('payment_method').value,
   };
   const res = await fetch('/webapp/client-cabinet/buy-subscription', {
     method: 'POST',
@@ -106,6 +113,8 @@ document.getElementById('buyNow').addEventListener('click', async () => {
   const data = await res.json();
   if (res.ok && data.payment_url) {
     location.href = data.payment_url;
+  } else if (res.ok && data.charged) {
+    document.getElementById('msg').innerText = data.message || 'Оплата прошла по сохраненной карте.';
   } else {
     alert(data.detail || 'Ошибка');
     button.disabled = false;

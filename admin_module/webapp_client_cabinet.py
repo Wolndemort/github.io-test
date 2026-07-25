@@ -60,6 +60,13 @@ def _webapp_loading_config(club) -> dict:
     }
 
 
+def _normalize_payment_method(value: str | None) -> str:
+    method = (value or "bank_card").strip().lower()
+    if method in {"sbp", "yookassa_sbp"}:
+        return "sbp"
+    return "bank_card"
+
+
 async def _ensure_webapp_user_linked(db: AsyncSession, user_id: int, club_id: int) -> User | None:
     user = await db.get(User, user_id)
     if not user:
@@ -74,6 +81,20 @@ async def _ensure_webapp_user_linked(db: AsyncSession, user_id: int, club_id: in
         else:
             return None
     return user
+
+
+async def _get_saved_subscription(db: AsyncSession, club_id: int, user_id: int) -> Subscription | None:
+    result = await db.execute(
+        select(Subscription)
+        .where(
+            Subscription.club_id == club_id,
+            Subscription.user_id == user_id,
+            Subscription.rebill_id.is_not(None),
+        )
+        .order_by(Subscription.created_at.desc())
+        .limit(1)
+    )
+    return result.scalar_one_or_none()
 
 
 @router.get("/webapp/biometric-pass", response_class=HTMLResponse)
@@ -278,8 +299,10 @@ async def webapp_buy_subscription_page(request: Request, club_id: int, init_data
     if not user:
         return await webapp_auth_help_page(request=request, club_id=club_id, init_data=init_data, db=db)
     students = (await db.execute(select(Student).where(Student.parent_id == user.user_id, Student.club_id == club_id).order_by(Student.name))).scalars().all()
-    disciplines = (club.club_settings or {}).get("disciplines", {})
-    return templates.TemplateResponse("webapp_buy_subscription.html", {"request": request, "club": club, "club_id": club_id, "students": students, "disciplines": disciplines})
+    settings = club.club_settings or {}
+    disciplines = settings.get("disciplines", {})
+    sbp_enabled = bool(settings.get("payments", {}).get("yookassa_sbp_enabled", True))
+    return templates.TemplateResponse("webapp_buy_subscription.html", {"request": request, "club": club, "club_id": club_id, "students": students, "disciplines": disciplines, "sbp_enabled": sbp_enabled})
 
 
 @router.post("/webapp/client-cabinet/buy-subscription")
@@ -308,11 +331,14 @@ async def webapp_buy_subscription_submit(payload: WebAppBuySubscriptionPayload, 
     days = selected_tariff.get("days", 30)
     count = selected_tariff.get("count", 0)
     amount_kopecks = int(float(price) * 100)
+    payment_method = _normalize_payment_method(payload.payment_method)
     pay_settings = (club.club_settings or {}).get("payments", {})
     shop_id = pay_settings.get("yookassa_shop_id")
     secret_key = pay_settings.get("yookassa_secret_key")
     if not shop_id or not secret_key:
         raise HTTPException(status_code=400, detail="ЮKassa не настроена")
+    if payment_method == "sbp" and not bool(pay_settings.get("yookassa_sbp_enabled", True)):
+        raise HTTPException(status_code=400, detail="СБП отключена в настройках клуба")
     redis = request.app.state.redis_client
     idem_key = f"idem:webapp:buy_sub:{club.id}:{user_id}:{student.id}:{payload.sport_type}:{payload.tariff_idx}"
     if not await rate_limit(redis, idem_key, 1, 90):
@@ -339,13 +365,56 @@ async def webapp_buy_subscription_submit(payload: WebAppBuySubscriptionPayload, 
     order = PaymentOrder(id=order_id, user_id=user_id, student_id=student.id, club_id=club.id, amount_kopecks=amount_kopecks, lesson_count=count, days_to_add=days, discipline=payload.sport_type, status="NEW", type="FIRST")
     db.add(order)
     await db.commit()
-    payment_data = await YooKassaClient(shop_id=shop_id, secret_key=secret_key, proxy_url=PROXY_URL).init_payment(order_id=order_id, amount_kopecks=amount_kopecks, user_id=user_id, bot_username=club.bot_token)
+    payment_data = None
+    saved_subscription = await _get_saved_subscription(db, club.id, user_id)
+    if payment_method == "bank_card" and saved_subscription and saved_subscription.rebill_id:
+        payment_data = await YooKassaClient(shop_id=shop_id, secret_key=secret_key, proxy_url=PROXY_URL).charge_payment(
+            order_id=order_id,
+            amount_kopecks=amount_kopecks,
+            payment_method_id=saved_subscription.rebill_id,
+            club_name=club.name,
+        )
+        if payment_data.get("Success") and payment_data.get("Status") == "succeeded":
+            order.status = "CONFIRMED"
+            order.provider_payment_id = payment_data.get("PaymentId")
+            next_charge_naive = (datetime.now() + timedelta(days=days))
+            subscription = saved_subscription
+            subscription.next_charge_at = next_charge_naive
+            subscription.is_active = True
+            subscription.amount_kopecks = amount_kopecks
+            abon_result = await add_abon(
+                student_id=student.id,
+                lessons_count=count,
+                session=db,
+                club_id=club.id,
+                club_settings=club.club_settings or {},
+                days_to_add=days,
+                discipline=payload.sport_type,
+            )
+            if abon_result:
+                new_expire, _ = abon_result
+                await db.commit()
+                audit_event("webapp_subscription_checkout_created", club_id=club.id, user_id=user_id, student_id=student.id, amount_kopecks=amount_kopecks, sport_type=payload.sport_type, tariff_idx=payload.tariff_idx)
+                return {"ok": True, "charged": True, "status": "succeeded", "message": f"Оплата прошла. Абонемент активирован до {new_expire}"}
+        if payment_data.get("Success") and payment_data.get("Status") == "pending":
+            order.provider_payment_id = payment_data.get("PaymentId")
+            await db.commit()
+            audit_event("webapp_subscription_checkout_created", club_id=club.id, user_id=user_id, student_id=student.id, amount_kopecks=amount_kopecks, sport_type=payload.sport_type, tariff_idx=payload.tariff_idx)
+            return {"ok": True, "charged": False, "status": "pending", "message": "Оплата обрабатывается YooKassa"}
+
+    payment_data = await YooKassaClient(shop_id=shop_id, secret_key=secret_key, proxy_url=PROXY_URL).init_payment(
+        order_id=order_id,
+        amount_kopecks=amount_kopecks,
+        user_id=user_id,
+        bot_username=club.bot_token,
+        payment_method_type=payment_method,
+    )
     if not payment_data.get("Success"):
         order.status = "FAILED"
         await db.commit()
         raise HTTPException(status_code=400, detail=payment_data.get("Message", "Ошибка создания платежа"))
     audit_event("webapp_subscription_checkout_created", club_id=club.id, user_id=user_id, student_id=student.id, amount_kopecks=amount_kopecks, sport_type=payload.sport_type, tariff_idx=payload.tariff_idx)
-    return {"ok": True, "payment_url": payment_data["PaymentURL"]}
+    return {"ok": True, "payment_url": payment_data["PaymentURL"], "charged": False}
 
 
 @router.get("/webapp/client-cabinet/auth", response_class=HTMLResponse)
@@ -415,8 +484,10 @@ async def webapp_buy_freeze_page(request: Request, club_id: int, student_id: int
     student = await db.get(Student, student_id)
     if not student or student.club_id != club_id or student.parent_id != int(tg_user.get("id", 0)):
         raise HTTPException(status_code=403, detail="Атлет не найден")
-    price = (club.club_settings or {}).get("limits", {}).get("freeze_price_per_day", 0)
-    return templates.TemplateResponse("webapp_buy_freeze.html", {"request": request, "club": club, "student": student, "club_id": club_id, "price": price})
+    settings = club.club_settings or {}
+    price = settings.get("limits", {}).get("freeze_price_per_day", 0)
+    sbp_enabled = bool(settings.get("payments", {}).get("yookassa_sbp_enabled", True))
+    return templates.TemplateResponse("webapp_buy_freeze.html", {"request": request, "club": club, "student": student, "club_id": club_id, "price": price, "sbp_enabled": sbp_enabled})
 
 
 @router.post("/webapp/client-cabinet/buy-freeze")
@@ -430,6 +501,7 @@ async def webapp_buy_freeze_submit(payload: WebAppActionPayload, request: Reques
     student = await db.get(Student, payload.student_id, with_for_update=True)
     if not student or student.club_id != payload.club_id or student.parent_id != int(tg_user.get("id", 0)):
         raise HTTPException(status_code=403, detail="Атлет не найден")
+    payment_method = _normalize_payment_method(payload.payment_method)
     price_per_day = float((club.club_settings or {}).get("limits", {}).get("freeze_price_per_day", 0))
     if price_per_day <= 0:
         raise HTTPException(status_code=400, detail="Покупка заморозки отключена")
@@ -440,6 +512,8 @@ async def webapp_buy_freeze_submit(payload: WebAppActionPayload, request: Reques
     secret_key = getattr(club, "yookassa_secret_key", None) or (club.club_settings or {}).get("payments", {}).get("yookassa_secret_key")
     if not shop_id or not secret_key:
         raise HTTPException(status_code=400, detail="ЮKassa не настроена")
+    if payment_method == "sbp" and not bool((club.club_settings or {}).get("payments", {}).get("yookassa_sbp_enabled", True)):
+        raise HTTPException(status_code=400, detail="СБП отключена в настройках клуба")
     redis = request.app.state.redis_client
     idem_key = f"idem:webapp:buy_freeze:{club.id}:{int(tg_user.get('id', 0))}:{student.id}:{days}"
     if not await rate_limit(redis, idem_key, 1, 90):
@@ -473,10 +547,45 @@ async def webapp_buy_freeze_submit(payload: WebAppActionPayload, request: Reques
     )
     db.add(order)
     await db.commit()
-    payment_data = await YooKassaClient(shop_id=shop_id, secret_key=secret_key, proxy_url=PROXY_URL).init_payment(order_id=order_id, amount_kopecks=amount_kopecks, user_id=int(tg_user.get("id", 0)), bot_username=club.bot_token)
+    payment_data = None
+    saved_subscription = await _get_saved_subscription(db, club.id, int(tg_user.get("id", 0)))
+    if payment_method == "bank_card" and saved_subscription and saved_subscription.rebill_id:
+        payment_data = await YooKassaClient(shop_id=shop_id, secret_key=secret_key, proxy_url=PROXY_URL).charge_payment(
+            order_id=order_id,
+            amount_kopecks=amount_kopecks,
+            payment_method_id=saved_subscription.rebill_id,
+            club_name=club.name,
+        )
+        if payment_data.get("Success") and payment_data.get("Status") == "succeeded":
+            order.status = "CONFIRMED"
+            order.provider_payment_id = payment_data.get("PaymentId")
+            new_expire = await process_student_freeze(
+                student_id=student.id,
+                club_id=club.id,
+                club_settings=club.club_settings or {},
+                session=db,
+                days=days,
+            )
+            await db.commit()
+            if new_expire and new_expire != "disabled":
+                audit_event("webapp_freeze_checkout_created", club_id=club.id, user_id=int(tg_user.get("id", 0)), student_id=student.id, days=days, amount_kopecks=amount_kopecks)
+                return {"ok": True, "charged": True, "status": "succeeded", "message": f"Оплата прошла. Заморозка активирована до {new_expire.strftime('%d.%m.%Y')}"}
+        if payment_data.get("Success") and payment_data.get("Status") == "pending":
+            order.provider_payment_id = payment_data.get("PaymentId")
+            await db.commit()
+            audit_event("webapp_freeze_checkout_created", club_id=club.id, user_id=int(tg_user.get("id", 0)), student_id=student.id, days=days, amount_kopecks=amount_kopecks)
+            return {"ok": True, "charged": False, "status": "pending", "message": "Оплата обрабатывается YooKassa"}
+
+    payment_data = await YooKassaClient(shop_id=shop_id, secret_key=secret_key, proxy_url=PROXY_URL).init_payment(
+        order_id=order_id,
+        amount_kopecks=amount_kopecks,
+        user_id=int(tg_user.get("id", 0)),
+        bot_username=club.bot_token,
+        payment_method_type=payment_method,
+    )
     if not payment_data.get("Success"):
         order.status = "FAILED"
         await db.commit()
         raise HTTPException(status_code=400, detail=payment_data.get("Message", "Ошибка создания платежа"))
     audit_event("webapp_freeze_checkout_created", club_id=club.id, user_id=int(tg_user.get("id", 0)), student_id=student.id, days=days, amount_kopecks=amount_kopecks)
-    return {"ok": True, "payment_url": payment_data["PaymentURL"]}
+    return {"ok": True, "payment_url": payment_data["PaymentURL"], "charged": False}

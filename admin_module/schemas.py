@@ -5,6 +5,7 @@ class WebAppActionPayload(BaseModel):
     init_data: str
     club_id: int
     student_id: int
+    payment_method: str = "bank_card"
 
 
 class WebAppClubPayload(BaseModel):
@@ -18,6 +19,7 @@ class WebAppBuySubscriptionPayload(BaseModel):
     student_id: int
     sport_type: str
     tariff_idx: int
+    payment_method: str = "bank_card"
 
 
 class WebAppBindPhonePayload(BaseModel):

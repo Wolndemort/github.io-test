@@ -8,6 +8,12 @@
     <label style="display:block;margin-top:12px;">Дней
         <input id="days" type="number" min="1" max="365" value="7" style="width:100%;padding:12px;margin-top:6px;">
     </label>
+    <label style="display:block;margin-top:12px;">Способ оплаты
+        <select id="payment_method" style="width:100%;padding:12px;margin-top:6px;">
+            <option value="bank_card">Картой</option>
+            <option value="sbp" {% if not sbp_enabled %}disabled{% endif %}>СБП{% if not sbp_enabled %} (недоступно){% endif %}</option>
+        </select>
+    </label>
     <div class="mono-divider"></div>
     <div class="mono-grid-2">
         <button id="pay" class="mono-action" style="width:100%;">В корзину</button>
@@ -43,11 +49,18 @@ document.getElementById('buyNow')?.addEventListener('click', async () => {
   const res = await fetch('/webapp/client-cabinet/buy-freeze?days=' + encodeURIComponent(days), {
     method: 'POST',
     headers: {'Content-Type':'application/json'},
-    body: JSON.stringify({init_data: window.Telegram?.WebApp?.initData || '', club_id: {{ club_id }}, student_id: {{ student.id }}})
+    body: JSON.stringify({
+      init_data: window.Telegram?.WebApp?.initData || '',
+      club_id: {{ club_id }},
+      student_id: {{ student.id }},
+      payment_method: document.getElementById('payment_method').value
+    })
   });
   const data = await res.json();
   if (res.ok && data.payment_url) {
     location.href = data.payment_url;
+  } else if (res.ok && data.charged) {
+    document.getElementById('msg').innerText = data.message || 'Оплата прошла по сохраненной карте.';
   } else {
     alert(data.detail || 'Ошибка');
     button.disabled = false;

@@ -1350,7 +1350,6 @@ async def process_execute_delete_card(callback: types.CallbackQuery, session: As
         for sub in subscriptions:
             # Стираем rebill_id (токен ЮKassa), чтобы стереть привязку навсегда
             sub.rebill_id = None
-            sub.is_active = False # Выключаем флаг подписки
         
         await session.commit()
         logger.info(f"🗑️ Пользователь {user_id} полностью удалил свои банковские карты из СУБД.")
