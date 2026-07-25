@@ -9,7 +9,10 @@
         <input id="days" type="number" min="1" max="365" value="7" style="width:100%;padding:12px;margin-top:6px;">
     </label>
     <div class="mono-divider"></div>
-    <button id="pay" class="mono-action dark" style="width:100%;">Добавить в корзину</button>
+    <div class="mono-grid-2">
+        <button id="pay" class="mono-action" style="width:100%;">В корзину</button>
+        <button id="buyNow" class="mono-action dark" style="width:100%;">Купить сейчас</button>
+    </div>
     <p id="msg"></p>
 </div>
 <div class="mono-sticky-bottom">
@@ -33,6 +36,22 @@ document.getElementById('pay')?.addEventListener('click', async () => {
   button.disabled = false;
   document.getElementById('msg').innerText = 'Заморозка добавлена в корзину. Можно продолжать покупки.';
 });
+document.getElementById('buyNow')?.addEventListener('click', async () => {
+  const button = document.getElementById('buyNow');
+  button.disabled = true;
+  const days = document.getElementById('days').value;
+  const res = await fetch('/webapp/client-cabinet/buy-freeze?days=' + encodeURIComponent(days), {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({init_data: window.Telegram?.WebApp?.initData || '', club_id: {{ club_id }}, student_id: {{ student.id }}})
+  });
+  const data = await res.json();
+  if (res.ok && data.payment_url) {
+    location.href = data.payment_url;
+  } else {
+    alert(data.detail || 'Ошибка');
+    button.disabled = false;
+  }
+});
 </script>
 {% endblock %}
-<script>(function(){const old=document.getElementById('pay'),b=document.createElement('button');b.textContent='Купить сейчас';b.className='mono-action dark';b.style='width:100%;margin-top:8px';old?.after(b);b.onclick=async()=>{b.disabled=true;const days=document.getElementById('days').value,r=await fetch('/webapp/client-cabinet/buy-freeze?days='+encodeURIComponent(days),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({init_data:window.Telegram?.WebApp?.initData||'',club_id:{{club_id}},student_id:{{student.id}}})}),d=await r.json();if(r.ok&&d.payment_url)location.href=d.payment_url;else{alert(d.detail||'Ошибка');b.disabled=false}}})();</script>

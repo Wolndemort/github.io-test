@@ -34,7 +34,10 @@
         <select id="tariff" style="width:100%;padding:12px;margin-top:6px;"></select>
     </label>
     <div class="mono-divider"></div>
-    <button id="create" class="mono-action dark" style="width:100%;">Добавить в корзину</button>
+    <div class="mono-grid-2">
+        <button id="create" class="mono-action" style="width:100%;">В корзину</button>
+        <button id="buyNow" class="mono-action dark" style="width:100%;">Купить сейчас</button>
+    </div>
     <p id="msg"></p>
 </div>
 <div class="mono-sticky-bottom">
@@ -78,15 +81,35 @@ renderTariffs();
 document.getElementById('create').addEventListener('click', async () => {
   const button = document.getElementById('create');
   button.disabled = true;
-  button.textContent = 'Создаём ссылку...';
   const items = JSON.parse(localStorage.getItem('speedy_cart') || '[]');
   const selected = (disciplines[sportSelect.value].tariffs || [])[Number(tariffSelect.value)];
   items.push({item_type:'subscription', student_id:Number(studentSelect.value), sport_type:sportSelect.value, tariff_idx:Number(tariffSelect.value), quantity:1, name:'Абонемент', price:Number(selected.price)*100});
   localStorage.setItem('speedy_cart', JSON.stringify(items));
   button.disabled = false;
-  button.textContent = 'Добавить в корзину';
   document.getElementById('msg').innerText = 'Абонемент добавлен в корзину. Можно продолжать покупки.';
+});
+document.getElementById('buyNow').addEventListener('click', async () => {
+  const button = document.getElementById('buyNow');
+  button.disabled = true;
+  const payload = {
+    init_data: window.Telegram?.WebApp?.initData || '',
+    club_id: {{ club_id }},
+    student_id: Number(studentSelect.value),
+    sport_type: sportSelect.value,
+    tariff_idx: Number(tariffSelect.value),
+  };
+  const res = await fetch('/webapp/client-cabinet/buy-subscription', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(payload),
+  });
+  const data = await res.json();
+  if (res.ok && data.payment_url) {
+    location.href = data.payment_url;
+  } else {
+    alert(data.detail || 'Ошибка');
+    button.disabled = false;
+  }
 });
 </script>
 {% endblock %}
-<script>(function(){const b=document.createElement('button');b.textContent='Купить сейчас';b.className='mono-action dark';b.style='width:100%;margin-top:8px';document.getElementById('create')?.after(b);b.onclick=async()=>{b.disabled=true;const p={init_data:window.Telegram?.WebApp?.initData||'',club_id:{{club_id}},student_id:Number(document.getElementById('student').value),sport_type:document.getElementById('sport').value,tariff_idx:Number(document.getElementById('tariff').value)};const r=await fetch('/webapp/client-cabinet/buy-subscription',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)}),d=await r.json();if(r.ok&&d.payment_url)location.href=d.payment_url;else{alert(d.detail||'Ошибка');b.disabled=false}}})();</script>
