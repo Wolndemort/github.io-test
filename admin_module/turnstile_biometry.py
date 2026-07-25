@@ -15,13 +15,19 @@ from services.gate_control import process_athlete_gate_pass
 
 
 @router.post("/open-turnstile")
-async def open_turnstile(payload: dict, db: AsyncSession = Depends(get_session), _: str = Depends(get_api_key)):
+async def open_turnstile(
+    payload: dict,
+    request: Request,
+    db: AsyncSession = Depends(get_session),
+    _: str = Depends(get_api_key),
+):
     student_id = payload.get("student_id")
     student_club = await db.execute(select(Student.club_id).where(Student.id == student_id))
     club_id = student_club.scalar()
     club_res = await db.execute(select(Club.club_settings).where(Club.id == club_id))
     club_settings = club_res.scalar() or {}
-    res = await process_athlete_gate_pass(student_id, db, club_settings, expected_club_id=club_id)
+    redis = getattr(request.app.state, "redis_client", None)
+    res = await process_athlete_gate_pass(student_id, db, club_settings, expected_club_id=club_id, redis=redis)
     if not res["success"]:
         return {"success": False, "message": res["message"]}
     return {"success": True, "message": f"{res['message']} | {res['turnstile_status']}"}
@@ -43,7 +49,8 @@ async def open_webapp_turnstile(payload: BiometricCheckIn, request: Request, db:
     if student.parent_id != tg_user["id"]:
         raise HTTPException(status_code=403, detail="Доступ запрещен: Вы не родитель этого атлета")
     club_settings = club.club_settings or {}
-    res = await process_athlete_gate_pass(payload.student_id, db, club_settings, expected_club_id=club.id)
+    redis = getattr(request.app.state, "redis_client", None)
+    res = await process_athlete_gate_pass(payload.student_id, db, club_settings, expected_club_id=club.id, redis=redis)
     if not res["success"]:
         return {"success": False, "message": res["message"]}
     if not res["is_inside_session"] and student.parent_id:

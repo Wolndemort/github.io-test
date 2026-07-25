@@ -11,6 +11,7 @@ async def process_athlete_gate_pass(
     db,
     club_settings: dict,
     expected_club_id: int | None = None,
+    redis=None,
 ) -> dict:
     """
     Универсальный сервис контроля СКУД, сессий и разморозки.
@@ -128,22 +129,44 @@ async def process_athlete_gate_pass(
     relay_config = dict(club_settings.get("turnstile", {}) or {})
     turnstile_status = "ℹ️ СКУД отключен"
     if relay_config.get("enabled", False):
-        try:
-            base_url = str(relay_config.get("base_url", ""))
-            if base_url and not base_url.startswith("http"):
-                relay_config["base_url"] = f"http://{base_url}"
+        lock_key = f"turnstile:opening:{club.id}"
+        relay_lock_acquired = True
+        if redis is not None:
+            try:
+                relay_lock_acquired = bool(await redis.set(lock_key, "1", px=1500, nx=True))
+            except Exception as lock_err:
+                logger.warning("Не удалось поставить лок на турникет %s: %s", lock_key, lock_err)
+                relay_lock_acquired = True
 
-            # trigger_dingtian_turnstile должен быть импортирован или лежать в утилитах
-            from handlers.skud import trigger_dingtian_turnstile  # Сверь путь импорта!
-            is_opened = await trigger_dingtian_turnstile(relay_config)
-            if not is_opened:
-                await db.rollback()
-                return {
-                    "success": False,
-                    "message": "⚠️ Реле турникета отклонило команду. Турникет сейчас недоступен: проход не записан, занятия не списаны. Сообщите администратору или попробуйте ещё раз.",
-                }
-            turnstile_status = "✅ Турникет открыт"
+        if not relay_lock_acquired:
+            turnstile_status = "ℹ️ Турникет уже открывается"
+        try:
+            if relay_lock_acquired:
+                base_url = str(relay_config.get("base_url", ""))
+                if base_url and not base_url.startswith("http"):
+                    relay_config["base_url"] = f"http://{base_url}"
+
+                # trigger_dingtian_turnstile должен быть импортирован или лежать в утилитах
+                from handlers.skud import trigger_dingtian_turnstile  # Сверь путь импорта!
+                is_opened = await trigger_dingtian_turnstile(relay_config)
+                if not is_opened:
+                    if redis is not None:
+                        try:
+                            await redis.delete(lock_key)
+                        except Exception as unlock_err:
+                            logger.warning("Не удалось снять лок турникета %s: %s", lock_key, unlock_err)
+                    await db.rollback()
+                    return {
+                        "success": False,
+                        "message": "⚠️ Реле турникета отклонило команду. Турникет сейчас недоступен: проход не записан, занятия не списаны. Сообщите администратору или попробуйте ещё раз.",
+                    }
+                turnstile_status = "✅ Турникет открыт"
         except Exception as sku_err:
+            if relay_lock_acquired and redis is not None:
+                try:
+                    await redis.delete(lock_key)
+                except Exception as unlock_err:
+                    logger.warning("Не удалось снять лок турникета %s после ошибки: %s", lock_key, unlock_err)
             await db.rollback()
             logger.warning(f"Микросбой сети турникета: {sku_err}. Проход отклонён без записи.")
             return {

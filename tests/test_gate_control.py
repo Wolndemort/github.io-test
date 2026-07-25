@@ -40,6 +40,21 @@ def make_student(**overrides):
     return SimpleNamespace(**values)
 
 
+class FakeRedis:
+    def __init__(self):
+        self.values = {}
+
+    async def set(self, key, value, ex=None, px=None, nx=False):
+        if nx and key in self.values:
+            return False
+        self.values[key] = value
+        return True
+
+    async def delete(self, key):
+        self.values.pop(key, None)
+        return 1
+
+
 @pytest.mark.asyncio
 async def test_gate_rejects_student_from_another_club():
     student = make_student(club_id=20)
@@ -155,3 +170,43 @@ async def test_gate_rolls_back_session_when_turnstile_rejects():
     assert "Реле" in result["message"]
     db.rollback.assert_awaited_once()
     db.commit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_gate_skips_double_relay_call_for_same_club_lock():
+    club = SimpleNamespace(id=10, name="Клуб")
+    redis = FakeRedis()
+    first_student = make_student(id=1, name="Атлет 1", club_id=10, last_visit=None)
+    second_student = make_student(id=2, name="Атлет 2", club_id=10, last_visit=None)
+
+    first_db = make_db(first_student, club)
+    second_db = make_db(second_student, club)
+    relay_calls = []
+
+    async def open_turnstile(config):
+        relay_calls.append(config)
+        return True
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr("handlers.skud.trigger_dingtian_turnstile", open_turnstile)
+
+        first_result = await process_athlete_gate_pass(
+            1,
+            first_db,
+            {"turnstile": {"enabled": True, "base_url": "http://gate"}},
+            expected_club_id=10,
+            redis=redis,
+        )
+        second_result = await process_athlete_gate_pass(
+            2,
+            second_db,
+            {"turnstile": {"enabled": True, "base_url": "http://gate"}},
+            expected_club_id=10,
+            redis=redis,
+        )
+
+    assert first_result["success"] is True
+    assert second_result["success"] is True
+    assert first_result["turnstile_status"] == "✅ Турникет открыт"
+    assert second_result["turnstile_status"] == "ℹ️ Турникет уже открывается"
+    assert len(relay_calls) == 1

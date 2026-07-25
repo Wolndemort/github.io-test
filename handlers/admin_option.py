@@ -957,7 +957,8 @@ async def process_manual_checkin(
         state: FSMContext,
         session: AsyncSession,
         club: Club,
-        club_settings: dict
+        club_settings: dict,
+        redis: Redis
 ):
     # 1. Защита от двойного клика в интерфейсе ТГ
     if any(word in (callback.message.text or "") for word in
@@ -968,7 +969,7 @@ async def process_manual_checkin(
 
     # 2. Передаем задачу нашему универсальному сервису прохода!
     res = await process_athlete_gate_pass(
-        student_id, session, club_settings, expected_club_id=club.id
+        student_id, session, club_settings, expected_club_id=club.id, redis=redis
     )
 
 @router.callback_query(F.data == "admin_public_links")

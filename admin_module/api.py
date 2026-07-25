@@ -209,6 +209,7 @@ async def verify_webapp_admin(club: Club, init_data: str | None):
 @router.post("/webapp/scanner/scan")
 async def scanner_scan(
     payload: ScannerPayload,
+    request: Request,
     session: AsyncSession = Depends(get_session),
 ):
     """Обрабатывает QR без sendData, чтобы планшетный сканер не закрывался."""
@@ -231,8 +232,9 @@ async def scanner_scan(
     if not hmac.compare_digest(raw[3], generate_signature(student_id, raw[2])):
         raise HTTPException(status_code=400, detail="Недействительный QR")
 
+    redis = getattr(request.app.state, "redis_client", None)
     result = await process_athlete_gate_pass(
-        student_id, session, club.club_settings or {}, expected_club_id=club.id
+        student_id, session, club.club_settings or {}, expected_club_id=club.id, redis=redis
     )
     if not result["success"]:
         return {"success": False, "message": result["message"]}

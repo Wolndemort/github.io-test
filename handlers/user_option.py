@@ -675,6 +675,7 @@ async def _handle_qr_scan_data(
     session: AsyncSession,
     club: Club,
     club_settings: dict,
+    redis: Redis | None = None,
 ):
     raw_data = fix_layout(raw_data)
     parts = raw_data.strip().split(':')
@@ -706,6 +707,7 @@ async def _handle_qr_scan_data(
             session,
             club_settings,
             expected_club_id=club.id,
+            redis=redis,
         )
     except Exception as gate_error:
         logger.exception("Сбой обработчика прохода для athlete=%s: %s", scanned_id, gate_error)
@@ -744,13 +746,14 @@ async def _handle_qr_scan_data(
 
 
 @router.message(F.web_app_data)
-async def parse_qr_scan(message: types.Message, session: AsyncSession, club: Club, club_settings: dict):
+async def parse_qr_scan(message: types.Message, session: AsyncSession, club: Club, club_settings: dict, redis: Redis):
     await _handle_qr_scan_data(
         raw_data=message.web_app_data.data,
         message=message,
         session=session,
         club=club,
-        club_settings=club_settings
+        club_settings=club_settings,
+        redis=redis,
     )
 
 
@@ -759,14 +762,16 @@ async def manual_scanner_handler(
         message: types.Message,
         session: AsyncSession,  # ÐÑÐ¸Ð»ÐµÑÐµÐ»Ð¾ Ð¸Ð· Ð¼Ð¸Ð´Ð»Ð²Ð°ÑÐ¸
         club: Club,  # ÐÑÐ¸Ð»ÐµÑÐµÐ»Ð¾ Ð¸Ð· Ð¼Ð¸Ð´Ð»Ð²Ð°ÑÐ¸
-        club_settings: dict  # ÐÑÐ¸Ð»ÐµÑÐµÐ»Ð¾ Ð¸Ð· Ð¼Ð¸Ð´Ð»Ð²Ð°ÑÐ¸
+        club_settings: dict,  # ÐÑÐ¸Ð»ÐµÑÐµÐ»Ð¾ Ð¸Ð· Ð¼Ð¸Ð´Ð»Ð²Ð°ÑÐ¸
+        redis: Redis
 ):
     await _handle_qr_scan_data(
         raw_data=message.text,
         message=message,
         session=session,
         club=club,
-        club_settings=club_settings
+        club_settings=club_settings,
+        redis=redis,
     )
 
 @router.callback_query(F.data.startswith("gen_qr_"))
