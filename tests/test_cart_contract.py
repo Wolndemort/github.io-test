@@ -94,6 +94,14 @@ def test_shop_escapes_product_data_without_inline_product_arguments():
     assert "|tojson" in page
     assert "function esc" in page or "const esc" in page
     assert "data-id" in page
+    assert "normalizeCategory" in page
+    assert "normalizeCategory(p.category)===currentCategory" in page
+
+
+def test_admin_products_filter_normalizes_existing_category_values():
+    page = Path("templates/admin_products.html").read_text(encoding="utf-8")
+    assert "normalizeCategory" in page
+    assert "normalizeCategory(x.category)===filter" in page
 
 def test_admin_product_list_escapes_names_and_uses_data_buttons():
     page = Path("templates/admin_products.html").read_text(encoding="utf-8")

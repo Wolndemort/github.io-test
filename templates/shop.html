@@ -36,16 +36,18 @@ const products={{ products|tojson }};
 let currentCategory="";
 const itemsEl=document.getElementById('items');
 const esc=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const normalizeCategory=x=>String(x??'other').trim().toLowerCase().replace(/\s+/g,' ').replace(/ё/g,'е');
+const getCategoryLabel=x=>String(x??'other').trim()||'other';
 const read=()=>JSON.parse(localStorage.getItem('speedy_cart')||'[]'),save=x=>localStorage.setItem('speedy_cart',JSON.stringify(x));
 function updateCartLink(){const n=read().reduce((s,x)=>s+Number(x.quantity||1),0);document.getElementById('cart-link').textContent=`🛒 Открыть корзину (${n})`}
 function added(){document.getElementById('message').textContent='Добавлено в корзину — можно продолжать покупки.'}
 function render(){
-  const list=products.filter(p=>!currentCategory||String(p.category||'other')===currentCategory);
+  const list=products.filter(p=>!currentCategory||normalizeCategory(p.category)===currentCategory);
   itemsEl.innerHTML=list.map(p=>`<div class="item">${p.image_url?`<img src="${esc(p.image_url)}" alt="${esc(p.name)}">`:'<div style="height:180px;display:grid;place-items:center;background:#222;border-radius:10px;font-size:42px">🖼️</div>'}<div class="row2"><b>${esc(p.name)}</b><span>${(p.price_kopecks/100).toFixed(2)} ₽</span></div><small>${esc(p.category)} · осталось ${p.stock}</small><br><button data-id="${p.id}">В корзину</button><button data-buy="${p.id}">Купить сейчас</button></div>`).join('')||'<p>Товаров пока нет.</p>';
   itemsEl.querySelectorAll('[data-id]').forEach(b=>b.onclick=()=>{const p=products.find(x=>x.id===Number(b.dataset.id)),items=read(),x=items.find(x=>x.item_type==='product'&&x.product_id===p.id);if(x){if(x.quantity<p.stock)x.quantity++}else items.push({item_type:'product',product_id:p.id,name:p.name,price:p.price_kopecks,max:p.stock,quantity:1});save(items);updateCartLink();added()});
   itemsEl.querySelectorAll('[data-buy]').forEach(b=>b.onclick=async()=>{const p=products.find(x=>x.id===Number(b.dataset.buy)),r=await fetch('/webapp/cart/checkout',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({init_data:tg.initData,club_id:{{club_id}},items:[{item_type:'product',product_id:p.id,quantity:1}]})}),d=await r.json();if(!r.ok)return alert(d.detail||'Ошибка');localStorage.removeItem('speedy_cart');location.href=d.payment_url})
 }
-document.getElementById('filters').onclick=e=>{const btn=e.target.closest('[data-cat]');if(!btn)return;currentCategory=btn.dataset.cat||'';document.querySelectorAll('.chip').forEach(x=>x.classList.toggle('active',x===btn));render()};
+document.getElementById('filters').onclick=e=>{const btn=e.target.closest('[data-cat]');if(!btn)return;currentCategory=normalizeCategory(btn.dataset.cat);document.querySelectorAll('.chip').forEach(x=>x.classList.toggle('active',x===btn));render()};
 document.getElementById('back').onclick=()=>history.length>1?history.back():location.href='/webapp/client-cabinet?club_id={{club_id}}';
 render();updateCartLink();
 </script>
