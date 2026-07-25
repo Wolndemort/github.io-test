@@ -14,7 +14,7 @@
         #app-loader .spinner { width: 28px; height: 28px; border: 3px solid #d0d0d0; border-top-color: #111; border-radius: 50%; animation: spin .8s linear infinite; }
         @keyframes spin { to { transform: rotate(360deg); } }
         {% endif %}
-        body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f4f4f4; color: #111; padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom); }
+        body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f4f4f4; color: #111; padding-top: env(safe-area-inset-top); padding-bottom: calc(env(safe-area-inset-bottom) + 96px); }
         .wrap { width: 100%; max-width: 760px; margin: 0 auto; padding: 16px; }
         .hero { background: linear-gradient(180deg, #ffffff 0%, #fafafa 100%); border: 1px solid #d9d9d9; border-radius: 24px; padding: 20px; margin-bottom: 14px; box-shadow: 0 14px 40px rgba(0,0,0,.06); }
         .eyebrow { text-transform: uppercase; letter-spacing: .18em; font-size: 11px; color: #666; margin-bottom: 10px; }
@@ -31,6 +31,8 @@
         .muted { color: #777; font-size: 14px; }
         .status { font-weight: 700; white-space: nowrap; }
         .actions { display: grid; gap: 10px; }
+        .bottom-bar { position: fixed; left: 0; right: 0; bottom: 0; padding: 12px 16px calc(12px + env(safe-area-inset-bottom)); background: linear-gradient(180deg, rgba(244,244,244,0), #f4f4f4 20%, #f4f4f4 100%); z-index: 6; }
+        .bottom-bar .inner { max-width: 760px; margin: 0 auto; background: #fff; border: 1px solid #d9d9d9; border-radius: 18px; padding: 10px; box-shadow: 0 12px 28px rgba(0,0,0,.06); display: grid; gap: 8px; }
         .btn { display: block; text-align: center; text-decoration: none; padding: 15px 16px; border-radius: 16px; border: 1px solid #111; color: #111; background: #fff; font-weight: 700; transition: transform .15s ease, background .15s ease; }
         .btn:hover { transform: translateY(-1px); background: #f7f7f7; }
         .btn.dark { background: #111; color: #fff; }
@@ -127,6 +129,14 @@
             <a class="btn soft mono-action" href="/webapp/client-cabinet?club_id={{ club_id }}">Обновить кабинет</a>
             <a class="btn soft mono-action" href="#" onclick="window.Telegram?.WebApp?.close(); return false;">Вернуться в профиль бота</a>
         </div>
+    </div>
+</div>
+
+<div class="bottom-bar">
+    <div class="inner">
+        <a class="btn dark mono-action dark" href="/webapp/cart?club_id={{ club_id }}">🛒 Корзина</a>
+        <a class="btn soft mono-action" href="/webapp/client-cabinet/history?club_id={{ club_id }}">История оплат</a>
+        <a class="btn soft mono-action" href="/webapp/client-cabinet?club_id={{ club_id }}">Обновить кабинет</a>
     </div>
 </div>
 

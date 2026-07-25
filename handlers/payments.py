@@ -1261,7 +1261,7 @@ async def final_cash_pay(
 
 @router.callback_query(F.data == 'manage_subscription')
 async def process_manage_subscription(callback: types.CallbackQuery, session: AsyncSession):
-    """Главный экран управления подпиской: проверка привязанной карты"""
+    """Главный экран управления картами: проверка привязанной карты"""
     await callback.answer()
     user_id = callback.from_user.id
 
@@ -1281,7 +1281,7 @@ async def process_manage_subscription(callback: types.CallbackQuery, session: As
             [types.InlineKeyboardButton(text="🔙 Назад в профиль", callback_data="profile")] # Замени коллбэк назад на свой, если нужно
         ])
         return await callback.message.edit_text(
-            "💳 <b>Управление подпиской</b>\n\n"
+            "💳 <b>Управление картами</b>\n\n"
             "У вас нет сохраненных карт в системе автопродления.\n"
             "Карта привязывается автоматически после первой успешной онлайн-оплаты абонемента.",
             parse_mode="HTML",
@@ -1300,7 +1300,7 @@ async def process_manage_subscription(callback: types.CallbackQuery, session: As
     ])
 
     await callback.message.edit_text(
-        f"💳 <b>УПРАВЛЕНИЕ ПОДПИСКОЙ</b>\n\n"
+        f"💳 <b>УПРАВЛЕНИЕ КАРТАМИ</b>\n\n"
         f" К вашему профилю привязана банковская карта для быстрой оплаты.\n\n"
         f"<b>Статус автопродления:</b> АКТИВЕН\n"
         f"<b>Дата следующего расчетного периода:</b> {next_charge_str}\n\n"

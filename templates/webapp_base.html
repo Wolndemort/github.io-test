@@ -6,6 +6,26 @@
     <title>{% block title %}WebApp{% endblock %}</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <link rel="stylesheet" href="{{ url_for('static', path='css/mono.css') }}?v=1.1.0">
+    <style>
+        .mono-sticky-bottom {
+            position: sticky;
+            bottom: 0;
+            z-index: 5;
+            margin-top: 14px;
+            padding: 10px 0 0;
+            background: linear-gradient(180deg, rgba(9,9,9,0), #090909 28%, #090909 100%);
+        }
+        .mono-sticky-bottom .mono-card {
+            margin-bottom: 0;
+        }
+        .mono-bottom-actions {
+            display: grid;
+            gap: 8px;
+        }
+        @media (max-width: 540px) {
+            .mono-bottom-actions { gap: 10px; }
+        }
+    </style>
     {% block head_extra %}{% endblock %}
 </head>
 <body class="mono-theme">

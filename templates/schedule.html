@@ -7,7 +7,7 @@
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <link rel="stylesheet" href="{{ url_for('static', path='css/mono.css') }}?v=1.1.0">
     <style>
-        body { margin:0; background:#f4f4f4; color:#111; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+        body { margin:0; background:#f4f4f4; color:#111; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; padding-bottom: 96px; }
         .mono-shell { max-width:760px; margin:0 auto; padding:16px; }
         .mono-hero, .mono-card { background:linear-gradient(180deg,#fff,#fafafa); border:1px solid #d9d9d9; border-radius:24px; box-shadow:0 14px 40px rgba(0,0,0,.06); }
         .mono-hero { padding:20px; margin-bottom:12px; }
@@ -26,6 +26,10 @@
         .slots { font-size:12px; color:#111; text-align:right; font-weight:700; }
         .no-lessons { color:#777; font-style:italic; font-size:13px; }
         .discipline-picker { width:100%; padding:12px; margin-bottom:12px; border:1px solid #444; border-radius:12px; background:#101010; color:#fff; font-size:16px; }
+        .bottom-bar{position:fixed;left:0;right:0;bottom:0;padding:12px 16px calc(12px + env(safe-area-inset-bottom));background:linear-gradient(180deg,rgba(244,244,244,0),#f4f4f4 20%,#f4f4f4 100%);z-index:5}
+        .bottom-bar .inner{max-width:760px;margin:0 auto;display:grid;gap:8px}
+        .bottom-bar a{display:block;text-align:center;padding:14px 16px;border-radius:16px;border:1px solid #111;background:#111;color:#fff;text-decoration:none;font-weight:700}
+        .bottom-bar a.secondary{background:#fff;color:#111;border-color:#cfcfcf}
     </style>
 </head>
 <body class="mono-theme">
@@ -65,6 +69,12 @@
         {% else %}
             <p class="no-lessons">В клубе пока нет созданных спортивных секций.</p>
         {% endfor %}
+    </div>
+</div>
+<div class="bottom-bar">
+    <div class="inner">
+        <a href="/webapp/client-cabinet?club_id={{ club_id }}">← В кабинет</a>
+        <a class="secondary" href="/webapp/shop?club_id={{ club_id }}">🛒 В магазин</a>
     </div>
 </div>
 <script>

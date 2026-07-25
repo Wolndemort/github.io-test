@@ -49,7 +49,7 @@ def get_profile_keyboard(user, club_settings: dict, is_authorized: bool = False)
     if club_settings.get("limits", {}).get("freeze_price_per_day", 0) > 0:
         builder.row(
             types.InlineKeyboardButton(text="❄️ Купить заморозку", callback_data="buy_freeze"),
-            types.InlineKeyboardButton(text="💳 Подписка", callback_data="manage_subscription"),
+            types.InlineKeyboardButton(text="💳 Управление картами", callback_data="manage_subscription"),
         )
 
     # 4. Управление атлетами
