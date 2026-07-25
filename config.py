@@ -11,3 +11,4 @@ fastapi_key = os.getenv('API_STATS_KEY')
 YOOKASSA_WEBHOOK_SECRET = os.getenv('YOOKASSA_WEBHOOK_SECRET')
 # Настройки интернет-эквайринга юкасса
 PROXY_URL = None
+BASE_URL = os.getenv('BASE_URL', 'https://speedycrm.ru')

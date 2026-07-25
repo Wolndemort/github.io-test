@@ -33,10 +33,16 @@
         .actions { display: grid; gap: 10px; }
         .bottom-bar { position: fixed; left: 0; right: 0; bottom: 0; padding: 12px 16px calc(12px + env(safe-area-inset-bottom)); background: linear-gradient(180deg, rgba(244,244,244,0), #f4f4f4 20%, #f4f4f4 100%); z-index: 6; }
         .bottom-bar .inner { max-width: 760px; margin: 0 auto; background: #fff; border: 1px solid #d9d9d9; border-radius: 18px; padding: 10px; box-shadow: 0 12px 28px rgba(0,0,0,.06); display: grid; gap: 8px; }
+        .bottom-bar.collapsed .inner { display: none; }
+        .bottom-bar .toggle { max-width: 760px; margin: 0 auto 8px; }
+        .bottom-bar .toggle-btn { width: 100%; display: block; text-align: center; text-decoration: none; padding: 12px 14px; border-radius: 14px; border: 1px solid #111; background: #111; color: #fff; font-weight: 700; box-shadow: 0 8px 20px rgba(0,0,0,.08); }
+        .bottom-bar .toggle-btn:hover { background: #222; }
         .btn { display: block; text-align: center; text-decoration: none; padding: 15px 16px; border-radius: 16px; border: 1px solid #111; color: #111; background: #fff; font-weight: 700; transition: transform .15s ease, background .15s ease; }
         .btn:hover { transform: translateY(-1px); background: #f7f7f7; }
         .btn.dark { background: #111; color: #fff; }
         .btn.soft { border-color: #c8c8c8; color: #111; background: #fff; }
+        .bottom-bar .btn.soft { background: #f7f7f7; border-color: #111; color: #111; }
+        .bottom-bar .btn.dark { background: #111; color: #fff; border-color: #111; }
         .student-actions { display: grid; gap: 8px; margin-top: 10px; }
         .section-title { display:flex; align-items:center; justify-content:space-between; margin-bottom: 10px; }
         .section-title span { text-transform: uppercase; letter-spacing: .16em; font-size: 11px; color: #666; }
@@ -132,7 +138,10 @@
     </div>
 </div>
 
-<div class="bottom-bar">
+<div class="bottom-bar" id="bottomBar">
+    <div class="toggle">
+        <a class="toggle-btn" href="#" id="toggleBottomBar">Свернуть быстрые действия</a>
+    </div>
     <div class="inner">
         <a class="btn dark mono-action dark" href="/webapp/cart?club_id={{ club_id }}">🛒 Корзина</a>
         <a class="btn soft mono-action" href="/webapp/client-cabinet/history?club_id={{ club_id }}">История оплат</a>
@@ -145,6 +154,15 @@
     if (tg) {
         tg.ready();
         tg.expand();
+    }
+    const bottomBar = document.getElementById('bottomBar');
+    const toggleBottomBar = document.getElementById('toggleBottomBar');
+    if (bottomBar && toggleBottomBar) {
+        toggleBottomBar.onclick = (e) => {
+            e.preventDefault();
+            const collapsed = bottomBar.classList.toggle('collapsed');
+            toggleBottomBar.textContent = collapsed ? 'Развернуть быстрые действия' : 'Свернуть быстрые действия';
+        };
     }
     {% if loading.enabled %}
     const loaderLogo = document.getElementById('app-loader-logo');

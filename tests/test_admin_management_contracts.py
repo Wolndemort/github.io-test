@@ -5,6 +5,8 @@ from pydantic import ValidationError
 from admin_module.api import router
 from admin_module.schemas import AdminStudentUpdate
 from admin_module.system_api import StudentCreate
+from database.constants import DEFAULT_CLUB_SETTINGS
+from handlers.super_admin_handlers import merge_default_club_settings
 from services.input_normalization import normalize_ru_phone, parse_user_date
 
 
@@ -108,6 +110,49 @@ def test_club_settings_reads_are_guarded_and_super_admin_errors_use_logger():
     assert "(club.club_settings or {}).get(\"payments\", {})" in payments
     assert "print(f\"Ошибка в хендлере extend_club_sub: {e}\")" not in super_handlers
     assert "logger.exception(\"Ошибка в хендлере extend_club_sub\")" in super_handlers
+
+
+def test_client_cabinet_bottom_bar_is_collapsible_and_uses_high_contrast_actions():
+    page = Path("templates/client_cabinet.html").read_text(encoding="utf-8")
+    assert "id=\"bottomBar\"" in page
+    assert "toggleBottomBar" in page
+    assert "Свернуть быстрые действия" in page
+    assert "Развернуть быстрые действия" in page
+    assert ".bottom-bar.collapsed .inner" in page
+    assert ".bottom-bar .btn.soft" in page
+    assert ".bottom-bar .btn.dark" in page
+
+
+def test_master_bot_registers_new_club_bot_without_restart():
+    super_source = Path("handlers/super_admin_handlers.py").read_text(encoding="utf-8")
+    main = Path("main.py").read_text(encoding="utf-8")
+    config = Path("config.py").read_text(encoding="utf-8")
+    registry = Path("services/bot_registry.py").read_text(encoding="utf-8")
+    assert "register_bot" in super_source
+    assert "BASE_URL" in super_source
+    assert "register_existing_bots" in main
+    assert "close_all_bots" in main
+    assert "BASE_URL" in config
+    assert "os.getenv('BASE_URL', 'https://speedycrm.ru')" in config
+    assert "bots_dict: dict[str, Bot] = {}" in registry
+    assert "async def register_bot" in registry
+
+
+def test_reload_cache_merges_only_missing_fields_and_keeps_manual_settings():
+    current = {
+        "ui": {"club_name": "Мой клуб", "support_enabled": False},
+        "limits": {"session_timeout_minutes": 777},
+        "features": {"freeze": False},
+    }
+    merged, changed = merge_default_club_settings(current, DEFAULT_CLUB_SETTINGS)
+    assert changed is True
+    assert merged["ui"]["club_name"] == "Мой клуб"
+    assert merged["ui"]["support_enabled"] is False
+    assert merged["limits"]["session_timeout_minutes"] == 777
+    assert merged["features"]["freeze"] is False
+    assert "payments" in merged
+    assert "disciplines" in merged
+    assert merged is not current
 
 
 def test_daily_student_birthday_reminder_is_scheduled_and_uses_student_flow():

@@ -1,4 +1,5 @@
 import asyncio
+import copy
 from datetime import timedelta, datetime
 from aiogram.exceptions import TelegramUnauthorizedError, TelegramNetworkError
 from loguru import logger
@@ -14,10 +15,33 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from database.db import Club, Student, ClubStaff
 from database.constants import DEFAULT_CLUB_SETTINGS
 from config import ADMIN_IDS
+from config import BASE_URL
 from handlers.states import AddClub
 from services.audit import audit_event
+from services.bot_registry import register_bot
 
 router = Router()
+
+
+def merge_default_club_settings(current_settings: dict, default_settings: dict = DEFAULT_CLUB_SETTINGS) -> tuple[dict, bool]:
+    merged = copy.deepcopy(current_settings or {})
+    is_modified = False
+
+    for section_key, section_value in default_settings.items():
+        if section_key not in merged:
+            merged[section_key] = copy.deepcopy(section_value)
+            is_modified = True
+            continue
+
+        if isinstance(section_value, dict) and isinstance(merged[section_key], dict):
+            for field_key, field_value in section_value.items():
+                if field_key not in merged[section_key]:
+                    if field_key in ["yookassa_shop_id", "yookassa_secret_key", "password", "base_url"]:
+                        continue
+                    merged[section_key][field_key] = copy.deepcopy(field_value)
+                    is_modified = True
+
+    return merged, is_modified
 
 
 @router.message(Command("super"), F.from_user.id.in_(ADMIN_IDS))
@@ -223,11 +247,19 @@ async def process_token(message: types.Message, state: FSMContext, session: Asyn
         await session.commit()
         await session.refresh(new_club)
 
+        webhook_url = f"{BASE_URL}/webhook/bot/{bot_token}"
+        try:
+            await register_bot(bot_token, webhook_url)
+            bot_status = "🤖 Бот подключён к текущему процессу и вебхук обновлён."
+        except Exception as bot_err:
+            logger.error(f"Не удалось сразу зарегистрировать бот для клуба {new_club.id}: {bot_err}")
+            bot_status = "⚠️ Клуб создан, но бот не подхватился сразу. Перезапуск не нужен — попробуйте позже или проверьте токен."
+
         await message.answer(
             f"✅ <b>Клуб успешно создан!</b>\n\n"
             f"🆔 ID в SaaS: <code>{new_club.id}</code>\n"
             f"🏢 Название: <code>{club_name}</code>\n"
-            f"🚀 Клуб добавлен. Меню бота можно настроить вручную в BotFather.",
+            f"{bot_status}",
             parse_mode="HTML"
         )
         audit_event(
@@ -480,27 +512,7 @@ async def reload_all_system_configs(
         updated_clubs_count = 0
 
         for club in all_clubs:
-            current_settings = club.club_settings or {}
-            is_modified = False
-
-            # Безопасно мерджим структуру верхнего уровня (features, ui, limits, turnstile и т.д.)
-            for section_key, section_value in DEFAULT_CLUB_SETTINGS.items():
-                if section_key not in current_settings:
-                    # Если секции вообще нет в БД клуба, копируем целиком
-                    current_settings[section_key] = section_value
-                    is_modified = True
-                elif isinstance(section_value, dict) and isinstance(current_settings[section_key], dict):
-                    # Если секция есть и это словарь, проверяем вложенные поля
-                    for field_key, field_value in section_value.items():
-                        if field_key not in current_settings[section_key]:
-                            # ⚡ ИСПРАВЛЕНО: Пропускаем пустые поля авторизации ЮKassa и СКУД,
-                            # чтобы не забивать базу живых клубов пустыми строками ""
-                            if field_key in ["yookassa_shop_id", "yookassa_secret_key", "password", "base_url"]:
-                                continue
-
-                            # Аккуратно добавляем только новые полезные поля структуры
-                            current_settings[section_key][field_key] = field_value
-                            is_modified = True
+            current_settings, is_modified = merge_default_club_settings(club.club_settings or {})
 
             # Сохраняем изменения в базу только если реально нашли и добавили новые поля структуры
             if is_modified:

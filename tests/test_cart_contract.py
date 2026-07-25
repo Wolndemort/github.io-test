@@ -96,6 +96,7 @@ def test_shop_escapes_product_data_without_inline_product_arguments():
     assert "data-id" in page
     assert "normalizeCategory" in page
     assert "normalizeCategory(p.category)===currentCategory" in page
+    assert "const sbpEnabled" in page
     assert "pay-badge" in page
     assert "data-sbp" in page
     assert '<select id="payment_method">' not in page

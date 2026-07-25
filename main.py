@@ -22,19 +22,19 @@ from contextlib import asynccontextmanager
 from fastapi import Request
 from fastapi.responses import JSONResponse
 from datetime import datetime
-from aiogram import Bot, Dispatcher, types
-from aiogram.client.default import DefaultBotProperties
+from aiogram import Dispatcher, types
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import FastAPI
 from loguru import logger
 from sqlalchemy import select
 from admin_module.sqladmin import setup_admin
-from config import ADMIN_IDS
+from config import ADMIN_IDS, BASE_URL
 from database.db import init_db, get_daily_stats, get_expire_students_grouped, create_db_backup, engine, \
     AsyncSessionLocal, Club, Student, CartOrder, VisitLog
 from handlers import start, user_option, buttons, payments, admin_option, super_admin_handlers,official_payment,\
     super_admin_payment
 from handlers.buttons import get_profile_keyboard
+from services.bot_registry import bots_dict, register_existing_bots, close_all_bots
 from middlewares.db_saas_midleware import ClubMiddleware
 from middlewares.main_middleware import DbSessionMiddleware
 from admin_module.api import router
@@ -94,20 +94,7 @@ async def lifespan(app: FastAPI):
         active_clubs = result.scalars().all()
 
     # 2. Создаем экземпляры ботов
-    for club in active_clubs:
-        try:
-            bot = Bot(
-                token=club.bot_token,
-                default=DefaultBotProperties(parse_mode="HTML")
-            )
-            bots_dict[club.bot_token] = bot
-
-            # Регистрируем вебхук в Telegram
-            webhook_url = f"{BASE_URL}/webhook/bot/{club.bot_token}"
-            await bot.set_webhook(url=webhook_url, drop_pending_updates=True)
-            logger.info(f"✅ ВЕБХУК запущен: Клуб '{club.name}' -> {webhook_url[:35]}...")
-        except Exception as e:
-            logger.error(f"❌ Ошибка токена для клуба '{club.name}': {e}")
+    await register_existing_bots(active_clubs, BASE_URL)
 
     # 3. Настройка диспетчера aiogram
     dp.message.outer_middleware(DbSessionMiddleware(session_pool=AsyncSessionLocal))
@@ -151,8 +138,7 @@ async def lifespan(app: FastAPI):
     scheduler.shutdown(wait=False)
     logger.info("Планировщик фоновых задач остановлен")
     logger.info("🛑 Закрытие сессий ботов...")
-    for bot in bots_dict.values():
-        await bot.session.close()
+    await close_all_bots()
 
 # Инициализация FastAPI
 app = FastAPI(title="SpeedyCRM SaaS API", lifespan=lifespan)
@@ -163,8 +149,6 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 app.include_router(router)
 setup_admin(app, engine)
 
-# Глобальный маппинг ботов
-bots_dict = {}
 dp = Dispatcher(storage=storage)
 
 
