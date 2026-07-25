@@ -37,7 +37,7 @@
                 <div>
                     <span class="balance-span">{{ student.balance }} зан.</span>
                     {% if student.parent_id %}
-                    <a href="tg://user?id={{ student.parent_id }}" class="tg-link" target="_blank" rel="noopener noreferrer">💬 Чат</a>
+                    <a href="#" class="tg-link" onclick="return openChat({{ student.parent_id }})">💬 Чат</a>
                     {% endif %}
                 </div>
             </div>
@@ -53,7 +53,7 @@
             {% for student in birthdays_today %}
                 🎂 {{ student.name }}
                 {% if student.parent_id %}
-                <a href="tg://user?id={{ student.parent_id }}" class="tg-link" target="_blank" rel="noopener noreferrer">💬 Чат</a>
+                <a href="#" class="tg-link" onclick="return openChat({{ student.parent_id }})">💬 Чат</a>
                 {% endif %}
                 <br>
             {% endfor %}
@@ -83,7 +83,7 @@
                         осталось {{ session.mins_left }} мин
                     </span>
                     {% if session.parent_id %}
-                    <a href="tg://user?id={{ session.parent_id }}" class="tg-link" target="_blank" rel="noopener noreferrer">💬 Чат</a>
+                    <a href="#" class="tg-link" onclick="return openChat({{ session.parent_id }})">💬 Чат</a>
                     {% endif %}
                 </div>
             </div>
@@ -109,7 +109,7 @@
                     <div class="text-right gray-bold">
                         {% if session.balance == 999 %}♾ Безлимит{% else %}{{ session.balance }} зан.{% endif %}
                         {% if session.parent_id %}
-                        <a href="tg://user?id={{ session.parent_id }}" class="tg-link" target="_blank" rel="noopener noreferrer">💬 Чат</a>
+                        <a href="#" class="tg-link" onclick="return openChat({{ session.parent_id }})">💬 Чат</a>
                         {% endif %}
                     </div>
                 </div>
@@ -134,7 +134,7 @@
                     <span>{{ student.name }}</span>
                     <div>
                         {% if student.parent_id %}
-                        <a href="tg://user?id={{ student.parent_id }}" class="tg-link" target="_blank" rel="noopener noreferrer">💬 Чат</a>
+                        <a href="#" class="tg-link" onclick="return openChat({{ student.parent_id }})">💬 Чат</a>
                         {% endif %}
                     </div>
                 </div>
@@ -167,7 +167,7 @@
                     <div>
                         <span class="red-bold mr-5">0 зан.</span>
                         {% if student.parent_id %}
-                        <a href="tg://user?id={{ student.parent_id }}" class="tg-link" target="_blank" rel="noopener noreferrer">💬 Чат</a>
+                        <a href="#" class="tg-link" onclick="return openChat({{ student.parent_id }})">💬 Чат</a>
                         {% endif %}
                     </div>
                 </div>
@@ -192,7 +192,7 @@
                     <div>
                         <span class="orange-bold mr-5">{{ student.balance }} зан.</span>
                         {% if student.parent_id %}
-                        <a href="tg://user?id={{ student.parent_id }}" class="tg-link" target="_blank" rel="noopener noreferrer">💬 Чат</a>
+                        <a href="#" class="tg-link" onclick="return openChat({{ student.parent_id }})">💬 Чат</a>
                         {% endif %}
                     </div>
                 </div>
@@ -249,6 +249,27 @@
                 searchResultBox.style.display = 'none';
             }
         });
+
+        async function openChat(parentId) {
+            const tg = window.Telegram?.WebApp;
+            const link = `tg://user?id=${parentId}`;
+            try {
+                if (tg?.openTelegramLink) {
+                    tg.openTelegramLink(link);
+                } else {
+                    window.open(link, '_blank', 'noopener,noreferrer');
+                }
+                return false;
+            } catch (_) {
+                try {
+                    await navigator.clipboard.writeText(String(parentId));
+                    alert(`ID родителя ${parentId} скопирован. Если Telegram не открывает личку, отправьте сообщение вручную.`);
+                } catch (err) {
+                    alert(`ID родителя: ${parentId}`);
+                }
+                return false;
+            }
+        }
     </script>
     </div>
 </body>

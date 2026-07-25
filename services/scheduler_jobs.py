@@ -94,6 +94,113 @@ def _subscription_reminder_flags(student, now_datetime: datetime) -> list[tuple[
     return flags
 
 
+def _format_work_schedule(club_name: str, work_schedule: dict) -> str:
+    day_names = {"mon": "Пн", "tue": "Вт", "wed": "Ср", "thu": "Чт", "fri": "Пт", "sat": "Сб", "sun": "Вс"}
+    lines = [f"🕒 <b>График работы</b>", f"🏟 <b>{escape(club_name)}</b>", ""]
+    for key in ("mon", "tue", "wed", "thu", "fri", "sat", "sun"):
+        row = work_schedule.get(key) or {}
+        if row:
+            open_at = escape(str(row.get("open", "—")))
+            close_at = escape(str(row.get("close", "—")))
+            note = escape(str(row.get("note", "")).strip())
+            suffix = f" · {note}" if note else ""
+            lines.append(f"{day_names[key]}: <b>{open_at}–{close_at}</b>{suffix}")
+        else:
+            lines.append(f"{day_names[key]}: <b>не задан</b>")
+    lines.extend(["", "Проверьте график перед визитом."])
+    return "\n".join(lines)
+
+
+async def send_weekend_work_schedule():
+    """Weekend reminder with club work hours for parents/clients."""
+    now = reporting_periods()["now"]
+    async with AsyncSessionLocal() as session:
+        clubs = (await session.execute(select(Club).where(Club.subscription_expire_at >= now))).scalars().all()
+        for club in clubs:
+            settings = club.club_settings if isinstance(club.club_settings, dict) else {}
+            work_schedule = settings.get("work_schedule", {})
+            if not work_schedule or not club.bot_token:
+                continue
+            bot = bots_dict.get(club.bot_token)
+            if not bot:
+                continue
+            recipients = set()
+            parents_res = await session.execute(select(Student.parent_id).where(Student.club_id == club.id, Student.parent_id.isnot(None)))
+            recipients.update(int(pid) for pid in parents_res.scalars().all() if pid)
+            if club.owner_id:
+                recipients.add(int(club.owner_id))
+            if not recipients:
+                continue
+            text = _format_work_schedule(club.name or "Клуб", work_schedule)
+            for chat_id in recipients:
+                try:
+                    await bot.send_message(chat_id=chat_id, text=text, parse_mode="HTML")
+                    await asyncio.sleep(0.03)
+                except Exception as exc:
+                    logger.warning("Не удалось отправить график работы club=%s chat=%s: %s", club.id, chat_id, exc)
+
+
+def _format_work_schedule_notice(club_name: str, work_schedule: dict, days: list[str], intro: str) -> str:
+    day_names = {"mon": "Пн", "tue": "Вт", "wed": "Ср", "thu": "Чт", "fri": "Пт", "sat": "Сб", "sun": "Вс"}
+    lines = [intro, f"🏟 <b>{escape(club_name)}</b>", ""]
+    for key in days:
+        row = work_schedule.get(key) or {}
+        if row:
+            open_at = escape(str(row.get("open", "—")))
+            close_at = escape(str(row.get("close", "—")))
+            note = escape(str(row.get("note", "")).strip())
+            suffix = f" · {note}" if note else ""
+            lines.append(f"{day_names[key]}: <b>{open_at}–{close_at}</b>{suffix}")
+        else:
+            lines.append(f"{day_names[key]}: <b>не задан</b>")
+    lines.extend(["", "Проверьте график перед визитом."])
+    return "\n".join(lines)
+
+
+async def send_work_schedule_notice(mode: str):
+    now = reporting_periods()["now"]
+    async with AsyncSessionLocal() as session:
+        clubs = (await session.execute(select(Club).where(Club.subscription_expire_at >= now))).scalars().all()
+        for club in clubs:
+            settings = club.club_settings if isinstance(club.club_settings, dict) else {}
+            work_schedule = settings.get("work_schedule", {})
+            if not work_schedule or not club.bot_token:
+                continue
+            bot = bots_dict.get(club.bot_token)
+            if not bot:
+                continue
+            recipients = set()
+            parents_res = await session.execute(select(Student.parent_id).where(Student.club_id == club.id, Student.parent_id.isnot(None)))
+            recipients.update(int(pid) for pid in parents_res.scalars().all() if pid)
+            if club.owner_id:
+                recipients.add(int(club.owner_id))
+            if not recipients:
+                continue
+
+            if mode == "sat":
+                intro = "Наш клуб работает в субботу по следующему графику:"
+                days = ["sat"]
+            elif mode == "sun":
+                intro = "Наш клуб работает в воскресенье по следующему графику:"
+                days = ["sun"]
+            else:
+                intro = "Наш клуб работает в понедельник по следующему графику:"
+                days = ["mon", "tue", "wed", "thu", "fri"]
+
+            text = _format_work_schedule_notice(
+                club.name or "Клуб",
+                work_schedule,
+                days,
+                f"{intro}\n\nГрафик занятий можете посмотреть во вкладке «Расписание».",
+            )
+            for chat_id in recipients:
+                try:
+                    await bot.send_message(chat_id=chat_id, text=text, parse_mode="HTML")
+                    await asyncio.sleep(0.03)
+                except Exception as exc:
+                    logger.warning("Не удалось отправить график работы club=%s chat=%s: %s", club.id, chat_id, exc)
+
+
 async def check_abon_mailing():
     """Рассылка уведомлений об истекающих абонементах."""
     async with AsyncSessionLocal() as session:

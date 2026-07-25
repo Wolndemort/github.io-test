@@ -361,6 +361,60 @@ async def change_admin_schedule(payload: ScheduleChangePayload, session: AsyncSe
     return {"success": True}
 
 
+@router.get("/webapp/admin-work-schedule", response_class=HTMLResponse)
+async def webapp_admin_work_schedule_page(
+        request: Request,
+        club_id: int = Query(...),
+        session: AsyncSession = Depends(get_session),
+        init_data: str | None = Query(default=None),
+):
+    club = await session.get(Club, club_id)
+    if not init_data:
+        return telegram_init_gate('/webapp/admin-work-schedule', club_id, 'Откройте график работы из Telegram')
+    await verify_webapp_admin(club, init_data)
+    settings = club.club_settings if isinstance(club.club_settings, dict) else {}
+    work_schedule = settings.get("work_schedule", {})
+    return templates.TemplateResponse("admin_work_schedule.html", {"request": request, "club": club, "club_id": club_id, "work_schedule": work_schedule})
+
+
+@router.post("/webapp/admin-work-schedule/change")
+async def change_admin_work_schedule(payload: dict, session: AsyncSession = Depends(get_session)):
+    club = await session.get(Club, int(payload.get("club_id", 0)))
+    if not club:
+        raise HTTPException(404, "Клуб не найден")
+    tg_user = await verify_webapp_admin(club, payload.get("init_data"))
+    settings = dict(club.club_settings or {})
+    work_schedule = dict(settings.get("work_schedule", {}))
+    day = str(payload.get("day", "")).strip()
+    if day not in {"mon", "tue", "wed", "thu", "fri", "sat", "sun"}:
+        raise HTTPException(400, "Некорректный день")
+    action = str(payload.get("action", "")).strip()
+    item = payload.get("item") or {}
+    if action in {"add", "update"}:
+        open_at = str(item.get("open", "09:00"))[:5]
+        close_at = str(item.get("close", "18:00"))[:5]
+        note = str(item.get("note", ""))[:180]
+        work_schedule[day] = {"open": open_at, "close": close_at, "note": note}
+    elif action == "delete":
+        work_schedule.pop(day, None)
+    else:
+        raise HTTPException(400, "Неизвестное действие")
+    settings["work_schedule"] = work_schedule
+    club.club_settings = settings
+    await session.commit()
+    audit_event(
+        "work_schedule_changed",
+        **await audit_actor_context(session, club, tg_user, "webapp/admin-work-schedule/change"),
+        club_id=club.id,
+        action=action,
+        object_type="work_schedule",
+        object_id=day,
+        day=day,
+        work_schedule=work_schedule.get(day),
+    )
+    return {"success": True}
+
+
 @router.get("/webapp/schedule", response_class=HTMLResponse)
 async def webapp_schedule_page(
         request: Request,

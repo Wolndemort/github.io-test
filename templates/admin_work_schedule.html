@@ -1,0 +1,63 @@
+<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><script src="https://telegram.org/js/telegram-web-app.js"></script><style>body{font-family:sans-serif;background:#f4f4f4;margin:0;padding:14px;color:#111}.nav{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px}.nav a{display:block;text-align:center;text-decoration:none;padding:10px 12px;border-radius:10px;border:1px solid #111;background:#111;color:#fff;font-weight:700}.nav a.secondary{background:#fff;color:#111;border-color:#bbb}.card{background:white;border-radius:16px;padding:14px;margin:10px 0}input,select,button{padding:10px;margin:3px;border-radius:8px;border:1px solid #ccc}button{background:#111;color:white}.row{border-top:1px solid #ddd;padding:10px 0}.row:first-child{border-top:0}.row small{color:#666}</style></head><body>
+<div class="nav">
+  <a href="/admin?club_id={{club_id}}&init_data={{ request.query_params.get('init_data','')|urlencode }}">← В панель</a>
+  <a class="secondary" href="/webapp/admin-schedule?club_id={{club_id}}&init_data={{ request.query_params.get('init_data','')|urlencode }}">Расписание</a>
+  <a class="secondary" href="#" onclick="window.Telegram?.WebApp?.close(); return false;">Закрыть</a>
+</div>
+<h2>График работы — {{ club.name }}</h2>
+<div class="card">
+  <select id="day">{% for k,v in {"mon":"Пн","tue":"Вт","wed":"Ср","thu":"Чт","fri":"Пт","sat":"Сб","sun":"Вс"}.items() %}<option value="{{k}}">{{v}}</option>{% endfor %}</select>
+  <input id="openAt" type="time" value="09:00">
+  <input id="closeAt" type="time" value="18:00">
+  <input id="note" placeholder="Примечание, например: выходной / короткий день">
+  <button onclick="save()">Сохранить</button>
+</div>
+<div class="card"><div id="list"></div></div>
+<script>
+const tg = Telegram.WebApp; tg.ready(); tg.expand();
+const cid = {{ club_id }};
+const initData = tg.initData;
+const data = {{ work_schedule|tojson }};
+const daySelect = document.getElementById('day');
+const openAt = document.getElementById('openAt');
+const closeAt = document.getElementById('closeAt');
+const note = document.getElementById('note');
+const list = document.getElementById('list');
+const days = {mon:'Пн',tue:'Вт',wed:'Ср',thu:'Чт',fri:'Пт',sat:'Сб',sun:'Вс'};
+function render(){
+  list.innerHTML = Object.keys(days).map(day => {
+    const x = data[day];
+    return `<div class="row"><b>${days[day]}</b><div>${x ? `${x.open} — ${x.close}${x.note ? ' · ' + x.note : ''}` : 'Не задано'}</div><small>
+      <button onclick="editDay('${day}')">Изменить</button>
+      ${x ? `<button onclick="delDay('${day}')">Удалить</button>` : ''}
+    </small></div>`;
+  }).join('');
+}
+function editDay(day){
+  daySelect.value = day;
+  openAt.value = data[day]?.open || '09:00';
+  closeAt.value = data[day]?.close || '18:00';
+  note.value = data[day]?.note || '';
+}
+async function save(){
+  const r = await fetch('/webapp/admin-work-schedule/change', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({init_data:initData, club_id:cid, action:'add', day:daySelect.value, item:{open:openAt.value, close:closeAt.value, note:note.value}})
+  });
+  if(!r.ok) return alert((await r.json()).detail || 'Ошибка');
+  location.reload();
+}
+async function delDay(day){
+  if(!confirm('Удалить день?')) return;
+  const r = await fetch('/webapp/admin-work-schedule/change', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({init_data:initData, club_id:cid, action:'delete', day})
+  });
+  if(!r.ok) return alert((await r.json()).detail || 'Ошибка');
+  location.reload();
+}
+render();
+</script></body></html>
+<style>html,body{background:#090909!important;color:#f7f7f7!important}.card{background:#151515!important;color:#f7f7f7!important;border-color:#2d2d2d!important;box-shadow:0 16px 42px rgba(0,0,0,.28)}input,select{background:#101010!important;color:#fff!important;border-color:#444!important}button{background:#fff!important;color:#090909!important;font-weight:700}.row{border-color:#333!important}</style>

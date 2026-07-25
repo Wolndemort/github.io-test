@@ -78,19 +78,37 @@ def test_admin_and_stats_chat_links_are_parent_scoped_and_consistent():
     assert "student.username" not in admin
     assert "Проверить чат" not in admin
     assert "💬 Чат" in admin
-    assert "tg://user?id={{ student.parent_id }}" in admin
+    assert "openChat(" in admin
 
     assert "💬 Чат" in students
-    assert "tg://user?id={{ s.parent_id }}" in students
+    assert "openChat(" in students
     assert "Написать в Telegram" not in students
 
     assert "💬 Чат" in stats
     assert "parent_id" in stats
-    assert "tg://user?id={{ student.parent_id }}" in stats
+    assert "openChat(" in stats
 
     assert '"parent_id": student.parent_id' in admin_pages or '"parent_id": getattr(s, "parent_id", None)' in admin_pages
     assert '"parent_id": getattr(student, "parent_id", None)' in analytics
     assert '"username":' not in analytics
+
+
+def test_work_schedule_webapp_and_weekend_job_are_registered():
+    settings = Path("handlers/admin_settings_panel.py").read_text(encoding="utf-8")
+    webapp = Path("admin_module/webapp_views.py").read_text(encoding="utf-8")
+    main = Path("main.py").read_text(encoding="utf-8")
+    template = Path("templates/admin_work_schedule.html").read_text(encoding="utf-8")
+    jobs = Path("services/scheduler_jobs.py").read_text(encoding="utf-8")
+
+    assert "admin-work-schedule" in settings
+    assert "/webapp/admin-work-schedule" in webapp
+    assert "work_schedule_changed" in webapp
+    assert "webapp/admin-work-schedule/change" in template
+    assert "work_schedule" in template
+    assert "send_work_schedule_notice" in jobs
+    assert "work_schedule_sat" in main
+    assert "work_schedule_sun" in main
+    assert "work_schedule_mon" in main
 
 
 def test_user_and_admin_history_render_database_utc_as_moscow_time():

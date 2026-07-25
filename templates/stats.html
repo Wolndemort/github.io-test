@@ -79,7 +79,7 @@
                         <span>
                             <span class="muted-note">заморожен</span>
                             {% if student.parent_id %}
-                            <a href="tg://user?id={{ student.parent_id }}" class="mono-action" style="display:inline-block;margin-left:8px;padding:6px 10px;text-decoration:none" target="_blank" rel="noopener noreferrer">💬 Чат</a>
+                            <a href="#" class="mono-action" style="display:inline-block;margin-left:8px;padding:6px 10px;text-decoration:none" onclick="return openChat({{ student.parent_id }})">💬 Чат</a>
                             {% endif %}
                         </span>
                     </div>
@@ -105,7 +105,7 @@
                         <span>
                             <span class="muted-note">без абонемента</span>
                             {% if student.parent_id %}
-                            <a href="tg://user?id={{ student.parent_id }}" class="mono-action" style="display:inline-block;margin-left:8px;padding:6px 10px;text-decoration:none" target="_blank" rel="noopener noreferrer">💬 Чат</a>
+                            <a href="#" class="mono-action" style="display:inline-block;margin-left:8px;padding:6px 10px;text-decoration:none" onclick="return openChat({{ student.parent_id }})">💬 Чат</a>
                             {% endif %}
                         </span>
                     </div>
@@ -154,7 +154,7 @@
                     <span>
                         <span class="muted-note">баланс: 0</span>
                         {% if student.parent_id %}
-                        <a href="tg://user?id={{ student.parent_id }}" class="mono-action" style="display:inline-block;margin-left:8px;padding:6px 10px;text-decoration:none" target="_blank" rel="noopener noreferrer">💬 Чат</a>
+                        <a href="#" class="mono-action" style="display:inline-block;margin-left:8px;padding:6px 10px;text-decoration:none" onclick="return openChat({{ student.parent_id }})">💬 Чат</a>
                         {% endif %}
                     </span>
                 </div>
@@ -175,7 +175,7 @@
             <span>
                 <span style="font-weight: bold;">{{ student.balance }}</span>
                 {% if student.parent_id %}
-                <a href="tg://user?id={{ student.parent_id }}" class="mono-action" style="display:inline-block;margin-left:8px;padding:6px 10px;text-decoration:none" target="_blank" rel="noopener noreferrer">💬 Чат</a>
+                <a href="#" class="mono-action" style="display:inline-block;margin-left:8px;padding:6px 10px;text-decoration:none" onclick="return openChat({{ student.parent_id }})">💬 Чат</a>
                 {% endif %}
             </span>
         </div>
@@ -188,6 +188,22 @@
         const tg = window.Telegram.WebApp;
         tg.ready();
         tg.expand();
+
+        async function openChat(parentId) {
+            const link = `tg://user?id=${parentId}`;
+            try {
+                if (tg?.openTelegramLink) tg.openTelegramLink(link);
+                else window.open(link, '_blank', 'noopener,noreferrer');
+            } catch (_) {
+                try {
+                    await navigator.clipboard.writeText(String(parentId));
+                    alert(`ID родителя ${parentId} скопирован. Если Telegram не открывает личку, отправьте сообщение вручную.`);
+                } catch (err) {
+                    alert(`ID родителя: ${parentId}`);
+                }
+            }
+            return false;
+        }
     </script>
     </div>
 </body>

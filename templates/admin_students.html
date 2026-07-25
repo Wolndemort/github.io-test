@@ -16,7 +16,7 @@
   {% for s in students %}
     <form class="student card" data-name="{{ s.name|lower }}" data-birthday="{{ s.birthday.isoformat() if s.birthday else '' }}" data-parent="{{ '1' if s.parent_id else '0' }}" data-missing="{{ '1' if not s.birthday else '0' }}" data-active="{{ '1' if s.expire_date and s.expire_date > now else '0' }}" data-nosub="{{ '1' if not s.expire_date else '0' }}" data-frozen="{{ '1' if s.is_frozen else '0' }}" data-discipline="{{ s.discipline or '' }}" data-id="{{ s.id }}">
       <label>Имя атлета<input name="name" value="{{ s.name or '' }}" maxlength="150"></label><span class="muted">ID {{ s.id }} · баланс: {{ s.balance_lessons }} · {{ s.discipline or 'без дисциплины' }}</span>
-      <div class="grid"><label>Телефон родителя<input name="parent_phone" value="{{ s.parent_phone or '' }}" placeholder="79990000000"></label>{% if s.parent_id %}<a href="tg://user?id={{ s.parent_id }}" class="mono-action" style="display:inline-block;margin-top:6px;text-decoration:none" target="_blank" rel="noopener noreferrer">💬 Чат</a>{% endif %}
+      <div class="grid"><label>Телефон родителя<input name="parent_phone" value="{{ s.parent_phone or '' }}" placeholder="79990000000"></label>{% if s.parent_id %}<a href="#" class="mono-action" style="display:inline-block;margin-top:6px;text-decoration:none" onclick="return openChat({{ s.parent_id }})">💬 Чат</a>{% endif %}
         <label>Дата рождения {% if not s.birthday %}<span class="missing">не указана</span>{% endif %}<input name="birthday" type="date" value="{{ s.birthday.isoformat() if s.birthday else '' }}"></label>
         <label>Баланс занятий<input name="balance_lessons" type="number" min="0" max="999" value="{{ s.balance_lessons if s.balance_lessons else '' }}" placeholder="0"></label>
         <label>До даты<input name="expire_date" type="date" value="{{ s.expire_date.strftime('%Y-%m-%d') if s.expire_date else '' }}"></label>
@@ -131,7 +131,7 @@ function studentCardHtml(s) {
   return `
     <form class="student card" data-name="${esc((s.name || '').toLowerCase())}" data-birthday="${esc(s.birthday || '')}" data-parent="${s.parent_id ? '1' : '0'}" data-missing="${s.birthday ? '0' : '1'}" data-active="${s.expire_date ? '1' : '0'}" data-nosub="${s.expire_date ? '0' : '1'}" data-frozen="${s.is_frozen ? '1' : '0'}" data-discipline="${esc(s.discipline || '')}" data-id="${s.id}">
       <label>Имя атлета<input name="name" value="${esc(s.name || '')}" maxlength="150"></label><span class="muted">ID ${s.id} · баланс: ${s.balance_lessons || 0} · ${esc(s.discipline || 'без дисциплины')}</span>
-      <div class="grid"><label>Телефон родителя<input name="parent_phone" value="${esc(s.parent_phone || '')}" placeholder="79990000000"></label>${s.parent_id ? `<a href="tg://user?id=${s.parent_id}" class="mono-action" style="display:inline-block;margin-top:6px;text-decoration:none" target="_blank" rel="noopener noreferrer">💬 Чат</a>` : ''}
+      <div class="grid"><label>Телефон родителя<input name="parent_phone" value="${esc(s.parent_phone || '')}" placeholder="79990000000"></label>${s.parent_id ? `<a href="#" class="mono-action" style="display:inline-block;margin-top:6px;text-decoration:none" onclick="return openChat(${s.parent_id})">💬 Чат</a>` : ''}
         <label>Дата рождения ${s.birthday ? '' : '<span class="missing">не указана</span>'}<input name="birthday" type="date" value="${esc(s.birthday || '')}"></label>
         <label>Баланс занятий<input name="balance_lessons" type="number" min="0" max="999" value="${s.balance_lessons ? s.balance_lessons : ''}" placeholder="0"></label>
         <label>До даты<input name="expire_date" type="date" value="${esc(s.expire_date || '')}"></label>
@@ -215,5 +215,26 @@ discSel.onchange = fillTariffs;
 noSub.onchange = fillTariffs;
 document.getElementById('saveCreate').onclick = createStudent;
 fillDisc();
+
+async function openChat(parentId) {
+  const tg = window.Telegram?.WebApp;
+  const link = `tg://user?id=${parentId}`;
+  try {
+    if (tg?.openTelegramLink) {
+      tg.openTelegramLink(link);
+    } else {
+      window.open(link, '_blank', 'noopener,noreferrer');
+    }
+    return false;
+  } catch (_) {
+    try {
+      await navigator.clipboard.writeText(String(parentId));
+      alert(`ID родителя ${parentId} скопирован. Если Telegram не открывает личку, отправьте сообщение вручную.`);
+    } catch (err) {
+      alert(`ID родителя: ${parentId}`);
+    }
+    return false;
+  }
+}
 </script></body></html>
 <style>#fab{position:fixed;right:16px;bottom:18px;z-index:30;width:56px;height:56px;border-radius:50%;border:0;background:#111;color:#fff;font-size:30px;box-shadow:0 10px 24px rgba(0,0,0,.22)}#modal{display:none;position:fixed;inset:0;z-index:40;background:rgba(0,0,0,.45)}#modal .box{background:#fff;max-width:520px;margin:8vh auto;padding:16px;border-radius:16px}#modal input,#modal select{width:100%;box-sizing:border-box;padding:10px;margin-top:4px;border:1px solid #ccc;border-radius:10px;font-size:16px}#modal .row{display:grid;grid-template-columns:1fr 1fr;gap:8px}#modal .actions{display:flex;gap:8px;margin-top:12px}#modal button{flex:1}body.mono-theme,body.mono-theme html{background:#090909!important;color:#f7f7f7!important}body.mono-theme .hero,body.mono-theme .top,body.mono-theme .card,body.mono-theme .mono-card,body.mono-theme .mono-hero,body.mono-theme .pill,body.mono-theme .mono-pill{background:#151515!important;color:#f7f7f7!important;border-color:#2d2d2d!important;box-shadow:0 16px 42px rgba(0,0,0,.28)!important}body.mono-theme h1,body.mono-theme h2,body.mono-theme h3,body.mono-theme h4,body.mono-theme .mono-title,body.mono-theme b{color:#fff!important}body.mono-theme p,body.mono-theme .subtitle,body.mono-theme .muted,body.mono-theme .label,body.mono-theme .eyebrow,body.mono-theme .coach,body.mono-theme .hint{color:#aaa!important}body.mono-theme input,body.mono-theme select,body.mono-theme textarea{background:#101010!important;color:#fff!important;border-color:#444!important}body.mono-theme .btn,body.mono-theme button,body.mono-theme .mono-action.dark{background:#fff!important;color:#090909!important;border-color:#fff!important}</style>

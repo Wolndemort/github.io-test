@@ -34,7 +34,7 @@ from handlers import start, user_option, buttons, payments, admin_option, super_
     super_admin_payment
 from handlers.buttons import get_profile_keyboard
 from services.bot_registry import bots_dict, register_existing_bots, close_all_bots
-from services.scheduler_jobs import saas_daily_morning_check, check_abon_mailing, send_daily_report_to_admins, send_backup_to_admin
+from services.scheduler_jobs import saas_daily_morning_check, check_abon_mailing, send_daily_report_to_admins, send_backup_to_admin, send_work_schedule_notice
 from middlewares.db_saas_midleware import ClubMiddleware
 from middlewares.main_middleware import DbSessionMiddleware
 from admin_module.api import router
@@ -122,6 +122,9 @@ async def lifespan(app: FastAPI):
 
     # Вечерний блок (22:00) — Отчет по посещениям и абонементам для владельцев клубов
     scheduler.add_job(send_daily_report_to_admins, 'cron', hour=22, minute=0, id="daily_admin_report", replace_existing=True, coalesce=True, max_instances=1, misfire_grace_time=3600)
+    scheduler.add_job(send_work_schedule_notice, 'cron', day_of_week='sat', hour=11, minute=0, args=['sat'], id="work_schedule_sat", replace_existing=True, coalesce=True, max_instances=1, misfire_grace_time=3600)
+    scheduler.add_job(send_work_schedule_notice, 'cron', day_of_week='sun', hour=11, minute=0, args=['sun'], id="work_schedule_sun", replace_existing=True, coalesce=True, max_instances=1, misfire_grace_time=3600)
+    scheduler.add_job(send_work_schedule_notice, 'cron', day_of_week='mon', hour=11, minute=0, args=['mon'], id="work_schedule_mon", replace_existing=True, coalesce=True, max_instances=1, misfire_grace_time=3600)
     # Ночной блок (01:00) — Автоматические списания по подпискам ЮKassa
     # Пока оставляем закомментированным, как ты и хотел!
     # Как закончишь тесты в ЛК ЮKassa — просто убери решетку (#) в начале строки.
