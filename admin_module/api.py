@@ -17,6 +17,12 @@ from services.analytics import (
     moscow_weekday,
 )
 from services.schedule_utils import normalize_schedule_block
+from services.order_notifications import (
+    build_owner_receipt_text,
+    build_staff_alert_text,
+    format_order_items,
+    notify_product_staff,
+)
 import hmac
 import os
 import time
@@ -952,6 +958,38 @@ async def admin_product_sale(payload: AdminProductSalePayload, session: AsyncSes
     for product, quantity in normalized:
         session.add(CartItem(cart_order_id=order_id, product_id=product.id, item_type="product", title=product.name, quantity=quantity, unit_price_kopecks=product.price_kopecks, payload={"category": product.category, "payment_method": "cash"}))
     await session.commit()
+    try:
+        bot = Bot(club.bot_token)
+        notice_items = [
+            type("ItemView", (), {"title": product.name, "quantity": quantity, "product_id": product.id})()
+            for product, quantity in normalized
+        ]
+        owner_text = build_owner_receipt_text(
+            title="Наличная продажа товаров",
+            order_id=order_id,
+            buyer_label="Наличная продажа",
+            items_text=format_order_items(notice_items, product_only=True),
+            amount_kopecks=total,
+            extra_lines=["Способ: <b>Наличные</b>"],
+        )
+        if club.owner_id:
+            await bot.send_message(club.owner_id, owner_text, parse_mode="HTML")
+        await notify_product_staff(
+            bot,
+            club,
+            session,
+            build_staff_alert_text(
+                title="Новая продажа товаров",
+                order_id=order_id,
+                buyer_label="Наличная продажа",
+                items_text=format_order_items(notice_items, product_only=True),
+                amount_kopecks=total,
+                badge="☕",
+            ),
+        )
+        await bot.session.close()
+    except Exception:
+        logger.exception("Не удалось отправить уведомление о наличной продаже товаров %s", order_id)
     return {"ok": True, "order_id": order_id, "total_kopecks": total}
 
 @router.post("/webapp/admin-products")

@@ -13,6 +13,13 @@ from database.db import PaymentOrder, CartOrder, CartItem, ClubProduct, Club, St
 from loguru import logger
 from services.audit import audit_event
 from services.yookassa_client import YooKassaClient
+from services.order_notifications import (
+    build_owner_receipt_text,
+    build_staff_alert_text,
+    format_order_items,
+    notify_product_staff,
+    resolve_user_label,
+)
 from aiogram import Bot
 
 
@@ -63,14 +70,38 @@ async def yookassa_webhook(request: Request, session: AsyncSession = Depends(get
                     await purchase_student_freeze(int(p["student_id"]), cart.club_id, int(p["days"]), session)
         cart.status = "CONFIRMED"; cart.provider_payment_id = payment_id
         await session.commit()
-        receipt = "\n".join(f"• {i.title} × {i.quantity}" for i in items)
-        notice = (f"✅ <b>Новая оплата</b>\nЗаказ: <code>{cart.id}</code>\n"
-                  f"Покупатель: <code>{cart.user_id}</code>\n{receipt}\n"
-                  f"Сумма: <b>{cart.amount_kopecks / 100:.2f} ₽</b>\nДата: {datetime.now().strftime('%d.%m.%Y %H:%M')}")
+        buyer_label = await resolve_user_label(session, cart.user_id)
+        receipt = format_order_items(items)
+        notice = build_owner_receipt_text(
+            title="Новая оплата",
+            order_id=cart.id,
+            buyer_label=buyer_label,
+            items_text=receipt,
+            amount_kopecks=cart.amount_kopecks,
+        )
+        barista_items = format_order_items(items, product_only=True)
+        barista_alert = None
+        if "Без товарных позиций" not in barista_items:
+            barista_alert = build_staff_alert_text(
+                title="Новый товарный заказ",
+                order_id=cart.id,
+                buyer_label=buyer_label,
+                items_text=barista_items,
+                amount_kopecks=cart.amount_kopecks,
+                badge="☕",
+            )
         try:
             bot = Bot(club.bot_token)
-            await bot.send_message(club.owner_id, notice, parse_mode="HTML")
-            await bot.send_message(cart.user_id, notice.replace("✅ <b>Новая оплата</b>", "✅ <b>Оплата подтверждена</b>"), parse_mode="HTML")
+            if club.owner_id:
+                await bot.send_message(club.owner_id, notice, parse_mode="HTML")
+            if barista_alert:
+                await notify_product_staff(bot, club, session, barista_alert)
+            if cart.user_id:
+                await bot.send_message(
+                    cart.user_id,
+                    notice.replace("✅ <b>Новая оплата</b>", "✅ <b>Оплата подтверждена</b>"),
+                    parse_mode="HTML",
+                )
             await bot.session.close()
         except Exception:
             logger.exception("Не удалось отправить уведомление по корзине %s", cart.id)
@@ -144,12 +175,14 @@ async def yookassa_webhook(request: Request, session: AsyncSession = Depends(get
         if club and club.owner_id:
             try:
                 frozen_student = await session.get(Student, order.student_id)
+                payer_label = await resolve_user_label(session, order.user_id, empty_label="Не указан")
                 bot = Bot(club.bot_token)
                 is_freeze = order.type.startswith("FREEZE")
                 await bot.send_message(
                     club.owner_id,
                     (
                         ("❄️ <b>Клиент купил заморозку</b>" if is_freeze else "✅ <b>Новая оплата абонемента</b>") + "\n\n"
+                        f"Плательщик: {payer_label}\n"
                         f"Атлет: <b>{escape(frozen_student.name if frozen_student else str(order.student_id))}</b>\n"
                         f"Сумма: <b>{order.amount_kopecks / 100:.2f} ₽</b>\n"
                         + (f"Срок: <b>{order.days_to_add} дн.</b>\n" if is_freeze else f"Занятий: <b>{order.lesson_count}</b>\n")
