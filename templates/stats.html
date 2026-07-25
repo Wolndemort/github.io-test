@@ -76,7 +76,12 @@
                     {% for student in frozen_students %}
                     <div class="list-item">
                         <span>{{ student.name }}</span>
-                        <span class="muted-note">заморожен</span>
+                        <span>
+                            <span class="muted-note">заморожен</span>
+                            {% if student.parent_id %}
+                            <a href="tg://user?id={{ student.parent_id }}" class="mono-action" style="display:inline-block;margin-left:8px;padding:6px 10px;text-decoration:none" target="_blank" rel="noopener noreferrer">💬 Чат</a>
+                            {% endif %}
+                        </span>
                     </div>
                     {% endfor %}
                 </div>
@@ -97,7 +102,12 @@
                     {% for student in inactive_students %}
                     <div class="list-item">
                         <span>{{ student.name }}</span>
-                        <span class="muted-note">без абонемента</span>
+                        <span>
+                            <span class="muted-note">без абонемента</span>
+                            {% if student.parent_id %}
+                            <a href="tg://user?id={{ student.parent_id }}" class="mono-action" style="display:inline-block;margin-left:8px;padding:6px 10px;text-decoration:none" target="_blank" rel="noopener noreferrer">💬 Чат</a>
+                            {% endif %}
+                        </span>
                     </div>
                     {% endfor %}
                 </div>
@@ -141,7 +151,12 @@
                 {% for student in churned_students %}
                 <div class="list-item">
                     <span>{{ student.name }}</span>
-                    <span class="muted-note">баланс: 0</span>
+                    <span>
+                        <span class="muted-note">баланс: 0</span>
+                        {% if student.parent_id %}
+                        <a href="tg://user?id={{ student.parent_id }}" class="mono-action" style="display:inline-block;margin-left:8px;padding:6px 10px;text-decoration:none" target="_blank" rel="noopener noreferrer">💬 Чат</a>
+                        {% endif %}
+                    </span>
                 </div>
                 {% endfor %}
             </div>
@@ -157,7 +172,12 @@
         {% for student in top_students %}
         <div class="list-item">
             <span>{{ student.name }}</span>
-            <span style="font-weight: bold;">{{ student.balance }}</span>
+            <span>
+                <span style="font-weight: bold;">{{ student.balance }}</span>
+                {% if student.parent_id %}
+                <a href="tg://user?id={{ student.parent_id }}" class="mono-action" style="display:inline-block;margin-left:8px;padding:6px 10px;text-decoration:none" target="_blank" rel="noopener noreferrer">💬 Чат</a>
+                {% endif %}
+            </span>
         </div>
         {% endfor %}
     </div>

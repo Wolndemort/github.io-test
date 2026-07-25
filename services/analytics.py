@@ -177,7 +177,6 @@ def _dashboard_student_row(student: Any) -> dict[str, Any]:
         "name": getattr(student, "name", None) or "Атлет",
         "balance": _balance(student),
         "is_frozen": bool(getattr(student, "is_frozen", 0)),
-        "username": getattr(student, "username", None) or getattr(student, "tg_username", None),
         "parent_id": getattr(student, "parent_id", None),
         "phone": getattr(student, "parent_phone", None),
     }

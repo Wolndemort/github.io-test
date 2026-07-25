@@ -68,6 +68,31 @@ def test_stats_and_sales_templates_have_readable_dark_surface_metrics():
     assert "color: #f7f7f7 !important" in css
 
 
+def test_admin_and_stats_chat_links_are_parent_scoped_and_consistent():
+    admin = Path("templates/admin.html").read_text(encoding="utf-8")
+    students = Path("templates/admin_students.html").read_text(encoding="utf-8")
+    stats = Path("templates/stats.html").read_text(encoding="utf-8")
+    admin_pages = Path("admin_module/admin_pages.py").read_text(encoding="utf-8")
+    analytics = Path("services/analytics.py").read_text(encoding="utf-8")
+
+    assert "student.username" not in admin
+    assert "Проверить чат" not in admin
+    assert "💬 Чат" in admin
+    assert "tg://user?id={{ student.parent_id }}" in admin
+
+    assert "💬 Чат" in students
+    assert "tg://user?id={{ s.parent_id }}" in students
+    assert "Написать в Telegram" not in students
+
+    assert "💬 Чат" in stats
+    assert "parent_id" in stats
+    assert "tg://user?id={{ student.parent_id }}" in stats
+
+    assert '"parent_id": student.parent_id' in admin_pages or '"parent_id": getattr(s, "parent_id", None)' in admin_pages
+    assert '"parent_id": getattr(student, "parent_id", None)' in analytics
+    assert '"username":' not in analytics
+
+
 def test_user_and_admin_history_render_database_utc_as_moscow_time():
     student = Path("templates/webapp_student.html").read_text(encoding="utf-8")
     history = Path("templates/webapp_history.html").read_text(encoding="utf-8")

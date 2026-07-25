@@ -42,7 +42,7 @@ else location.replace(location.pathname+'?club_id=' + encodeURIComponent(new URL
             # БД хранит наивные UTC-времена; для админского интерфейса показываем МСК.
             display_last_visit = last_visit_naive + timedelta(hours=3)
             display_session_end = session_end + timedelta(hours=3)
-            info = {"student_id": student.id, "name": student.name, "balance": student.balance_lessons or 0, "last_visit": display_last_visit.strftime("%d.%m.%Y %H:%M"), "session_end": display_session_end.strftime("%H:%M"), "time_passed_mins": int(time_passed.total_seconds() // 60)}
+            info = {"student_id": student.id, "name": student.name, "balance": student.balance_lessons or 0, "parent_id": student.parent_id, "last_visit": display_last_visit.strftime("%d.%m.%Y %H:%M"), "session_end": display_session_end.strftime("%H:%M"), "time_passed_mins": int(time_passed.total_seconds() // 60)}
             (active_sessions if time_passed < timedelta(minutes=timeout_minutes) else past_sessions).append(info)
             if time_passed < timedelta(minutes=timeout_minutes):
                 info["mins_left"] = max(0, int((session_end - now_local).total_seconds() // 60))
@@ -78,11 +78,11 @@ async def get_revenue_stats(request: Request, session: AsyncSession = Depends(ge
     burning_passes = metrics["burning_passes"]
     inactive_passes = metrics["inactive_passes"]
     total_lessons_left = metrics["total_lessons_left"]
-    churned_students = [{"name": s.name} for s in metrics["inactive_students"]]
+    churned_students = [{"name": s.name, "parent_id": getattr(s, "parent_id", None)} for s in metrics["inactive_students"]]
     discipline_counts = metrics["discipline_counts"]
     names = {"boxing": "🥊 Бокс (Дети)", "kickboxing": "🤼‍♂️ Кикбоксинг", "bjj": "🥋 Бразильское джиу-джитсу", "yoga": "🧘‍♂️ Йога"}
     disciplines_stats = [{"name": names.get(k, f"🏃‍♂️ {k}"), "active_athletes": v} for k, v in discipline_counts.items()]
-    top_students = [{"name": s.name, "balance": s.balance_lessons or 0} for s in sorted(students, key=lambda x: x.balance_lessons or 0, reverse=True)[:5]]
+    top_students = [{"name": s.name, "balance": s.balance_lessons or 0, "parent_id": getattr(s, "parent_id", None)} for s in sorted(students, key=lambda x: x.balance_lessons or 0, reverse=True)[:5]]
     return templates.TemplateResponse("stats.html", {"request": request, "empty": False, "club_id": club_id, "club_name": club_name, "total_athletes": total_athletes, "total_parents": total_parents, "retention_rate": metrics["retention_rate"], "active_passes": active_passes, "frozen_passes": frozen_passes, "burning_passes": burning_passes, "inactive_passes": inactive_passes, "total_lessons_left": total_lessons_left, "disciplines_stats": disciplines_stats, "churned_students": churned_students, "top_students": top_students, "revenue_today": round(revenue_today, 2), "revenue_week": round(revenue_week, 2), "revenue_month": round(revenue_month, 2), "payment_types": {"FIRST": 0, "RECURRENT": 0}})
 
 

@@ -29,16 +29,15 @@
         <input type="text" id="searchInput" class="search-input" placeholder="Введите имя атлета...">
         <div class="scroll-box" id="searchResultBox" style="display: none; max-height: 200px; border-top: 1px solid #eee; margin-top: 10px;">
             {% for student in all_athletes %}
-            <div class="list-item search-target-item" data-name="{{ student.name|lower }}">
+                <div class="list-item search-target-item" data-name="{{ student.name|lower }}">
                 <div>
                     <strong>{{ student.name }}</strong>
                     {% if student.is_frozen %}<span class="frozen-badge">(заморожен)</span>{% endif %}
                 </div>
                 <div>
                     <span class="balance-span">{{ student.balance }} зан.</span>
-                    {% if student.username %}
-                    <!-- ФИКС: Безопасный URL для Telegram чата -->
-                    <a href="https://t.me{{ student.username|replace('@', '') }}" class="tg-link" target="_blank">💬 ЛС</a>
+                    {% if student.parent_id %}
+                    <a href="tg://user?id={{ student.parent_id }}" class="tg-link" target="_blank" rel="noopener noreferrer">💬 Чат</a>
                     {% endif %}
                 </div>
             </div>
@@ -52,7 +51,11 @@
         <div class="label white-label" style="color:#666 !important;">🎉 Сегодня день рождения!</div>
         <div class="birthday-list">
             {% for student in birthdays_today %}
-                🎂 {{ student.name }} (Родитель: {{ student.username or 'Не указан' }})<br>
+                🎂 {{ student.name }}
+                {% if student.parent_id %}
+                <a href="tg://user?id={{ student.parent_id }}" class="tg-link" target="_blank" rel="noopener noreferrer">💬 Чат</a>
+                {% endif %}
+                <br>
             {% endfor %}
         </div>
         <div class="birthday-footer" style="color:#666;">Не забудьте поздравить атлета на ресепшене!</div>
@@ -79,6 +82,9 @@
                     <span class="red-badge">
                         осталось {{ session.mins_left }} мин
                     </span>
+                    {% if session.parent_id %}
+                    <a href="tg://user?id={{ session.parent_id }}" class="tg-link" target="_blank" rel="noopener noreferrer">💬 Чат</a>
+                    {% endif %}
                 </div>
             </div>
             {% else %}
@@ -102,6 +108,9 @@
                     </div>
                     <div class="text-right gray-bold">
                         {% if session.balance == 999 %}♾ Безлимит{% else %}{{ session.balance }} зан.{% endif %}
+                        {% if session.parent_id %}
+                        <a href="tg://user?id={{ session.parent_id }}" class="tg-link" target="_blank" rel="noopener noreferrer">💬 Чат</a>
+                        {% endif %}
                     </div>
                 </div>
                 {% else %}
@@ -124,9 +133,8 @@
                 <div class="list-item">
                     <span>{{ student.name }}</span>
                     <div>
-                        <span class="check-chat-text">Проверить чат</span>
                         {% if student.parent_id %}
-                        <a href="tg://user?id={{ student.parent_id }}" class="tg-link">💬 Написать</a>
+                        <a href="tg://user?id={{ student.parent_id }}" class="tg-link" target="_blank" rel="noopener noreferrer">💬 Чат</a>
                         {% endif %}
                     </div>
                 </div>
@@ -159,7 +167,7 @@
                     <div>
                         <span class="red-bold mr-5">0 зан.</span>
                         {% if student.parent_id %}
-                        <a href="tg://user?id={{ student.parent_id }}" class="tg-link">💬 Написать</a>
+                        <a href="tg://user?id={{ student.parent_id }}" class="tg-link" target="_blank" rel="noopener noreferrer">💬 Чат</a>
                         {% endif %}
                     </div>
                 </div>
@@ -184,7 +192,7 @@
                     <div>
                         <span class="orange-bold mr-5">{{ student.balance }} зан.</span>
                         {% if student.parent_id %}
-                        <a href="tg://user?id={{ student.parent_id }}" class="tg-link">💬 Написать</a>
+                        <a href="tg://user?id={{ student.parent_id }}" class="tg-link" target="_blank" rel="noopener noreferrer">💬 Чат</a>
                         {% endif %}
                     </div>
                 </div>
@@ -201,7 +209,7 @@
     <!-- СЕКЦИЯ НАВИГАЦИИ -->
     <div class="card mono-card mt-15" style="margin-bottom: 30px;"> <!-- Добавлен отступ для iOS -->
         <div class="label">Другие разделы</div>
-        <a href="/admin/students?club_id={{ club_id }}" class="btn">👥 Управление атлетами и ДР</a>
+        <a href="/admin/students?club_id={{ club_id }}" class="btn">👥 Управление атлетами</a>
         <!-- ФИКС: Явная передача контекста club_id для SaaS-изоляции -->
         <a href="/stats/export/excel?club_id={{ club_id }}" class="btn">📊 Скачать Excel-отчет</a>
         <a href="/revenue?club_id={{ club_id }}" class="btn btn-secondary">📈 Бизнес-аналитика и выручка</a>
