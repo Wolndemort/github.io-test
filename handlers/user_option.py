@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from redis.asyncio import Redis
 from database.db import Student, process_student_freeze, Club, User, VisitLog, PaymentOrder, Subscription
 from services.abuse_guard import rate_limit, audit_block
+from services.audit import audit_event
 from config import secret_key
 from sqlalchemy import select
 from sqlalchemy import func
@@ -66,6 +67,17 @@ async def go_to_begin(
 ):
     await state.clear()
     user_name = callback.from_user.first_name
+    audit_event(
+        "bot_menu_opened",
+        club_id=club.id,
+        actor_user_id=callback.from_user.id,
+        actor_role="owner" if callback.from_user.id == club.owner_id else "client",
+        actor_name=callback.from_user.full_name,
+        action="open",
+        object_type="menu",
+        object_id="main",
+        location="bot/begin",
+    )
 
     # 1. Сначала пытаемся взять имя из JSON-настроек UI
     setting_name = club_settings.get("ui", {}).get("club_name")
@@ -108,6 +120,19 @@ async def universal_profile_handler(
     students = result.scalars().all()
 
     is_auth = bool(students)
+    audit_event(
+        "bot_profile_opened",
+        club_id=club.id,
+        actor_user_id=user_id,
+        actor_role="owner" if user_id == club.owner_id else "client",
+        actor_name=event.from_user.full_name,
+        action="open",
+        object_type="profile",
+        object_id=user_id,
+        location="bot/profile",
+        students=[s.id for s in students],
+        authorized=is_auth,
+    )
 
     if not is_auth:
         status_text = (
@@ -320,6 +345,17 @@ async def payment_history_handler(
         club: Club
 ):
     user_id = callback.from_user.id
+    audit_event(
+        "bot_profile_details_opened",
+        club_id=club.id,
+        actor_user_id=user_id,
+        actor_role="owner" if user_id == club.owner_id else "client",
+        actor_name=callback.from_user.full_name,
+        action="open",
+        object_type="profile_details",
+        object_id=user_id,
+        location="bot/profile/detailed_status",
+    )
     students = (await session.execute(
         select(Student).where(Student.parent_id == user_id, Student.club_id == club.id).order_by(Student.name)
     )).scalars().all()

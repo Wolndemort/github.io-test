@@ -16,6 +16,7 @@ from aiogram import Router, F, types
 from handlers.states import PaymentStates
 from redis.asyncio import Redis
 from services.abuse_guard import rate_limit, audit_block
+from services.audit import audit_event
 
 
 router = Router()
@@ -1264,7 +1265,6 @@ async def process_manage_subscription(callback: types.CallbackQuery, session: As
     """Главный экран управления картами: проверка привязанной карты"""
     await callback.answer()
     user_id = callback.from_user.id
-
     # 1. Ищем активную подписку пользователя с сохраненной картой
     # (Проверяем поле rebill_id на наличие токена карты ЮKassa)
     query = select(Subscription).where(
@@ -1274,6 +1274,18 @@ async def process_manage_subscription(callback: types.CallbackQuery, session: As
     )
     result = await session.execute(query)
     subscriptions = result.scalars().all()
+    audit_event(
+        "bot_card_management_opened",
+        club_id=subscriptions[0].club_id if subscriptions else None,
+        actor_user_id=user_id,
+        actor_role="client",
+        actor_name=callback.from_user.full_name,
+        action="open",
+        object_type="subscription_card",
+        object_id=user_id,
+        location="bot/manage_subscription",
+        has_saved_card=bool(subscriptions),
+    )
 
     if not subscriptions:
         # Если привязанных карт в базе нет
@@ -1314,6 +1326,16 @@ async def process_manage_subscription(callback: types.CallbackQuery, session: As
 async def process_confirm_delete_card(callback: types.CallbackQuery):
     """Экран-предохранитель: подтверждение отвязки карты через галочку и крестик"""
     await callback.answer()
+    audit_event(
+        "bot_card_delete_confirm_opened",
+        actor_user_id=callback.from_user.id,
+        actor_role="client",
+        actor_name=callback.from_user.full_name,
+        action="open",
+        object_type="subscription_card",
+        object_id=callback.from_user.id,
+        location="bot/manage_subscription/confirm_delete",
+    )
 
     # Создаем клавиатуру с галочкой и крестиком
     kb = types.InlineKeyboardMarkup(inline_keyboard=[
@@ -1353,6 +1375,18 @@ async def process_execute_delete_card(callback: types.CallbackQuery, session: As
         
         await session.commit()
         logger.info(f"🗑️ Пользователь {user_id} полностью удалил свои банковские карты из СУБД.")
+        audit_event(
+            "bot_card_deleted",
+            club_id=subscriptions[0].club_id,
+            actor_user_id=user_id,
+            actor_role="client",
+            actor_name=callback.from_user.full_name,
+            action="delete",
+            object_type="subscription_card",
+            object_id=user_id,
+            location="bot/manage_subscription/delete_card",
+            deleted_cards=len(subscriptions),
+        )
 
     kb = types.InlineKeyboardMarkup(inline_keyboard=[
         [types.InlineKeyboardButton(text="🔙 Вернуться в профиль", callback_data="profile")]

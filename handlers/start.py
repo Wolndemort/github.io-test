@@ -10,6 +10,7 @@ from types import SimpleNamespace
 from loguru import logger
 from handlers.buttons import admin_keyboard, get_profile_keyboard
 from database.db import User, Student, Club
+from services.audit import audit_event
 
 router = Router()
 
@@ -128,6 +129,17 @@ async def start_handler(
     welcome_text = club_settings.get("ui", {}).get("welcome_text") or "Добро пожаловать!"
 
     if is_owner or is_super_admin:
+        audit_event(
+            "bot_menu_opened",
+            club_id=club.id,
+            actor_user_id=user_id,
+            actor_role="super_admin" if is_super_admin and not is_owner else "owner",
+            actor_name=message.from_user.full_name,
+            action="open",
+            object_type="menu",
+            object_id="admin",
+            location="bot/start",
+        )
         return await message.answer(
             f"⚡ <b>Панель управления клуба «{club.name}»</b>\n\n{welcome_text}",
             reply_markup=admin_keyboard(
@@ -164,12 +176,38 @@ async def start_handler(
         # === ФИКС ТИПОВОЙ ОШИБКИ TYPEERROR ===
         current_user = SimpleNamespace(user_id=user_id, club_id=club.id)
 
+        audit_event(
+            "bot_profile_opened",
+            club_id=club.id,
+            actor_user_id=user_id,
+            actor_role="client",
+            actor_name=message.from_user.full_name,
+            action="open",
+            object_type="profile",
+            object_id=user_id,
+            location="bot/start",
+            students=[s.id for s in (await session.execute(select(Student).where(Student.parent_id == user_id, Student.club_id == club.id))).scalars().all()],
+            authorized=True,
+        )
         await message.answer(
             f"📍 <b>{club.name}</b>\n\n{welcome_text}\n\n{status_text}",
             reply_markup=get_profile_keyboard(current_user, club_settings=club_settings, is_authorized=True),
             parse_mode="HTML"
         )
     else:
+        audit_event(
+            "bot_profile_opened",
+            club_id=club.id,
+            actor_user_id=user_id,
+            actor_role="client",
+            actor_name=message.from_user.full_name,
+            action="open",
+            object_type="profile",
+            object_id=user_id,
+            location="bot/start",
+            students=[],
+            authorized=False,
+        )
         builder = ReplyKeyboardBuilder()
         builder.row(types.KeyboardButton(
             text="📱 Поделиться контактом",
