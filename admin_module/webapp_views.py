@@ -7,7 +7,7 @@ import httpx
 from aiogram import Bot
 from fastapi import Depends, File, HTTPException, Query, Request, UploadFile
 from fastapi.responses import HTMLResponse, StreamingResponse
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from loguru import logger
 
@@ -233,32 +233,52 @@ async def webapp_admin_tariffs_page(request: Request, club_id: int = Query(...),
 @router.post("/webapp/admin-tariffs/change")
 async def change_admin_tariff(payload: TariffChangePayload, request: Request, session: AsyncSession = Depends(get_session)):
     club = await session.get(Club, payload.club_id)
+    if not club:
+        raise HTTPException(404, "???? ?? ??????")
     tg_user = await verify_webapp_staff(club, payload.init_data, session, "tariffs_manage")
     settings = dict(club.club_settings or {})
     disciplines = dict(settings.get("disciplines", {}))
     block = dict(disciplines.get(payload.discipline, {}))
     if not block:
-        raise HTTPException(404, "Направление не найдено")
+        raise HTTPException(404, "???????????? ?? ???????")
     tariffs = list(block.get("tariffs", []) or [])
+
+    def _as_float(value, default=0.0):
+        try:
+            text = str(value).strip()
+            return float(text) if text else float(default)
+        except (TypeError, ValueError):
+            return float(default)
+
+    def _as_int(value, default=0):
+        try:
+            text = str(value).strip()
+            return int(float(text)) if text else int(default)
+        except (TypeError, ValueError):
+            return int(default)
+
     if payload.action == "toggle_active":
         block["active"] = not bool(block.get("active", False))
     elif payload.action == "toggle_type":
         block["type"] = "lessons" if block.get("type", "lessons") == "unlimited" else "unlimited"
+        if block["type"] == "unlimited":
+            for tariff in tariffs:
+                tariff["count"] = 999
     elif payload.action == "add":
         tariff = payload.tariff or {}
-        tariffs.append({"price": float(tariff.get("price", 0)), "days": int(tariff.get("days", 30)), "count": 999 if block.get("type") == "unlimited" else int(tariff.get("count", 0)), "min_age": int(tariff.get("min_age", 0))})
+        tariffs.append({"price": _as_float(tariff.get("price", 0)), "days": max(1, _as_int(tariff.get("days", 30), 30)), "count": 999 if block.get("type") == "unlimited" else max(0, _as_int(tariff.get("count", 0), 0)), "min_age": max(0, _as_int(tariff.get("min_age", 0), 0))})
     elif payload.action in {"update", "delete"}:
         if payload.index is None or payload.index < 0 or payload.index >= len(tariffs):
-            raise HTTPException(400, "Тариф не найден")
+            raise HTTPException(400, "????? ?? ??????")
         if payload.action == "delete":
             tariffs.pop(payload.index)
         else:
             tariff = payload.tariff or {}
-            tariffs[payload.index] = {"price": float(tariff.get("price", 0)), "days": int(tariff.get("days", 30)), "count": 999 if block.get("type") == "unlimited" else int(tariff.get("count", 0)), "min_age": int(tariff.get("min_age", 0))}
+            tariffs[payload.index] = {"price": _as_float(tariff.get("price", 0)), "days": max(1, _as_int(tariff.get("days", 30), 30)), "count": 999 if block.get("type") == "unlimited" else max(0, _as_int(tariff.get("count", 0), 0)), "min_age": max(0, _as_int(tariff.get("min_age", 0), 0))}
     else:
-        raise HTTPException(400, "Неизвестное действие")
-    if any(float(t.get("price", 0)) <= 0 or int(t.get("days", 0)) <= 0 or int(t.get("count", 0)) < 0 for t in tariffs):
-        raise HTTPException(400, "Цена, срок и количество должны быть положительными")
+        raise HTTPException(400, "??????????? ????????")
+    if any(_as_float(t.get("price", 0)) <= 0 or _as_int(t.get("days", 0)) <= 0 or _as_int(t.get("count", 0)) < 0 for t in tariffs):
+        raise HTTPException(400, "????, ???? ? ?????????? ?????? ???? ??????????????")
     block["tariffs"] = tariffs
     disciplines[payload.discipline] = block
     settings["disciplines"] = disciplines
@@ -279,7 +299,6 @@ async def change_admin_tariff(payload: TariffChangePayload, request: Request, se
         tariff=payload.tariff,
     )
     return {"success": True}
-
 
 @router.get("/webapp/admin-schedule", response_class=HTMLResponse)
 async def webapp_admin_schedule_page(

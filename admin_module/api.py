@@ -848,6 +848,8 @@ async def get_revenue_stats(
     inactive_passes = student_metrics["inactive_passes"]
     total_lessons_left = student_metrics["total_lessons_left"]
     churned_students = [{"name": s.name} for s in student_metrics["inactive_students"]]
+    frozen_students = [{"name": s.name} for s in student_metrics["frozen_students"]]
+    inactive_students = [{"name": s.name} for s in student_metrics["inactive_students"]]
     discipline_counts = student_metrics["discipline_counts"]
 
     # Красивые имена для дисциплин в HTML
@@ -892,6 +894,8 @@ async def get_revenue_stats(
             "total_lessons_left": total_lessons_left,
             "disciplines_stats": disciplines_stats,
             "churned_students": churned_students,
+            "frozen_students": frozen_students,
+            "inactive_students": inactive_students,
             "top_students": top_students,
 
             # Финансы (на случай, если захочешь вывести их туда же)

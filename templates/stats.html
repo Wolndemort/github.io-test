@@ -69,6 +69,19 @@
         <div class="card mono-card">
             <div class="label">Заморозки</div>
             <div class="value">{{ frozen_passes }}</div>
+            {% if frozen_students %}
+            <details>
+                <summary>Кто именно</summary>
+                <div class="scroll-box">
+                    {% for student in frozen_students %}
+                    <div class="list-item">
+                        <span>{{ student.name }}</span>
+                        <span class="muted-note">заморожен</span>
+                    </div>
+                    {% endfor %}
+                </div>
+            </details>
+            {% endif %}
         </div>
         <div class="card mono-card">
             <div class="label">Горят (<=3 зан.)</div>
@@ -77,10 +90,19 @@
         <div class="card mono-card">
             <div class="label">Закончились</div>
             <div class="value">{{ inactive_passes }}</div>
-        </div>
-        <div class="card mono-card full">
-            <div class="label">Осталось уроков на руках</div>
-            <div class="value">{{ total_lessons_left }}</div>
+            {% if inactive_students %}
+            <details>
+                <summary>Кто именно</summary>
+                <div class="scroll-box">
+                    {% for student in inactive_students %}
+                    <div class="list-item">
+                        <span>{{ student.name }}</span>
+                        <span class="muted-note">без абонемента</span>
+                    </div>
+                    {% endfor %}
+                </div>
+            </details>
+            {% endif %}
         </div>
         <div class="card mono-card">
             <div class="label">Выручка сегодня</div>

@@ -1,4 +1,4 @@
-import qrcode
+﻿import qrcode
 from html import escape
 from types import SimpleNamespace
 from aiogram.types import InlineKeyboardMarkup
@@ -120,6 +120,7 @@ async def universal_profile_handler(
     students = result.scalars().all()
 
     is_auth = bool(students)
+    missing_birthdays = sum(1 for s in students if not s.birthday)
     audit_event(
         "bot_profile_opened",
         club_id=club.id,
@@ -132,47 +133,59 @@ async def universal_profile_handler(
         location="bot/profile",
         students=[s.id for s in students],
         authorized=is_auth,
+        missing_birthdays=missing_birthdays,
     )
 
+    birthday_note = ""
     if not is_auth:
         status_text = (
-            f"📍 Клуб: <b>{club.name}</b>\n\n"
-            "⚠️ <b>У вас еще нет привязанных атлетов в этом клубе.</b>\n\n"
-            "Нажмите <b>«Привязать профиль»</b> или добавьте атлета вручную."
+            f"🏰 Клуб: <b>{club.name}</b>\n\n"
+            "🔍 <b>У вас пока нет авторизованных атлетов в этом клубе.</b>\n\n"
+            "Откройте <b>управление профилем</b> через главный экран."
         )
     else:
-        status_text = f"🏰 Клуб: <b>{club.name}</b>\n🆔 <b>Ваши профили:</b>\n"
+        birthday_note = (
+            f"\n\n⚠️ <b>Есть атлеты без даты рождения:</b> <code>{missing_birthdays}</code>\n"
+            "Нажмите кнопку ниже, чтобы заполнить их."
+            if missing_birthdays
+            else ""
+        )
+        status_text = f"🏰 Клуб: <b>{club.name}</b>\n🔍 <b>Ваши профили:</b>\n"
         for s in students:
             is_frozen_val = int(getattr(s, 'is_frozen', 0) or 0)
 
-            # Логика статуса даты
+            # Статус абонемента
             if not s.expire_date:
-                status = "❌ <b>Не куплен</b>"
+                status = "⏳ <b>Нет даты</b>"
             elif is_frozen_val == 1:
-                status = "❄️ <b>ЗАМОРОЖЕН</b>"
+                status = "❄️ <b>Заморожен</b>"
             elif s.expire_date.replace(tzinfo=None) > now_naive:
                 status = f"✅ <b>Активен</b> до <code>{s.expire_date.strftime('%d.%m.%Y')}</code>"
             else:
-                status = f"🔴 <b>ИСТЕК</b> (<code>{s.expire_date.strftime('%d.%m.%Y')}</code>)"
+                status = f"⚠️ <b>Истек</b> (<code>{s.expire_date.strftime('%d.%m.%Y')}</code>)"
 
-            # Логика баланса
+            # Баланс занятий
             balance = getattr(s, 'balance_lessons', 0)
             if balance >= 900:
-                lessons_info = "♾ <b>Безлимит</b>"
+                lessons_info = "♾️ <b>Безлимит</b>"
             elif balance > 0:
-                lessons_info = f"🔢 Занятий: <b>{balance}</b>"
+                lessons_info = f"Баланс занятий: <b>{balance}</b>"
             else:
-                lessons_info = "❌ <b>Занятия окончены</b>"
+                lessons_info = "⛔ <b>Занятий нет</b>"
 
-            status_text += f"\n• <b>{s.name}</b>: {status}\n  └ {lessons_info}"
+            status_text += f"\n👤 <b>{s.name}</b>: {status}\n  • {lessons_info}"
 
     final_text = (
-        f"👤 <b>Личный кабинет</b>\n\n{status_text}\n\n"
-        "<i>Используйте кнопки ниже для управления:</i>"
+        f"👤 <b>Профиль атлетов</b>\n\n{status_text}{birthday_note}\n\n"
+        "<i>Используйте кнопки ниже для действий:</i>"
     )
     current_user = SimpleNamespace(user_id=user_id, club_id=club.id)
-    reply_markup = get_profile_keyboard(current_user, club_settings=club_settings, is_authorized=is_auth)
-
+    reply_markup = get_profile_keyboard(
+        current_user,
+        club_settings=club_settings,
+        is_authorized=is_auth,
+        missing_birthdays=missing_birthdays if is_auth else 0,
+    )
     # Переносим event.answer() в самое начало блока отправки,
     # чтобы кнопка отжималась моментально в 100% случаев, предотвращая зависание UI
     if isinstance(event, types.CallbackQuery):
@@ -899,6 +912,7 @@ async def start_add_athlete(callback: types.CallbackQuery, state: FSMContext, cl
     await callback.answer()
 
 
+# callback_data="edit_birthday" — используется кнопкой профиля для перехода к заполнению даты рождения
 @router.callback_query(F.data == "edit_birthday")
 async def choose_birthday_edit_student(callback: types.CallbackQuery, session: AsyncSession, club: Club):
     students = (await session.execute(

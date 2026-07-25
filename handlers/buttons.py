@@ -8,7 +8,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 router = Router()
 
 
-def get_profile_keyboard(user, club_settings: dict, is_authorized: bool = False):
+def get_profile_keyboard(user, club_settings: dict, is_authorized: bool = False, missing_birthdays: int = 0):
     """
     Передаем объект user (модель User из БД), чтобы динамически подставлять
     его club_id и user_id в ссылку WebApp.
@@ -41,7 +41,12 @@ def get_profile_keyboard(user, club_settings: dict, is_authorized: bool = False)
     )
 
     # 2. Дополнительные данные атлетов
-    builder.row(types.InlineKeyboardButton(text="✏️ Данные атлетов", callback_data="edit_birthday"))
+    birthday_label = (
+        f"📅 Атлеты без ДР ({missing_birthdays}) — заполнить"
+        if missing_birthdays and missing_birthdays > 0
+        else "✏️ Данные атлетов"
+    )
+    builder.row(types.InlineKeyboardButton(text=birthday_label, callback_data="edit_birthday"))
 
     # 3. Покупки и абонемент
     if features.get("online_payments", False):

@@ -21,6 +21,24 @@ def test_card_management_flow_emits_audit_events():
     assert "sub.is_active = False" not in payments
 
 
+def test_profile_prompts_for_missing_birthdays_and_reuses_existing_edit_flow():
+    buttons = Path("handlers/buttons.py").read_text(encoding="utf-8")
+    user = Path("handlers/user_option.py").read_text(encoding="utf-8")
+
+    assert "missing_birthdays" in buttons
+    assert "Атлеты без ДР" in buttons
+    assert "Есть атлеты без даты рождения" in user
+    assert 'callback_data="edit_birthday"' in user
+
+
+def test_revenue_filters_are_collapsible_in_sales_and_cash_register():
+    sales = Path("templates/admin_sales.html").read_text(encoding="utf-8")
+    cash = Path("templates/cash_register.html").read_text(encoding="utf-8")
+
+    assert "<details" in sales and "Фильтры" in sales
+    assert "<details>" in cash and "Фильтры" in cash
+
+
 def test_admin_audit_screen_is_exposed_in_webapp_and_super_panel():
     api = Path("admin_module/api.py").read_text(encoding="utf-8")
     super_handlers = Path("handlers/super_admin_handlers.py").read_text(encoding="utf-8")

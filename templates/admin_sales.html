@@ -27,7 +27,7 @@
         <div class="muted">Подтверждённые оплаты клуба</div>
     </div>
     <form class="card filters" method="get">
-        <details class="filter-panel" open><summary>Фильтры</summary>
+        <details class="filter-panel"><summary>Фильтры</summary>
         <input type="hidden" name="club_id" value="{{ club_id }}">
         <input type="hidden" name="init_data" value="{{ request.query_params.get('init_data','') }}">
         <label>С даты<input type="date" name="date_from" value="{{ filters.date_from }}"></label>

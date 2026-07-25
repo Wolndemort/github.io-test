@@ -39,12 +39,15 @@ button{background:#fff;color:#111;font-weight:bold}
   <button id="add">Добавить</button>
 </div>
 <div class="card">
-  <form>
-    <input type="hidden" name="init_data" value="{{ request.query_params.get('init_data','') }}">
-    <label>С даты <input type="date" name="date_from" value="{{ date_from }}"></label>
-    <label>По дату <input type="date" name="date_to" value="{{ date_to }}"></label>
-    <button>Фильтр</button>
-  </form>
+  <details>
+    <summary>Фильтры</summary>
+    <form>
+      <input type="hidden" name="init_data" value="{{ request.query_params.get('init_data','') }}">
+      <label>С даты <input type="date" name="date_from" value="{{ date_from }}"></label>
+      <label>По дату <input type="date" name="date_to" value="{{ date_to }}"></label>
+      <button>Фильтр</button>
+    </form>
+  </details>
   <h3>Все операции</h3>
   {% for row in rows %}
   <div class="row">
