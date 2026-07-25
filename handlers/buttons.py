@@ -41,12 +41,9 @@ def get_profile_keyboard(user, club_settings: dict, is_authorized: bool = False,
     )
 
     # 2. Дополнительные данные атлетов
-    birthday_label = (
-        f"📅 Атлеты без ДР ({missing_birthdays}) — заполнить"
-        if missing_birthdays and missing_birthdays > 0
-        else "✏️ Данные атлетов"
-    )
-    builder.row(types.InlineKeyboardButton(text=birthday_label, callback_data="edit_birthday"))
+    if missing_birthdays and missing_birthdays > 0:
+        birthday_label = f"📅 Атлеты без ДР ({missing_birthdays}) — заполнить"
+        builder.row(types.InlineKeyboardButton(text=birthday_label, callback_data="edit_birthday"))
 
     # 3. Покупки и абонемент
     if features.get("online_payments", False):

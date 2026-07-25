@@ -73,10 +73,12 @@ def test_user_and_admin_history_render_database_utc_as_moscow_time():
     history = Path("templates/webapp_history.html").read_text(encoding="utf-8")
     admin = Path("admin_module/admin_pages.py").read_text(encoding="utf-8")
     bot = Path("handlers/user_option.py").read_text(encoding="utf-8")
-    assert "visit.visited_at.replace(tzinfo=None) + timedelta(hours=3)" in bot
+    assert "group_completed_sessions" in bot
+    assert "summarize_payment_entry" in bot
     assert "display_last_visit = last_visit_naive + timedelta(hours=3)" in admin
-    assert "visited_at|moscow_time" in student
-    assert "created_at|moscow_time" in history
+    assert "visit_sessions" in student
+    assert "visit_sessions" in history
+    assert "payment_lines" in history
 
 
 def test_background_scheduler_has_stable_moscow_schedule_and_no_overlap():

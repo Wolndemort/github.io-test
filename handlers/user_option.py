@@ -9,7 +9,7 @@ from aiogram.utils.keyboard import ReplyKeyboardBuilder
 from aiogram.filters import Command
 from sqlalchemy.ext.asyncio import AsyncSession
 from redis.asyncio import Redis
-from database.db import Student, process_student_freeze, Club, User, VisitLog, PaymentOrder, Subscription
+from database.db import Student, process_student_freeze, Club, User, VisitLog, PaymentOrder, Subscription, CartOrder, CartItem
 from services.abuse_guard import rate_limit, audit_block
 from services.audit import audit_event
 from config import secret_key
@@ -17,6 +17,7 @@ from sqlalchemy import select
 from sqlalchemy import func
 from handlers.buttons import get_main_menu_keyboard, get_profile_keyboard, get_section_menu_kb
 from services.schedule_utils import normalize_schedule_block
+from services.visit_history import attach_student_names, group_completed_sessions, summarize_payment_entry, moscow_str
 from aiogram.fsm.context import FSMContext
 from aiogram.types import InlineKeyboardButton, BufferedInputFile
 from datetime import timedelta, timezone
@@ -306,32 +307,28 @@ async def detailed_status_handler(
             f"───────────────────\n\n"
         )
 
-    visit_count_stmt = select(func.count(VisitLog.id)).where(
-        VisitLog.club_id == club.id,
-        VisitLog.student_id.in_([s.id for s in students])
-    )
-    total_visits = await session.scalar(visit_count_stmt) or 0
-
-    recent_visits_stmt = (
-        select(VisitLog, Student.name)
-        .join(Student, Student.id == VisitLog.student_id)
+    visit_rows = (await session.execute(
+        select(VisitLog)
         .where(
             VisitLog.club_id == club.id,
             VisitLog.student_id.in_([s.id for s in students])
         )
-        .order_by(VisitLog.visited_at.desc())
-        .limit(5)
-    )
-    recent_visits_rows = (await session.execute(recent_visits_stmt)).all()
+        .order_by(VisitLog.visited_at.asc())
+    )).scalars().all()
+    prepared_visits = attach_student_names(visit_rows, {s.id: s.name for s in students})
+    completed_sessions = group_completed_sessions(prepared_visits, timeout_minutes, now=now)
 
-    visits_block = f"📚 <b>История посещений клуба:</b>\nВсего чек-инов: <b>{total_visits}</b>\n"
-    if recent_visits_rows:
-        visits_block += "\n<b>Последние 5:</b>\n"
-        for visit, student_name in recent_visits_rows:
-            visit_time = (visit.visited_at.replace(tzinfo=None) + timedelta(hours=3)).strftime("%d.%m.%Y %H:%M")
-            visits_block += f"• <b>{student_name}</b> — <code>{visit_time}</code>\n"
+    visits_block = "📚 <b>История завершенных сессий:</b>\n"
+    if completed_sessions:
+        visits_block += f"Всего сессий: <b>{len(completed_sessions)}</b>\n\n"
+        for item in completed_sessions[:5]:
+            visits_block += (
+                f"• <b>{item['student_name']}</b> — "
+                f"<code>{moscow_str(item['started_at'])} → {moscow_str(item['ended_at'])}</code> "
+                f"— {item['visits_count']} чек-ин(ов)\n"
+            )
     else:
-        visits_block += "\n<i>Пока нет ни одного чекина.</i>\n"
+        visits_block += "\n<i>Пока нет завершенных сессий.</i>\n"
 
     detail_text += visits_block
 
@@ -383,6 +380,20 @@ async def payment_history_handler(
         .order_by(PaymentOrder.created_at.desc())
         .limit(10)
     )).scalars().all()
+    cart_orders = (await session.execute(
+        select(CartOrder)
+        .where(CartOrder.club_id == club.id, CartOrder.user_id == user_id)
+        .order_by(CartOrder.created_at.desc())
+        .limit(5)
+    )).scalars().all()
+    cart_items_by_order = {}
+    if cart_orders:
+        cart_ids = [o.id for o in cart_orders]
+        cart_items = (await session.execute(
+            select(CartItem).where(CartItem.cart_order_id.in_(cart_ids))
+        )).scalars().all()
+        for item in cart_items:
+            cart_items_by_order.setdefault(item.cart_order_id, []).append(item.title)
     subs = (await session.execute(
         select(Subscription)
         .where(Subscription.club_id == club.id, Subscription.user_id == user_id)
@@ -391,28 +402,48 @@ async def payment_history_handler(
     )).scalars().all()
 
     text = f"🧾 <b>История</b>\n🏰 Клуб: <b>{club.name}</b>\n\n"
-    if orders:
-        text += "<b>Последние оплаты:</b>\n"
+    if orders or cart_orders:
+        text += "<b>Платежи:</b>\n"
         for order in orders:
-            created = order.created_at.strftime("%d.%m.%Y %H:%M") if order.created_at else "—"
-            amount = f"{order.amount_kopecks / 100:.0f} ₽"
-            text += f"• <code>{created}</code> — <b>{amount}</b> — {order.status}\n"
+            student_name = next((s.name for s in students if s.id == order.student_id), None)
+            text += summarize_payment_entry(order, student_name=student_name) + "\n"
+        for cart in cart_orders:
+            text += summarize_payment_entry(
+                cart,
+                item_titles=cart_items_by_order.get(cart.id, []),
+            ) + "\n"
     else:
-        text += "<i>Оплат пока нет.</i>\n"
+        text += "<i>Платежей пока нет.</i>\n"
 
     text += "\n"
     if subs:
         text += "<b>Подписки:</b>\n"
         for sub in subs:
             next_charge = sub.next_charge_at.strftime("%d.%m.%Y") if sub.next_charge_at else "—"
-            text += f"• Атлет ID <code>{sub.student_id}</code> — след. списание: <b>{next_charge}</b> — {'активна' if sub.is_active else 'неактивна'}\n"
+            text += f"• Атлет <code>{sub.student_id}</code> — след. списание: <b>{next_charge}</b> — {'активна' if sub.is_active else 'неактивна'}\n"
     else:
         text += "<i>Подписок пока нет.</i>\n"
 
-    text += "\n<b>Ваши атлеты:</b>\n"
-    for s in students:
-        status = "❄️ заморожен" if s.is_frozen else ("✅ активен" if s.expire_date and s.expire_date > datetime.now() else "🔴 истек")
-        text += f"• <b>{s.name}</b> — {status}\n"
+    visit_rows = (await session.execute(
+        select(VisitLog)
+        .where(
+            VisitLog.club_id == club.id,
+            VisitLog.student_id.in_(student_ids)
+        )
+        .order_by(VisitLog.visited_at.asc())
+    )).scalars().all()
+    completed_sessions = group_completed_sessions(
+        attach_student_names(visit_rows, {s.id: s.name for s in students}),
+        int((club.club_settings or {}).get("limits", {}).get("session_timeout_minutes", 150)),
+        now=datetime.now(timezone.utc),
+    )
+
+    text += "\n<b>История посещений:</b>\n"
+    if completed_sessions:
+        for item in completed_sessions[:5]:
+            text += f"• <b>{item['student_name']}</b> — <code>{moscow_str(item['started_at'])} → {moscow_str(item['ended_at'])}</code> — {item['visits_count']} чек-ин(ов)\n"
+    else:
+        text += "<i>Завершенных сессий пока нет.</i>\n"
 
     back_keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="⬅️ Назад в профиль", callback_data="profile")]

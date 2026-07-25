@@ -65,15 +65,18 @@
     </div>
 </div>
 <div class="mono-card">
-    <div class="mono-kicker"><div class="name">Последние посещения</div><span>20</span></div>
-    {% if visits %}
+    <div class="mono-kicker"><div class="name">История посещений</div><span>сессии</span></div>
+    {% if visit_sessions %}
         <ul>
-        {% for visit in visits %}
-            <li>{{ visit.visited_at|moscow_time }}</li>
+        {% for session in visit_sessions %}
+            <li>
+                {{ session.started_at|moscow_time }} → {{ session.ended_at|moscow_time }}
+                · {{ session.visits_count }} чекин(ов)
+            </li>
         {% endfor %}
         </ul>
     {% else %}
-        <p>Пока нет посещений.</p>
+        <p>Пока нет завершенных сессий.</p>
     {% endif %}
 </div>
 {% endblock %}

@@ -21,6 +21,7 @@ from services.audit import audit_event
 from services.abuse_guard import rate_limit, audit_block
 from services.yookassa_client import YooKassaClient
 from services.input_normalization import normalize_ru_phone
+from services.visit_history import attach_student_names, group_completed_sessions, summarize_payment_entry
 from aiogram import Bot
 
 
@@ -253,9 +254,17 @@ async def webapp_student_page(request: Request, club_id: int, student_id: int, i
     student = await db.get(Student, student_id)
     if not student or student.club_id != club_id or student.parent_id != int(tg_user.get("id", 0)):
         raise HTTPException(status_code=403, detail="Атлет не найден")
-    visits = (await db.execute(select(VisitLog).where(VisitLog.club_id == club_id, VisitLog.student_id == student_id).order_by(VisitLog.visited_at.desc()).limit(20))).scalars().all()
+    visits = (await db.execute(
+        select(VisitLog)
+        .where(VisitLog.club_id == club_id, VisitLog.student_id == student_id)
+        .order_by(VisitLog.visited_at.asc())
+    )).scalars().all()
+    visit_sessions = group_completed_sessions(
+        attach_student_names(visits, {student.id: student.name}),
+        int((club.club_settings or {}).get("limits", {}).get("session_timeout_minutes", 150)),
+    )
     freeze_price_per_day = (club.club_settings or {}).get("limits", {}).get("freeze_price_per_day", 0)
-    return templates.TemplateResponse("webapp_student.html", {"request": request, "club": club, "student": student, "club_id": club_id, "freeze_price_per_day": freeze_price_per_day, "visits": visits, "now": datetime.now()})
+    return templates.TemplateResponse("webapp_student.html", {"request": request, "club": club, "student": student, "club_id": club_id, "freeze_price_per_day": freeze_price_per_day, "visit_sessions": visit_sessions, "now": datetime.now()})
 
 
 @router.get("/webapp/client-cabinet/history", response_class=HTMLResponse)
@@ -272,17 +281,54 @@ async def webapp_history_page(request: Request, club_id: int, student_id: int | 
     user = await _ensure_webapp_user_linked(db, user_id, club_id)
     if not user:
         return await webapp_auth_help_page(request=request, club_id=club_id, init_data=init_data, db=db)
-    student_ids = [row[0] for row in (await db.execute(select(Student.id).where(Student.parent_id == user_id, Student.club_id == club_id))).all()]
+    students = (await db.execute(select(Student).where(Student.parent_id == user_id, Student.club_id == club_id).order_by(Student.name))).scalars().all()
+    student_ids = [student.id for student in students]
     if student_id:
         student_ids = [student_id] if student_id in student_ids else []
-    orders = (await db.execute(select(PaymentOrder).where(PaymentOrder.club_id == club_id, PaymentOrder.student_id.in_(student_ids)).order_by(PaymentOrder.created_at.desc()).limit(30))).scalars().all()
-    cart_orders = (await db.execute(select(CartOrder).where(CartOrder.club_id == club_id, CartOrder.user_id == user_id).order_by(CartOrder.created_at.desc()).limit(30))).scalars().all()
-    cart_history = []
-    for cart in cart_orders:
-        items = (await db.execute(select(CartItem).where(CartItem.cart_order_id == cart.id))).scalars().all()
-        cart_history.append({"order": cart, "items": items})
+    orders = (await db.execute(select(PaymentOrder).where(PaymentOrder.club_id == club_id, PaymentOrder.student_id.in_(student_ids)).order_by(PaymentOrder.created_at.desc()).limit(20))).scalars().all()
+    cart_orders = (await db.execute(select(CartOrder).where(CartOrder.club_id == club_id, CartOrder.user_id == user_id).order_by(CartOrder.created_at.desc()).limit(10))).scalars().all()
+    cart_items_by_order = {}
+    if cart_orders:
+        cart_ids = [cart.id for cart in cart_orders]
+        cart_items = (await db.execute(select(CartItem).where(CartItem.cart_order_id.in_(cart_ids)))).scalars().all()
+        for item in cart_items:
+            cart_items_by_order.setdefault(item.cart_order_id, []).append(item.title)
     subscriptions = (await db.execute(select(Subscription).where(Subscription.club_id == club_id, Subscription.user_id == user_id).order_by(Subscription.created_at.desc()))).scalars().all()
-    return templates.TemplateResponse("webapp_history.html", {"request": request, "club": club, "club_id": club_id, "orders": orders, "cart_history": cart_history, "subscriptions": subscriptions, "student_id": student_id})
+
+    visit_rows = (await db.execute(
+        select(VisitLog)
+        .where(VisitLog.club_id == club_id, VisitLog.student_id.in_(student_ids))
+        .order_by(VisitLog.visited_at.asc())
+    )).scalars().all()
+    visit_sessions = group_completed_sessions(
+        attach_student_names(visit_rows, {student.id: student.name for student in students}),
+        int((club.club_settings or {}).get("limits", {}).get("session_timeout_minutes", 150)),
+    )
+
+    payment_lines = []
+    for order in orders:
+        student_name = next((s.name for s in students if s.id == order.student_id), None)
+        payment_lines.append(summarize_payment_entry(order, student_name=student_name))
+    for cart in cart_orders:
+        payment_lines.append(summarize_payment_entry(cart, item_titles=cart_items_by_order.get(cart.id, [])))
+
+    subscription_lines = [
+        f"• {sub.created_at.strftime('%d.%m.%Y %H:%M') if sub.created_at else '—'} — {'активна' if sub.is_active else 'неактивна'}"
+        for sub in subscriptions
+    ]
+
+    return templates.TemplateResponse(
+        "webapp_history.html",
+        {
+            "request": request,
+            "club": club,
+            "club_id": club_id,
+            "payment_lines": payment_lines,
+            "subscription_lines": subscription_lines,
+            "visit_sessions": visit_sessions,
+            "student_id": student_id,
+        },
+    )
 
 
 @router.get("/webapp/client-cabinet/buy-subscription", response_class=HTMLResponse)

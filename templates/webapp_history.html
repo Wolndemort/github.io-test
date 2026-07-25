@@ -9,37 +9,45 @@
 <div class="mono-card">
     <div class="mono-kicker"><div class="name">Сводка</div><span>история</span></div>
     <div class="mono-grid-2">
-        <div class="mono-pill"><div class="label">Подписок</div><div class="value">{{ subscriptions|length if subscriptions is defined else 0 }}</div></div>
-        <div class="mono-pill"><div class="label">Платежей</div><div class="value">{{ orders|length if orders is defined else 0 }}</div></div>
+        <div class="mono-pill"><div class="label">Платежей</div><div class="value">{{ payment_lines|length if payment_lines is defined else 0 }}</div></div>
+        <div class="mono-pill"><div class="label">Сессий</div><div class="value">{{ visit_sessions|length if visit_sessions is defined else 0 }}</div></div>
     </div>
 </div>
 <div class="mono-card">
+    <div class="mono-kicker"><div class="name">Платежи</div><span>последние</span></div>
+    {% if payment_lines %}
+        <ul>
+        {% for line in payment_lines %}
+            <li>{{ line|safe }}</li>
+        {% endfor %}
+        </ul>
+    {% else %}
+        <p>Платежей пока нет.</p>
+    {% endif %}
+</div>
+<div class="mono-card">
     <div class="mono-kicker"><div class="name">Подписки</div><span>последние</span></div>
-    {% if subscriptions %}
+    {% if subscription_lines %}
         <ul>
-        {% for sub in subscriptions %}
-            <li>{{ sub.created_at|moscow_time if sub.created_at else '' }} — {{ 'активна' if sub.is_active else 'неактивна' }}</li>
+        {% for line in subscription_lines %}
+            <li>{{ line }}</li>
         {% endfor %}
         </ul>
     {% else %}
-        <p>Подписок нет.</p>
+        <p>Подписок пока нет.</p>
     {% endif %}
 </div>
 <div class="mono-card">
-    <div class="mono-kicker"><div class="name">Платежи</div><span>последние 30</span></div>
-    {% if orders %}
+    <div class="mono-kicker"><div class="name">История посещений</div><span>сессии</span></div>
+    {% if visit_sessions %}
         <ul>
-        {% for order in orders %}
-            <li>{{ order.created_at|moscow_time if order.created_at else '' }} — {{ order.type }} — {{ (order.amount_kopecks or 0) / 100 }} ₽ — {{ order.status }}</li>
+        {% for session in visit_sessions %}
+            <li>{{ session.started_at|moscow_time }} → {{ session.ended_at|moscow_time }} · {{ session.visits_count }} чекин(ов)</li>
         {% endfor %}
         </ul>
     {% else %}
-        <p>Платежей нет.</p>
+        <p>Завершенных сессий пока нет.</p>
     {% endif %}
-</div>
-<div class="mono-card">
-    <div class="mono-kicker"><div class="name">Корзина</div><span>заказы</span></div>
-    {% if cart_history %}<ul>{% for entry in cart_history %}<li><b>{{ entry["order"].created_at|moscow_time if entry["order"].created_at else '' }}</b> — {{ entry["order"].status }} — {{ '%.2f'|format((entry["order"].amount_kopecks or 0) / 100) }} ₽<br>{% for item in entry["items"] %}{{ item.title }} × {{ item.quantity }}{% if not loop.last %}, {% endif %}{% endfor %}</li>{% endfor %}</ul>{% else %}<p>Заказов корзины нет.</p>{% endif %}
 </div>
 <div class="mono-sticky-bottom">
     <div class="mono-card">
