@@ -20,13 +20,14 @@ async def test_parse_qr_scan_no_lessons(mock_gate_service, mock_gen_sig):
     session = AsyncMock()
     club = AsyncMock()
     club_settings = {"limits": {"session_timeout_minutes": 150}}
+    redis = AsyncMock()
 
     message = AsyncMock()
     message.web_app_data.data = f"student:1:{datetime.now(timezone.utc):%Y-%m-%d-%H}:valid_sig"
     message.answer = AsyncMock()
 
     # Запуск
-    await parse_qr_scan(message, session, club, club_settings)
+    await parse_qr_scan(message, session, club, club_settings, redis)
 
     # Проверяем, что хендлер отдал админу/пользователю ошибку, которую вернул сервис
     args, kwargs = message.answer.call_args
@@ -59,6 +60,7 @@ async def test_parse_qr_scan_unlimited_success(mock_gate_service, mock_gen_sig):
     session = AsyncMock()
     club = AsyncMock()
     club_settings = {"limits": {"session_timeout_minutes": 150}}
+    redis = AsyncMock()
 
     message = AsyncMock()
     message.web_app_data.data = f"student:1:{datetime.now(timezone.utc):%Y-%m-%d-%H}:valid_sig"
@@ -66,7 +68,7 @@ async def test_parse_qr_scan_unlimited_success(mock_gate_service, mock_gen_sig):
     message.bot.send_message = AsyncMock()
 
     # Запуск
-    await parse_qr_scan(message, session, club, club_settings)
+    await parse_qr_scan(message, session, club, club_settings, redis)
 
     # Проверяем, что в ответе фигурирует успешный статус прохода
     args, kwargs = message.answer.call_args

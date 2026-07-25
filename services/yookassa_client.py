@@ -35,7 +35,8 @@ class YooKassaClient:
             bot_username: str,
             user_email: Optional[str] = None,  # 🆕 Добавлено для чека
             user_phone: Optional[str] = None,  # 🆕 Добавлено для чека
-            vat_code: int = 1  # 🆕 Добавлено: 1 — без НДС (самый частый для ботов)
+            vat_code: int = 1,  # 🆕 Добавлено: 1 — без НДС (самый частый для ботов)
+            payment_method_type: str = "bank_card"
     ) -> dict:
         """
         Создание первой оплаты.
@@ -46,6 +47,9 @@ class YooKassaClient:
         if not self.shop_id or not self.secret_key:
             return {"Success": False, "Message": "Платежный магазин не настроен"}
         url = self.base_url
+        payment_method_type = (payment_method_type or "bank_card").strip().lower()
+        if payment_method_type not in {"bank_card", "sbp"}:
+            return {"Success": False, "Message": f"Неподдерживаемый способ оплаты: {payment_method_type}"}
 
         # Переводим копейки из твоей модели БД в рубли (формат "3500.00")
         amount_rub = f"{amount_kopecks / 100:.2f}"
@@ -74,7 +78,6 @@ class YooKassaClient:
                 "currency": "RUB"
             },
             "capture": True,  # Списывать деньги сразу (без двухэтапной заморозки)
-            "save_payment_method": True,  # ‼️ КЛЮЧЕВОЙ ФЛАГ ДЛЯ SAAS (сохранить карту)
             "confirmation": {
                 "type": "redirect",
                 "return_url": f"https://t.me/{clean_bot_username}?start=check_{order_id}"
@@ -103,6 +106,12 @@ class YooKassaClient:
                 ]
             }
         }
+
+        if payment_method_type == "sbp":
+            payload["payment_method_data"] = {"type": "sbp"}
+            payload["description"] = "Оплата через СБП"
+        else:
+            payload["save_payment_method"] = True  # ‼️ КЛЮЧЕВОЙ ФЛАГ ДЛЯ SAAS (сохранить карту)
 
         # ЮKassa требует уникальный Idempotence-Key для каждого запроса создания платежа
         headers = {

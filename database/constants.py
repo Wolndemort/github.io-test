@@ -86,7 +86,8 @@ DEFAULT_CLUB_SETTINGS = {
     "payments": {
         "provider": "yookassa",
         "yookassa_shop_id": "",       # Заполняется админом клуба
-        "yookassa_secret_key": ""     # Заполняется админом клуба (live_... или test_...)
+        "yookassa_secret_key": "",    # Заполняется админом клуба (live_... или test_...)
+        "yookassa_sbp_enabled": True   # Онлайн-СБП через YooKassa
     },
     "turnstile": {
          "enabled": False,  #включение и выключение

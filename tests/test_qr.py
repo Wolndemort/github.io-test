@@ -32,6 +32,7 @@ async def test_parse_qr_scan_new_session_success(mock_gate_service, mock_gen_sig
     club.id = 1
     club.name = "Test Club"
     club_settings = {"limits": {"session_timeout_minutes": 150}}
+    redis = AsyncMock()
 
     message = AsyncMock()
     message.web_app_data.data = f"student:1:{datetime.now(timezone.utc):%Y-%m-%d-%H}:valid_sig"
@@ -39,12 +40,12 @@ async def test_parse_qr_scan_new_session_success(mock_gate_service, mock_gen_sig
     message.bot.send_message = AsyncMock()
 
     # 2. Запуск хендлера
-    await parse_qr_scan(message, session, club, club_settings)
+    await parse_qr_scan(message, session, club, club_settings, redis)
 
     # 3. Проверки
     # Проверяем, что хендлер честно вызвал наш центральный сервис с правильным id ученика
     mock_gate_service.assert_called_once_with(
-        1, session, club_settings, expected_club_id=1
+        1, session, club_settings, expected_club_id=1, redis=redis
     )
 
     # Проверяем, что бот вывел админу/родителю сообщение об успешном проходе
@@ -80,6 +81,7 @@ async def test_parse_qr_scan_inside_session_success(mock_gate_service, mock_gen_
     club.id = 1
     club.name = "Test Club"
     club_settings = {"limits": {"session_timeout_minutes": 150}}
+    redis = AsyncMock()
 
     message = AsyncMock()
     message.web_app_data.data = f"student:1:{datetime.now(timezone.utc):%Y-%m-%d-%H}:valid_sig"
@@ -87,11 +89,11 @@ async def test_parse_qr_scan_inside_session_success(mock_gate_service, mock_gen_
     message.bot.send_message = AsyncMock()
 
     # Запуск
-    await parse_qr_scan(message, session, club, club_settings)
+    await parse_qr_scan(message, session, club, club_settings, redis)
 
     # Проверки
     mock_gate_service.assert_called_once_with(
-        1, session, club_settings, expected_club_id=1
+        1, session, club_settings, expected_club_id=1, redis=redis
     )
 
     args, kwargs = message.answer.call_args
@@ -106,11 +108,12 @@ async def test_parse_qr_scan_rejects_invalid_signature(mock_gate_service, _mock_
     session = AsyncMock()
     club = AsyncMock()
     club.id = 1
+    redis = AsyncMock()
     message = AsyncMock()
     message.web_app_data.data = f"student:1:{datetime.now(timezone.utc):%Y-%m-%d-%H}:forged_sig"
     message.answer = AsyncMock()
 
-    await parse_qr_scan(message, session, club, {})
+    await parse_qr_scan(message, session, club, {}, redis)
 
     mock_gate_service.assert_not_awaited()
     assert "Недействительный QR" in message.answer.await_args.args[0]
@@ -123,11 +126,12 @@ async def test_parse_qr_scan_rejects_expired_qr(mock_gate_service, _mock_gen_sig
     session = AsyncMock()
     club = AsyncMock()
     club.id = 1
+    redis = AsyncMock()
     message = AsyncMock()
     message.web_app_data.data = "student:1:2020-01-01-00:expected_sig"
     message.answer = AsyncMock()
 
-    await parse_qr_scan(message, session, club, {})
+    await parse_qr_scan(message, session, club, {}, redis)
 
     mock_gate_service.assert_not_awaited()
     assert "истёк" in message.answer.await_args.args[0]

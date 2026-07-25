@@ -39,7 +39,8 @@ async def receive_paid_freeze_days(message: types.Message, state: FSMContext):
                            discipline_name="Заморозка абонемента", tariff_label=f"Заморозка на {days} дн.")
     kb = types.InlineKeyboardMarkup(inline_keyboard=[
         [types.InlineKeyboardButton(text="💳 Оплатить картой", callback_data="pay_method_official")],
-        [types.InlineKeyboardButton(text="↩️ Оплата по СБП", callback_data="pay_method_sbp")],
+        [types.InlineKeyboardButton(text="↔️ СБП через YooKassa", callback_data="pay_method_sbp_yookassa")],
+        [types.InlineKeyboardButton(text="↩️ Перевод на карту (вручную)", callback_data="pay_method_sbp")],
         [types.InlineKeyboardButton(text="❌ Отмена", callback_data="profile")]
     ])
     await message.answer(f"❄️ Заморозка на <b>{days} дней</b>\nК оплате: <b>{total:g} ₽</b>", reply_markup=kb, parse_mode="HTML")
@@ -290,7 +291,11 @@ async def process_kids_limit(
         ])
 
     inline_keyboard.append([
-        types.InlineKeyboardButton(text="↩️ Перевод по СБП (Вручную по чеку)", callback_data="pay_method_sbp")
+        types.InlineKeyboardButton(text="↔️ СБП через YooKassa", callback_data="pay_method_sbp_yookassa")
+    ])
+
+    inline_keyboard.append([
+        types.InlineKeyboardButton(text="↩️ Перевод на карту (вручную)", callback_data="pay_method_sbp")
     ])
 
     kb = types.InlineKeyboardMarkup(inline_keyboard=inline_keyboard)
@@ -441,14 +446,14 @@ async def process_sbp_payment_choice(
         club_settings: dict,
         redis: Redis
 ):
-    """Сценарий ручной оплаты по реквизитам СБП (твоя старая схема)"""
+    """Сценарий ручного перевода на карту (старая схема по чеку)"""
     # Включаем твой родной стейт ожидания чека
     await state.set_state(PaymentStates.waiting_for_receipt)
 
     # Достаем сохраненные на прошлом шаге данные из FSM
     data = await state.get_data()
 
-    # UI часть (Вывод реквизитов СБП из конфига клуба)
+    # UI часть (Вывод реквизитов для перевода из конфига клуба)
     ui_cfg = club_settings.get("ui", {})
     payment_info = ui_cfg.get("payment_info")
 
@@ -460,9 +465,9 @@ async def process_sbp_payment_choice(
         return await callback.answer("Слишком часто. Попробуйте позже.", show_alert=True)
 
     text = (
-        f"💰 <b>Оплата по СБП: {data['discipline_name']}</b>\n"
+        f"💰 <b>Перевод на карту: {data['discipline_name']}</b>\n"
         f"Тариф: <b>{data['tariff_label']} — {data['price']}₽</b>\n\n"
-        f"💳 <b>Реквизиты для перевода (СБП):</b>\n"
+        f"💳 <b>Реквизиты для перевода на карту:</b>\n"
         f"<code>{payment_info}</code>\n\n"
         f"<b>Шаг 1:</b> Переведите {data['price']}₽ по указанным реквизитам.\n"
         f"<b>Шаг 2:</b> Пришлите <b>скриншот чека</b> сюда в ответ на это сообщение.\n\n"
@@ -474,6 +479,140 @@ async def process_sbp_payment_choice(
         parse_mode="HTML"
     )
     await callback.answer()
+
+
+@router.callback_query(F.data == 'pay_method_sbp_yookassa')
+async def process_sbp_yookassa_payment(
+        callback: types.CallbackQuery,
+        state: FSMContext,
+        session: AsyncSession,
+        club: Club,
+        redis: Redis,
+):
+    """Онлайн-оплата через СБП в YooKassa."""
+    await callback.answer("Проверяю СБП...", show_alert=False)
+
+    data = await state.get_data()
+    user_id = callback.from_user.id
+    student_id = data.get("student_id")
+    price = data.get("price")
+    amount_kopecks = int(float(price) * 100)
+    lesson_count = data.get("lesson_count")
+    days_to_add = data.get("days_to_add")
+    sport_type = data.get("sport_type")
+    payment_kind = data.get("payment_kind", "SUBSCRIPTION")
+
+    idem_key = f"idem:bot:pay_sbp:{club.id}:{user_id}:{student_id}:{sport_type}:{lesson_count}:{days_to_add}:{payment_kind}"
+    if not await rate_limit(redis, idem_key, 1, 90):
+        await audit_block("bot_checkout_blocked", "duplicate_sbp_payment", club_id=club.id, user_id=user_id, student_id=student_id)
+        return await callback.answer("Платеж уже создается. Подождите немного.", show_alert=True)
+
+    user_res = await session.execute(select(User).where(User.user_id == user_id))
+    user = user_res.scalar_one_or_none()
+    if not user:
+        return await callback.message.answer("❌ Ошибка: Пользователь не найден в системе.")
+
+    club_id = user.club_id or getattr(club, "id", None)
+    if not club_id:
+        return await callback.message.answer("❌ Ошибка: Не удалось определить ваш клуб.")
+    if not club or club.id != club_id:
+        club_res = await session.execute(select(Club).where(Club.id == club_id))
+        club = club_res.scalar_one_or_none()
+    if not club:
+        return await callback.message.answer("❌ Ошибка: Клуб не найден в системе.")
+
+    pay_settings = club.club_settings.get("payments", {}) if club.club_settings else {}
+    shop_id = pay_settings.get("yookassa_shop_id")
+    secret_key = pay_settings.get("yookassa_secret_key")
+    sbp_enabled = pay_settings.get("yookassa_sbp_enabled", True)
+
+    if not sbp_enabled:
+        kb = types.InlineKeyboardMarkup(inline_keyboard=[
+            [types.InlineKeyboardButton(text="💳 Оплатить картой", callback_data="pay_method_official")],
+            [types.InlineKeyboardButton(text="↩️ Перевод на карту (вручную)", callback_data="pay_method_sbp")],
+        ])
+        await callback.message.edit_text(
+            "⚠️ <b>СБП через YooKassa отключена в настройках клуба.</b>\n\n"
+            "Выберите другой способ оплаты ниже.",
+            parse_mode="HTML",
+            reply_markup=kb,
+        )
+        return await callback.answer("СБП отключена для этого клуба", show_alert=True)
+
+    if not shop_id or not secret_key:
+        kb = types.InlineKeyboardMarkup(inline_keyboard=[
+            [types.InlineKeyboardButton(text="💳 Оплатить картой", callback_data="pay_method_official")],
+            [types.InlineKeyboardButton(text="↩️ Перевод на карту (вручную)", callback_data="pay_method_sbp")],
+        ])
+        await callback.message.edit_text(
+            "⚠️ <b>Онлайн-СБП пока недоступна.</b>\n\n"
+            "В клубе не настроены реквизиты YooKassa для этого способа оплаты.\n"
+            "Попробуйте другой вариант:",
+            parse_mode="HTML",
+            reply_markup=kb,
+        )
+        return await callback.answer("Онлайн-СБП не настроена", show_alert=True)
+
+    order_id = f"SBP_{uuid.uuid4().hex[:12].upper()}"
+    order_type = "FREEZE_SBP" if payment_kind == "FREEZE" else "FIRST_SBP"
+    new_order = PaymentOrder(
+        id=order_id,
+        user_id=user_id,
+        student_id=student_id,
+        club_id=club_id,
+        amount_kopecks=amount_kopecks,
+        lesson_count=lesson_count,
+        days_to_add=days_to_add,
+        status="NEW",
+        type=order_type,
+        discipline=sport_type,
+    )
+    session.add(new_order)
+    await session.commit()
+
+    yookassa_node = YooKassaClient(shop_id=shop_id, secret_key=secret_key, proxy_url=PROXY_URL)
+    bot_info = await callback.bot.get_me()
+    clean_bot_username = bot_info.username.replace("@", "")
+    payment_data = await yookassa_node.init_payment(
+        order_id=order_id,
+        amount_kopecks=amount_kopecks,
+        user_id=user_id,
+        bot_username=clean_bot_username,
+        payment_method_type="sbp",
+    )
+
+    if payment_data.get("Success"):
+        payment_url = payment_data.get("PaymentURL")
+        kb = types.InlineKeyboardMarkup(inline_keyboard=[
+            [types.InlineKeyboardButton(text="↔️ Перейти к оплате через СБП", url=payment_url)],
+            [types.InlineKeyboardButton(text="💳 Оплатить картой", callback_data="pay_method_official")],
+            [types.InlineKeyboardButton(text="↩️ Перевод на карту (вручную)", callback_data="pay_method_sbp")],
+        ])
+        await callback.message.edit_text(
+            f"↔️ <b>Оплата через СБП</b>\n\n"
+            f"Вы выбрали тариф: <b>{data['tariff_label']} за {price}₽</b>\n\n"
+            f"Нажмите кнопку ниже, чтобы завершить оплату в YooKassa.",
+            reply_markup=kb,
+            parse_mode="HTML"
+        )
+        return await state.clear()
+
+    new_order.status = "REJECTED"
+    await session.commit()
+
+    error_msg = str(payment_data.get("Message", "СБП сейчас недоступна"))
+    kb = types.InlineKeyboardMarkup(inline_keyboard=[
+        [types.InlineKeyboardButton(text="💳 Оплатить картой", callback_data="pay_method_official")],
+        [types.InlineKeyboardButton(text="↩️ Перевод на карту (вручную)", callback_data="pay_method_sbp")],
+    ])
+    await callback.message.edit_text(
+        "⚠️ <b>Онлайн-СБП пока недоступна.</b>\n\n"
+        f"Причина: {error_msg}\n\n"
+        "Выберите другой способ оплаты:",
+        parse_mode="HTML",
+        reply_markup=kb,
+    )
+    return await callback.answer("СБП недоступна, выберите другой способ", show_alert=True)
 
 
 @router.callback_query(F.data == 'pay_method_official')
@@ -635,7 +774,10 @@ async def process_official_card_payment(
     clean_bot_username = bot_info.username.replace("@", "")
 
     payment_data = await yookassa_node.init_payment(
-        order_id=order_id, amount_kopecks=amount_kopecks, user_id=user_id, bot_username=clean_bot_username
+        order_id=order_id,
+        amount_kopecks=amount_kopecks,
+        user_id=user_id,
+        bot_username=clean_bot_username
     )
 
     if payment_data.get("Success"):

@@ -65,6 +65,39 @@ async def test_init_payment_builds_receipt_and_returns_url(monkeypatch):
     assert payload["metadata"]["order_id"] == "INIT_1"
     assert payload["save_payment_method"] is True
     assert payload["receipt"]["items"][0]["amount"]["value"] == "1250.00"
+    assert "payment_method_data" not in payload
+
+
+@pytest.mark.asyncio
+async def test_init_payment_can_build_sbp_payload(monkeypatch):
+    FakeAsyncClient.response = FakeResponse(
+        201,
+        {
+            "id": "payment-sbp",
+            "confirmation": {"confirmation_url": "https://pay.example/sbp"},
+        },
+    )
+    monkeypatch.setattr(
+        "services.yookassa_client.httpx.AsyncClient", FakeAsyncClient
+    )
+
+    result = await YooKassaClient("shop", "secret").init_payment(
+        order_id="SBP_1",
+        amount_kopecks=7800,
+        user_id=77,
+        bot_username="club_bot",
+        payment_method_type="sbp",
+    )
+
+    assert result == {
+        "Success": True,
+        "PaymentId": "payment-sbp",
+        "PaymentURL": "https://pay.example/sbp",
+    }
+    payload = FakeAsyncClient.last_request["json"]
+    assert payload["payment_method_data"] == {"type": "sbp"}
+    assert "save_payment_method" not in payload
+    assert payload["description"] == "Оплата через СБП"
 
 
 @pytest.mark.asyncio
@@ -86,4 +119,3 @@ async def test_charge_payment_returns_bank_status(monkeypatch):
     assert result["Success"] is True
     assert result["Status"] == "succeeded"
     assert FakeAsyncClient.last_request["json"]["metadata"]["order_id"] == "REC_1"
-
