@@ -17,7 +17,10 @@
     th,td{border-bottom:1px solid #1f2937;padding:10px;vertical-align:top;text-align:left;font-size:14px}
     th{color:#93c5fd}
     .muted{color:#9ca3af;font-size:12px}
-    pre{white-space:pre-wrap;word-break:break-word;background:#0b1220;border-radius:10px;padding:10px;max-width:520px;overflow:auto}
+    pre{white-space:pre-wrap;word-break:break-word;background:#0b1220;border-radius:10px;padding:10px;max-width:520px;max-height:260px;overflow:auto;margin:8px 0 0}
+    details{margin-top:6px}
+    summary{cursor:pointer;color:#93c5fd}
+    .payload-summary{max-width:420px}
     .badge{display:inline-block;padding:4px 8px;border-radius:999px;background:#1d4ed8;color:#fff;font-size:12px}
   </style>
 </head>
@@ -68,7 +71,15 @@
           <td>{{ row.object_type }} {{ row.object_id }}</td>
           <td>{% if row.amount_kopecks is not none %}{{ '%.2f'|format(row.amount_kopecks / 100) }} ₽{% else %}—{% endif %}</td>
           <td>{{ row.location or '—' }}</td>
-          <td><pre>{{ row.payload | tojson(indent=2) }}</pre></td>
+          <td class="payload-summary">
+            <div>{{ row.payload_summary }}</div>
+            {% if row.payload %}
+            <details>
+              <summary>Полный JSON</summary>
+              <pre>{{ row.payload | tojson(indent=2) }}</pre>
+            </details>
+            {% endif %}
+          </td>
         </tr>
         {% else %}
         <tr><td colspan="8">Записей нет.</td></tr>

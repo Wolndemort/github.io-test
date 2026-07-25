@@ -72,6 +72,55 @@ import admin_module.payments_webhook  # noqa: F401
 import admin_module.system_api  # noqa: F401
 
 
+def _audit_payload_summary(payload: dict) -> str:
+    if not payload:
+        return "—"
+
+    def _short(value, limit: int = 40) -> str:
+        text = " ".join(str(value).split())
+        return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
+
+    preferred_keys = (
+        "action",
+        "object_type",
+        "object_id",
+        "location",
+        "method",
+        "category",
+        "entry_type",
+        "discipline",
+        "day",
+    )
+    parts: list[str] = []
+
+    for key in preferred_keys:
+        value = payload.get(key)
+        if value not in (None, "", [], {}):
+            parts.append(f"{key}={_short(value)}")
+
+    compact_limit = 4
+    skip_keys = {"event", "actor_name", "actor_user_id", "actor_role", *preferred_keys}
+    for key, value in payload.items():
+        if key in skip_keys:
+            continue
+        if value in (None, "", [], {}):
+            continue
+        if isinstance(value, list):
+            parts.append(f"{key}×{len(value)}")
+        elif isinstance(value, dict):
+            parts.append(f"{key}{{{', '.join(list(value.keys())[:3])}}}")
+        else:
+            parts.append(f"{key}={_short(value, 30)}")
+        if len(parts) >= compact_limit:
+            break
+
+    if not parts:
+        return "без доп. полей"
+
+    summary = "; ".join(parts)
+    return summary if len(summary) <= 180 else summary[:177].rstrip() + "…"
+
+
 class WebAppActionPayload(BaseModel):
     init_data: str
     club_id: int
@@ -456,6 +505,7 @@ async def admin_audit_page(
             "amount_kopecks": entry.amount_kopecks,
             "method": entry.method or "",
             "payload": payload,
+            "payload_summary": _audit_payload_summary(payload),
         })
     return templates.TemplateResponse(
         "admin_audit.html",
