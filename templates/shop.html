@@ -17,7 +17,7 @@ button,.link{display:inline-block;padding:9px 12px;border:0;border-radius:8px;ba
 #back{background:#1b1b1b;color:#fff;border:1px solid #444}
 small{color:#aaa}
 </style>
-<button id="back">← Назад</button>
+<a id="back" class="link" href="/webapp/client-cabinet?club_id={{ club_id }}">← В кабинет</a>
 <h2>Магазин {{ club.name }}</h2>
 <div class="bar">
   <div class="row" id="filters">
@@ -48,7 +48,6 @@ function render(){
   itemsEl.querySelectorAll('[data-buy]').forEach(b=>b.onclick=async()=>{const p=products.find(x=>x.id===Number(b.dataset.buy)),r=await fetch('/webapp/cart/checkout',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({init_data:tg.initData,club_id:{{club_id}},items:[{item_type:'product',product_id:p.id,quantity:1}]})}),d=await r.json();if(!r.ok)return alert(d.detail||'Ошибка');localStorage.removeItem('speedy_cart');location.href=d.payment_url})
 }
 document.getElementById('filters').onclick=e=>{const btn=e.target.closest('[data-cat]');if(!btn)return;currentCategory=normalizeCategory(btn.dataset.cat);document.querySelectorAll('.chip').forEach(x=>x.classList.toggle('active',x===btn));render()};
-document.getElementById('back').onclick=()=>history.length>1?history.back():location.href='/webapp/client-cabinet?club_id={{club_id}}';
 render();updateCartLink();
 </script>
 </html>

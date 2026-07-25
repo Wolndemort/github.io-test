@@ -6,6 +6,9 @@
   <title>Аудит клуба</title>
   <style>
     body{font-family:Arial,sans-serif;background:#0f172a;color:#e5e7eb;margin:0;padding:20px}
+    .nav{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px}
+    .nav a{display:block;text-align:center;text-decoration:none;padding:10px 12px;border-radius:10px;border:1px solid #2563eb;background:#2563eb;color:#fff;font-weight:700}
+    .nav a.secondary{background:#111827;border-color:#334155;color:#fff}
     .wrap{max-width:1400px;margin:0 auto}
     .card{background:#111827;border:1px solid #243042;border-radius:14px;padding:16px;margin-bottom:16px}
     input{background:#0b1220;color:#fff;border:1px solid #334155;border-radius:10px;padding:10px 12px;margin:4px 8px 4px 0}
@@ -20,6 +23,10 @@
 </head>
 <body>
 <div class="wrap">
+  <div class="nav">
+    <a href="/admin?club_id={{ club_id }}&init_data={{ request.query_params.get('init_data', '')|urlencode }}">← В панель</a>
+    <a class="secondary" href="#" onclick="window.Telegram?.WebApp?.close(); return false;">Закрыть</a>
+  </div>
   <div class="card">
     <h2 style="margin-top:0">📜 Аудит клуба</h2>
     <form method="get">

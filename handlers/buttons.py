@@ -335,7 +335,7 @@ def get_pay_options_kb(discipline_cfg: dict, sport_type: str) -> types.InlineKey
             callback_data=f"set_tariff_{sport_type}_{idx}"
         ))
 
-    builder.row(types.InlineKeyboardButton(text="⬅️ Назад", callback_data="choose_section"))
+    builder.row(types.InlineKeyboardButton(text="⬅️ В главное меню", callback_data="begin"))
     return builder.as_markup()
 
 

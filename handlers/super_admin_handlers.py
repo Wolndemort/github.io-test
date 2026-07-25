@@ -69,6 +69,7 @@ async def super_staff_add_start(callback: types.CallbackQuery, session: AsyncSes
     for club in clubs:
         kb.button(text=f"{club.id}: {club.name}", callback_data=f"super_staff_club_{club.id}")
     kb.adjust(1)
+    kb.row(types.InlineKeyboardButton(text="⬅️ Назад", callback_data="super"))
     await callback.message.edit_text("Выберите клуб для сотрудника:", reply_markup=kb.as_markup())
     await callback.answer()
 
@@ -103,7 +104,12 @@ async def super_audit_choose_club(callback: types.CallbackQuery):
 async def super_staff_choose_club(callback: types.CallbackQuery, state: FSMContext):
     await state.update_data(staff_club_id=int(callback.data.rsplit("_", 1)[1]))
     await state.set_state(SuperAdminStates.waiting_for_staff_telegram_id)
-    await callback.message.answer("Введите Telegram ID сотрудника:")
+    await callback.message.answer(
+        "Введите Telegram ID сотрудника:",
+        reply_markup=InlineKeyboardBuilder().row(
+            types.InlineKeyboardButton(text="⬅️ Назад", callback_data="super")
+        ).as_markup()
+    )
     await callback.answer()
 
 
@@ -118,6 +124,7 @@ async def super_staff_id(message: types.Message, state: FSMContext):
     kb.button(text="🥋 Тренер", callback_data="super_staff_role_coach")
     kb.button(text="📋 Менеджер", callback_data="super_staff_role_manager")
     kb.adjust(1)
+    kb.row(types.InlineKeyboardButton(text="⬅️ Назад", callback_data="super"))
     await message.answer("Выберите роль сотрудника:", reply_markup=kb.as_markup())
 
 

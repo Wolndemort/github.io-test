@@ -324,7 +324,8 @@ async def back_to_admin_main_menu(
         club: Club,
         club_settings: dict,
         is_owner: bool,
-        is_super_admin: bool
+        is_super_admin: bool,
+        staff=None
 ):
     if not (is_owner or is_super_admin):
         return await callback.answer("❌ Доступ ограничен.", show_alert=True)
