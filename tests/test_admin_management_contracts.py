@@ -126,6 +126,14 @@ def test_client_cabinet_bottom_bar_is_collapsible_and_uses_high_contrast_actions
     assert ".bottom-bar .btn.dark" in page
 
 
+def test_schedule_webapp_bottom_bar_is_collapsible():
+    page = Path("templates/schedule.html").read_text(encoding="utf-8")
+    assert "toggleBottomBar" in page
+    assert ".bottom-bar.collapsed .inner" in page
+    assert "Свернуть быстрые действия" in page
+    assert "Развернуть быстрые действия" in page
+
+
 def test_master_bot_registers_new_club_bot_without_restart():
     super_source = Path("handlers/super_admin_handlers.py").read_text(encoding="utf-8")
     main = Path("main.py").read_text(encoding="utf-8")
