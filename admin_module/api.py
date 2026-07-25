@@ -731,7 +731,7 @@ async def admin_create_student(
         raise HTTPException(status_code=403, detail="Доступ запрещён")
     await verify_webapp_admin(club, payload.init_data)
 
-    disciplines = club.club_settings.get("disciplines", {})
+    disciplines = (club.club_settings or {}).get("disciplines", {})
     disc_cfg = disciplines.get(payload.discipline)
     if not disc_cfg or not disc_cfg.get("active"):
         raise HTTPException(status_code=400, detail="Дисциплина недоступна")
@@ -1372,7 +1372,7 @@ async def webapp_admin_schedule_page(
     if not init_data:
         return _telegram_init_gate('/webapp/admin-schedule', club_id, 'Откройте админское расписание из Telegram')
     await verify_webapp_staff(club, init_data, session, "schedule_view")
-    return templates.TemplateResponse("admin_schedule.html", {"request": request, "club": club, "club_id": club_id, "disciplines": club.club_settings.get("disciplines", {})})
+    return templates.TemplateResponse("admin_schedule.html", {"request": request, "club": club, "club_id": club_id, "disciplines": (club.club_settings or {}).get("disciplines", {})})
 
 @router.post("/webapp/admin-schedule/change")
 async def change_admin_schedule(payload: ScheduleChangePayload, session: AsyncSession = Depends(get_session)):

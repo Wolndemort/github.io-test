@@ -364,7 +364,7 @@ async def process_one_click_payment(callback: types.CallbackQuery, state: FSMCon
     if not saved_card:
         return await callback.message.answer("❌ Ошибка: Сохраненная карта не найдена. Оплатите заново для привязки.")
 
-    pay_settings = club.club_settings.get("payments", {})
+    pay_settings = (club.club_settings or {}).get("payments", {})
     shop_id = pay_settings.get("yookassa_shop_id")
     secret_key = pay_settings.get("yookassa_secret_key")
 
@@ -421,8 +421,8 @@ async def process_one_click_payment(callback: types.CallbackQuery, state: FSMCon
             desc = "БЕЗЛИМИТ" if data['lesson_count'] == 999 else f"{data['lesson_count']} зан."
 
             # Достаем понятное человеку название секции для UI
-            human_disc = club.club_settings.get("disciplines", {}).get(str(sport_type).lower(), {}).get("name",
-                                                                                                        sport_type)
+            human_disc = (club.club_settings or {}).get("disciplines", {}).get(str(sport_type).lower(), {}).get("name",
+                                                                                                              sport_type)
 
             await callback.message.edit_text(
                 f"⚡️ <b>Оплата успешно проведена в 1 клик!</b>\n\n"
@@ -522,7 +522,7 @@ async def process_sbp_yookassa_payment(
     if not club:
         return await callback.message.answer("❌ Ошибка: Клуб не найден в системе.")
 
-    pay_settings = club.club_settings.get("payments", {}) if club.club_settings else {}
+    pay_settings = (club.club_settings or {}).get("payments", {})
     shop_id = pay_settings.get("yookassa_shop_id")
     secret_key = pay_settings.get("yookassa_secret_key")
     sbp_enabled = pay_settings.get("yookassa_sbp_enabled", True)
@@ -660,7 +660,7 @@ async def process_official_card_payment(
     if not club:
         return await callback.message.answer("❌ Ошибка: Клуб не найден в базе данных платформы.")
 
-    pay_settings = club.club_settings.get("payments", {}) if club.club_settings else {}
+    pay_settings = (club.club_settings or {}).get("payments", {})
     shop_id = pay_settings.get("yookassa_shop_id")
     secret_key = pay_settings.get("yookassa_secret_key")
 
@@ -699,7 +699,7 @@ async def process_official_card_payment(
             "⏳ <b>Оплата в 1 клик...</b>\n\nСписываем средства со связанной карты. Пожалуйста, подождите.",
             parse_mode="HTML")
 
-        ui_cfg = club.club_settings.get("ui", {}) if club.club_settings else {}
+        ui_cfg = (club.club_settings or {}).get("ui", {})
         club_name = ui_cfg.get("club_name", club.name if club else "Фитнес-клуб")
 
         charge_data = await yookassa_node.charge_payment(
@@ -728,8 +728,8 @@ async def process_official_card_payment(
                     new_expire, _ = abon_result
                     desc = (f"заморозка на {days_to_add} дн." if payment_kind == "FREEZE"
                             else ("БЕЗЛИМИТ" if lesson_count == 999 else f"{lesson_count} зан."))
-                    human_disc = club.club_settings.get("disciplines", {}).get(str(sport_type).lower(), {}).get("name",
-                                                                                                                sport_type)
+                    human_disc = (club.club_settings or {}).get("disciplines", {}).get(str(sport_type).lower(), {}).get("name",
+                                                                                                               sport_type)
 
                     await callback.message.edit_text(
                         f"⚡️ <b>Оплата успешно проведена в 1 клик!</b>\n\n"

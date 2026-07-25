@@ -95,6 +95,20 @@ def test_admin_audit_screen_and_button_are_registered():
     assert "Показываются последние 300 записей" in page
 
 
+def test_club_settings_reads_are_guarded_and_super_admin_errors_use_logger():
+    main = Path("main.py").read_text(encoding="utf-8")
+    api = Path("admin_module/api.py").read_text(encoding="utf-8")
+    payments = Path("handlers/payments.py").read_text(encoding="utf-8")
+    super_handlers = Path("handlers/super_admin_handlers.py").read_text(encoding="utf-8")
+    assert "(club.club_settings or {}).get(\"disciplines\", {})" in main
+    assert "(club.club_settings or {}).get(\"payments\", {})" in main
+    assert "(club.club_settings or {}).get(\"disciplines\", {})" in api
+    assert "(club.club_settings or {}).get(\"disciplines\", {})" in payments
+    assert "(club.club_settings or {}).get(\"payments\", {})" in payments
+    assert "print(f\"Ошибка в хендлере extend_club_sub: {e}\")" not in super_handlers
+    assert "logger.exception(\"Ошибка в хендлере extend_club_sub\")" in super_handlers
+
+
 def test_daily_student_birthday_reminder_is_scheduled_and_uses_student_flow():
     source = Path("main.py").read_text(encoding="utf-8")
     assert "scheduler.add_job(saas_daily_morning_check" in source

@@ -431,7 +431,7 @@ async def send_daily_report_to_admins():
             sleeping_count = len(admin_metrics.get("sleeping_students", [])) if not admin_metrics.get("empty") else 0
 
             # Переводим технические ключи дисциплин в человеческие названия из настроек клуба
-            config_disciplines = club.club_settings.get("disciplines", {})
+            config_disciplines = (club.club_settings or {}).get("disciplines", {})
             top_disc_key = biz_metrics["top_discipline"].lower()
 
             # Ищем название дисциплины в конфиге, если не нашли — оставляем как есть
@@ -689,7 +689,7 @@ async def saas_recurrent_payments_job(session_factory):
                 logger.error(f"🚨 Клуб с ID {sub.club_id} не найден в базе данных!")
                 continue
 
-            pay_settings = club.club_settings.get("payments", {})
+            pay_settings = (club.club_settings or {}).get("payments", {})
             shop_id = pay_settings.get("yookassa_shop_id")
             secret_key = pay_settings.get("yookassa_secret_key")
 

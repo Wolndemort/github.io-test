@@ -302,7 +302,7 @@ async def list_for_extend(
         )
     except Exception as e:
         # Если что-то пойдет не так, мы увидим ошибку в консоли, а не зависание
-        print(f"Ошибка в хендлере extend_club_sub: {e}")
+        logger.exception("Ошибка в хендлере extend_club_sub")
         await callback.message.answer("Произошла ошибка при получении списка клубов.")
 
 
