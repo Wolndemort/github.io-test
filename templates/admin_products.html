@@ -1,17 +1,89 @@
-<!doctype html><html lang="ru"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<!doctype html>
+<html lang="ru">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
-<style>body{font-family:sans-serif;background:#f4f4f4;padding:14px}.topbar{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px}.navlink{display:block;text-align:center;text-decoration:none;padding:10px 12px;border-radius:10px;border:1px solid #111;background:#111;color:#fff;font-weight:700}.navlink.secondary{background:#fff;color:#111;border-color:#bbb}.card{background:#fff;border-radius:14px;padding:12px;margin:8px 0}.card img{width:90px;height:60px;object-fit:cover;border-radius:8px}input,button,select{padding:9px;margin:3px;border-radius:7px;border:1px solid #ccc}button{background:#111;color:#fff}.off{opacity:.5}</style>
+<style>
+  body{font-family:sans-serif;background:#f4f4f4;padding:14px;color:#111}
+  .topbar{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px}
+  .navlink{display:block;text-align:center;text-decoration:none;padding:10px 12px;border-radius:12px;border:1px solid #111;background:#111;color:#fff;font-weight:700}
+  .navlink.secondary{background:#fff;color:#111;border-color:#bbb}
+  .card{background:#fff;border-radius:16px;padding:12px;margin:8px 0;box-shadow:0 1px 0 rgba(0,0,0,.03)}
+  .filters{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .filters select{flex:1;min-width:180px}
+  .product{display:grid;grid-template-columns:72px 1fr;gap:12px;align-items:center;padding:12px 0;border-top:1px solid #ececec}
+  .thumb{width:72px;height:72px;border-radius:14px;overflow:hidden;background:linear-gradient(135deg,#ececec,#d9d9d9);display:grid;place-items:center;font-size:28px;font-weight:700;color:#666}
+  .thumb img{width:100%;height:100%;object-fit:cover;display:block}
+  .meta{display:flex;gap:6px;flex-wrap:wrap;margin-top:4px}
+  .pill{display:inline-block;padding:4px 8px;border-radius:999px;background:#f0f0f0;font-size:12px;color:#333}
+  .pill.ok{background:#e8f7ec;color:#15703b}
+  .pill.off{background:#f2f2f2;color:#8a8a8a}
+  .actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+  input,button,select{padding:10px;margin:3px 0;border-radius:10px;border:1px solid #ccc;font-size:15px}
+  button{background:#111;color:#fff}
+  #list .card.off{opacity:.72}
+  .form-grid{display:grid;gap:8px}
+</style>
 <div class="topbar">
   <a class="navlink" href="/admin?club_id={{ club_id }}&init_data={{ request.query_params.get('init_data','')|urlencode }}">← В панель</a>
   <a class="navlink secondary" href="#" onclick="window.Telegram?.WebApp?.close(); return false;">Закрыть</a>
 </div>
-<h2>Товары клуба</h2><select id="categoryFilter"><option value="">Все категории</option></select><div id="list"></div>
-<div class="card"><h3 id="caption">Новый товар</h3><input id="n" placeholder="Название"><input id="c" placeholder="Категория"><input id="p" type="number" min="1" placeholder="Цена ₽"><input id="s" type="number" min="0" placeholder="Остаток"><input id="i" placeholder="URL картинки"><input id="file" type=file accept="image/jpeg,image/png,image/webp"><label><input id="a" type="checkbox" checked> Активен</label><br><button id="saveBtn">Сохранить</button><button id="resetBtn">Очистить</button></div>
+<h2>Товары клуба</h2>
+<div class="card">
+  <div class="filters">
+    <select id="categoryFilter"><option value="">Все категории</option></select>
+  </div>
+</div>
+<div id="list"></div>
+<div class="card">
+  <h3 id="caption">Новый товар</h3>
+  <div class="form-grid">
+    <input id="n" placeholder="Название">
+    <input id="c" placeholder="Категория">
+    <input id="p" type="number" min="1" placeholder="Цена ₽">
+    <input id="s" type="number" min="0" placeholder="Остаток">
+    <input id="i" placeholder="URL картинки">
+    <input id="file" type=file accept="image/jpeg,image/png,image/webp">
+    <label><input id="a" type="checkbox" checked> Активен</label>
+    <div class="actions">
+      <button id="saveBtn">Сохранить</button>
+      <button id="resetBtn" type="button">Очистить</button>
+    </div>
+  </div>
+</div>
 <script>
 const tg=Telegram.WebApp;tg.ready();const cid={{club_id}},items={{products|tojson}};let edit=null;const esc=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const normalizeCategory=x=>String(x??'other').trim().toLowerCase().replace(/\s+/g,' ').replace(/ё/g,'е');
 const categories=[...new Set(items.map(x=>x.category).filter(Boolean))].sort();categories.forEach(x=>categoryFilter.insertAdjacentHTML('beforeend',`<option value="${esc(x)}">${esc(x)}</option>`));
-function draw(){const filter=normalizeCategory(categoryFilter.value);list.innerHTML=items.filter(x=>!filter||normalizeCategory(x.category)===filter).map(x=>`<div class="card ${x.is_active?'':'off'}">${x.image_url?`<img src="${esc(x.image_url)}" alt="${esc(x.name)}">`:'🖼️'} <b>${esc(x.name)}</b><br>${esc(x.category)} · ${(x.price_kopecks/100).toFixed(2)} ₽ · остаток ${x.stock} · ${x.is_active?'активен':'выключен'}<br><button data-edit="${x.id}">Изменить</button><button data-del="${x.id}">Удалить</button></div>`).join('')||'Товаров нет';list.querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>editItem(Number(b.dataset.edit)));list.querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>del(Number(b.dataset.del)))}
+function thumb(x){
+  if(x.image_url) return `<div class="thumb"><img src="${esc(x.image_url)}" alt="${esc(x.name)}"></div>`;
+  return `<div class="thumb">🖼️</div>`;
+}
+function draw(){
+  const filter=normalizeCategory(categoryFilter.value);
+  list.innerHTML=items.filter(x=>!filter||normalizeCategory(x.category)===filter).map(x=>`
+    <div class="card ${x.is_active?'':'off'}">
+      <div class="product">
+        ${thumb(x)}
+        <div>
+          <b>${esc(x.name)}</b>
+          <div class="meta">
+            <span class="pill">${esc(x.category)}</span>
+            <span class="pill">₽ ${(x.price_kopecks/100).toFixed(2)}</span>
+            <span class="pill">Остаток ${x.stock}</span>
+            <span class="pill ${x.is_active?'ok':'off'}">${x.is_active?'активен':'выключен'}</span>
+          </div>
+          <div class="actions">
+            <button data-edit="${x.id}">Изменить</button>
+            <button data-del="${x.id}">Удалить</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  `).join('')||'Товаров нет';
+  list.querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>editItem(Number(b.dataset.edit)));
+  list.querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>del(Number(b.dataset.del)));
+}
 function editItem(id){const x=items.find(y=>y.id===id);edit=id;n.value=x.name;c.value=x.category;p.value=x.price_kopecks/100;s.value=x.stock;i.value=x.image_url||'';a.checked=x.is_active;caption.textContent='Изменить товар'}function reset(){edit=null;n.value=c.value=p.value=s.value=i.value='';file.value='';a.checked=true;caption.textContent='Новый товар'}
 async function save(){let image=i.value||null;if(file.files[0]){const fd=new FormData();fd.append('image',file.files[0]);const u=await fetch('/webapp/admin-products/upload-image?club_id='+cid+'&init_data='+encodeURIComponent(tg.initData),{method:'POST',body:fd}),ud=await u.json();if(!u.ok)return alert(ud.detail||'Ошибка загрузки');image=ud.image_url}const body={init_data:tg.initData,club_id:cid,name:n.value,category:c.value||'other',price_kopecks:Math.round(Number(p.value)*100),stock:Number(s.value)||0,is_active:a.checked,image_url:image};const r=await fetch(edit?'/webapp/admin-products/'+edit:'/webapp/admin-products',{method:edit?'PATCH':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});if(!r.ok)return alert((await r.json()).detail||'Ошибка');location.reload()}
 async function del(id){if(!confirm('Удалить товар?'))return;const r=await fetch('/webapp/admin-products/'+id+'?club_id='+cid+'&init_data='+encodeURIComponent(tg.initData),{method:'DELETE'});if(r.ok)location.reload();else alert('Ошибка')}saveBtn.onclick=save;resetBtn.onclick=reset;categoryFilter.onchange=draw;draw();

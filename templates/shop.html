@@ -10,7 +10,9 @@ body{font-family:sans-serif;background:#090909;color:#f7f7f7;padding:14px 14px 9
 .chip{padding:8px 12px;border-radius:999px;border:1px solid #333;background:#151515;color:#fff;cursor:pointer}
 .chip.active{background:#fff;color:#111}
 .item{background:#151515;border:1px solid #2d2d2d;border-radius:14px;padding:14px;margin:9px 0}
-.item img{width:100%;height:180px;object-fit:cover;border-radius:10px}
+.item img{width:100%;height:180px;object-fit:cover;border-radius:12px}
+.thumb{width:100%;height:180px;border-radius:12px;background:linear-gradient(135deg,#2b2b2b,#1b1b1b);display:grid;place-items:center;font-size:54px;color:#aaa;overflow:hidden}
+.thumb img{width:100%;height:100%;object-fit:cover;display:block}
 .row2{display:flex;justify-content:space-between;gap:10px}
 button,.link{display:inline-block;padding:9px 12px;border:0;border-radius:8px;background:#fff;color:#090909;font-weight:700;margin:2px;text-decoration:none;cursor:pointer}
 #cart-link{position:fixed;left:14px;right:14px;bottom:14px;z-index:4;display:block;text-align:center;margin:0;padding:12px 14px;border-radius:14px;box-shadow:0 8px 28px rgba(0,0,0,.35)}
@@ -47,12 +49,13 @@ const itemsEl=document.getElementById('items');
 const esc=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const normalizeCategory=x=>String(x??'other').trim().toLowerCase().replace(/\s+/g,' ').replace(/ё/g,'е');
 const getCategoryLabel=x=>String(x??'other').trim()||'other';
+const thumbHtml=p=>p.image_url?`<div class="thumb"><img src="${esc(p.image_url)}" alt="${esc(p.name)}"></div>`:`<div class="thumb">${esc((p.name||'🛍️').trim().charAt(0).toUpperCase()||'🛍️')}</div>`;
 const read=()=>JSON.parse(localStorage.getItem('speedy_cart')||'[]'),save=x=>localStorage.setItem('speedy_cart',JSON.stringify(x));
 function updateCartLink(){const n=read().reduce((s,x)=>s+Number(x.quantity||1),0);document.getElementById('cart-link').textContent=`🛒 Открыть корзину (${n})`}
 function added(){document.getElementById('message').textContent='Добавлено в корзину — можно продолжать покупки.'}
 function render(){
   const list=products.filter(p=>!currentCategory||normalizeCategory(p.category)===currentCategory);
-  itemsEl.innerHTML=list.map(p=>`<div class="item">${p.image_url?`<img src="${esc(p.image_url)}" alt="${esc(p.name)}">`:'<div style="height:180px;display:grid;place-items:center;background:#222;border-radius:10px;font-size:42px">🖼️</div>'}<div class="row2"><b>${esc(p.name)}</b><span>${(p.price_kopecks/100).toFixed(2)} ₽</span></div><small>${esc(p.category)} · осталось ${p.stock}</small><br><button data-id="${p.id}">В корзину</button><button data-buy="${p.id}">Купить сейчас</button></div>`).join('')||'<p>Товаров пока нет.</p>';
+  itemsEl.innerHTML=list.map(p=>`<div class="item">${thumbHtml(p)}<div class="row2"><b>${esc(p.name)}</b><span>${(p.price_kopecks/100).toFixed(2)} ₽</span></div><small>${esc(p.category)} · осталось ${p.stock}</small><br><button data-id="${p.id}">В корзину</button><button data-buy="${p.id}">Купить сейчас</button></div>`).join('')||'<p>Товаров пока нет.</p>';
   itemsEl.querySelectorAll('[data-id]').forEach(b=>b.onclick=()=>{const p=products.find(x=>x.id===Number(b.dataset.id)),items=read(),x=items.find(x=>x.item_type==='product'&&x.product_id===p.id);if(x){if(x.quantity<p.stock)x.quantity++}else items.push({item_type:'product',product_id:p.id,name:p.name,price:p.price_kopecks,max:p.stock,quantity:1});save(items);updateCartLink();added()});
   itemsEl.querySelectorAll('[data-buy]').forEach(b=>b.onclick=async()=>{const p=products.find(x=>x.id===Number(b.dataset.buy)),r=await fetch('/webapp/cart/checkout',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({init_data:tg.initData,club_id:{{club_id}},items:[{item_type:'product',product_id:p.id,quantity:1}],payment_method:document.getElementById('payment_method').value})}),d=await r.json();if(!r.ok)return alert(d.detail||'Ошибка');if(d.payment_url){localStorage.removeItem('speedy_cart');location.href=d.payment_url}else if(d.charged){localStorage.removeItem('speedy_cart');alert(d.message||'Оплата прошла по сохраненной карте.')}else alert(d.message||'Готово')})
 }
