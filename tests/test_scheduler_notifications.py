@@ -6,7 +6,7 @@ ROOT = Path(__file__).parents[1]
 
 
 def test_scheduler_has_all_required_client_notification_flows():
-    source = (ROOT / "main.py").read_text(encoding="utf-8")
+    source = (ROOT / "services" / "scheduler_jobs.py").read_text(encoding="utf-8")
     assert "notify:no-subscription" in source
     assert "notify:birthday-missing" in source
     assert "notify:birthday:" in source
@@ -14,8 +14,9 @@ def test_scheduler_has_all_required_client_notification_flows():
     assert "days_absent >= 10" in source
     assert "Указать дату рождения" in source
     assert "Выбрать абонемент" in source
-    assert "scheduler.add_job(saas_daily_morning_check, 'cron', hour=10, minute=0" in source
-    assert "scheduler.add_job(check_abon_mailing, 'cron', hour=10, minute=5" in source
+    main_source = (ROOT / "main.py").read_text(encoding="utf-8")
+    assert "scheduler.add_job(saas_daily_morning_check, 'cron', hour=10, minute=0" in main_source
+    assert "scheduler.add_job(check_abon_mailing, 'cron', hour=10, minute=5" in main_source
 
 
 def test_expiring_scheduler_requires_real_active_subscription():
@@ -27,7 +28,7 @@ def test_expiring_scheduler_requires_real_active_subscription():
 
 
 def test_expiring_reminders_cover_days_and_lessons():
-    source = (ROOT / "main.py").read_text(encoding="utf-8")
+    source = (ROOT / "services" / "scheduler_jobs.py").read_text(encoding="utf-8")
     assert "_subscription_reminder_flags" in source
     assert "days_left in {3, 2, 1}" in source
     assert "Осталось занятий" in source

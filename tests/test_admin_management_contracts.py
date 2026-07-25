@@ -103,8 +103,9 @@ def test_club_settings_reads_are_guarded_and_super_admin_errors_use_logger():
     api = Path("admin_module/api.py").read_text(encoding="utf-8")
     payments = Path("handlers/payments.py").read_text(encoding="utf-8")
     super_handlers = Path("handlers/super_admin_handlers.py").read_text(encoding="utf-8")
-    assert "(club.club_settings or {}).get(\"disciplines\", {})" in main
     assert "(club.club_settings or {}).get(\"payments\", {})" in main
+    scheduler_jobs = Path("services/scheduler_jobs.py").read_text(encoding="utf-8")
+    assert "(club.club_settings or {}).get(\"disciplines\", {})" in scheduler_jobs
     assert "(club.club_settings or {}).get(\"disciplines\", {})" in api
     assert "(club.club_settings or {}).get(\"disciplines\", {})" in payments
     assert "(club.club_settings or {}).get(\"payments\", {})" in payments
@@ -194,7 +195,7 @@ def test_admin_student_update_requires_club_scope():
 
 def test_bot_manual_add_button_has_registered_flow_and_no_orphan_states():
     buttons = Path("handlers/buttons.py").read_text(encoding="utf-8")
-    handler = Path("handlers/admin_option.py").read_text(encoding="utf-8")
+    handler = Path("handlers/admin_students.py").read_text(encoding="utf-8")
     states = Path("handlers/states.py").read_text(encoding="utf-8")
     assert 'callback_data="admin_add_manual"' in buttons
     assert '@router.callback_query(F.data == "admin_add_manual")' in handler
