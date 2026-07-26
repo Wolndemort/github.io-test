@@ -75,8 +75,11 @@ async def enable_biometry(payload: BiometricEnable, db: AsyncSession = Depends(g
     parent_user = user_res.scalar_one_or_none()
     if not parent_user:
         raise HTTPException(status_code=404, detail="Пользователь не найден")
-    club_res = await db.execute(select(Club).where(Club.id == parent_user.club_id))
-    club = club_res.scalar_one_or_none()
+    club_id_res = await db.execute(
+        select(Student.club_id).where(Student.parent_id == telegram_user_id, Student.club_id.isnot(None)).limit(1)
+    )
+    club_id = club_id_res.scalar()
+    club = await db.get(Club, club_id) if club_id else None
     if not club or not verify_telegram_data(payload.init_data, club.bot_token):
         raise HTTPException(status_code=430, detail="Ошибка безопасности данных")
     parent_user.is_biometric_enabled = True

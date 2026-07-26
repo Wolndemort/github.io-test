@@ -342,14 +342,11 @@ async def process_one_click_payment(callback: types.CallbackQuery, state: FSMCon
 
     # Совместимость со старыми пользователями: сначала используем их привязку,
     # а если она не заполнена — клуб текущего бота из middleware.
-    club_id = user.club_id or getattr(club, "id", None)
+    club_id = getattr(club, "id", None)
     if not club_id:
         return await callback.message.answer("❌ Ошибка: Не удалось определить ваш клуб.")
-    if not club or club.id != club_id:
-        club_res = await session.execute(select(Club).where(Club.id == club_id))
-        club = club_res.scalar_one_or_none()
-    if not club:
-        return await callback.message.answer("❌ Ошибка: Клуб не найден в системе.")
+    if not club_id:
+        return await callback.message.answer("❌ Ошибка: Не удалось определить ваш клуб.")
 
     # Ищем карту только после определения клуба, чтобы не взять подписку
     # пользователя из другого клуба.
@@ -513,14 +510,11 @@ async def process_sbp_yookassa_payment(
     if not user:
         return await callback.message.answer("❌ Ошибка: Пользователь не найден в системе.")
 
-    club_id = user.club_id or getattr(club, "id", None)
+    club_id = getattr(club, "id", None)
     if not club_id:
         return await callback.message.answer("❌ Ошибка: Не удалось определить ваш клуб.")
-    if not club or club.id != club_id:
-        club_res = await session.execute(select(Club).where(Club.id == club_id))
-        club = club_res.scalar_one_or_none()
-    if not club:
-        return await callback.message.answer("❌ Ошибка: Клуб не найден в системе.")
+    if not club_id:
+        return await callback.message.answer("❌ Ошибка: Не удалось определить ваш клуб.")
 
     pay_settings = (club.club_settings or {}).get("payments", {})
     shop_id = pay_settings.get("yookassa_shop_id")
@@ -651,14 +645,11 @@ async def process_official_card_payment(
 
     # Совместимость со старыми пользователями: сначала используем их привязку,
     # а если она не заполнена — клуб текущего бота из middleware.
-    club_id = user.club_id or getattr(club, "id", None)
+    club_id = getattr(club, "id", None)
     if not club_id:
         return await callback.message.answer("❌ Ошибка: Клуб не найден в вашей учетной записи.")
-    if not club or club.id != club_id:
-        club_res = await session.execute(select(Club).where(Club.id == club_id))
-        club = club_res.scalar_one_or_none()
-    if not club:
-        return await callback.message.answer("❌ Ошибка: Клуб не найден в базе данных платформы.")
+    if not club_id:
+        return await callback.message.answer("❌ Ошибка: Не удалось определить ваш клуб.")
 
     pay_settings = (club.club_settings or {}).get("payments", {})
     shop_id = pay_settings.get("yookassa_shop_id")

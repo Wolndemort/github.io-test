@@ -704,7 +704,9 @@ else location.replace(location.pathname+'?user_id={user_id}&init_data='+encodeUR
     if not user:
         raise HTTPException(status_code=404, detail="Пользователь не найден")
 
-    club = await db.get(Club, user.club_id)
+    students_for_club = await db.execute(select(Student.club_id).where(Student.parent_id == user_id, Student.club_id.isnot(None)).limit(1))
+    club_id = students_for_club.scalar()
+    club = await db.get(Club, club_id) if club_id else None
     tg_user = verify_telegram_data(init_data, club.bot_token if club else "")
     if not tg_user or int(tg_user.get("id", 0)) != user_id:
         raise HTTPException(status_code=403, detail="Доступ запрещен")
@@ -713,7 +715,7 @@ else location.replace(location.pathname+'?user_id={user_id}&init_data='+encodeUR
     loading = ui.get("loading", {}) if isinstance(ui.get("loading", {}), dict) else {}
     freeze_price_per_day = settings.get("limits", {}).get("freeze_price_per_day", 0)
     # Достаем список студентов для этого родителя
-    students_query = select(Student).where(Student.parent_id == user_id)
+    students_query = select(Student).where(Student.parent_id == user_id, Student.club_id == club.id)
     students_result = await db.execute(students_query)
     students = students_result.scalars().all()
 

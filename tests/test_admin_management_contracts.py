@@ -310,7 +310,7 @@ async def test_cart_checkout_ensures_webapp_user_exists_before_order_insert():
     user2 = await _ensure_cart_user(session2, club, tg_user)
 
     assert user2 is existing
-    assert existing.club_id == 2
+    assert existing.club_id == 1
     assert existing.full_name == "Ivan"
 
 
@@ -582,3 +582,15 @@ def test_long_webapp_pages_include_scroll_to_top_button():
     assert "scroll_top.js" in shop
     assert "scroll_top.js" in base
     assert "scrollTopButton" in script
+
+
+def test_club_isolation_contracts_cover_webapp_system_api_and_payments():
+    webapp = Path("admin_module/webapp_views.py").read_text(encoding="utf-8")
+    system_api = Path("admin_module/system_api.py").read_text(encoding="utf-8")
+    payments = Path("handlers/payments.py").read_text(encoding="utf-8")
+
+    assert "Student.parent_id == user_id, Student.club_id == club.id" in webapp
+    assert "club_id: int = Query(...)" in system_api
+    assert "select(User).where(User.club_id == club_id)" in system_api
+    assert "select(Student).where(Student.id == student_id, Student.club_id == club_id)" in system_api
+    assert "club_id = user.club_id or getattr(club" not in payments

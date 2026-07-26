@@ -87,8 +87,6 @@ async def start_handler(
         await session.commit()
         await session.refresh(db_user)
     else:
-        if db_user.club_id != club.id:
-            db_user.club_id = club.id
         if db_user.full_name != message.from_user.full_name:
             db_user.full_name = message.from_user.full_name
         await session.commit()
@@ -191,7 +189,7 @@ async def start_handler(
         )
         await message.answer(
             f"📍 <b>{club.name}</b>\n\n{welcome_text}\n\n{status_text}",
-            reply_markup=get_profile_keyboard(current_user, club_settings=club_settings, is_authorized=True),
+            reply_markup=get_profile_keyboard(current_user, club.id, club_settings=club_settings, is_authorized=True),
             parse_mode="HTML"
         )
     else:
@@ -286,7 +284,7 @@ async def accept_legal_handler(
 
             await callback.message.answer(
                 f"📍 <b>{club.name}</b>\n\n{welcome_text}\n\n{status_text}",
-                reply_markup=get_profile_keyboard(current_user, club_settings=club_settings, is_authorized=True),
+                reply_markup=get_profile_keyboard(current_user, club.id, club_settings=club_settings, is_authorized=True),
                 parse_mode="HTML"
             )
         else:

@@ -88,8 +88,6 @@ async def _ensure_cart_user(session: AsyncSession, club: Club, tg_user: dict) ->
         session.add(user)
         await session.flush()
         return user
-    if user.club_id != club.id:
-        user.club_id = club.id
     if not user.full_name:
         user.full_name = tg_user.get("first_name") or " ".join(part for part in [tg_user.get("first_name"), tg_user.get("last_name")] if part) or ""
     return user

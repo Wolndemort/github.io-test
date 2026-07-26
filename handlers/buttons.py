@@ -8,7 +8,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 router = Router()
 
 
-def get_profile_keyboard(user, club_settings: dict, is_authorized: bool = False, missing_birthdays: int = 0):
+def get_profile_keyboard(user, club_id: int, club_settings: dict, is_authorized: bool = False, missing_birthdays: int = 0):
     """
     Передаем объект user (модель User из БД), чтобы динамически подставлять
     его club_id и user_id в ссылку WebApp.
@@ -19,12 +19,12 @@ def get_profile_keyboard(user, club_settings: dict, is_authorized: bool = False,
     features = club_settings.get("features", {})
 
     # Формируем базовый URL с изоляцией поддомена по club_id
-    base_url = f"https://{user.club_id}.speedycrm.ru"
+    base_url = f"https://{club_id}.speedycrm.ru"
 
     # 1. Проход и быстрый доступ
     builder.row(types.InlineKeyboardButton(
         text="📱 Проход по FaceID",
-        web_app=WebAppInfo(url=f"{base_url}/webapp/biometric-pass?club_id={user.club_id}&user_id={user.user_id}")
+        web_app=WebAppInfo(url=f"{base_url}/webapp/biometric-pass?club_id={club_id}&user_id={user.user_id}")
     ))
 
     builder.row(
@@ -33,7 +33,7 @@ def get_profile_keyboard(user, club_settings: dict, is_authorized: bool = False,
     )
     builder.row(types.InlineKeyboardButton(
         text="🛒 Магазин и корзина (WebApp)",
-        web_app=WebAppInfo(url=f"{base_url}/webapp/shop?club_id={user.club_id}")
+        web_app=WebAppInfo(url=f"{base_url}/webapp/shop?club_id={club_id}")
     ))
     builder.row(
         types.InlineKeyboardButton(text="🧾 История", callback_data="payment_history"),

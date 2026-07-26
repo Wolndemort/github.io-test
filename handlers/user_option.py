@@ -183,6 +183,7 @@ async def universal_profile_handler(
     current_user = SimpleNamespace(user_id=user_id, club_id=club.id)
     reply_markup = get_profile_keyboard(
         current_user,
+        club.id,
         club_settings=club_settings,
         is_authorized=is_auth,
         missing_birthdays=missing_birthdays if is_auth else 0,

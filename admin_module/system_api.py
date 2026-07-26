@@ -1,4 +1,4 @@
-from fastapi import Depends, HTTPException
+from fastapi import Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -30,14 +30,45 @@ async def create_student(data: StudentCreate, session: AsyncSession = Depends(ge
 
 
 @router.get("/stats/users", response_model=None)
-async def get_all_users(session: AsyncSession = Depends(get_session), _=Depends(get_api_key)):
-    result = await session.execute(select(User).options(selectinload(User.students)))
-    return result.scalars().all()
+async def get_all_users(
+    club_id: int = Query(...),
+    session: AsyncSession = Depends(get_session),
+    _=Depends(get_api_key),
+):
+    result = await session.execute(
+        select(User).where(User.club_id == club_id).options(selectinload(User.students))
+    )
+    users = result.scalars().all()
+    return [
+        {
+            "user_id": user.user_id,
+            "club_id": user.club_id,
+            "full_name": user.full_name,
+            "is_accepted": user.is_accepted,
+            "is_biometric_enabled": user.is_biometric_enabled,
+            "students": [
+                {
+                    "id": student.id,
+                    "name": student.name,
+                    "club_id": student.club_id,
+                    "parent_id": student.parent_id,
+                }
+                for student in user.students
+                if student.club_id == club_id
+            ],
+        }
+        for user in users
+    ]
 
 
 @router.get("/stats/students/{student_id}")
-async def get_student_info(student_id: int, session: AsyncSession = Depends(get_session), _=Depends(get_api_key)):
-    result = await session.execute(select(Student).where(Student.id == student_id))
+async def get_student_info(
+    student_id: int,
+    club_id: int = Query(...),
+    session: AsyncSession = Depends(get_session),
+    _=Depends(get_api_key),
+):
+    result = await session.execute(select(Student).where(Student.id == student_id, Student.club_id == club_id))
     student = result.scalar_one_or_none()
     if not student:
         raise HTTPException(status_code=404, detail="Student not found")

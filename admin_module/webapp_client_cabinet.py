@@ -84,14 +84,10 @@ async def _ensure_webapp_user_linked(db: AsyncSession, user_id: int, club_id: in
     user = await db.get(User, user_id)
     if not user:
         return None
-    if user.club_id != club_id:
-        has_students = await db.scalar(
-            select(Student.id).where(Student.parent_id == user_id, Student.club_id == club_id).limit(1)
-        )
-        if has_students:
-            user.club_id = club_id
-            await db.commit()
-        else:
+    has_students = await db.scalar(
+        select(Student.id).where(Student.parent_id == user_id, Student.club_id == club_id).limit(1)
+    )
+    if not has_students:
             return None
     return user
 
@@ -590,10 +586,9 @@ async def webapp_bind_phone_submit(payload: WebAppBindPhonePayload, request: Req
     user_id = int(tg_user.get("id", 0))
     user = await db.get(User, user_id, with_for_update=True)
     if not user:
-        user = User(user_id=user_id, club_id=club.id, full_name=tg_user.get("first_name") or "", is_accepted=False, is_biometric_enabled=False)
+        user = User(user_id=user_id, club_id=None, full_name=tg_user.get("first_name") or "", is_accepted=False, is_biometric_enabled=False)
         db.add(user)
         await db.flush()
-    user.club_id = club.id
     for student in students:
         student.parent_id = user_id
         db.add(student)
