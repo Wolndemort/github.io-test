@@ -54,11 +54,14 @@ def _webapp_loading_config(club) -> dict:
     settings = (club.club_settings or {}) if club else {}
     ui = settings.get("ui", {}) if isinstance(settings.get("ui", {}), dict) else {}
     loading = ui.get("loading", {}) if isinstance(ui.get("loading", {}), dict) else {}
+    logo_url = str(loading.get("logo_url") or ui.get("logo_url") or "").strip()
+    logo_rev = str(loading.get("logo_rev") or "").strip()
     return {
         "enabled": bool(loading.get("enabled", False)),
         "duration_ms": max(300, min(10000, int(loading.get("duration_ms", 1200)))),
         "message": str(loading.get("message", "Загружаем приложение…")),
-        "logo_url": ui.get("logo_url", ""),
+        "logo_url": logo_url,
+        "logo_rev": logo_rev,
     }
 
 
@@ -126,7 +129,10 @@ async def get_biometric_page(
     settings = (club.club_settings or {}) if club else {}
     ui = settings.get("ui", {}) if isinstance(settings.get("ui", {}), dict) else {}
     loading = ui.get("loading", {}) if isinstance(ui.get("loading", {}), dict) else {}
-    return templates.TemplateResponse("biometric_pass.html", {"request": request, "students": students, "club": club, "club_id": club_id, "user_id": user_id, "biometric_enabled": bool(getattr(linked_user, "is_biometric_enabled", False)), "club_name": club.name if club else "", "logo_url": _absolute_webapp_url(request, ui.get("logo_url", "")), "loading": {"enabled": bool(loading.get("enabled", False)), "duration_ms": max(300, min(10000, int(loading.get("duration_ms", 1200)))), "message": str(loading.get("message", "Загружаем приложение…"))}})
+    loading_logo = _absolute_webapp_url(request, str(loading.get("logo_url") or ui.get("logo_url", "")))
+    if loading_logo and loading.get("logo_rev"):
+        loading_logo = f"{loading_logo}?v={loading['logo_rev']}"
+    return templates.TemplateResponse("biometric_pass.html", {"request": request, "students": students, "club": club, "club_id": club_id, "user_id": user_id, "biometric_enabled": bool(getattr(linked_user, "is_biometric_enabled", False)), "club_name": club.name if club else "", "logo_url": loading_logo, "loading": {"enabled": bool(loading.get("enabled", False)), "duration_ms": max(300, min(10000, int(loading.get("duration_ms", 1200)))), "message": str(loading.get("message", "Загружаем приложение…"))}})
 
 
 @router.get("/webapp/client-cabinet", response_class=HTMLResponse)
@@ -158,7 +164,7 @@ async def get_client_cabinet_page(request: Request, club_id: int, init_data: str
             "club_id": club_id,
             "user_id": user_id,
             "club_name": club.name if club else "",
-            "logo_url": _absolute_webapp_url(request, loading["logo_url"]),
+            "logo_url": f"{_absolute_webapp_url(request, loading['logo_url'])}?v={loading.get('logo_rev', '')}" if loading.get("logo_url") else "",
             "students": students,
             "user_name": user.full_name or tg_user.get("first_name", ""),
             "now": datetime.now(),

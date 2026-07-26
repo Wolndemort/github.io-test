@@ -219,6 +219,26 @@ def test_admin_settings_submenus_use_readable_labels():
     assert "рџ" not in panel
 
 
+def test_webapp_loading_logo_prefers_loading_config_and_keeps_cache_buster():
+    from admin_module.webapp_client_cabinet import _webapp_loading_config
+
+    class ClubStub:
+        def __init__(self, club_settings):
+            self.club_settings = club_settings
+
+    loading_first = _webapp_loading_config(
+        ClubStub({"ui": {"logo_url": "/static/uploads/logos/ui.jpg", "loading": {"enabled": True, "logo_url": "/static/uploads/logos/loading.jpg", "logo_rev": "abc123"}}})
+    )
+    assert loading_first["logo_url"] == "/static/uploads/logos/loading.jpg"
+    assert loading_first["logo_rev"] == "abc123"
+
+    loading_fallback = _webapp_loading_config(
+        ClubStub({"ui": {"logo_url": "/static/uploads/logos/ui.jpg", "loading": {"enabled": True}}})
+    )
+    assert loading_fallback["logo_url"] == "/static/uploads/logos/ui.jpg"
+    assert loading_fallback["logo_rev"] == ""
+
+
 def test_user_and_admin_history_render_database_utc_as_moscow_time():
     student = Path("templates/webapp_student.html").read_text(encoding="utf-8")
     history = Path("templates/webapp_history.html").read_text(encoding="utf-8")

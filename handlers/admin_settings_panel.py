@@ -56,7 +56,7 @@ async def admin_settings_menu(callback: types.CallbackQuery, club_settings: dict
     builder.row(types.InlineKeyboardButton(text="⚙️ Настройка лимитов клуба", callback_data="manage_club_limits"))
     loading_enabled = bool((ui.get("loading") or {}).get("enabled", False))
     loading_mark = "✅" if loading_enabled else "❌"
-    builder.row(types.InlineKeyboardButton(text=f"{loading_mark} Загрузочный экран", callback_data="toggle_webapp_loading"), types.InlineKeyboardButton(text="⚙️ Настроить", callback_data="configure_webapp_loading"))
+    builder.row(types.InlineKeyboardButton(text=f"{loading_mark} Загрузочный экран", callback_data="toggle_webapp_loading"))
     builder.row(types.InlineKeyboardButton(text="🖼 Загрузить логотип WebApp", callback_data="upload_webapp_logo"))
     builder.row(types.InlineKeyboardButton(text="💰 Настройка тарифов", callback_data="admin_tariffs_sections"))
     builder.row(types.InlineKeyboardButton(text="💰 Тарифы (WebApp)", web_app=types.WebAppInfo(url=f"https://{club_id}.speedycrm.ru/webapp/admin-tariffs?club_id={club_id}")))
@@ -600,9 +600,12 @@ async def save_webapp_logo(message: types.Message, state: FSMContext, club: Club
             raise ValueError("logo is too large after conversion")
         settings = dict(club.club_settings or {})
         ui = dict(settings.get("ui") or {})
-        ui["logo_url"] = f"/static/uploads/logos/{filename}"
+        logo_url = f"/static/uploads/logos/{filename}"
+        ui["logo_url"] = logo_url
         loading = dict(ui.get("loading") or {})
         loading["enabled"] = True
+        loading["logo_url"] = logo_url
+        loading["logo_rev"] = uuid4().hex
         loading.setdefault("duration_ms", 1200)
         loading.setdefault("message", "Загружаем приложение…")
         ui["loading"] = loading
@@ -642,8 +645,17 @@ async def save_webapp_loading(message: types.Message, state: FSMContext, club: C
         return await message.answer("Неверный JSON. Проверьте пример и отправьте ещё раз.")
     settings = dict(club.club_settings or {})
     ui = dict(settings.get("ui") or {})
+    if logo_url:
+        ui["logo_url"] = logo_url
+        loading_rev = uuid4().hex
+    else:
+        logo_url = str(ui.get("logo_url", "")).strip()
+        loading_rev = str((ui.get("loading") or {}).get("logo_rev", "")).strip() or uuid4().hex
     ui["logo_url"] = logo_url
     ui["loading"] = {"enabled": enabled, "duration_ms": duration, "message": text}
+    if logo_url:
+        ui["loading"]["logo_url"] = logo_url
+    ui["loading"]["logo_rev"] = loading_rev
     settings["ui"] = ui
     db_club = await session.merge(club)
     db_club.club_settings = settings

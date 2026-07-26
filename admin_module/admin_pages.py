@@ -147,7 +147,10 @@ else location.replace(location.pathname+'?club_id=' + encodeURIComponent(new URL
             parsed_disciplines.append({"name": disc_content.get("name", "Спортивная секция"), "days": parsed_days})
     ui = settings.get("ui", {}) if isinstance(settings.get("ui", {}), dict) else {}
     loading = ui.get("loading", {}) if isinstance(ui.get("loading", {}), dict) else {}
-    return templates.TemplateResponse("schedule.html", {"request": request, "club_name": club.name or "Без названия", "disciplines": parsed_disciplines, "loading": {"enabled": bool(loading.get("enabled", False)), "duration_ms": max(300, min(10000, int(loading.get("duration_ms", 1200)))), "message": str(loading.get("message", "Загружаем приложение…"))}, "logo_url": str(ui.get("logo_url", ""))})
+    loading_logo = str(loading.get("logo_url") or ui.get("logo_url") or "").strip()
+    if loading_logo and loading.get("logo_rev"):
+        loading_logo = f"{loading_logo}?v={loading['logo_rev']}"
+    return templates.TemplateResponse("schedule.html", {"request": request, "club_name": club.name or "Без названия", "disciplines": parsed_disciplines, "loading": {"enabled": bool(loading.get("enabled", False)), "duration_ms": max(300, min(10000, int(loading.get("duration_ms", 1200)))), "message": str(loading.get("message", "Загружаем приложение…"))}, "logo_url": loading_logo})
 
 
 @router.get("/webapp/live_cam", response_class=HTMLResponse)

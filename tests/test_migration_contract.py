@@ -17,3 +17,10 @@ def test_payment_migration_is_guarded_for_existing_tables():
     assert '"subscriptions" not in inspector.get_table_names()' in source
     assert '"visit_logs" not in inspector.get_table_names()' in source
     assert '"provider_payment_id" not in' in source
+
+
+def test_product_details_migration_exists_and_targets_current_head():
+    source = (MIGRATIONS / "4c9d2f1a8b6e_add_details_to_club_products.py").read_text(encoding="utf-8")
+    assert 'revision: str = "4c9d2f1a8b6e"' in source
+    assert 'down_revision: Union[str, Sequence[str], None] = "i3j4k5l6m7n8"' in source
+    assert 'op.add_column("club_products", sa.Column("details", sa.String(length=1000), nullable=True))' in source
