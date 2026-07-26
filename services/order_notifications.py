@@ -100,3 +100,31 @@ async def notify_product_staff(bot: Bot, club: Club, session, text: str) -> None
             )
         except Exception:
             continue
+
+
+async def notify_stock_reminders(bot: Bot, club: Club, session, text: str) -> None:
+    staff_rows = (
+        await session.execute(
+            select(ClubStaff).where(
+                ClubStaff.club_id == club.id,
+                ClubStaff.is_active.is_(True),
+            )
+        )
+    ).scalars().all()
+    targets = [
+        int(staff.telegram_id)
+        for staff in staff_rows
+        if str(getattr(staff, "role", "")).strip().casefold() == "cashier"
+    ]
+    if club.owner_id:
+        targets.append(int(club.owner_id))
+    for telegram_id in dict.fromkeys(targets):
+        try:
+            await bot.send_message(
+                chat_id=telegram_id,
+                text=text,
+                parse_mode="HTML",
+                disable_notification=False,
+            )
+        except Exception:
+            continue

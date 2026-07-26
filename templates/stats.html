@@ -70,8 +70,7 @@
             <div class="label">Заморозки</div>
             <div class="value">{{ frozen_passes }}</div>
             {% if frozen_students %}
-            <details>
-                <summary>Кто именно</summary>
+            <details class="athlete-dropdown" open>
                 <div class="scroll-box">
                     {% for student in frozen_students %}
                     <div class="list-item">
@@ -79,7 +78,7 @@
                         <span>
                             <span class="muted-note">заморожен</span>
                             {% if student.parent_id %}
-                            <a href="#" class="mono-action" style="display:inline-block;margin-left:8px;padding:6px 10px;text-decoration:none" onclick="return openChat({{ student.parent_id }})">💬 Чат</a>
+                            <button type="button" class="mono-action" style="display:inline-block;margin-left:8px;padding:6px 10px;text-decoration:none" onclick="openChat(event, {{ student.parent_id }})">💬 Чат</button>
                             {% endif %}
                         </span>
                     </div>
@@ -96,8 +95,7 @@
             <div class="label">Закончились</div>
             <div class="value">{{ inactive_passes }}</div>
             {% if inactive_students %}
-            <details>
-                <summary>Кто именно</summary>
+            <details class="athlete-dropdown" open>
                 <div class="scroll-box">
                     {% for student in inactive_students %}
                     <div class="list-item">
@@ -105,7 +103,7 @@
                         <span>
                             <span class="muted-note">без абонемента</span>
                             {% if student.parent_id %}
-                            <a href="#" class="mono-action" style="display:inline-block;margin-left:8px;padding:6px 10px;text-decoration:none" onclick="return openChat({{ student.parent_id }})">💬 Чат</a>
+                            <button type="button" class="mono-action" style="display:inline-block;margin-left:8px;padding:6px 10px;text-decoration:none" onclick="openChat(event, {{ student.parent_id }})">💬 Чат</button>
                             {% endif %}
                         </span>
                     </div>
@@ -141,12 +139,23 @@
         {% endfor %}
     </div>
 
+    <div class="card mono-card">
+        <div class="label">Выручка по датам</div>
+        <form method="get" action="/revenue" class="grid" style="grid-template-columns:1fr 1fr auto;gap:8px;align-items:end;">
+            <input type="hidden" name="club_id" value="{{ club_id }}">
+            <input type="hidden" name="init_data" value="{{ request.query_params.get('init_data','') }}">
+            <label>С даты<input type="date" name="date_from" value="{{ filters.date_from if filters is defined else '' }}"></label>
+            <label>По дату<input type="date" name="date_to" value="{{ filters.date_to if filters is defined else '' }}"></label>
+            <button type="submit">Показать</button>
+        </form>
+        <div class="muted-note" style="margin-top:10px;">{{ filters.date_from or 'Начало' }} — {{ filters.date_to or 'Сегодня' }}</div>
+    </div>
+
     <!-- Список для обзвона (Кому нужно продление) -->
     <div class="card mono-card">
         <div class="label">📞 Срочный обзвон (Закончились абонементы)</div>
         {% if churned_students %}
-        <details>
-            <summary>Показать список ({{ churned_students|length }} чел.)</summary>
+        <details class="athlete-dropdown" open>
             <div class="scroll-box">
                 {% for student in churned_students %}
                 <div class="list-item">
@@ -154,7 +163,7 @@
                     <span>
                         <span class="muted-note">баланс: 0</span>
                         {% if student.parent_id %}
-                        <a href="#" class="mono-action" style="display:inline-block;margin-left:8px;padding:6px 10px;text-decoration:none" onclick="return openChat({{ student.parent_id }})">💬 Чат</a>
+                        <button type="button" class="mono-action" style="display:inline-block;margin-left:8px;padding:6px 10px;text-decoration:none" onclick="openChat(event, {{ student.parent_id }})">💬 Чат</button>
                         {% endif %}
                     </span>
                 </div>
@@ -175,7 +184,7 @@
             <span>
                 <span style="font-weight: bold;">{{ student.balance }}</span>
                 {% if student.parent_id %}
-                <a href="#" class="mono-action" style="display:inline-block;margin-left:8px;padding:6px 10px;text-decoration:none" onclick="return openChat({{ student.parent_id }})">💬 Чат</a>
+                <button type="button" class="mono-action" style="display:inline-block;margin-left:8px;padding:6px 10px;text-decoration:none" onclick="openChat(event, {{ student.parent_id }})">💬 Чат</button>
                 {% endif %}
             </span>
         </div>
@@ -189,22 +198,20 @@
         tg.ready();
         tg.expand();
 
-        async function openChat(parentId) {
+        function openChat(event, parentId) {
+            event?.preventDefault?.();
+            event?.stopPropagation?.();
             const link = `tg://user?id=${parentId}`;
             try {
                 if (tg?.openTelegramLink) tg.openTelegramLink(link);
                 else window.open(link, '_blank', 'noopener,noreferrer');
             } catch (_) {
-                try {
-                    await navigator.clipboard.writeText(String(parentId));
-                    alert(`ID родителя ${parentId} скопирован. Если Telegram не открывает личку, отправьте сообщение вручную.`);
-                } catch (err) {
-                    alert(`ID родителя: ${parentId}`);
-                }
+                navigator.clipboard?.writeText(String(parentId)).catch(() => {});
             }
             return false;
         }
     </script>
+    <script src="/static/js/scroll_top.js"></script>
     </div>
 </body>
 </html>

@@ -27,6 +27,8 @@
     <div class="card mono-card">
         <div class="label">Быстрый поиск атлета по базе</div>
         <input type="text" id="searchInput" class="search-input" placeholder="Введите имя атлета...">
+        <details class="athlete-dropdown" open>
+        <summary style="display:none"></summary>
         <div class="scroll-box" id="searchResultBox" style="display: none; max-height: 200px; border-top: 1px solid #eee; margin-top: 10px;">
             {% for student in all_athletes %}
                 <div class="list-item search-target-item" data-name="{{ student.name|lower }}">
@@ -37,7 +39,7 @@
                 <div>
                     <span class="balance-span">{{ student.balance }} зан.</span>
                     {% if student.parent_id %}
-                    <a href="#" class="tg-link" onclick="return openChat({{ student.parent_id }})">💬 Чат</a>
+                    <button type="button" class="tg-link" onclick="openChat(event, {{ student.parent_id }})">💬 Чат</button>
                     {% endif %}
                 </div>
             </div>
@@ -53,11 +55,12 @@
             {% for student in birthdays_today %}
                 🎂 {{ student.name }}
                 {% if student.parent_id %}
-                <a href="#" class="tg-link" onclick="return openChat({{ student.parent_id }})">💬 Чат</a>
+                <button type="button" class="tg-link" onclick="openChat(event, {{ student.parent_id }})">💬 Чат</button>
                 {% endif %}
                 <br>
             {% endfor %}
         </div>
+        </details>
         <div class="birthday-footer" style="color:#666;">Не забудьте поздравить атлета на ресепшене!</div>
     </div>
     {% endif %}
@@ -68,6 +71,8 @@
             <span class="green-text">🟢 Сейчас в зале (Активные сессии)</span>
             <span class="badge-count">{{ active_sessions|length }} чел.</span>
         </div>
+        <details class="athlete-dropdown" open>
+        <summary style="display:none"></summary>
         <div class="scroll-box long-scroll">
             {% for session in active_sessions %}
             <div class="list-item border-green">
@@ -83,7 +88,7 @@
                         осталось {{ session.mins_left }} мин
                     </span>
                     {% if session.parent_id %}
-                    <a href="#" class="tg-link" onclick="return openChat({{ session.parent_id }})">💬 Чат</a>
+                    <button type="button" class="tg-link" onclick="openChat(event, {{ session.parent_id }})">💬 Чат</button>
                     {% endif %}
                 </div>
             </div>
@@ -93,12 +98,15 @@
             </div>
             {% endfor %}
         </div>
+        </details>
     </div>
 
     <!-- 📜 4. СКУД: ПОСЛЕДНИЕ ПОСЕЩЕНИЯ (ИСТОРИЯ СЕССИЙ) -->
     <div class="card mono-card">
         <details>
             <summary>📜 История последних посещений (Топ-20)</summary>
+            <details class="athlete-dropdown" open>
+            <summary style="display:none"></summary>
             <div class="scroll-box long-scroll">
                 {% for session in past_sessions %}
                 <div class="list-item border-gray">
@@ -109,7 +117,7 @@
                     <div class="text-right gray-bold">
                         {% if session.balance == 999 %}♾ Безлимит{% else %}{{ session.balance }} зан.{% endif %}
                         {% if session.parent_id %}
-                        <a href="#" class="tg-link" onclick="return openChat({{ session.parent_id }})">💬 Чат</a>
+                        <button type="button" class="tg-link" onclick="openChat(event, {{ session.parent_id }})">💬 Чат</button>
                         {% endif %}
                     </div>
                 </div>
@@ -119,6 +127,7 @@
                 </div>
                 {% endfor %}
             </div>
+            </details>
         </details>
     </div>
 
@@ -128,18 +137,21 @@
         {% if sleeping_students %}
         <details>
             <summary>Показать список потеряшек ({{ sleeping_students|length }} чел.)</summary>
+            <details class="athlete-dropdown" open>
+            <summary style="display:none"></summary>
             <div class="scroll-box">
                 {% for student in sleeping_students %}
                 <div class="list-item">
                     <span>{{ student.name }}</span>
                     <div>
                         {% if student.parent_id %}
-                        <a href="#" class="tg-link" onclick="return openChat({{ student.parent_id }})">💬 Чат</a>
+                        <button type="button" class="tg-link" onclick="openChat(event, {{ student.parent_id }})">💬 Чат</button>
                         {% endif %}
                     </div>
                 </div>
                 {% endfor %}
             </div>
+            </details>
         </details>
         {% else %}
         <div class="green-success-text">Все клиенты регулярно посещают тренировки!</div>
@@ -160,6 +172,8 @@
         {% if expired_students %}
         <details>
             <summary>Открыть список для обзвона ({{ expired_students|length }} чел.)</summary>
+            <details class="athlete-dropdown" open>
+            <summary style="display:none"></summary>
             <div class="scroll-box">
                 {% for student in expired_students %}
                 <div class="list-item">
@@ -167,12 +181,13 @@
                     <div>
                         <span class="red-bold mr-5">0 зан.</span>
                         {% if student.parent_id %}
-                        <a href="#" class="tg-link" onclick="return openChat({{ student.parent_id }})">💬 Чат</a>
+                        <button type="button" class="tg-link" onclick="openChat(event, {{ student.parent_id }})">💬 Чат</button>
                         {% endif %}
                     </div>
                 </div>
                 {% endfor %}
             </div>
+            </details>
         </details>
         {% else %}
         <div class="green-success-text">Отличная работа! Клиентов с 0 балансом нет.</div>
@@ -192,7 +207,7 @@
                     <div>
                         <span class="orange-bold mr-5">{{ student.balance }} зан.</span>
                         {% if student.parent_id %}
-                        <a href="#" class="tg-link" onclick="return openChat({{ student.parent_id }})">💬 Чат</a>
+                        <button type="button" class="tg-link" onclick="openChat(event, {{ student.parent_id }})">💬 Чат</button>
                         {% endif %}
                     </div>
                 </div>
@@ -250,28 +265,22 @@
             }
         });
 
-        async function openChat(parentId) {
+        function openChat(event, parentId) {
+            event?.preventDefault?.();
+            event?.stopPropagation?.();
             const tg = window.Telegram?.WebApp;
             const link = `tg://user?id=${parentId}`;
             try {
-                if (tg?.openTelegramLink) {
-                    tg.openTelegramLink(link);
-                } else {
-                    window.open(link, '_blank', 'noopener,noreferrer');
-                }
-                return false;
+                if (tg?.openTelegramLink) tg.openTelegramLink(link);
+                else window.open(link, '_blank', 'noopener,noreferrer');
             } catch (_) {
-                try {
-                    await navigator.clipboard.writeText(String(parentId));
-                    alert(`ID родителя ${parentId} скопирован. Если Telegram не открывает личку, отправьте сообщение вручную.`);
-                } catch (err) {
-                    alert(`ID родителя: ${parentId}`);
-                }
-                return false;
+                navigator.clipboard?.writeText(String(parentId)).catch(() => {});
             }
+            return false;
         }
     </script>
     </div>
+    <script src="/static/js/scroll_top.js"></script>
 </body>
 </html>
 <script src="/static/js/admin_fullscreen.js"></script>

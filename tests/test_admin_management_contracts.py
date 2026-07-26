@@ -93,6 +93,75 @@ def test_admin_and_stats_chat_links_are_parent_scoped_and_consistent():
     assert '"username":' not in analytics
 
 
+def test_client_webapp_can_create_students_but_cannot_edit_or_delete_them():
+    cabinet = Path("admin_module/webapp_client_cabinet.py").read_text(encoding="utf-8")
+    page = Path("templates/client_cabinet.html").read_text(encoding="utf-8")
+    form = Path("templates/webapp_create_student.html").read_text(encoding="utf-8")
+
+    assert "/webapp/client-cabinet/create-student" in cabinet
+    assert "WebAppCreateStudentPayload" in cabinet
+    assert "webapp_student_created" in cabinet
+    assert "Создать атлета" in page
+    assert "create-student" in page
+    assert "Редактировать" not in page
+    assert "Удалить" not in page
+    assert "Только создание" in form
+    assert "fetch('/webapp/client-cabinet/create-student'" in form
+    assert "update-student" not in form
+    assert "delete-student" not in form
+    assert 'input id="birthday" type="text"' in form
+    assert "replace(/\\D/g, '')" in form
+
+
+def test_boxing_name_no_longer_contains_children_suffix():
+    constants = Path("database/constants.py").read_text(encoding="utf-8")
+    admin_pages = Path("admin_module/admin_pages.py").read_text(encoding="utf-8")
+    assert "Бокс (Дети)" not in constants
+    assert "Бокс (Дети)" not in admin_pages
+    assert '"boxing": {' in constants
+    assert '"boxing": "🥊 Бокс"' in admin_pages
+
+
+def test_admin_student_dates_are_text_inputs_with_autofill_formatting():
+    page = Path("templates/admin_students.html").read_text(encoding="utf-8")
+    assert 'id="newBirthday" type="text"' in page
+    assert 'input[name="birthday"]' in page
+    assert 'input[name="expire_date"]' in page
+    assert "replace(/\\D/g, '')" in page
+    assert "showPicker" in page
+    assert 'type = \'date\'' in page
+
+
+def test_stats_freeze_dropdown_has_no_visible_title_and_revenue_has_date_filters():
+    stats = Path("templates/stats.html").read_text(encoding="utf-8")
+    revenue = Path("admin_module/api.py").read_text(encoding="utf-8")
+    assert "Кто именно" not in stats
+    assert "athlete-dropdown" in stats
+    assert "Заморозки" in stats
+    assert "Выручка по датам" in stats
+    assert 'name="date_from"' in stats
+    assert 'name="date_to"' in stats
+    assert "date_from: str | None = Query(default=None)" in revenue
+    assert "date_to: str | None = Query(default=None)" in revenue
+    assert "start_filter = moscow_date_boundary(date_from)" in revenue
+    assert "end_filter = moscow_date_boundary(date_to) + timedelta(days=1)" in revenue
+
+
+def test_admin_athlete_lists_use_collapsible_dropdown_blocks():
+    admin = Path("templates/admin.html").read_text(encoding="utf-8")
+    assert "athlete-dropdown" in admin
+    assert admin.count("athlete-dropdown") >= 4
+    assert "openChat(event," in admin
+
+
+def test_webapp_create_student_has_keyboard_and_calendar_for_birthday():
+    form = Path("templates/webapp_create_student.html").read_text(encoding="utf-8")
+    assert 'id="birthday" type="text"' in form
+    assert "replace(/\\D/g, '')" in form
+    assert "showPicker" in form
+    assert 'type = \'date\'' in form
+
+
 def test_work_schedule_webapp_and_weekend_job_are_registered():
     settings = Path("handlers/admin_settings_panel.py").read_text(encoding="utf-8")
     webapp = Path("admin_module/webapp_views.py").read_text(encoding="utf-8")
@@ -106,9 +175,18 @@ def test_work_schedule_webapp_and_weekend_job_are_registered():
     assert "webapp/admin-work-schedule/change" in template
     assert "work_schedule" in template
     assert "send_work_schedule_notice" in jobs
+    assert "admin_schedulers" in settings
+    assert "birthday_missing_reminders" in settings
+    assert "subscription_expiry_reminders" in settings
+    assert "birthday_greetings" in settings
+    assert "absence_reminders" in settings
+    assert "work_schedule_reminders" in settings
+    assert "stock_reminders" in settings
     assert "work_schedule_sat" in main
     assert "work_schedule_sun" in main
     assert "work_schedule_mon" in main
+    assert "stock_reminder_am" in main
+    assert "stock_reminder_pm" in main
 
 
 def test_user_and_admin_history_render_database_utc_as_moscow_time():
@@ -131,6 +209,59 @@ def test_background_scheduler_has_stable_moscow_schedule_and_no_overlap():
         assert f'id="{job_id}"' in source
     assert "max_instances=1" in source
     assert "scheduler.shutdown(wait=False)" in source
+
+
+@pytest.mark.asyncio
+async def test_cart_checkout_ensures_webapp_user_exists_before_order_insert():
+    from admin_module.api import _ensure_cart_user
+
+    created = []
+
+    class FakeUser:
+        def __init__(self, user_id, club_id=None, full_name=None, is_accepted=False, is_biometric_enabled=False):
+            self.user_id = user_id
+            self.club_id = club_id
+            self.full_name = full_name
+            self.is_accepted = is_accepted
+            self.is_biometric_enabled = is_biometric_enabled
+
+    class FakeSession:
+        def __init__(self):
+            self.stored = None
+
+        async def get(self, model, user_id, with_for_update=False):
+            return None
+
+        def add(self, obj):
+            created.append(obj)
+            self.stored = obj
+
+        async def flush(self):
+            return None
+
+    club = type("Club", (), {"id": 2})()
+    tg_user = {"id": 5898364782, "first_name": "Ivan", "last_name": "Petrov"}
+
+    session = FakeSession()
+    user = await _ensure_cart_user(session, club, tg_user)
+
+    assert user.user_id == 5898364782
+    assert user.club_id == 2
+    assert user.full_name == "Ivan"
+    assert created and created[0] is user
+
+    existing = FakeUser(user_id=5898364782, club_id=1, full_name="")
+
+    class ExistingSession(FakeSession):
+        async def get(self, model, user_id, with_for_update=False):
+            return existing
+
+    session2 = ExistingSession()
+    user2 = await _ensure_cart_user(session2, club, tg_user)
+
+    assert user2 is existing
+    assert existing.club_id == 2
+    assert existing.full_name == "Ivan"
 
 
 def test_admin_audit_screen_and_button_are_registered():
@@ -175,6 +306,94 @@ def test_schedule_webapp_bottom_bar_is_collapsible():
     assert ".bottom-bar.collapsed .inner" in page
     assert "Свернуть быстрые действия" in page
     assert "Развернуть быстрые действия" in page
+    assert "discipline-title span:last-child" in page
+    assert "color: #f7f7f7 !important" in page
+
+
+def test_admin_schedule_webapp_supports_copy_from_day_and_dark_contrast():
+    page = Path("templates/admin_schedule.html").read_text(encoding="utf-8")
+    api = Path("admin_module/webapp_views.py").read_text(encoding="utf-8")
+    assert "copy_day" in page
+    assert "copyFrom" in page
+    assert "selectionMeta" in page
+    assert "Копировать занятия из дня" in page
+    assert "source_day" in api
+    assert "Нельзя копировать день в сам себя" in api
+    assert "В исходном дне нет занятий" in api
+
+
+@pytest.mark.asyncio
+async def test_admin_schedule_copy_day_duplicates_existing_lessons(monkeypatch):
+    from admin_module import webapp_views
+    from admin_module.api import ScheduleChangePayload
+
+    club = type(
+        "Club",
+        (),
+        {
+            "id": 7,
+            "club_settings": {
+                "disciplines": {
+                    "boxing": {
+                        "name": "🥊 Бокс",
+                        "schedule": {
+                            "mon": [{"time": "10:00", "coach": "Тренер А", "max_slots": 12}],
+                            "tue": [],
+                        },
+                    }
+                }
+            },
+        },
+    )()
+
+    class FakeResult:
+        def scalar_one_or_none(self):
+            return club
+
+    class FakeSession:
+        def __init__(self):
+            self.committed = False
+
+        async def execute(self, *args, **kwargs):
+            return FakeResult()
+
+        async def commit(self):
+            self.committed = True
+
+    captured = {}
+
+    async def fake_actor_context(*args, **kwargs):
+        return {}
+
+    def fake_audit_event(name, **kwargs):
+        captured["name"] = name
+        captured["kwargs"] = kwargs
+
+    async def fake_verify(*args, **kwargs):
+        return {"id": 1001}
+
+    monkeypatch.setattr(webapp_views, "verify_webapp_staff", fake_verify)
+    monkeypatch.setattr(webapp_views, "audit_actor_context", fake_actor_context)
+    monkeypatch.setattr(webapp_views, "audit_event", fake_audit_event)
+
+    payload = ScheduleChangePayload(
+        init_data="init",
+        club_id=7,
+        action="copy_day",
+        discipline="boxing",
+        day="tue",
+        source_day="mon",
+    )
+
+    result = await webapp_views.change_admin_schedule(payload, session=FakeSession())
+
+    assert result == {"success": True}
+    assert club.club_settings["disciplines"]["boxing"]["schedule"]["tue"] == [
+        {"time": "10:00", "coach": "Тренер А", "max_slots": 12, "taken_slots": 0}
+    ]
+    assert captured["name"] == "schedule_changed"
+    assert captured["kwargs"]["source_day"] == "mon"
+    assert captured["kwargs"]["day"] == "tue"
 
 
 def test_master_bot_registers_new_club_bot_without_restart():
@@ -300,3 +519,16 @@ def test_legacy_student_create_requires_club_id():
 def test_legacy_student_create_contains_club_scope():
     payload = StudentCreate(name=" Атлет ", parent_id=10, club_id=7)
     assert payload.club_id == 7
+
+
+def test_long_webapp_pages_include_scroll_to_top_button():
+    admin = Path("templates/admin.html").read_text(encoding="utf-8")
+    stats = Path("templates/stats.html").read_text(encoding="utf-8")
+    shop = Path("templates/shop.html").read_text(encoding="utf-8")
+    base = Path("templates/webapp_base.html").read_text(encoding="utf-8")
+    script = Path("static/js/scroll_top.js").read_text(encoding="utf-8")
+    assert "scroll_top.js" in admin
+    assert "scroll_top.js" in stats
+    assert "scroll_top.js" in shop
+    assert "scroll_top.js" in base
+    assert "scrollTopButton" in script

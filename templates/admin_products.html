@@ -15,14 +15,21 @@
   .thumb{width:72px;height:72px;border-radius:14px;overflow:hidden;background:linear-gradient(135deg,#ececec,#d9d9d9);display:grid;place-items:center;font-size:28px;font-weight:700;color:#666}
   .thumb img{width:100%;height:100%;object-fit:cover;display:block}
   .meta{display:flex;gap:6px;flex-wrap:wrap;margin-top:4px}
-  .pill{display:inline-block;padding:4px 8px;border-radius:999px;background:#f0f0f0;font-size:12px;color:#333}
+  .pill{display:inline-block;padding:4px 8px;border-radius:999px;background:#f0f0f0;font-size:12px;color:#333;white-space:nowrap}
   .pill.ok{background:#e8f7ec;color:#15703b}
   .pill.off{background:#f2f2f2;color:#8a8a8a}
   .actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
-  input,button,select{padding:10px;margin:3px 0;border-radius:10px;border:1px solid #ccc;font-size:15px}
+  input,button,select,textarea{padding:10px;margin:3px 0;border-radius:10px;border:1px solid #ccc;font-size:15px}
   button{background:#111;color:#fff}
   #list .card.off{opacity:.72}
   .form-grid{display:grid;gap:8px}
+  .product-info{margin-top:8px;color:#555;font-size:13px;line-height:1.45}
+  details.product-details summary{cursor:pointer;font-size:13px;color:#444}
+  .price-pill{white-space:nowrap;flex:0 0 auto}
+  .quickbar{display:grid;grid-template-columns:1fr 1fr;gap:8px;align-items:center}
+  .quickbar button{margin:0}
+  .floating-top{position:fixed;right:16px;bottom:82px;z-index:40;width:48px;height:48px;border-radius:50%;border:0;background:#111;color:#fff;font-size:20px;box-shadow:0 10px 24px rgba(0,0,0,.22)}
+  @media(max-width:640px){.product{grid-template-columns:1fr}}
 </style>
 <div class="topbar">
   <a class="navlink" href="/admin?club_id={{ club_id }}&init_data={{ request.query_params.get('init_data','')|urlencode }}">← В панель</a>
@@ -34,16 +41,27 @@
     <select id="categoryFilter"><option value="">Все категории</option></select>
   </div>
 </div>
-<div id="list"></div>
-<div class="card">
+<div class="card quickbar">
+  <button id="createBtn" type="button">Создать товар</button>
+  <button id="topBtn" type="button">Наверх</button>
+</div>
+<div class="card" id="productForm">
   <h3 id="caption">Новый товар</h3>
   <div class="form-grid">
     <input id="n" placeholder="Название">
     <input id="c" placeholder="Категория">
+    <select id="preset">
+      <option value="">Без типа</option>
+      <option value="fresh">Fresh / напиток</option>
+      <option value="snack">Снеки</option>
+      <option value="merch">Мерч</option>
+      <option value="other">Другое</option>
+    </select>
+    <textarea id="details" placeholder="Состав / описание товара" style="min-height:90px;resize:vertical"></textarea>
     <input id="p" type="number" min="1" placeholder="Цена ₽">
     <input id="s" type="number" min="0" placeholder="Остаток">
     <input id="i" placeholder="URL картинки">
-    <input id="file" type=file accept="image/jpeg,image/png,image/webp">
+    <input id="file" type="file" accept="image/jpeg,image/png,image/webp">
     <label><input id="a" type="checkbox" checked> Активен</label>
     <div class="actions">
       <button id="saveBtn">Сохранить</button>
@@ -51,14 +69,25 @@
     </div>
   </div>
 </div>
+<div id="list"></div>
+<button id="scrollTopBtn" class="floating-top" type="button" aria-label="Наверх">↑</button>
 <script>
-const tg=Telegram.WebApp;tg.ready();const cid={{club_id}},items={{products|tojson}};let edit=null;const esc=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const normalizeCategory=x=>String(x??'other').trim().toLowerCase().replace(/\s+/g,' ').replace(/ё/g,'е');
-const categories=[...new Set(items.map(x=>x.category).filter(Boolean))].sort();categories.forEach(x=>categoryFilter.insertAdjacentHTML('beforeend',`<option value="${esc(x)}">${esc(x)}</option>`));
+const tg=Telegram.WebApp;tg.ready();
+const cid={{club_id}},items={{products|tojson}};
+let edit=null;
+const esc=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const normalizeCategory=x=>String(x??'other').trim().toLowerCase().replace(/\s+/g,' ').replace(/С‘/g,'Рµ');
+const categories=[...new Set(items.map(x=>x.category).filter(Boolean))].sort();
+categories.forEach(x=>categoryFilter.insertAdjacentHTML('beforeend',`<option value="${esc(x)}">${esc(x)}</option>`));
+const productForm = document.getElementById('productForm');
+
 function thumb(x){
   if(x.image_url) return `<div class="thumb"><img src="${esc(x.image_url)}" alt="${esc(x.name)}"></div>`;
   return `<div class="thumb">🖼️</div>`;
 }
+
+function scrollTopSmooth(){ window.scrollTo({top:0, behavior:'smooth'}); }
+
 function draw(){
   const filter=normalizeCategory(categoryFilter.value);
   list.innerHTML=items.filter(x=>!filter||normalizeCategory(x.category)===filter).map(x=>`
@@ -69,10 +98,11 @@ function draw(){
           <b>${esc(x.name)}</b>
           <div class="meta">
             <span class="pill">${esc(x.category)}</span>
-            <span class="pill">₽ ${(x.price_kopecks/100).toFixed(2)}</span>
+            <span class="pill price-pill">₽ ${(x.price_kopecks/100).toFixed(2)}</span>
             <span class="pill">Остаток ${x.stock}</span>
             <span class="pill ${x.is_active?'ok':'off'}">${x.is_active?'активен':'выключен'}</span>
           </div>
+          ${x.details ? `<details class="product-details"><summary>Состав / описание</summary><div class="product-info">${esc(x.details)}</div></details>` : ''}
           <div class="actions">
             <button data-edit="${x.id}">Изменить</button>
             <button data-del="${x.id}">Удалить</button>
@@ -84,7 +114,64 @@ function draw(){
   list.querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>editItem(Number(b.dataset.edit)));
   list.querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>del(Number(b.dataset.del)));
 }
-function editItem(id){const x=items.find(y=>y.id===id);edit=id;n.value=x.name;c.value=x.category;p.value=x.price_kopecks/100;s.value=x.stock;i.value=x.image_url||'';a.checked=x.is_active;caption.textContent='Изменить товар'}function reset(){edit=null;n.value=c.value=p.value=s.value=i.value='';file.value='';a.checked=true;caption.textContent='Новый товар'}
-async function save(){let image=i.value||null;if(file.files[0]){const fd=new FormData();fd.append('image',file.files[0]);const u=await fetch('/webapp/admin-products/upload-image?club_id='+cid+'&init_data='+encodeURIComponent(tg.initData),{method:'POST',body:fd}),ud=await u.json();if(!u.ok)return alert(ud.detail||'Ошибка загрузки');image=ud.image_url}const body={init_data:tg.initData,club_id:cid,name:n.value,category:c.value||'other',price_kopecks:Math.round(Number(p.value)*100),stock:Number(s.value)||0,is_active:a.checked,image_url:image};const r=await fetch(edit?'/webapp/admin-products/'+edit:'/webapp/admin-products',{method:edit?'PATCH':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});if(!r.ok)return alert((await r.json()).detail||'Ошибка');location.reload()}
-async function del(id){if(!confirm('Удалить товар?'))return;const r=await fetch('/webapp/admin-products/'+id+'?club_id='+cid+'&init_data='+encodeURIComponent(tg.initData),{method:'DELETE'});if(r.ok)location.reload();else alert('Ошибка')}saveBtn.onclick=save;resetBtn.onclick=reset;categoryFilter.onchange=draw;draw();
+
+function editItem(id){
+  const x=items.find(y=>y.id===id);
+  edit=id;
+  n.value=x.name;
+  c.value=x.category;
+  p.value=x.price_kopecks/100;
+  s.value=x.stock;
+  i.value=x.image_url||'';
+  details.value=x.details||'';
+  preset.value=x.category||'';
+  a.checked=x.is_active;
+  caption.textContent='Изменить товар';
+  productForm.scrollIntoView({behavior:'smooth', block:'start'});
+}
+
+function reset(){
+  edit=null;
+  n.value=c.value=p.value=s.value=i.value=details.value='';
+  preset.value='';
+  file.value='';
+  a.checked=true;
+  caption.textContent='Новый товар';
+}
+
+function applyPreset(){
+  if(!preset.value) return;
+  if(!c.value || c.value==='other') c.value=preset.value;
+  if(preset.value==='fresh' && !details.value) details.value='сок / вода / без сахара';
+}
+
+async function save(){
+  let image=i.value||null;
+  if(file.files[0]){
+    const fd=new FormData();fd.append('image',file.files[0]);
+    const u=await fetch('/webapp/admin-products/upload-image?club_id='+cid+'&init_data='+encodeURIComponent(tg.initData),{method:'POST',body:fd}),
+          ud=await u.json();
+    if(!u.ok) return alert(ud.detail||'Ошибка загрузки');
+    image=ud.image_url;
+  }
+  const body={init_data:tg.initData,club_id:cid,name:n.value,category:c.value||'other',price_kopecks:Math.round(Number(p.value)*100),stock:Number(s.value)||0,is_active:a.checked,image_url:image,details:details.value};
+  const r=await fetch(edit?'/webapp/admin-products/'+edit:'/webapp/admin-products',{method:edit?'PATCH':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  if(!r.ok) return alert((await r.json()).detail||'Ошибка');
+  location.reload();
+}
+
+async function del(id){
+  if(!confirm('Удалить товар?')) return;
+  const r=await fetch('/webapp/admin-products/'+id+'?club_id='+cid+'&init_data='+encodeURIComponent(tg.initData),{method:'DELETE'});
+  if(r.ok) location.reload(); else alert('Ошибка');
+}
+
+saveBtn.onclick=save;
+resetBtn.onclick=reset;
+createBtn.onclick=()=>{reset(); productForm.scrollIntoView({behavior:'smooth', block:'start'});};
+topBtn.onclick=scrollTopSmooth;
+scrollTopBtn.onclick=scrollTopSmooth;
+categoryFilter.onchange=draw;
+preset.onchange=applyPreset;
+draw();
 </script></html>

@@ -4,7 +4,13 @@ DEFAULT_CLUB_SETTINGS = {
         "freeze": True,  # Заморозка
         "qr_checkin": True,  # Чекин по QR
         "manual_add": True,  # Ручное добавление атлета админом
-        "online_payments": False  # Прием платежей через API (ЮKassa и т.д.)
+        "online_payments": False,  # Прием платежей через API (ЮKassa и т.д.)
+        "stock_reminders": True,  # Напоминания о низком остатке товаров
+        "birthday_missing_reminders": True,  # Нет даты рождения у атлета
+        "subscription_expiry_reminders": True,  # Заканчивается абонемент
+        "birthday_greetings": True,  # Поздравления с ДР
+        "absence_reminders": True,  # Прогульщики
+        "work_schedule_reminders": True  # График работы клуба
     },
 
     # 2. Тексты и контакты (Для каждого клуба свои)
@@ -27,7 +33,7 @@ DEFAULT_CLUB_SETTINGS = {
     # 3. ДИСЦИПЛИНЫ (Ключевой блок для хендлеров оплаты)
     "disciplines": {
         "boxing": {
-            "name": "Бокс (Дети)",
+            "name": "Бокс",
             "active": False,  # Выключен, пока админ не настроит тарифы
             "type": "lessons",
             "schedule": {"mon": [], "tue": [], "wed": [], "thu": [], "fri": [], "sat": [], "sun": []},

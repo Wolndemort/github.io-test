@@ -15,7 +15,9 @@
         .mono-title { font-size:28px; font-weight:800; letter-spacing:-.03em; margin:8px 0 4px; }
         .mono-card { padding:16px; margin-bottom:12px; }
         .discipline-section { margin-bottom: 18px; }
-        .discipline-title { font-size: 18px; font-weight: 800; color: #111; margin-bottom: 10px; border-bottom: 1px solid #ddd; padding-bottom: 6px; }
+        .discipline-title { display:flex; align-items:center; gap:8px; font-size: 18px; font-weight: 800; color: #f7f7f7 !important; margin-bottom: 10px; border-bottom: 1px solid #ddd; padding-bottom: 6px; }
+        .discipline-title span:last-child { color: #f7f7f7 !important; }
+        .discipline-icon { display:inline-block; filter: brightness(0) invert(1); }
         .day-container { background:#fff; border-radius:18px; padding:12px; margin-bottom:10px; border:1px solid #e6e6e6; }
         .day-title { font-size:14px; font-weight:800; margin-bottom:8px; color:#666; text-transform:uppercase; letter-spacing:.08em; }
         .lesson-card { display:flex; justify-content:space-between; align-items:center; background:#f8f8f8; padding:10px 12px; border-radius:14px; margin-bottom:8px; border:1px solid #ececec; }
@@ -53,7 +55,7 @@
         <select id="day-picker" class="discipline-picker"><option value="">Все дни</option><option value="mon">Понедельник</option><option value="tue">Вторник</option><option value="wed">Среда</option><option value="thu">Четверг</option><option value="fri">Пятница</option><option value="sat">Суббота</option><option value="sun">Воскресенье</option></select>
         {% for discipline in disciplines %}
             <div class="discipline-section" id="discipline-{{ loop.index0 }}" hidden>
-                <div class="discipline-title">🥋 {{ discipline.name }}</div>
+                <div class="discipline-title"><span class="discipline-icon">🥋</span><span>{{ discipline.name }}</span></div>
                 {% for day in discipline.days %}
                     <div class="day-container" data-day="{{ day.key }}">
                         <div class="day-title">{{ day.title }}</div>

@@ -1,5 +1,254 @@
-<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><script src="https://telegram.org/js/telegram-web-app.js"></script><style>body{font-family:sans-serif;background:#f4f4f4;margin:0;padding:14px;color:#111}.nav{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px}.nav a{display:block;text-align:center;text-decoration:none;padding:10px 12px;border-radius:10px;border:1px solid #111;background:#111;color:#fff;font-weight:700}.nav a.secondary{background:#fff;color:#111;border-color:#bbb}.card{background:white;border-radius:16px;padding:14px;margin:10px 0}input,select,button{padding:10px;margin:3px;border-radius:8px;border:1px solid #ccc}button{background:#111;color:white}.lesson{border-top:1px solid #ddd;padding:8px 0}</style></head><body>
-<div class="nav"><a href="/admin?club_id={{club_id}}&init_data={{ request.query_params.get('init_data','')|urlencode }}">← В панель</a><a class="secondary" href="#" onclick="window.Telegram?.WebApp?.close(); return false;">Закрыть</a></div>
-<h2>Расписание — {{ club.name }}</h2><select id="d">{% for key,x in disciplines.items() %}<option value="{{key}}">{{x.get('name',key)}}</option>{% endfor %}</select><select id="day"><option value="mon">Пн</option><option value="tue">Вт</option><option value="wed">Ср</option><option value="thu">Чт</option><option value="fri">Пт</option><option value="sat">Сб</option><option value="sun">Вс</option></select><div id="list"></div><div class="card"><input id="time" placeholder="18:00"><input id="coach" placeholder="Информация"><button onclick="save('add')">Добавить</button></div>
-<script>const tg=Telegram.WebApp;tg.ready();tg.expand();const data={{ disciplines|tojson }};let idx=null;function render(){let a=(data[d.value]?.schedule||{})[day.value]||[];list.innerHTML=a.map((x,i)=>`<div class=lesson><b>${x.time}</b> — ${x.coach||''} ${x.max_slots?`(${x.max_slots})`:''} <button onclick="edit(${i})">Изменить</button><button onclick="removeL(${i})">Удалить</button></div>`).join('')||'<p>Нет занятий</p>'}function edit(i){let x=(data[d.value].schedule[day.value]||[])[i];idx=i;time.value=x.time;coach.value=x.coach;document.querySelector('button[onclick="save(\'add\')"]').textContent='Сохранить'}async function api(action,index=null){let r=await fetch('/webapp/admin-schedule/change',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({init_data:tg.initData,club_id:{{club_id}},action,discipline:d.value,day:day.value,index,lesson:{time:time.value,coach:coach.value,max_slots:0}})});if(!r.ok)throw Error((await r.json()).detail||'Ошибка');location.reload()}function save(){api(idx===null?'add':'update',idx).catch(e=>alert(e.message))}function removeL(i){if(confirm('Удалить занятие?'))api('delete',i).catch(e=>alert(e.message))}d.onchange=day.onchange=()=>{idx=null;render()};render()</script></body></html>
-<style>html,body{background:#090909!important;color:#f7f7f7!important}.card{background:#151515!important;color:#f7f7f7!important;border-color:#2d2d2d!important;box-shadow:0 16px 42px rgba(0,0,0,.28)}input,select{background:#101010!important;color:#fff!important;border-color:#444!important}button{background:#fff!important;color:#090909!important;font-weight:700}.lesson{border-color:#333!important}</style>
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+body{font-family:sans-serif;background:#f4f4f4;margin:0;padding:14px;color:#111}
+.nav{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px}
+.nav a,.action-btn,.copy-btn{display:block;text-align:center;text-decoration:none;padding:10px 12px;border-radius:10px;border:1px solid #111;background:#111;color:#fff;font-weight:700}
+.nav a.secondary,.action-btn.secondary{background:#fff;color:#111;border-color:#bbb}
+.card{background:white;border-radius:16px;padding:14px;margin:10px 0}
+.controls{display:grid;gap:10px}
+.row{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+input,select,button{padding:10px;margin:0;border-radius:8px;border:1px solid #ccc;min-width:0}
+button,.copy-btn{background:#111;color:#fff}
+.lesson{border-top:1px solid #ddd;padding:10px 0;display:flex;gap:8px;align-items:flex-start;justify-content:space-between}
+.lesson strong{color:#fff}
+.lesson .meta{flex:1;min-width:0;color:#e9e9e9}
+.lesson .meta .title{font-weight:700;color:#fff;overflow-wrap:anywhere}
+.lesson .meta .sub{color:#cfcfcf;font-size:13px;overflow-wrap:anywhere}
+.lesson .actions{display:flex;gap:6px;flex-shrink:0;flex-wrap:wrap;justify-content:flex-end}
+.section-title{font-size:18px;font-weight:800;color:#fff;margin:0 0 8px}
+.selection-meta{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0 0;color:#fff}
+.selection-pill{padding:6px 10px;border-radius:999px;background:#111;color:#fff;font-size:12px;font-weight:700}
+.copy-panel{display:grid;grid-template-columns:1fr auto;gap:8px;align-items:end}
+.copy-panel .hint{grid-column:1/-1;color:#666;font-size:12px;margin-top:-4px}
+.copy-panel select:disabled,.copy-panel button:disabled{opacity:.5}
+.day-empty{color:#777;margin:6px 0 0}
+html,body{background:#090909!important;color:#f7f7f7!important}
+.card{background:#151515!important;color:#f7f7f7!important;border-color:#2d2d2d!important;box-shadow:0 16px 42px rgba(0,0,0,.28)}
+input,select{background:#101010!important;color:#fff!important;border-color:#444!important}
+button,.copy-btn{background:#fff!important;color:#090909!important;font-weight:700}
+.nav a.secondary,.action-btn.secondary{background:#101010!important;color:#fff!important;border-color:#444!important}
+.lesson{border-color:#333!important}
+.section-title,.selection-meta,.lesson .meta .title,.lesson .meta .sub,.day-empty{color:#f7f7f7!important}
+.lesson strong{color:#ffffff!important}
+.lesson .meta .title{color:#fff!important}
+.lesson .meta .sub,.day-empty{color:#d8d8d8!important}
+.selection-pill{background:#fff!important;color:#090909!important}
+.copy-panel .hint{color:#cfcfcf!important}
+</style>
+</head>
+<body>
+<div class="nav">
+  <a href="/admin?club_id={{club_id}}&init_data={{ request.query_params.get('init_data','')|urlencode }}">← В панель</a>
+  <a class="secondary" href="#" onclick="window.Telegram?.WebApp?.close(); return false;">Закрыть</a>
+</div>
+
+<h2 class="section-title">Расписание — {{ club.name }}</h2>
+
+<div class="card controls">
+  <label>
+    Дисциплина
+    <select id="d">
+      {% for key, x in disciplines.items() %}
+      <option value="{{key}}">{{x.get('name',key)}}</option>
+      {% endfor %}
+    </select>
+  </label>
+
+  <label>
+    День
+    <select id="day">
+      <option value="mon">Пн</option>
+      <option value="tue">Вт</option>
+      <option value="wed">Ср</option>
+      <option value="thu">Чт</option>
+      <option value="fri">Пт</option>
+      <option value="sat">Сб</option>
+      <option value="sun">Вс</option>
+    </select>
+  </label>
+
+  <div class="selection-meta" id="selectionMeta"></div>
+</div>
+
+<div class="card">
+  <div class="copy-panel">
+    <label>
+      Копировать занятия из дня
+      <select id="copyFrom">
+        <option value="">Сначала выберите день с занятиями</option>
+      </select>
+    </label>
+    <button id="copyBtn" class="copy-btn" type="button" disabled>Копировать</button>
+    <div class="hint">Показываются только дни, где уже есть занятия в выбранной дисциплине.</div>
+  </div>
+</div>
+
+<div id="list"></div>
+
+<div class="card controls">
+  <div class="row">
+    <input id="time" placeholder="18:00" autocomplete="off">
+    <input id="coach" placeholder="Информация" autocomplete="off">
+  </div>
+  <button id="saveBtn" type="button">Добавить</button>
+</div>
+
+<script>
+const tg = Telegram.WebApp;
+tg.ready();
+tg.expand();
+
+const data = {{ disciplines|tojson }};
+const days = {
+  mon: 'Пн',
+  tue: 'Вт',
+  wed: 'Ср',
+  thu: 'Чт',
+  fri: 'Пт',
+  sat: 'Сб',
+  sun: 'Вс',
+};
+
+const disciplineSelect = document.getElementById('d');
+const daySelect = document.getElementById('day');
+const list = document.getElementById('list');
+const timeInput = document.getElementById('time');
+const coachInput = document.getElementById('coach');
+const saveBtn = document.getElementById('saveBtn');
+const copyFrom = document.getElementById('copyFrom');
+const copyBtn = document.getElementById('copyBtn');
+const selectionMeta = document.getElementById('selectionMeta');
+const storageKey = 'admin-schedule:{{ club_id }}';
+
+function loadSelection() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(storageKey) || '{}');
+    if (saved.discipline && data[saved.discipline]) disciplineSelect.value = saved.discipline;
+    if (saved.day && days[saved.day]) daySelect.value = saved.day;
+  } catch (_) {}
+}
+
+function saveSelection() {
+  localStorage.setItem(storageKey, JSON.stringify({ discipline: disciplineSelect.value, day: daySelect.value }));
+}
+
+loadSelection();
+saveSelection();
+
+let idx = null;
+
+function activeSchedule() {
+  return ((data[disciplineSelect.value] || {}).schedule || {});
+}
+
+function activeLessons() {
+  return activeSchedule()[daySelect.value] || [];
+}
+
+function updateSelectionMeta() {
+  const disciplineName = disciplineSelect.options[disciplineSelect.selectedIndex]?.textContent || '';
+  const dayName = days[daySelect.value] || '';
+  selectionMeta.innerHTML = `<span class="selection-pill">${disciplineName}</span><span class="selection-pill">${dayName}</span>`;
+}
+
+function updateCopyOptions() {
+  const schedule = activeSchedule();
+  const items = Object.entries(days).filter(([key]) => key !== daySelect.value && (schedule[key] || []).length > 0);
+  copyFrom.innerHTML = items.length
+    ? `<option value="">Выберите день</option>` + items.map(([key, label]) => `<option value="${key}">${label} — ${schedule[key].length}</option>`).join('')
+    : `<option value="">Нет доступных дней для копирования</option>`;
+  copyFrom.disabled = !items.length;
+  copyBtn.disabled = !items.length;
+}
+
+function render() {
+  const lessons = activeLessons();
+  list.innerHTML = lessons.length
+    ? lessons.map((x, i) => `
+        <div class="card lesson">
+          <div class="meta">
+            <div class="title"><strong>${x.time || '00:00'}</strong> — ${x.coach || ''}</div>
+            <div class="sub">${x.max_slots ? `Лимит: ${x.max_slots}` : 'Без лимита'}</div>
+          </div>
+          <div class="actions">
+            <button type="button" onclick="edit(${i})">Изменить</button>
+            <button type="button" onclick="removeL(${i})">Удалить</button>
+          </div>
+        </div>
+      `).join('')
+    : '<p class="day-empty">Нет занятий</p>';
+  updateSelectionMeta();
+  updateCopyOptions();
+}
+
+function edit(i) {
+  const x = activeLessons()[i];
+  if (!x) return;
+  idx = i;
+  timeInput.value = x.time || '';
+  coachInput.value = x.coach || '';
+  saveBtn.textContent = 'Сохранить';
+}
+
+async function send(action, extra = {}) {
+  const body = {
+    init_data: tg.initData,
+    club_id: {{club_id}},
+    action,
+    discipline: disciplineSelect.value,
+    day: daySelect.value,
+    index: idx,
+    lesson: action === 'copy_day' ? null : { time: timeInput.value, coach: coachInput.value, max_slots: 0 },
+    ...extra,
+  };
+  const r = await fetch('/webapp/admin-schedule/change', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) throw Error((await r.json()).detail || 'Ошибка');
+  location.reload();
+}
+
+function save() {
+  send(idx === null ? 'add' : 'update').catch(e => alert(e.message));
+}
+
+function copyDay() {
+  if (!copyFrom.value) return;
+  send('copy_day', { source_day: copyFrom.value, lesson: null, index: null }).catch(e => alert(e.message));
+}
+
+function removeL(i) {
+  if (confirm('Удалить занятие?')) {
+    idx = null;
+    send('delete', { index: i, lesson: null }).catch(e => alert(e.message));
+  }
+}
+
+disciplineSelect.addEventListener('change', () => {
+  idx = null;
+  saveBtn.textContent = 'Добавить';
+  saveSelection();
+  render();
+});
+
+daySelect.addEventListener('change', () => {
+  idx = null;
+  saveBtn.textContent = 'Добавить';
+  saveSelection();
+  render();
+});
+
+saveBtn.addEventListener('click', save);
+copyBtn.addEventListener('click', copyDay);
+
+render();
+</script>
+</body>
+</html>

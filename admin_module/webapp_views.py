@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import os
 import uuid
 
@@ -40,7 +41,7 @@ async def client_shop(request: Request, club_id: int = Query(...), init_data: st
     if not init_data: return telegram_init_gate('/webapp/shop', club_id, 'Откройте магазин из Telegram')
     if not club or not verify_telegram_data(init_data, club.bot_token): raise HTTPException(403, "Доступ запрещён")
     products = (await session.execute(select(ClubProduct).where(ClubProduct.club_id == club_id, ClubProduct.is_active.is_(True), ClubProduct.stock > 0).order_by(ClubProduct.category, ClubProduct.name))).scalars().all()
-    product_data = [{"id": p.id, "name": p.name, "category": p.category, "price_kopecks": p.price_kopecks, "stock": p.stock, "image_url": p.image_url} for p in products]
+    product_data = [{"id": p.id, "name": p.name, "category": p.category, "price_kopecks": p.price_kopecks, "stock": p.stock, "image_url": p.image_url, "details": p.details} for p in products]
     categories = sorted({(p.category or "other").strip() or "other" for p in products})
     sbp_enabled = bool((club.club_settings or {}).get("payments", {}).get("yookassa_sbp_enabled", True))
     return templates.TemplateResponse("shop.html", {"request": request, "club": club, "club_id": club_id, "products": product_data, "categories": categories, "sbp_enabled": sbp_enabled})
@@ -72,7 +73,7 @@ async def admin_product_sale_page(request: Request, club_id: int = Query(...), i
         return telegram_init_gate('/webapp/admin-product-sale', club_id, 'Откройте продажу из Telegram')
     await verify_webapp_staff(club, init_data, session, "cash_sale")
     products = (await session.execute(select(ClubProduct).where(ClubProduct.club_id == club_id, ClubProduct.is_active.is_(True), ClubProduct.stock > 0).order_by(ClubProduct.category, ClubProduct.name))).scalars().all()
-    product_data = [{"id": p.id, "name": p.name, "category": p.category, "price_kopecks": p.price_kopecks, "stock": p.stock, "image_url": p.image_url} for p in products]
+    product_data = [{"id": p.id, "name": p.name, "category": p.category, "price_kopecks": p.price_kopecks, "stock": p.stock, "image_url": p.image_url, "details": p.details} for p in products]
     categories = sorted({(p.category or "other").strip() or "other" for p in products})
     return templates.TemplateResponse("admin_product_sale.html", {"request": request, "club_id": club_id, "products": product_data, "categories": categories})
 
@@ -151,7 +152,7 @@ async def admin_product_sale(payload: AdminProductSalePayload, session: AsyncSes
 async def create_product(payload: ProductPayload, session: AsyncSession = Depends(get_session)):
     club = await session.get(Club, payload.club_id); tg_user = await verify_webapp_staff(club, payload.init_data, session, "products_manage")
     if not payload.name.strip() or payload.price_kopecks <= 0 or payload.stock < 0: raise HTTPException(400, "Некорректные данные товара")
-    p = ClubProduct(club_id=payload.club_id, name=payload.name.strip()[:120], image_url=(payload.image_url or "")[:500] or None, category=payload.category[:30], price_kopecks=payload.price_kopecks, stock=payload.stock, is_active=payload.is_active)
+    p = ClubProduct(club_id=payload.club_id, name=payload.name.strip()[:120], image_url=(payload.image_url or "")[:500] or None, category=payload.category[:30], price_kopecks=payload.price_kopecks, stock=payload.stock, is_active=payload.is_active, details=(payload.details or "").strip()[:1000] or None)
     session.add(p); await session.commit()
     audit_event(
         "product_created",
@@ -187,8 +188,8 @@ async def update_product(product_id: int, payload: ProductPayload, session: Asyn
     p = await session.get(ClubProduct, product_id)
     if not p or p.club_id != payload.club_id: raise HTTPException(404, "Товар не найден")
     if not payload.name.strip() or payload.price_kopecks <= 0 or payload.stock < 0: raise HTTPException(400, "Некорректные данные товара")
-    before = {"name": p.name, "image_url": p.image_url, "category": p.category, "price_kopecks": p.price_kopecks, "stock": p.stock, "is_active": p.is_active}
-    p.name=payload.name.strip()[:120]; p.image_url=(payload.image_url or "")[:500] or None; p.category=payload.category[:30]; p.price_kopecks=payload.price_kopecks; p.stock=payload.stock; p.is_active=payload.is_active
+    before = {"name": p.name, "image_url": p.image_url, "category": p.category, "price_kopecks": p.price_kopecks, "stock": p.stock, "is_active": p.is_active, "details": p.details}
+    p.name=payload.name.strip()[:120]; p.image_url=(payload.image_url or "")[:500] or None; p.category=payload.category[:30]; p.price_kopecks=payload.price_kopecks; p.stock=payload.stock; p.is_active=payload.is_active; p.details=(payload.details or "").strip()[:1000] or None
     await session.commit()
     audit_event(
         "product_updated",
@@ -326,6 +327,16 @@ async def change_admin_schedule(payload: ScheduleChangePayload, session: AsyncSe
         if payload.index is None or payload.index < 0 or payload.index >= len(lessons):
             raise HTTPException(400, "Занятие не найдено")
         lessons.pop(payload.index)
+    elif payload.action == "copy_day":
+        source_day = (payload.source_day or "").strip()
+        source_lessons = list(schedule.get(source_day, []))
+        if not source_day:
+            raise HTTPException(400, "Источник копирования не указан")
+        if source_day == payload.day:
+            raise HTTPException(400, "Нельзя копировать день в сам себя")
+        if not source_lessons:
+            raise HTTPException(400, "В исходном дне нет занятий")
+        lessons = [copy.deepcopy(lesson) for lesson in source_lessons]
     elif payload.action in {"add", "update"}:
         lesson = payload.lesson or {}
         raw_max_slots = lesson.get("max_slots", lesson.get("slots", lesson.get("limit", 0)))
@@ -357,6 +368,7 @@ async def change_admin_schedule(payload: ScheduleChangePayload, session: AsyncSe
         day=payload.day,
         lesson=payload.lesson,
         index=payload.index,
+        source_day=payload.source_day,
     )
     return {"success": True}
 

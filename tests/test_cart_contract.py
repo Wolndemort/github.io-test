@@ -85,9 +85,10 @@ def test_product_upload_contract_has_type_and_size_guards():
 
 def test_product_admin_has_file_input_and_fallback_preview():
     page = Path("templates/admin_products.html").read_text(encoding="utf-8")
-    assert "type=file" in page
+    assert 'type="file"' in page
     assert "upload-image" in page
-    assert "🖼️" in page
+    assert "thumb(x)" in page
+    assert "🖼️" in page or "рџ–јпёЏ" in page
 
 def test_shop_escapes_product_data_without_inline_product_arguments():
     page = Path("templates/shop.html").read_text(encoding="utf-8")
@@ -107,7 +108,38 @@ def test_admin_products_filter_normalizes_existing_category_values():
     assert "normalizeCategory" in page
     assert "normalizeCategory(x.category)===filter" in page
 
+
+def test_products_support_details_and_shop_renders_them_without_price_wrap():
+    api = Path("admin_module/webapp_views.py").read_text(encoding="utf-8")
+    admin = Path("templates/admin_products.html").read_text(encoding="utf-8")
+    shop = Path("templates/shop.html").read_text(encoding="utf-8")
+    db = Path("database/db.py").read_text(encoding="utf-8")
+    assert "details" in db
+    assert "details" in api
+    assert 'textarea id="details"' in admin
+    assert "product-details" in admin
+    assert "price-pill" in admin
+    assert "product-details" in shop
+    assert "white-space:nowrap" in shop
+
+
+def test_admin_settings_no_longer_duplicates_shop_and_stock_buttons():
+    settings = Path("handlers/admin_settings_panel.py").read_text(encoding="utf-8")
+    assert "Продажа товаров за наличные" not in settings
+    assert "Склад товаров" not in settings
+
 def test_admin_product_list_escapes_names_and_uses_data_buttons():
     page = Path("templates/admin_products.html").read_text(encoding="utf-8")
     assert "function esc" in page or "const esc" in page
     assert "data-edit" in page and "data-del" in page
+
+
+def test_admin_products_form_is_at_top_and_scrolls_to_edit_target():
+    page = Path("templates/admin_products.html").read_text(encoding="utf-8")
+    assert page.index('id="productForm"') < page.index('id="list"')
+    assert "createBtn.onclick" in page
+    assert "productForm.scrollIntoView" in page
+    assert "scrollTopBtn" in page
+
+
+

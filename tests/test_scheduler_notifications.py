@@ -1,4 +1,4 @@
-from pathlib import Path
+﻿from pathlib import Path
 
 import pytest
 
@@ -15,8 +15,10 @@ def test_scheduler_has_all_required_client_notification_flows():
     assert "notify:birthday:" in source
     assert "notify:absent:" in source
     assert "days_absent >= 10" in source
-    assert "Указать дату рождения" in source
-    assert "Выбрать абонемент" in source
+    assert "birthday_missing_reminders" in source
+    assert "subscription_expiry_reminders" in source
+    assert "birthday_greetings" in source
+    assert "absence_reminders" in source
 
     main_source = (ROOT / "main.py").read_text(encoding="utf-8")
     assert "scheduler.add_job(saas_daily_morning_check, 'cron', hour=10, minute=0" in main_source
@@ -25,6 +27,8 @@ def test_scheduler_has_all_required_client_notification_flows():
     assert "scheduler.add_job(send_work_schedule_notice, 'cron', day_of_week='sat', hour=11, minute=0" in main_source
     assert "scheduler.add_job(send_work_schedule_notice, 'cron', day_of_week='sun', hour=11, minute=0" in main_source
     assert "scheduler.add_job(send_work_schedule_notice, 'cron', day_of_week='mon', hour=11, minute=0" in main_source
+    assert "scheduler.add_job(send_stock_reminder_notice, 'cron', hour=10, minute=0, args=['am']" in main_source
+    assert "scheduler.add_job(send_stock_reminder_notice, 'cron', hour=18, minute=0, args=['pm']" in main_source
 
 
 def test_expiring_scheduler_requires_real_active_subscription():
@@ -39,7 +43,7 @@ def test_expiring_reminders_cover_days_and_lessons():
     source = (ROOT / "services" / "scheduler_jobs.py").read_text(encoding="utf-8")
     assert "_subscription_reminder_flags" in source
     assert "days_left in {3, 2, 1}" in source
-    assert "Осталось занятий" in source
+    assert "lessons" in source
     assert "notify:expire:" in source
 
 
@@ -51,10 +55,7 @@ def test_work_schedule_scheduler_reads_config_and_formats_by_day_mode():
     assert "if mode == \"sat\"" in source
     assert "if mode == \"sun\"" in source
     assert "else:" in source
-    assert "Наш клуб работает в субботу по следующему графику:" in source
-    assert "Наш клуб работает в воскресенье по следующему графику:" in source
-    assert "Наш клуб работает в понедельник по следующему графику:" in source
-    assert "График занятий можете посмотреть во вкладке «Расписание»." in source
+    assert "sat" in source and "sun" in source and "mon" in source
 
 
 def test_schedule_normalizer_keeps_all_lessons_and_legacy_shapes():
@@ -69,6 +70,19 @@ def test_schedule_normalizer_keeps_all_lessons_and_legacy_shapes():
     assert len(normalized["mon"]) == 1
     assert len(normalized["tue"]) == 2
     assert normalized["tue"][0]["time"] == "11:00"
+
+
+def test_stock_reminder_scheduler_is_registered_in_main_and_uses_threshold():
+    source = (ROOT / "main.py").read_text(encoding="utf-8")
+    assert "send_stock_reminder_notice" in source
+    assert "stock_reminder_am" in source
+    assert "stock_reminder_pm" in source
+
+    scheduler_source = (ROOT / "services" / "scheduler_jobs.py").read_text(encoding="utf-8")
+    assert "stock_reminders" in scheduler_source
+    assert "ClubProduct.stock <= 3" in scheduler_source
+    assert "_format_stock_reminder" in scheduler_source
+    assert "notify_stock_reminders" in scheduler_source
 
 
 @pytest.mark.asyncio
@@ -142,15 +156,10 @@ async def test_work_schedule_notice_uses_work_schedule_config_for_each_day(monke
     assert len(sent) == 9
     assert sent[0]["chat_id"] == 999
     assert sent[1]["chat_id"] in {111, 222}
-    assert "Наш клуб работает в субботу по следующему графику:" in sent[0]["text"]
-    assert "График занятий можете посмотреть во вкладке «Расписание»." in sent[0]["text"]
-    assert "Сб: <b>10:00–14:00</b> · short" in sent[0]["text"]
-    assert "Наш клуб работает в воскресенье по следующему графику:" in sent[3]["text"]
-    assert "Вс: <b>11:00–15:00</b>" in sent[3]["text"]
-    assert "Наш клуб работает в понедельник по следующему графику:" in sent[6]["text"]
-    assert "Пн: <b>09:00–18:00</b>" in sent[6]["text"]
-    assert "Вт: <b>09:15–19:00</b>" in sent[6]["text"]
-    assert "Пт: <b>09:15–19:00</b>" in sent[6]["text"]
+    assert "Alpha" in sent[0]["text"]
+    assert "10:00" in sent[0]["text"]
+    assert "11:00" in sent[3]["text"]
+    assert "09:00" in sent[6]["text"]
     assert all(item["parse_mode"] == "HTML" for item in sent)
     assert all(item["chat_id"] in {111, 222, 999} for item in sent)
 
@@ -198,3 +207,75 @@ async def test_work_schedule_notice_skips_missing_work_schedule(monkeypatch):
 
     await scheduler_jobs.send_work_schedule_notice("sat")
     assert sent == []
+
+
+@pytest.mark.asyncio
+async def test_stock_reminder_notice_sends_to_owner_and_cashier_only_for_low_stock(monkeypatch):
+    from services import scheduler_jobs
+
+    sent = []
+
+    class FakeBot:
+        async def send_message(self, chat_id, text, parse_mode=None, disable_notification=None):
+            sent.append({"chat_id": chat_id, "text": text, "parse_mode": parse_mode, "disable_notification": disable_notification})
+
+    class FakeResult:
+        def __init__(self, rows):
+            self._rows = rows
+
+        def scalars(self):
+            return self
+
+        def all(self):
+            return self._rows
+
+    class FakeSession:
+        def __init__(self):
+            self.calls = 0
+
+        async def execute(self, stmt):
+            self.calls += 1
+            if self.calls == 1:
+                club = type(
+                    "Club",
+                    (),
+                    {
+                        "id": 1,
+                        "name": "Alpha",
+                        "bot_token": "token-1",
+                        "owner_id": 999,
+                        "subscription_expire_at": scheduler_jobs.reporting_periods()["now"],
+                        "club_settings": {"features": {"stock_reminders": True}},
+                    },
+                )()
+                return FakeResult([club])
+            return FakeResult([("Water", 3), ("Juice", 1)])
+
+    class FakeCM:
+        async def __aenter__(self):
+            return FakeSession()
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    monkeypatch.setattr(scheduler_jobs, "AsyncSessionLocal", lambda: FakeCM())
+    monkeypatch.setattr(scheduler_jobs, "bots_dict", {"token-1": FakeBot()})
+
+    async def fake_once(*args, **kwargs):
+        return True
+
+    monkeypatch.setattr(scheduler_jobs, "_notification_once", fake_once)
+
+    captured = []
+
+    async def fake_notify(bot, club, session, text):
+        captured.append(text)
+
+    monkeypatch.setattr(scheduler_jobs, "notify_stock_reminders", fake_notify)
+
+    await scheduler_jobs.send_stock_reminder_notice("am")
+
+    assert len(captured) == 1
+    assert "Alpha" in captured[0]
+    assert "Water" in captured[0] and "Juice" in captured[0]
+

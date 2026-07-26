@@ -12,6 +12,7 @@ from admin_module.schemas import (
     BiometricCheckIn,
     WebAppActionPayload,
     WebAppBindPhonePayload,
+    WebAppCreateStudentPayload,
     WebAppBuySubscriptionPayload,
 )
 from admin_module.webapp_verify import verify_telegram_data
@@ -66,6 +67,14 @@ def _normalize_payment_method(value: str | None) -> str:
     if method in {"sbp", "yookassa_sbp"}:
         return "sbp"
     return "bank_card"
+
+
+def _default_student_discipline(club_settings: dict) -> str:
+    disciplines = club_settings.get("disciplines", {}) if isinstance(club_settings, dict) else {}
+    for code, cfg in disciplines.items():
+        if isinstance(cfg, dict) and cfg.get("active"):
+            return str(code)
+    return "boxing"
 
 
 async def _ensure_webapp_user_linked(db: AsyncSession, user_id: int, club_id: int) -> User | None:
@@ -168,6 +177,76 @@ async def get_client_cabinet_page(request: Request, club_id: int, init_data: str
             "freeze_price_per_day": settings.get("limits", {}).get("freeze_price_per_day", 0),
         },
     )
+
+
+@router.get("/webapp/client-cabinet/create-student", response_class=HTMLResponse)
+async def webapp_create_student_page(request: Request, club_id: int, init_data: str | None = Query(default=None), db: AsyncSession = Depends(get_session)):
+    if not init_data:
+        return _auth_gate_html("webapp/client-cabinet/create-student", club_id=club_id)
+    club = await db.get(Club, club_id)
+    if not club or not club.bot_token:
+        raise HTTPException(status_code=404, detail="РљР»СѓР± РЅРµ РЅР°Р№РґРµРЅ")
+    tg_user = verify_telegram_data(init_data, club.bot_token)
+    if not tg_user:
+        raise HTTPException(status_code=403, detail="Р”РѕСЃС‚СѓРї Р·Р°РїСЂРµС‰РµРЅ")
+    user = await _ensure_webapp_user_linked(db, int(tg_user.get("id", 0)), club_id)
+    if not user:
+        return await webapp_auth_help_page(request=request, club_id=club_id, init_data=init_data, db=db)
+    settings = club.club_settings or {}
+    return templates.TemplateResponse(
+        "webapp_create_student.html",
+        {
+            "request": request,
+            "club": club,
+            "club_id": club_id,
+            "default_discipline": _default_student_discipline(settings),
+            "disciplines": settings.get("disciplines", {}),
+        },
+    )
+
+
+@router.post("/webapp/client-cabinet/create-student")
+async def webapp_create_student_submit(payload: WebAppCreateStudentPayload, db: AsyncSession = Depends(get_session)):
+    club = await db.get(Club, payload.club_id)
+    if not club or not club.bot_token:
+        raise HTTPException(status_code=404, detail="РљР»СѓР± РЅРµ РЅР°Р№РґРµРЅ")
+    tg_user = verify_telegram_data(payload.init_data, club.bot_token)
+    if not tg_user:
+        raise HTTPException(status_code=403, detail="Р”РѕСЃС‚СѓРї Р·Р°РїСЂРµС‰РµРЅ")
+    user_id = int(tg_user.get("id", 0))
+    user = await _ensure_webapp_user_linked(db, user_id, payload.club_id)
+    if not user:
+        raise HTTPException(status_code=403, detail="РџРѕР»СЊР·РѕРІР°С‚РµР»СЊ РЅРµ РїСЂРёРІСЏР·Р°РЅ Рє РєР»СѓР±Сѓ")
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Р’РІРµРґРёС‚Рµ РёРјСЏ Р°С‚Р»РµС‚Р°")
+    birthday = None
+    if payload.birthday:
+        from services.input_normalization import parse_user_date
+        try:
+            birthday = parse_user_date(payload.birthday)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="РќРµРєРѕСЂСЂРµРєС‚РЅР°СЏ РґР°С‚Р° СЂРѕР¶РґРµРЅРёСЏ")
+    existing = (await db.execute(select(Student).where(Student.club_id == club.id, Student.parent_id == user_id))).scalars().all()
+    duplicate = next((student for student in existing if student.name.strip().casefold() == name.casefold() and student.birthday == birthday), None)
+    if duplicate:
+        raise HTTPException(status_code=409, detail="РўР°РєРѕР№ Р°С‚Р»РµС‚ СѓР¶Рµ РµСЃС‚СЊ")
+    student = Student(
+        club_id=club.id,
+        parent_id=user_id,
+        name=name,
+        birthday=birthday,
+        parent_phone=normalize_ru_phone(payload.phone) if payload.phone else None,
+        discipline=_default_student_discipline(club.club_settings or {}),
+        balance_lessons=0,
+        expire_date=None,
+        can_freeze=1,
+        is_frozen=0,
+    )
+    db.add(student)
+    await db.commit()
+    audit_event("webapp_student_created", club_id=club.id, user_id=user_id, student_id=student.id, student_name=student.name)
+    return {"ok": True, "student": {"id": student.id, "name": student.name}}
 
 
 @router.get("/webapp/client-cabinet/freeze", response_class=HTMLResponse)

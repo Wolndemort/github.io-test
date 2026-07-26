@@ -72,6 +72,29 @@ import admin_module.payments_webhook  # noqa: F401
 import admin_module.system_api  # noqa: F401
 
 
+async def _ensure_cart_user(session: AsyncSession, club: Club, tg_user: dict) -> User:
+    user_id = int(tg_user.get("id", 0))
+    user = await session.get(User, user_id, with_for_update=True)
+    if not user:
+        user = User(
+            user_id=user_id,
+            club_id=club.id,
+            full_name=tg_user.get("first_name")
+            or " ".join(part for part in [tg_user.get("first_name"), tg_user.get("last_name")] if part)
+            or "",
+            is_accepted=False,
+            is_biometric_enabled=False,
+        )
+        session.add(user)
+        await session.flush()
+        return user
+    if user.club_id != club.id:
+        user.club_id = club.id
+    if not user.full_name:
+        user.full_name = tg_user.get("first_name") or " ".join(part for part in [tg_user.get("first_name"), tg_user.get("last_name")] if part) or ""
+    return user
+
+
 def _audit_payload_summary(payload: dict) -> str:
     if not payload:
         return "—"
@@ -140,6 +163,7 @@ class ScheduleChangePayload(BaseModel):
     day: str
     index: int | None = None
     lesson: dict | None = None
+    source_day: str | None = None
 
 class ProductPayload(BaseModel):
     init_data: str
@@ -150,6 +174,7 @@ class ProductPayload(BaseModel):
     stock: int = 0
     is_active: bool = True
     image_url: str | None = None
+    details: str | None = None
 
 class CartCheckoutPayload(BaseModel):
     init_data: str
@@ -803,6 +828,8 @@ async def get_revenue_stats(
         request: Request,
         session: AsyncSession = Depends(get_session),
         init_data: str | None = Query(default=None),
+        date_from: str | None = Query(default=None),
+        date_to: str | None = Query(default=None),
 ):
     club_id = get_club_id_from_host(request)
 
@@ -833,20 +860,25 @@ async def get_revenue_stats(
     # ==========================================
     # БЛОК 1: ФИНАНСЫ (Для твоих графиков/отчетов)
     # ==========================================
-    payments_res = await session.execute(
-        select(PaymentOrder.amount_kopecks, PaymentOrder.created_at).where(
-            PaymentOrder.club_id == club_id,
-            PaymentOrder.status == "CONFIRMED",
-            PaymentOrder.created_at >= month_start
-        )
+    start_filter = moscow_date_boundary(date_from) if date_from else month_start
+    end_filter = moscow_date_boundary(date_to) + timedelta(days=1) if date_to else None
+
+    payment_query = select(PaymentOrder.amount_kopecks, PaymentOrder.created_at).where(
+        PaymentOrder.club_id == club_id,
+        PaymentOrder.status == "CONFIRMED",
+        PaymentOrder.created_at >= start_filter,
     )
-    cart_payments_res = await session.execute(
-        select(CartOrder.amount_kopecks, CartOrder.created_at).where(
-            CartOrder.club_id == club_id,
-            CartOrder.status == "CONFIRMED",
-            CartOrder.created_at >= month_start,
-        )
+    cart_query = select(CartOrder.amount_kopecks, CartOrder.created_at).where(
+        CartOrder.club_id == club_id,
+        CartOrder.status == "CONFIRMED",
+        CartOrder.created_at >= start_filter,
     )
+    if end_filter:
+        payment_query = payment_query.where(PaymentOrder.created_at < end_filter)
+        cart_query = cart_query.where(CartOrder.created_at < end_filter)
+
+    payments_res = await session.execute(payment_query)
+    cart_payments_res = await session.execute(cart_query)
     payment_rows = [type("PaymentRow", (), {"amount_kopecks": amount, "created_at": created_at}) for amount, created_at in payments_res.all()]
     payment_rows.extend(type("PaymentRow", (), {"amount_kopecks": amount, "created_at": created_at}) for amount, created_at in cart_payments_res.all())
     revenue = calculate_revenue_periods(payment_rows)
@@ -886,7 +918,7 @@ async def get_revenue_stats(
         # Если в клубе пусто — отдаем флаг empty, как просит HTML
         return templates.TemplateResponse(
             "stats.html",
-            {"request": request, "empty": True, "club_name": club_name}
+            {"request": request, "empty": True, "club_name": club_name, "filters": {"date_from": date_from or "", "date_to": date_to or ""}}
         )
 
     student_metrics = calculate_student_metrics(students, now=now_local)
@@ -952,7 +984,8 @@ async def get_revenue_stats(
             "revenue_today": round(revenue_today, 2),
             "revenue_week": round(revenue_week, 2),
             "revenue_month": round(revenue_month, 2),
-            "payment_types": payment_types
+            "payment_types": payment_types,
+            "filters": {"date_from": date_from or "", "date_to": date_to or ""},
         }
     )
 
@@ -1009,6 +1042,7 @@ async def cart_checkout(payload: CartCheckoutPayload, request: Request, session:
         payment_method = "bank_card"
     if payment_method == "sbp" and not bool(pay.get("yookassa_sbp_enabled", True)):
         raise HTTPException(400, "СБП отключена в настройках клуба")
+    await _ensure_cart_user(session, club, tg_user)
     product_ids = [int(x["product_id"]) for x in payload.items if x.get("item_type", "product") == "product"]
     products = (await session.execute(select(ClubProduct).where(ClubProduct.club_id == club.id, ClubProduct.id.in_(product_ids), ClubProduct.is_active.is_(True)).with_for_update())).scalars().all() if product_ids else []
     by_id = {p.id: p for p in products}; normalized=[]; total=0

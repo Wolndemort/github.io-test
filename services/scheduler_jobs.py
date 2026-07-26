@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import asyncio
 import os
@@ -14,6 +14,8 @@ from database.db import (
     AsyncSessionLocal,
     CartOrder,
     Club,
+    ClubProduct,
+    ClubStaff,
     PaymentOrder,
     Student,
     User,
@@ -23,20 +25,21 @@ from database.db import (
     get_expire_students_grouped,
 )
 from handlers.buttons import get_profile_keyboard
+from services.order_notifications import notify_stock_reminders
 from services.analytics import calculate_admin_dashboard, calculate_daily_business_report, reporting_periods
 from services.bot_registry import bots_dict
 
 
 async def send_backup_to_admin():
-    """Создает бэкап всей БД и отправляет Супер-админам."""
+    """РЎРѕР·РґР°РµС‚ Р±СЌРєР°Рї РІСЃРµР№ Р‘Р” Рё РѕС‚РїСЂР°РІР»СЏРµС‚ РЎСѓРїРµСЂ-Р°РґРјРёРЅР°Рј."""
     path = await create_db_backup()
     if not path or not os.path.exists(path):
-        logger.error("❌ Файл бэкапа не был создан!")
+        logger.error("вќЊ Р¤Р°Р№Р» Р±СЌРєР°РїР° РЅРµ Р±С‹Р» СЃРѕР·РґР°РЅ!")
         return
 
     random_bot = next(iter(bots_dict.values()), None)
     if not random_bot:
-        logger.error("❌ Нет активных ботов для отправки бэкапа!")
+        logger.error("вќЊ РќРµС‚ Р°РєС‚РёРІРЅС‹С… Р±РѕС‚РѕРІ РґР»СЏ РѕС‚РїСЂР°РІРєРё Р±СЌРєР°РїР°!")
         return
 
     for admin_id in ADMIN_IDS:
@@ -44,15 +47,15 @@ async def send_backup_to_admin():
             await random_bot.send_document(
                 chat_id=admin_id,
                 document=types.FSInputFile(path),
-                caption=f"📦 <b>SaaS Full Backup</b>\n📅 Дата: <code>{datetime.now().strftime('%d.%m.%Y')}</code>",
+                caption=f"рџ“¦ <b>SaaS Full Backup</b>\nрџ“… Р”Р°С‚Р°: <code>{datetime.now().strftime('%d.%m.%Y')}</code>",
             )
-            logger.info("✅ Бэкап отправлен супер-админу %s", admin_id)
+            logger.info("вњ… Р‘СЌРєР°Рї РѕС‚РїСЂР°РІР»РµРЅ СЃСѓРїРµСЂ-Р°РґРјРёРЅСѓ %s", admin_id)
         except Exception as exc:
-            logger.error("❌ Ошибка отправки бэкапа админу %s: %s", admin_id, exc)
+            logger.error("вќЊ РћС€РёР±РєР° РѕС‚РїСЂР°РІРєРё Р±СЌРєР°РїР° Р°РґРјРёРЅСѓ %s: %s", admin_id, exc)
 
     if os.path.exists(path):
         os.remove(path)
-        logger.debug("🗑️ Временный файл бэкапа удален с диска")
+        logger.debug("рџ—‘пёЏ Р’СЂРµРјРµРЅРЅС‹Р№ С„Р°Р№Р» Р±СЌРєР°РїР° СѓРґР°Р»РµРЅ СЃ РґРёСЃРєР°")
 
 
 async def _notification_once(key: str, ttl: int = 86400) -> bool:
@@ -62,7 +65,7 @@ async def _notification_once(key: str, ttl: int = 86400) -> bool:
 
         return bool(await redis_client.set(key, "1", ex=ttl, nx=True))
     except Exception as error:
-        logger.warning("Не удалось проверить idempotency уведомления %s: %s", key, error)
+        logger.warning("РќРµ СѓРґР°Р»РѕСЃСЊ РїСЂРѕРІРµСЂРёС‚СЊ idempotency СѓРІРµРґРѕРјР»РµРЅРёСЏ %s: %s", key, error)
         return True
 
 
@@ -73,7 +76,7 @@ async def _notification_forget(key: str) -> None:
 
         await redis_client.delete(key)
     except Exception as error:
-        logger.warning("Не удалось снять блокировку уведомления %s: %s", key, error)
+        logger.warning("РќРµ СѓРґР°Р»РѕСЃСЊ СЃРЅСЏС‚СЊ Р±Р»РѕРєРёСЂРѕРІРєСѓ СѓРІРµРґРѕРјР»РµРЅРёСЏ %s: %s", key, error)
 
 
 def _subscription_reminder_flags(student, now_datetime: datetime) -> list[tuple[str, int]]:
@@ -95,19 +98,19 @@ def _subscription_reminder_flags(student, now_datetime: datetime) -> list[tuple[
 
 
 def _format_work_schedule(club_name: str, work_schedule: dict) -> str:
-    day_names = {"mon": "Пн", "tue": "Вт", "wed": "Ср", "thu": "Чт", "fri": "Пт", "sat": "Сб", "sun": "Вс"}
-    lines = [f"🕒 <b>График работы</b>", f"🏟 <b>{escape(club_name)}</b>", ""]
+    day_names = {"mon": "РџРЅ", "tue": "Р’С‚", "wed": "РЎСЂ", "thu": "Р§С‚", "fri": "РџС‚", "sat": "РЎР±", "sun": "Р’СЃ"}
+    lines = [f"рџ•’ <b>Р“СЂР°С„РёРє СЂР°Р±РѕС‚С‹</b>", f"рџЏџ <b>{escape(club_name)}</b>", ""]
     for key in ("mon", "tue", "wed", "thu", "fri", "sat", "sun"):
         row = work_schedule.get(key) or {}
         if row:
-            open_at = escape(str(row.get("open", "—")))
-            close_at = escape(str(row.get("close", "—")))
+            open_at = escape(str(row.get("open", "вЂ”")))
+            close_at = escape(str(row.get("close", "вЂ”")))
             note = escape(str(row.get("note", "")).strip())
-            suffix = f" · {note}" if note else ""
-            lines.append(f"{day_names[key]}: <b>{open_at}–{close_at}</b>{suffix}")
+            suffix = f" В· {note}" if note else ""
+            lines.append(f"{day_names[key]}: <b>{open_at}вЂ“{close_at}</b>{suffix}")
         else:
-            lines.append(f"{day_names[key]}: <b>не задан</b>")
-    lines.extend(["", "Проверьте график перед визитом."])
+            lines.append(f"{day_names[key]}: <b>РЅРµ Р·Р°РґР°РЅ</b>")
+    lines.extend(["", "РџСЂРѕРІРµСЂСЊС‚Рµ РіСЂР°С„РёРє РїРµСЂРµРґ РІРёР·РёС‚РѕРј."])
     return "\n".join(lines)
 
 
@@ -119,6 +122,8 @@ async def send_weekend_work_schedule():
         for club in clubs:
             settings = club.club_settings if isinstance(club.club_settings, dict) else {}
             work_schedule = settings.get("work_schedule", {})
+            if not settings.get("features", {}).get("work_schedule_reminders", True):
+                continue
             if not work_schedule or not club.bot_token:
                 continue
             bot = bots_dict.get(club.bot_token)
@@ -131,30 +136,78 @@ async def send_weekend_work_schedule():
                 recipients.add(int(club.owner_id))
             if not recipients:
                 continue
-            text = _format_work_schedule(club.name or "Клуб", work_schedule)
+            text = _format_work_schedule(club.name or "РљР»СѓР±", work_schedule)
             for chat_id in recipients:
                 try:
                     await bot.send_message(chat_id=chat_id, text=text, parse_mode="HTML")
                     await asyncio.sleep(0.03)
                 except Exception as exc:
-                    logger.warning("Не удалось отправить график работы club=%s chat=%s: %s", club.id, chat_id, exc)
+                    logger.warning("РќРµ СѓРґР°Р»РѕСЃСЊ РѕС‚РїСЂР°РІРёС‚СЊ РіСЂР°С„РёРє СЂР°Р±РѕС‚С‹ club=%s chat=%s: %s", club.id, chat_id, exc)
 
 
 def _format_work_schedule_notice(club_name: str, work_schedule: dict, days: list[str], intro: str) -> str:
-    day_names = {"mon": "Пн", "tue": "Вт", "wed": "Ср", "thu": "Чт", "fri": "Пт", "sat": "Сб", "sun": "Вс"}
-    lines = [intro, f"🏟 <b>{escape(club_name)}</b>", ""]
+    day_names = {"mon": "РџРЅ", "tue": "Р’С‚", "wed": "РЎСЂ", "thu": "Р§С‚", "fri": "РџС‚", "sat": "РЎР±", "sun": "Р’СЃ"}
+    lines = [intro, f"рџЏџ <b>{escape(club_name)}</b>", ""]
     for key in days:
         row = work_schedule.get(key) or {}
         if row:
-            open_at = escape(str(row.get("open", "—")))
-            close_at = escape(str(row.get("close", "—")))
+            open_at = escape(str(row.get("open", "вЂ”")))
+            close_at = escape(str(row.get("close", "вЂ”")))
             note = escape(str(row.get("note", "")).strip())
-            suffix = f" · {note}" if note else ""
-            lines.append(f"{day_names[key]}: <b>{open_at}–{close_at}</b>{suffix}")
+            suffix = f" В· {note}" if note else ""
+            lines.append(f"{day_names[key]}: <b>{open_at}вЂ“{close_at}</b>{suffix}")
         else:
-            lines.append(f"{day_names[key]}: <b>не задан</b>")
-    lines.extend(["", "Проверьте график перед визитом."])
+            lines.append(f"{day_names[key]}: <b>РЅРµ Р·Р°РґР°РЅ</b>")
+    lines.extend(["", "РџСЂРѕРІРµСЂСЊС‚Рµ РіСЂР°С„РёРє РїРµСЂРµРґ РІРёР·РёС‚РѕРј."])
     return "\n".join(lines)
+
+
+def _format_stock_reminder(club_name: str, products: list[tuple[str, int]], *, bucket: str) -> str:
+    intro = "РЈС‚СЂРµРЅРЅРµРµ" if bucket == "am" else "Р’РµС‡РµСЂРЅРµРµ"
+    lines = [
+        f"рџ“¦ <b>{intro} РЅР°РїРѕРјРёРЅР°РЅРёРµ РїРѕ СЃРєР»Р°РґСѓ</b>",
+        f"рџЏџ <b>{escape(club_name)}</b>",
+        "",
+        "Р—Р°РєСѓРїРёС‚Рµ С‚РѕРІР°СЂС‹, Сѓ РєРѕС‚РѕСЂС‹С… РѕСЃС‚Р°С‚РѕРє РЅР° СѓСЂРѕРІРЅРµ 3 Рё РЅРёР¶Рµ:",
+    ]
+    for name, stock in products:
+        lines.append(f"вЂў {escape(name)} вЂ” <b>{stock}</b> С€С‚.")
+    lines.extend(["", "РџСЂРѕРІРµСЂСЊС‚Рµ СЃРєР»Р°Рґ Рё РїРѕРїРѕР»РЅРёС‚Рµ РѕСЃС‚Р°С‚РѕРє."])
+    return "\n".join(lines)
+
+
+async def send_stock_reminder_notice(bucket: str):
+    now = reporting_periods()["now"]
+    async with AsyncSessionLocal() as session:
+        clubs = (await session.execute(select(Club).where(Club.subscription_expire_at >= now))).scalars().all()
+        for club in clubs:
+            settings = club.club_settings if isinstance(club.club_settings, dict) else {}
+            if not settings.get("features", {}).get("stock_reminders", True):
+                continue
+            if not club.bot_token:
+                continue
+            bot = bots_dict.get(club.bot_token)
+            if not bot:
+                continue
+            products = (
+                await session.execute(
+                    select(ClubProduct.name, ClubProduct.stock).where(
+                        ClubProduct.club_id == club.id,
+                        ClubProduct.stock <= 3,
+                    ).order_by(ClubProduct.stock.asc(), ClubProduct.name.asc())
+                )
+            ).all()
+            if not products:
+                continue
+            reminder_key = f"notify:stock:{club.id}:{bucket}:{reporting_periods()['local_now'].date().isoformat()}"
+            if not await _notification_once(reminder_key, ttl=14 * 86400):
+                continue
+            text = _format_stock_reminder(club.name or "РљР»СѓР±", [(str(name), int(stock)) for name, stock in products], bucket=bucket)
+            try:
+                await notify_stock_reminders(bot, club, session, text)
+            except Exception as exc:
+                await _notification_forget(reminder_key)
+                logger.error("РќРµ СѓРґР°Р»РѕСЃСЊ РѕС‚РїСЂР°РІРёС‚СЊ РЅР°РїРѕРјРёРЅР°РЅРёРµ РїРѕ СЃРєР»Р°РґСѓ club=%s: %s", club.id, exc)
 
 
 async def send_work_schedule_notice(mode: str):
@@ -164,6 +217,8 @@ async def send_work_schedule_notice(mode: str):
         for club in clubs:
             settings = club.club_settings if isinstance(club.club_settings, dict) else {}
             work_schedule = settings.get("work_schedule", {})
+            if not settings.get("features", {}).get("work_schedule_reminders", True):
+                continue
             if not work_schedule or not club.bot_token:
                 continue
             bot = bots_dict.get(club.bot_token)
@@ -178,41 +233,41 @@ async def send_work_schedule_notice(mode: str):
                 continue
 
             if mode == "sat":
-                intro = "Наш клуб работает в субботу по следующему графику:"
+                intro = "РќР°С€ РєР»СѓР± СЂР°Р±РѕС‚Р°РµС‚ РІ СЃСѓР±Р±РѕС‚Сѓ РїРѕ СЃР»РµРґСѓСЋС‰РµРјСѓ РіСЂР°С„РёРєСѓ:"
                 days = ["sat"]
             elif mode == "sun":
-                intro = "Наш клуб работает в воскресенье по следующему графику:"
+                intro = "РќР°С€ РєР»СѓР± СЂР°Р±РѕС‚Р°РµС‚ РІ РІРѕСЃРєСЂРµСЃРµРЅСЊРµ РїРѕ СЃР»РµРґСѓСЋС‰РµРјСѓ РіСЂР°С„РёРєСѓ:"
                 days = ["sun"]
             else:
-                intro = "Наш клуб работает в понедельник по следующему графику:"
+                intro = "РќР°С€ РєР»СѓР± СЂР°Р±РѕС‚Р°РµС‚ РІ РїРѕРЅРµРґРµР»СЊРЅРёРє РїРѕ СЃР»РµРґСѓСЋС‰РµРјСѓ РіСЂР°С„РёРєСѓ:"
                 days = ["mon", "tue", "wed", "thu", "fri"]
 
             text = _format_work_schedule_notice(
-                club.name or "Клуб",
+                club.name or "РљР»СѓР±",
                 work_schedule,
                 days,
-                f"{intro}\n\nГрафик занятий можете посмотреть во вкладке «Расписание».",
+                f"{intro}\n\nР“СЂР°С„РёРє Р·Р°РЅСЏС‚РёР№ РјРѕР¶РµС‚Рµ РїРѕСЃРјРѕС‚СЂРµС‚СЊ РІРѕ РІРєР»Р°РґРєРµ В«Р Р°СЃРїРёСЃР°РЅРёРµВ».",
             )
             for chat_id in recipients:
                 try:
                     await bot.send_message(chat_id=chat_id, text=text, parse_mode="HTML")
                     await asyncio.sleep(0.03)
                 except Exception as exc:
-                    logger.warning("Не удалось отправить график работы club=%s chat=%s: %s", club.id, chat_id, exc)
+                    logger.warning("РќРµ СѓРґР°Р»РѕСЃСЊ РѕС‚РїСЂР°РІРёС‚СЊ РіСЂР°С„РёРє СЂР°Р±РѕС‚С‹ club=%s chat=%s: %s", club.id, chat_id, exc)
 
 
 async def check_abon_mailing():
-    """Рассылка уведомлений об истекающих абонементах."""
+    """Р Р°СЃСЃС‹Р»РєР° СѓРІРµРґРѕРјР»РµРЅРёР№ РѕР± РёСЃС‚РµРєР°СЋС‰РёС… Р°Р±РѕРЅРµРјРµРЅС‚Р°С…."""
     async with AsyncSessionLocal() as session:
         data = await get_expire_students_grouped(session)
 
-        logger.info("🚀 SaaS Рассылка: Найдено %s атлетов с истекающими абонементами.", len(data))
+        logger.info("рџљЂ SaaS Р Р°СЃСЃС‹Р»РєР°: РќР°Р№РґРµРЅРѕ %s Р°С‚Р»РµС‚РѕРІ СЃ РёСЃС‚РµРєР°СЋС‰РёРјРё Р°Р±РѕРЅРµРјРµРЅС‚Р°РјРё.", len(data))
 
         for student, token in data:
             try:
                 current_bot = bots_dict.get(token)
                 if not current_bot:
-                    logger.warning("⚠️ Бот с токеном ...%s не найден в bots_dict", token[-8:])
+                    logger.warning("вљ пёЏ Р‘РѕС‚ СЃ С‚РѕРєРµРЅРѕРј ...%s РЅРµ РЅР°Р№РґРµРЅ РІ bots_dict", token[-8:])
                     continue
 
                 club_res = await session.execute(select(Club).where(Club.bot_token == token))
@@ -222,7 +277,7 @@ async def check_abon_mailing():
                 user_res = await session.execute(select(User).where(User.user_id == student.parent_id))
                 parent_user = user_res.scalar_one_or_none()
                 if not parent_user:
-                    logger.error("❌ Родтель с ID %s не найден в базе данных.", student.parent_id)
+                    logger.error("вќЊ Р РѕРґС‚РµР»СЊ СЃ ID %s РЅРµ РЅР°Р№РґРµРЅ РІ Р±Р°Р·Рµ РґР°РЅРЅС‹С….", student.parent_id)
                     continue
 
                 reminder_flags = _subscription_reminder_flags(student, reporting_periods()["now"])
@@ -235,19 +290,19 @@ async def check_abon_mailing():
                 reminder_codes = "-".join(f"{kind}{value}" for kind, value in reminder_flags)
                 notification_key = f"notify:expire:{student.club_id}:{student.id}:{today.isoformat()}:{reminder_codes}"
                 lines = [
-                    "⚠️ <b>Внимание!</b>",
+                    "вљ пёЏ <b>Р’РЅРёРјР°РЅРёРµ!</b>",
                     "",
-                    f"У атлета <b>{escape(student.name)}</b> скоро закончится абонемент.",
+                    f"РЈ Р°С‚Р»РµС‚Р° <b>{escape(student.name)}</b> СЃРєРѕСЂРѕ Р·Р°РєРѕРЅС‡РёС‚СЃСЏ Р°Р±РѕРЅРµРјРµРЅС‚.",
                 ]
                 if expire_str:
-                    lines.append(f"Дата окончания: <code>{expire_str}</code>")
+                    lines.append(f"Р”Р°С‚Р° РѕРєРѕРЅС‡Р°РЅРёСЏ: <code>{expire_str}</code>")
                 days_left = [value for kind, value in reminder_flags if kind == "days"]
                 if days_left:
-                    lines.append(f"Осталось по дате: <b>{min(days_left)} дн.</b>")
+                    lines.append(f"РћСЃС‚Р°Р»РѕСЃСЊ РїРѕ РґР°С‚Рµ: <b>{min(days_left)} РґРЅ.</b>")
                 lessons_left = [value for kind, value in reminder_flags if kind == "lessons"]
                 if lessons_left:
-                    lines.append(f"Осталось занятий: <b>{min(lessons_left)}</b>")
-                lines.extend(["", "Не забудьте продлить его в меню! 🥊"])
+                    lines.append(f"РћСЃС‚Р°Р»РѕСЃСЊ Р·Р°РЅСЏС‚РёР№: <b>{min(lessons_left)}</b>")
+                lines.extend(["", "РќРµ Р·Р°Р±СѓРґСЊС‚Рµ РїСЂРѕРґР»РёС‚СЊ РµРіРѕ РІ РјРµРЅСЋ! рџҐЉ"])
                 text = "\n".join(lines)
 
                 reply_markup = get_profile_keyboard(
@@ -265,17 +320,17 @@ async def check_abon_mailing():
                     reply_markup=reply_markup,
                 )
 
-                logger.info("✅ [Клуб %s] Отправлено родителю %s", student.club_id, student.parent_id)
+                logger.info("вњ… [РљР»СѓР± %s] РћС‚РїСЂР°РІР»РµРЅРѕ СЂРѕРґРёС‚РµР»СЋ %s", student.club_id, student.parent_id)
                 await asyncio.sleep(0.05)
 
             except Exception as exc:
                 if "notification_key" in locals():
                     await _notification_forget(notification_key)
-                logger.error("❌ Ошибка отправки (Student ID %s): %s", student.id, exc)
+                logger.error("вќЊ РћС€РёР±РєР° РѕС‚РїСЂР°РІРєРё (Student ID %s): %s", student.id, exc)
 
 
 async def send_daily_report_to_admins():
-    """Рассылка вечерних бизнес-отчетов владельцам клубов."""
+    """Р Р°СЃСЃС‹Р»РєР° РІРµС‡РµСЂРЅРёС… Р±РёР·РЅРµСЃ-РѕС‚С‡РµС‚РѕРІ РІР»Р°РґРµР»СЊС†Р°Рј РєР»СѓР±РѕРІ."""
     periods = reporting_periods()
     now = periods["now"]
     start_of_today = periods["today"]
@@ -345,33 +400,33 @@ async def send_daily_report_to_admins():
             human_discipline_name = config_disciplines.get(top_disc_key, {}).get("name", biz_metrics["top_discipline"])
 
             report_text = (
-                f"📊 <b>ГЛУБОКИЙ БИЗНЕС-ОТЧЕТ: {club.name}</b>\n"
-                f"📅 Дата: <code>{now.strftime('%d.%m.%Y')}</code>\n\n"
-                f"💰 <b>Касса сегодня:</b> <code>{biz_metrics['revenue_today']} ₽</code>\n"
-                f"⚖️ <b>Динамика ко вчера:</b> <code>{biz_metrics['revenue_diff_text']}</code>\n"
-                f"🥋 <b>Всего атлетов в базе:</b> <code>{biz_metrics['total_athletes']}</code>\n"
-                f"👥 <b>Родителей с привязкой:</b> <code>{biz_metrics['total_parents']}</code>\n\n"
-                f"📈 <b>ОПЕРАТИВНЫЙ АНАЛИЗ ЗА ДЕНЬ:</b>\n"
-                f"🚶‍♂️ Посещений зала: <code>{visits}</code>\n"
-                f"⚡️ Пиковые часы сегодня: <code>{biz_metrics['peak_hours']}</code>\n"
-                f"🥋 Главное направление: <code>{human_discipline_name}</code>\n"
-                f"💎 Действующих абонементов: <code>{active_passes}</code>\n\n"
-                f"🚨 <b>МЕНЕДЖМЕНТ (Проверить админа):</b>\n"
-                f"❌ Закончился баланс: <code>{expired_count} чел.</code> (ждут звонка)\n"
-                f"last_visit 💤 Спящие (>14 дней): <code>{sleeping_count} чел.</code>\n"
+                f"рџ“Љ <b>Р“Р›РЈР‘РћРљРР™ Р‘РР—РќР•РЎ-РћРўР§Р•Рў: {club.name}</b>\n"
+                f"рџ“… Р”Р°С‚Р°: <code>{now.strftime('%d.%m.%Y')}</code>\n\n"
+                f"рџ’° <b>РљР°СЃСЃР° СЃРµРіРѕРґРЅСЏ:</b> <code>{biz_metrics['revenue_today']} в‚Ѕ</code>\n"
+                f"вљ–пёЏ <b>Р”РёРЅР°РјРёРєР° РєРѕ РІС‡РµСЂР°:</b> <code>{biz_metrics['revenue_diff_text']}</code>\n"
+                f"рџҐ‹ <b>Р’СЃРµРіРѕ Р°С‚Р»РµС‚РѕРІ РІ Р±Р°Р·Рµ:</b> <code>{biz_metrics['total_athletes']}</code>\n"
+                f"рџ‘Ґ <b>Р РѕРґРёС‚РµР»РµР№ СЃ РїСЂРёРІСЏР·РєРѕР№:</b> <code>{biz_metrics['total_parents']}</code>\n\n"
+                f"рџ“€ <b>РћРџР•Р РђРўРР’РќР«Р™ РђРќРђР›РР— Р—Рђ Р”Р•РќР¬:</b>\n"
+                f"рџљ¶вЂЌв™‚пёЏ РџРѕСЃРµС‰РµРЅРёР№ Р·Р°Р»Р°: <code>{visits}</code>\n"
+                f"вљЎпёЏ РџРёРєРѕРІС‹Рµ С‡Р°СЃС‹ СЃРµРіРѕРґРЅСЏ: <code>{biz_metrics['peak_hours']}</code>\n"
+                f"рџҐ‹ Р“Р»Р°РІРЅРѕРµ РЅР°РїСЂР°РІР»РµРЅРёРµ: <code>{human_discipline_name}</code>\n"
+                f"рџ’Ћ Р”РµР№СЃС‚РІСѓСЋС‰РёС… Р°Р±РѕРЅРµРјРµРЅС‚РѕРІ: <code>{active_passes}</code>\n\n"
+                f"рџљЁ <b>РњР•РќР•Р”Р–РњР•РќРў (РџСЂРѕРІРµСЂРёС‚СЊ Р°РґРјРёРЅР°):</b>\n"
+                f"вќЊ Р—Р°РєРѕРЅС‡РёР»СЃСЏ Р±Р°Р»Р°РЅСЃ: <code>{expired_count} С‡РµР».</code> (Р¶РґСѓС‚ Р·РІРѕРЅРєР°)\n"
+                f"last_visit рџ’¤ РЎРїСЏС‰РёРµ (>14 РґРЅРµР№): <code>{sleeping_count} С‡РµР».</code>\n"
             )
 
             await bot.send_message(club.owner_id, report_text, parse_mode="HTML")
-            logger.info("🔥 Комплексный ИИ-отчет для клуба %s успешно отправлен боссу!", club.id)
+            logger.info("рџ”Ґ РљРѕРјРїР»РµРєСЃРЅС‹Р№ РР-РѕС‚С‡РµС‚ РґР»СЏ РєР»СѓР±Р° %s СѓСЃРїРµС€РЅРѕ РѕС‚РїСЂР°РІР»РµРЅ Р±РѕСЃСЃСѓ!", club.id)
             await asyncio.sleep(0.05)
 
         except Exception as exc:
-            logger.error("❌ Ошибка отправки вечернего отчета клубу %s: %s", club.id, exc)
+            logger.error("вќЊ РћС€РёР±РєР° РѕС‚РїСЂР°РІРєРё РІРµС‡РµСЂРЅРµРіРѕ РѕС‚С‡РµС‚Р° РєР»СѓР±Сѓ %s: %s", club.id, exc)
 
 
 async def saas_daily_morning_check():
-    """Ежедневная фоновая проверка: Дни рождения и Прогульщики (10 дней без посещений)."""
-    logger.info("📊 Запуск фонового анализа базы атлетов...")
+    """Р•Р¶РµРґРЅРµРІРЅР°СЏ С„РѕРЅРѕРІР°СЏ РїСЂРѕРІРµСЂРєР°: Р”РЅРё СЂРѕР¶РґРµРЅРёСЏ Рё РџСЂРѕРіСѓР»СЊС‰РёРєРё (10 РґРЅРµР№ Р±РµР· РїРѕСЃРµС‰РµРЅРёР№)."""
+    logger.info("рџ“Љ Р—Р°РїСѓСЃРє С„РѕРЅРѕРІРѕРіРѕ Р°РЅР°Р»РёР·Р° Р±Р°Р·С‹ Р°С‚Р»РµС‚РѕРІ...")
     async with AsyncSessionLocal() as session:
         result = await session.execute(select(Student))
         students = result.scalars().all()
@@ -403,51 +458,57 @@ async def saas_daily_morning_check():
             club = clubs_by_id.get(club_id)
             if not club or not club.subscription_expire_at or club.subscription_expire_at < now_datetime or club.bot_token not in bots_dict:
                 continue
+            settings = club.club_settings if isinstance(club.club_settings, dict) else {}
             notification_key = f"notify:birthday-missing:{club_id}:{parent_id}:{today.isoformat()}"
             try:
+                if not settings.get("features", {}).get("birthday_missing_reminders", True):
+                    continue
                 if not await _notification_once(notification_key):
                     continue
                 await bots_dict[club.bot_token].send_message(
                     chat_id=parent_id,
                     text=(
-                        f"🎂 <b>Заполните даты рождения атлетов</b>\n\n"
-                        f"В профиле клуба <b>{escape(club.name)}</b> не указана дата рождения: "
+                        f"рџЋ‚ <b>Р—Р°РїРѕР»РЅРёС‚Рµ РґР°С‚С‹ СЂРѕР¶РґРµРЅРёСЏ Р°С‚Р»РµС‚РѕРІ</b>\n\n"
+                        f"Р’ РїСЂРѕС„РёР»Рµ РєР»СѓР±Р° <b>{escape(club.name)}</b> РЅРµ СѓРєР°Р·Р°РЅР° РґР°С‚Р° СЂРѕР¶РґРµРЅРёСЏ: "
                         f"<b>{escape(', '.join(names))}</b>.\n"
-                        "Это нужно для корректного возраста, тарифов и статистики."
+                        "Р­С‚Рѕ РЅСѓР¶РЅРѕ РґР»СЏ РєРѕСЂСЂРµРєС‚РЅРѕРіРѕ РІРѕР·СЂР°СЃС‚Р°, С‚Р°СЂРёС„РѕРІ Рё СЃС‚Р°С‚РёСЃС‚РёРєРё."
                     ),
                     reply_markup=types.InlineKeyboardMarkup(inline_keyboard=[[
-                        types.InlineKeyboardButton(text="Указать дату рождения", callback_data="edit_birthday")
+                        types.InlineKeyboardButton(text="РЈРєР°Р·Р°С‚СЊ РґР°С‚Сѓ СЂРѕР¶РґРµРЅРёСЏ", callback_data="edit_birthday")
                     ]]),
                     parse_mode="HTML",
                 )
             except Exception as reminder_error:
                 await _notification_forget(notification_key)
-                logger.error("Не удалось отправить напоминание о ДР родителю %s: %s", parent_id, reminder_error)
+                logger.error("РќРµ СѓРґР°Р»РѕСЃСЊ РѕС‚РїСЂР°РІРёС‚СЊ РЅР°РїРѕРјРёРЅР°РЅРёРµ Рѕ Р”Р  СЂРѕРґРёС‚РµР»СЋ %s: %s", parent_id, reminder_error)
 
         for (club_id, parent_id), names in missing_subscriptions.items():
             club = clubs_by_id.get(club_id)
             if not club or not club.subscription_expire_at or club.subscription_expire_at < now_datetime or club.bot_token not in bots_dict:
                 continue
+            settings = club.club_settings if isinstance(club.club_settings, dict) else {}
             notification_key = f"notify:no-subscription:{club_id}:{parent_id}:{today.isoformat()}"
             try:
+                if not settings.get("features", {}).get("subscription_expiry_reminders", True):
+                    continue
                 if not await _notification_once(notification_key):
                     continue
                 await bots_dict[club.bot_token].send_message(
                     chat_id=parent_id,
                     text=(
-                        f"💳 <b>Нет активного абонемента</b>\n\n"
-                        f"У атлета(ов) <b>{escape(', '.join(names))}</b> в клубе "
-                        f"<b>{escape(club.name)}</b> нет действующего абонемента.\n"
-                        "Выберите тариф в меню, чтобы продолжить тренировки."
+                        f"рџ’і <b>РќРµС‚ Р°РєС‚РёРІРЅРѕРіРѕ Р°Р±РѕРЅРµРјРµРЅС‚Р°</b>\n\n"
+                        f"РЈ Р°С‚Р»РµС‚Р°(РѕРІ) <b>{escape(', '.join(names))}</b> РІ РєР»СѓР±Рµ "
+                        f"<b>{escape(club.name)}</b> РЅРµС‚ РґРµР№СЃС‚РІСѓСЋС‰РµРіРѕ Р°Р±РѕРЅРµРјРµРЅС‚Р°.\n"
+                        "Р’С‹Р±РµСЂРёС‚Рµ С‚Р°СЂРёС„ РІ РјРµРЅСЋ, С‡С‚РѕР±С‹ РїСЂРѕРґРѕР»Р¶РёС‚СЊ С‚СЂРµРЅРёСЂРѕРІРєРё."
                     ),
                     reply_markup=types.InlineKeyboardMarkup(inline_keyboard=[[
-                        types.InlineKeyboardButton(text="💳 Выбрать абонемент", callback_data="choose_section")
+                        types.InlineKeyboardButton(text="рџ’і Р’С‹Р±СЂР°С‚СЊ Р°Р±РѕРЅРµРјРµРЅС‚", callback_data="choose_section")
                     ]]),
                     parse_mode="HTML",
                 )
             except Exception as subscription_error:
                 await _notification_forget(notification_key)
-                logger.error("Не удалось отправить напоминание об абонементе родителю %s: %s", parent_id, subscription_error)
+                logger.error("РќРµ СѓРґР°Р»РѕСЃСЊ РѕС‚РїСЂР°РІРёС‚СЊ РЅР°РїРѕРјРёРЅР°РЅРёРµ РѕР± Р°Р±РѕРЅРµРјРµРЅС‚Рµ СЂРѕРґРёС‚РµР»СЋ %s: %s", parent_id, subscription_error)
 
         for student in students:
             club_result = await session.execute(select(Club).where(Club.id == student.club_id))
@@ -455,6 +516,7 @@ async def saas_daily_morning_check():
             if not club or not club.subscription_expire_at or club.subscription_expire_at < now_datetime or club.bot_token not in bots_dict:
                 continue
             bot = bots_dict[club.bot_token]
+            settings = club.club_settings if isinstance(club.club_settings, dict) else {}
 
             if not student.parent_id:
                 continue
@@ -463,20 +525,20 @@ async def saas_daily_morning_check():
                 if student.birthday.month == today.month and student.birthday.day == today.day:
                     try:
                         birthday_key = f"notify:birthday:{student.club_id}:{student.id}:{today.year}"
-                        if await _notification_once(birthday_key, ttl=370 * 86400):
+                        if settings.get("features", {}).get("birthday_greetings", True) and await _notification_once(birthday_key, ttl=370 * 86400):
                             await bot.send_message(
                                 chat_id=student.parent_id,
                                 text=(
-                                    f"🎂 Клуб <b>{escape(club.name)}</b> поздравляет атлета <b>{escape(student.name)}</b> "
-                                    f"с Днём Рождения! 🎉\n"
-                                    f"Желаем новых спортивных побед и крепкого здоровья!"
+                                    f"рџЋ‚ РљР»СѓР± <b>{escape(club.name)}</b> РїРѕР·РґСЂР°РІР»СЏРµС‚ Р°С‚Р»РµС‚Р° <b>{escape(student.name)}</b> "
+                                    f"СЃ Р”РЅС‘Рј Р РѕР¶РґРµРЅРёСЏ! рџЋ‰\n"
+                                    f"Р–РµР»Р°РµРј РЅРѕРІС‹С… СЃРїРѕСЂС‚РёРІРЅС‹С… РїРѕР±РµРґ Рё РєСЂРµРїРєРѕРіРѕ Р·РґРѕСЂРѕРІСЊСЏ!"
                                 ),
                                 parse_mode="HTML",
                             )
-                            logger.info("🎉 Поздравление с ДР отправлено атлету %s (Родитель: %s)", student.name, student.parent_id)
+                            logger.info("рџЋ‰ РџРѕР·РґСЂР°РІР»РµРЅРёРµ СЃ Р”Р  РѕС‚РїСЂР°РІР»РµРЅРѕ Р°С‚Р»РµС‚Сѓ %s (Р РѕРґРёС‚РµР»СЊ: %s)", student.name, student.parent_id)
                     except Exception as e:
                         await _notification_forget(birthday_key)
-                        logger.error("Не удалось отправить ДР сообщение родителю %s: %s", student.parent_id, e)
+                        logger.error("РќРµ СѓРґР°Р»РѕСЃСЊ РѕС‚РїСЂР°РІРёС‚СЊ Р”Р  СЃРѕРѕР±С‰РµРЅРёРµ СЂРѕРґРёС‚РµР»СЋ %s: %s", student.parent_id, e)
 
             if student.last_visit and student.balance_lessons > 0 and not student.is_frozen:
                 last_visit = student.last_visit.replace(tzinfo=None)
@@ -484,18 +546,26 @@ async def saas_daily_morning_check():
                 if days_absent >= 10:
                     try:
                         notice_key = f"notify:absent:{student.club_id}:{student.id}:{last_visit.date().isoformat()}:10"
+                        if not settings.get("features", {}).get("absence_reminders", True):
+                            continue
                         if not await _notification_once(notice_key, ttl=45 * 86400):
                             continue
                         await bot.send_message(
                             chat_id=student.parent_id,
                             text=(
-                                f"👋 Здравствуйте! Мы заметили, что атлет <b>{escape(student.name)}</b> "
-                                f"не посещал тренировки уже {days_absent} дней. Мы соскучились! "
-                                "Ждём вас на занятиях. 😉"
+                                f"рџ‘‹ Р—РґСЂР°РІСЃС‚РІСѓР№С‚Рµ! РњС‹ Р·Р°РјРµС‚РёР»Рё, С‡С‚Рѕ Р°С‚Р»РµС‚ <b>{escape(student.name)}</b> "
+                                f"РЅРµ РїРѕСЃРµС‰Р°Р» С‚СЂРµРЅРёСЂРѕРІРєРё СѓР¶Рµ {days_absent} РґРЅРµР№. РњС‹ СЃРѕСЃРєСѓС‡РёР»РёСЃСЊ! "
+                                "Р–РґС‘Рј РІР°СЃ РЅР° Р·Р°РЅСЏС‚РёСЏС…. рџ‰"
                             ),
                             parse_mode="HTML",
                         )
-                        logger.info("📢 Уведомление о прогуле (10 дней) отправлено атлету %s", student.name)
+                        logger.info("рџ“ў РЈРІРµРґРѕРјР»РµРЅРёРµ Рѕ РїСЂРѕРіСѓР»Рµ (10 РґРЅРµР№) РѕС‚РїСЂР°РІР»РµРЅРѕ Р°С‚Р»РµС‚Сѓ %s", student.name)
                     except Exception as e:
                         await _notification_forget(notice_key)
-                        logger.error("Не удалось отправить уведомление прогульщику: %s", e)
+                        logger.error("РќРµ СѓРґР°Р»РѕСЃСЊ РѕС‚РїСЂР°РІРёС‚СЊ СѓРІРµРґРѕРјР»РµРЅРёРµ РїСЂРѕРіСѓР»СЊС‰РёРєСѓ: %s", e)
+
+
+
+
+
+

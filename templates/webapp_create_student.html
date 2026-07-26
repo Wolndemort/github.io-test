@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Создание атлета</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <link rel="stylesheet" href="{{ url_for('static', path='css/mono.css') }}?v=1.1.0">
+    <style>
+        body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f4f4f4; color: #111; padding: 16px; }
+        .wrap { max-width: 760px; margin: 0 auto; }
+        .card { background: #fff; border: 1px solid #d9d9d9; border-radius: 20px; padding: 16px; box-shadow: 0 10px 28px rgba(0,0,0,.04); }
+        label { display:block; margin-bottom: 10px; font-size: 13px; color: #666; }
+        input, select { width: 100%; box-sizing: border-box; padding: 12px; margin-top: 5px; border-radius: 10px; border: 1px solid #ccc; font-size: 16px; background: #fff; color: #111; }
+        .actions { display:grid; gap:10px; margin-top: 14px; }
+        .btn { display:block; text-align:center; text-decoration:none; padding: 14px 16px; border-radius: 14px; border: 1px solid #111; font-weight: 700; }
+        .btn.dark { background: #111; color: #fff; }
+        .btn.soft { background: #fff; color: #111; }
+        .muted { color:#666; font-size: 14px; }
+    </style>
+</head>
+<body class="mono-theme">
+<div class="wrap">
+    <div class="card">
+        <h1>Создание атлета</h1>
+        <p class="muted">Только создание. Редактирование и удаление через WebApp здесь недоступны.</p>
+        <div class="form">
+            <label>Имя атлета<input id="name" placeholder="Иван Иванов"></label>
+            <label>Телефон родителя<input id="phone" placeholder="79990000000"></label>
+            <label>Дата рождения<input id="birthday" type="text" inputmode="numeric" maxlength="10" placeholder="ДД.ММ.ГГГГ"></label>
+            <label>Направление
+                <select id="discipline">
+                    {% for code, info in disciplines.items() %}
+                    <option value="{{ code }}" {% if code == default_discipline %}selected{% endif %}>{{ info.name if info.name else code }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <div class="actions">
+                <a href="#" class="btn dark" id="saveBtn">Создать атлета</a>
+                <a class="btn soft" href="/webapp/client-cabinet?club_id={{ club_id }}">Назад в кабинет</a>
+            </div>
+        </div>
+    </div>
+</div>
+<script>
+const tg = window.Telegram?.WebApp;
+if (tg) { tg.ready(); tg.expand(); }
+const birthdayInput = document.getElementById('birthday');
+if (birthdayInput) {
+    birthdayInput.addEventListener('input', () => {
+        const digits = birthdayInput.value.replace(/\D/g, '').slice(0, 8);
+        if (digits.length <= 2) birthdayInput.value = digits;
+        else if (digits.length <= 4) birthdayInput.value = `${digits.slice(0, 2)}.${digits.slice(2)}`;
+        else birthdayInput.value = `${digits.slice(0, 2)}.${digits.slice(2, 4)}.${digits.slice(4)}`;
+    });
+    const native = document.createElement('input');
+    native.type = 'date';
+    native.style.position = 'absolute';
+    native.style.left = '-9999px';
+    native.style.width = '1px';
+    native.style.height = '1px';
+    native.tabIndex = -1;
+    birthdayInput.parentElement.appendChild(native);
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.textContent = '📅';
+    btn.style.cssText = 'margin-top:5px;margin-left:6px;border:1px solid #ccc;border-radius:10px;background:#fff;padding:12px 10px;min-width:44px;height:44px';
+    birthdayInput.parentElement.appendChild(btn);
+    btn.addEventListener('click', () => native.showPicker ? native.showPicker() : native.click());
+    native.addEventListener('change', () => {
+        if (!native.value) return;
+        const [y, m, d] = native.value.split('-');
+        birthdayInput.value = `${d}.${m}.${y}`;
+    });
+}
+document.getElementById('saveBtn').onclick = async (e) => {
+    e.preventDefault();
+    const payload = {
+        init_data: tg?.initData || new URLSearchParams(location.search).get('init_data') || '',
+        club_id: {{ club_id }},
+        name: document.getElementById('name').value,
+        phone: document.getElementById('phone').value,
+        birthday: document.getElementById('birthday').value,
+    };
+    const res = await fetch('/webapp/client-cabinet/create-student', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify(payload)
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+        alert(data.detail || 'Ошибка создания атлета');
+        return;
+    }
+    alert('Атлет создан');
+    location.href = '/webapp/client-cabinet?club_id={{ club_id }}&init_data=' + encodeURIComponent(payload.init_data);
+};
+</script>
+</body>
+</html>

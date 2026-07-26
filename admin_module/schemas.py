@@ -28,6 +28,14 @@ class WebAppBindPhonePayload(BaseModel):
     phone: str
 
 
+class WebAppCreateStudentPayload(BaseModel):
+    init_data: str
+    club_id: int
+    name: str
+    phone: str | None = None
+    birthday: str | None = None
+
+
 class WebAppHistoryQuery(BaseModel):
     init_data: str
     club_id: int
