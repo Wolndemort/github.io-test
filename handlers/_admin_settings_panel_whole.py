@@ -30,17 +30,17 @@ router = Router()
 @router.callback_query(F.data == "admin_settings")
 async def admin_settings_menu(callback: types.CallbackQuery, club_settings: dict, club_id: int, is_owner: bool | None = None, is_super_admin: bool | None = None):
     if is_owner is False and is_super_admin is False:
-        return await callback.answer("Доступ запрещен: эти настройки доступны только главному администратору.", show_alert=True)
+        return await callback.answer("Доступ запрещён: настройки клуба доступны только главному администратору.", show_alert=True)
     builder = InlineKeyboardBuilder()
     features = club_settings.get("features", {})
     limits = club_settings.get("limits", {})
 
     buttons = {
         "freeze": "Заморозка",
-        "qr_checkin": "QR-чекины",
-        "manual_add": "Ручные добавления",
-        "online_payments": "Онлайн-оплаты",
-        "stock_reminders": "Уведомления по складу",
+        "qr_checkin": "QR-вход",
+        "manual_add": "Ручное добавление",
+        "online_payments": "Онлайн-платежи",
+        "stock_reminders": "Напоминания по складу",
     }
 
     for key, label in buttons.items():
@@ -48,12 +48,13 @@ async def admin_settings_menu(callback: types.CallbackQuery, club_settings: dict
         builder.row(types.InlineKeyboardButton(text=f"{status} {label}", callback_data=f"toggle_feat_{key}"))
 
     builder.row(types.InlineKeyboardButton(text="🛍 Настройки магазина / YooKassa", callback_data="admin_setup_yookassa"))
-    builder.row(types.InlineKeyboardButton(text="🕑 График работы", web_app=types.WebAppInfo(url=f"https://{club_id}.speedycrm.ru/webapp/admin-work-schedule?club_id={club_id}")))
+    # Управление товарами вынесено в админский WebApp/панель, дубли в настройках убираем.
+    builder.row(types.InlineKeyboardButton(text="🕒 График работы", web_app=types.WebAppInfo(url=f"https://{club_id}.speedycrm.ru/webapp/admin-work-schedule?club_id={club_id}")))
     ui = club_settings.get("ui", {})
     site_mark = "✅" if ui.get("site_enabled", False) else "❌"
     support_mark = "✅" if ui.get("support_enabled", True) else "❌"
     builder.row(types.InlineKeyboardButton(text=f"{site_mark} Сайт клуба", callback_data="toggle_site_link"), types.InlineKeyboardButton(text=f"{support_mark} Поддержка", callback_data="toggle_support_link"))
-    builder.row(types.InlineKeyboardButton(text="✏️ Изменить сайт", callback_data="edit_site_url"), types.InlineKeyboardButton(text="✏️ Изменить username", callback_data="edit_support_username"))
+    builder.row(types.InlineKeyboardButton(text="✏️ зменить сайт", callback_data="edit_site_url"), types.InlineKeyboardButton(text="✏️ зменить username", callback_data="edit_support_username"))
     builder.row(types.InlineKeyboardButton(text="⚙️ Настройка лимитов клуба", callback_data="manage_club_limits"))
     loading_enabled = bool((ui.get("loading") or {}).get("enabled", False))
     loading_mark = "✅" if loading_enabled else "❌"
@@ -61,8 +62,8 @@ async def admin_settings_menu(callback: types.CallbackQuery, club_settings: dict
     builder.row(types.InlineKeyboardButton(text="🖼 Загрузить логотип WebApp", callback_data="upload_webapp_logo"))
     builder.row(types.InlineKeyboardButton(text="💰 Настройка тарифов", callback_data="admin_tariffs_sections"))
     builder.row(types.InlineKeyboardButton(text="💰 Тарифы (WebApp)", web_app=types.WebAppInfo(url=f"https://{club_id}.speedycrm.ru/webapp/admin-tariffs?club_id={club_id}")))
-    builder.row(types.InlineKeyboardButton(text="⏰ Планировщики", callback_data="admin_schedulers"))
-    builder.row(types.InlineKeyboardButton(text="💳 Изменить реквизиты", callback_data="admin_edit_payments"))
+    builder.row(types.InlineKeyboardButton(text=" ", callback_data="admin_schedulers"))
+    builder.row(types.InlineKeyboardButton(text="💳 зменить реквизиты", callback_data="admin_edit_payments"))
     turnstile_config = club_settings.get("turnstile", {})
     t_status = "✅" if turnstile_config.get("enabled", False) else "❌"
     builder.row(types.InlineKeyboardButton(text=f"{t_status} СКУД(Турникет)", callback_data="admin_turnstile_main"))
@@ -70,7 +71,7 @@ async def admin_settings_menu(callback: types.CallbackQuery, club_settings: dict
     builder.row(types.InlineKeyboardButton(text="⬅️ В админ-панель", callback_data="admin"))
 
     await callback.message.edit_text(
-        "⚙️ <b>Настройки клуба</b>\n\nВыберите нужный раздел ниже:",
+        "🛠 <b>Настройки модулей клуба</b>\n\nВключайте и выключайте функции бота:",
         reply_markup=builder.as_markup(),
         parse_mode="HTML"
     )
@@ -80,23 +81,23 @@ async def admin_settings_menu(callback: types.CallbackQuery, club_settings: dict
 @router.callback_query(F.data == "admin_schedulers")
 async def admin_schedulers_menu(callback: types.CallbackQuery, club_settings: dict, club_id: int, is_owner: bool | None = None, is_super_admin: bool | None = None):
     if is_owner is False and is_super_admin is False:
-        return await callback.answer("Доступ запрещён: настройки клуба доступны только главному администратору.", show_alert=True)
+        return await callback.answer(" :      .", show_alert=True)
     builder = InlineKeyboardBuilder()
     features = club_settings.get("features", {})
     items = [
-        ("birthday_missing_reminders", "Нет даты рождения"),
-        ("subscription_expiry_reminders", "Окончание абонемента"),
-        ("birthday_greetings", "Поздравления с ДР"),
-        ("absence_reminders", "Прогульщики"),
-        ("work_schedule_reminders", "График работы"),
-        ("stock_reminders", "Склад"),
+        ("birthday_missing_reminders", "  "),
+        ("subscription_expiry_reminders", " "),
+        ("birthday_greetings", "  "),
+        ("absence_reminders", ""),
+        ("work_schedule_reminders", " "),
+        ("stock_reminders", ""),
     ]
     for key, label in items:
-        status = "✅" if features.get(key, True) else "❌"
+        status = "" if features.get(key, True) else ""
         builder.row(types.InlineKeyboardButton(text=f"{status} {label}", callback_data=f"toggle_feat_{key}"))
-    builder.row(types.InlineKeyboardButton(text="⬅️ Назад", callback_data="admin_settings"))
+    builder.row(types.InlineKeyboardButton(text=" ", callback_data="admin_settings"))
     await callback.message.edit_text(
-        "⏰ <b>Планировщики клуба</b>\n\nВключайте и выключайте уведомления:",
+        " <b> </b>\n\n   :",
         reply_markup=builder.as_markup(),
         parse_mode="HTML",
     )
@@ -361,7 +362,7 @@ async def admin_turnstile_main(callback: types.CallbackQuery, club_settings: dic
         builder.row(types.InlineKeyboardButton(text="🪛 Настроить и включить", callback_data="setup_t_start"))
         builder.row(types.InlineKeyboardButton(text="🛠 Назад в настройки", callback_data="admin_settings"))
         await callback.message.edit_text(
-            "📡 <b>Интеграция СКУД (Турникет)</b>\n\n"
+            "📡 <b>нтеграция СКУД (Турникет)</b>\n\n"
             "Функция отключена.\n"
             "Для подключения вам понадобится реле DTWONDER (dingtian) и настроенный KeenDNS адрес.",
             reply_markup=builder.as_markup(),
@@ -373,7 +374,7 @@ async def admin_turnstile_main(callback: types.CallbackQuery, club_settings: dic
         builder.row(types.InlineKeyboardButton(text="🛠 Назад в настройки", callback_data="admin_settings"))
         current_url = turnstile_config.get("base_url", "Не задан")
         await callback.message.edit_text(
-            f"📡 <b>Интеграция СКУД (Турникет) активна</b>\n\n"
+            f"📡 <b>нтеграция СКУД (Турникет) активна</b>\n\n"
             f"📌 Текущий адрес реле: <code>{current_url}</code>\n\n"
             f"Вы можете изменить параметры или отключить интеграцию.",
             reply_markup=builder.as_markup(),
@@ -460,7 +461,7 @@ async def disable_turnstile(callback: types.CallbackQuery, session: AsyncSession
             db_club = await session.merge(club)
             flag_modified(db_club, "settings")
             await session.commit()
-            await callback.answer("🔒 Интеграция СКУД успешно отключена", show_alert=True)
+            await callback.answer("🔒 нтеграция СКУД успешно отключена", show_alert=True)
         except Exception as e:
             audit_event(
                 "turnstile_disable_failed",

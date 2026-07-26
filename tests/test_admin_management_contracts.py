@@ -189,6 +189,34 @@ def test_work_schedule_webapp_and_weekend_job_are_registered():
     assert "stock_reminder_pm" in main
 
 
+def test_admin_settings_menu_top_block_uses_readable_labels():
+    panel = Path("handlers/admin_settings_panel.py").read_text(encoding="utf-8").splitlines()
+    top_block = "\n".join(panel[29:70])
+    assert "🛍 Настройки магазина / YooKassa" in top_block
+    assert "График работы" in top_block
+    assert "Сайт клуба" in top_block
+    assert "Поддержка" in top_block
+    assert "⚙️ Настройка лимитов клуба" in top_block
+    assert "⏰ Планировщики" in top_block
+    assert "СКУД(Турникет)" in top_block
+    assert "🥋 Управление секциями" in top_block
+    assert "вЂ" not in top_block
+    assert "рџ" not in top_block
+
+
+def test_admin_settings_submenus_use_readable_labels():
+    panel = Path("handlers/admin_settings_panel.py").read_text(encoding="utf-8")
+    assert "⏰ <b>Планировщики клуба</b>" in panel
+    assert "Нет даты рождения" in panel
+    assert "Окончание абонемента" in panel
+    assert "🥋 <b>Список направлений</b>" in panel
+    assert "📡 <b>Интеграция СКУД (Турникет)</b>" in panel
+    assert "⚙️ <b>Управление лимитами клуба" in panel
+    assert "🎨 Отправьте JSON одной строкой" in panel
+    assert "вЂ" not in panel
+    assert "рџ" not in panel
+
+
 def test_user_and_admin_history_render_database_utc_as_moscow_time():
     student = Path("templates/webapp_student.html").read_text(encoding="utf-8")
     history = Path("templates/webapp_history.html").read_text(encoding="utf-8")
