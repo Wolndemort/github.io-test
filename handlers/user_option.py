@@ -840,9 +840,9 @@ async def parse_qr_scan(message: types.Message, session: AsyncSession, club: Clu
 @router.message(F.text.startswith(("student", "ыегвуте")))
 async def manual_scanner_handler(
         message: types.Message,
-        session: AsyncSession,  # ÐÑÐ¸Ð»ÐµÑÐµÐ»Ð¾ Ð¸Ð· Ð¼Ð¸Ð´Ð»Ð²Ð°ÑÐ¸
-        club: Club,  # ÐÑÐ¸Ð»ÐµÑÐµÐ»Ð¾ Ð¸Ð· Ð¼Ð¸Ð´Ð»Ð²Ð°ÑÐ¸
-        club_settings: dict,  # ÐÑÐ¸Ð»ÐµÑÐµÐ»Ð¾ Ð¸Ð· Ð¼Ð¸Ð´Ð»Ð²Ð°ÑÐ¸
+        session: AsyncSession,  # Пришло из middleware
+        club: Club,  # Пришло из middleware
+        club_settings: dict,  # Пришло из middleware
         redis: Redis
 ):
     await _handle_qr_scan_data(

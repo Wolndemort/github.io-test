@@ -200,6 +200,7 @@ def test_admin_settings_menu_top_block_uses_readable_labels():
     assert "⏰ Планировщики" in top_block
     assert "СКУД(Турникет)" in top_block
     assert "🥋 Управление секциями" in top_block
+    assert "Уведомления по складу" not in top_block
     assert "вЂ" not in top_block
     assert "рџ" not in top_block
 
@@ -209,6 +210,7 @@ def test_admin_settings_submenus_use_readable_labels():
     assert "⏰ <b>Планировщики клуба</b>" in panel
     assert "Нет даты рождения" in panel
     assert "Окончание абонемента" in panel
+    assert "Склад" in panel
     assert "🥋 <b>Список направлений</b>" in panel
     assert "📡 <b>Интеграция СКУД (Турникет)</b>" in panel
     assert "⚙️ <b>Управление лимитами клуба" in panel

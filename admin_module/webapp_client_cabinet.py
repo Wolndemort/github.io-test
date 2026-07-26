@@ -185,10 +185,10 @@ async def webapp_create_student_page(request: Request, club_id: int, init_data: 
         return _auth_gate_html("webapp/client-cabinet/create-student", club_id=club_id)
     club = await db.get(Club, club_id)
     if not club or not club.bot_token:
-        raise HTTPException(status_code=404, detail="РљР»СѓР± РЅРµ РЅР°Р№РґРµРЅ")
+        raise HTTPException(status_code=404, detail="Клуб не найден")
     tg_user = verify_telegram_data(init_data, club.bot_token)
     if not tg_user:
-        raise HTTPException(status_code=403, detail="Р”РѕСЃС‚СѓРї Р·Р°РїСЂРµС‰РµРЅ")
+        raise HTTPException(status_code=403, detail="Доступ запрещен")
     user = await _ensure_webapp_user_linked(db, int(tg_user.get("id", 0)), club_id)
     if not user:
         return await webapp_auth_help_page(request=request, club_id=club_id, init_data=init_data, db=db)
@@ -209,28 +209,28 @@ async def webapp_create_student_page(request: Request, club_id: int, init_data: 
 async def webapp_create_student_submit(payload: WebAppCreateStudentPayload, db: AsyncSession = Depends(get_session)):
     club = await db.get(Club, payload.club_id)
     if not club or not club.bot_token:
-        raise HTTPException(status_code=404, detail="РљР»СѓР± РЅРµ РЅР°Р№РґРµРЅ")
+        raise HTTPException(status_code=404, detail="Клуб не найден")
     tg_user = verify_telegram_data(payload.init_data, club.bot_token)
     if not tg_user:
-        raise HTTPException(status_code=403, detail="Р”РѕСЃС‚СѓРї Р·Р°РїСЂРµС‰РµРЅ")
+        raise HTTPException(status_code=403, detail="Доступ запрещен")
     user_id = int(tg_user.get("id", 0))
     user = await _ensure_webapp_user_linked(db, user_id, payload.club_id)
     if not user:
-        raise HTTPException(status_code=403, detail="РџРѕР»СЊР·РѕРІР°С‚РµР»СЊ РЅРµ РїСЂРёРІСЏР·Р°РЅ Рє РєР»СѓР±Сѓ")
+        raise HTTPException(status_code=403, detail="Пользователь не привязан к клубу")
     name = payload.name.strip()
     if not name:
-        raise HTTPException(status_code=400, detail="Р’РІРµРґРёС‚Рµ РёРјСЏ Р°С‚Р»РµС‚Р°")
+        raise HTTPException(status_code=400, detail="Введите имя атлета")
     birthday = None
     if payload.birthday:
         from services.input_normalization import parse_user_date
         try:
             birthday = parse_user_date(payload.birthday)
         except ValueError:
-            raise HTTPException(status_code=400, detail="РќРµРєРѕСЂСЂРµРєС‚РЅР°СЏ РґР°С‚Р° СЂРѕР¶РґРµРЅРёСЏ")
+            raise HTTPException(status_code=400, detail="Некорректная дата рождения")
     existing = (await db.execute(select(Student).where(Student.club_id == club.id, Student.parent_id == user_id))).scalars().all()
     duplicate = next((student for student in existing if student.name.strip().casefold() == name.casefold() and student.birthday == birthday), None)
     if duplicate:
-        raise HTTPException(status_code=409, detail="РўР°РєРѕР№ Р°С‚Р»РµС‚ СѓР¶Рµ РµСЃС‚СЊ")
+        raise HTTPException(status_code=409, detail="Такой атлет уже есть")
     student = Student(
         club_id=club.id,
         parent_id=user_id,

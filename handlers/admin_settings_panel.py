@@ -40,7 +40,6 @@ async def admin_settings_menu(callback: types.CallbackQuery, club_settings: dict
         "qr_checkin": "QR-чекины",
         "manual_add": "Ручные добавления",
         "online_payments": "Онлайн-оплаты",
-        "stock_reminders": "Уведомления по складу",
     }
 
     for key, label in buttons.items():
