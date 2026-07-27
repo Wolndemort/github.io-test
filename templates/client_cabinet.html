@@ -77,7 +77,7 @@
 <div class="wrap mono-shell">
     <div class="hero mono-hero">
         <div class="eyebrow mono-eyebrow">{{ club_name or club.name or 'Клуб' }} · Premium Cabinet</div>
-        <div class="title">Кабинет клиента</div>
+        <div class="title">{{ 'Кабинет сотрудника' if is_staff_mode else 'Кабинет клиента' }}</div>
         <p class="subtitle">{{ club_name }} · {{ user_name }}</p>
         <div class="summary mono-grid-4">
             <div class="pill mono-pill"><div class="value">{{ summary.total }}</div><div class="label">атлетов</div></div>
@@ -128,6 +128,9 @@
 
     <div class="card mono-card">
         <div class="actions">
+            {% if is_staff_mode %}
+            <a class="btn dark mono-action dark" href="/webapp/staff-pass?club_id={{ club_id }}&user_id={{ user_id }}">Открыть турникет</a>
+            {% endif %}
             <a class="btn dark mono-action dark" href="/webapp/biometric-pass?club_id={{ club_id }}&user_id={{ user_id }}">Открыть проход по FaceID</a>
             <a class="btn soft mono-action" href="/webapp/client-cabinet/create-student?club_id={{ club_id }}">Создать атлета</a>
             <a class="btn soft mono-action" href="/webapp/client-cabinet/buy-subscription?club_id={{ club_id }}">Купить абонемент</a>

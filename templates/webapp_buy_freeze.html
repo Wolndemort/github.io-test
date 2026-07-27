@@ -12,8 +12,10 @@
         <select id="payment_method" style="width:100%;padding:12px;margin-top:6px;">
             <option value="bank_card">Картой</option>
             <option value="sbp" {% if not sbp_enabled %}disabled{% endif %}>СБП{% if not sbp_enabled %} (недоступно){% endif %}</option>
+            <option value="requisites">По реквизитам</option>
         </select>
     </label>
+    <p class="muted" style="margin:8px 0 0;">Реквизиты берутся из настроек клуба и совпадают с ботом: <b>{{ payment_info }}</b></p>
     <div class="mono-divider"></div>
     <div class="mono-grid-2">
         <button id="pay" class="mono-action" style="width:100%;">В корзину</button>
@@ -61,6 +63,8 @@ document.getElementById('buyNow')?.addEventListener('click', async () => {
     location.href = data.payment_url;
   } else if (res.ok && data.charged) {
     document.getElementById('msg').innerText = data.message || 'Оплата прошла по сохраненной карте.';
+  } else if (res.ok && data.review_required) {
+    document.getElementById('msg').innerText = data.message || 'Заявка отправлена администратору.';
   } else {
     alert(data.detail || 'Ошибка');
     button.disabled = false;

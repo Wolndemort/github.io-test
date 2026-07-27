@@ -18,6 +18,7 @@ from redis.asyncio import Redis
 from services.abuse_guard import rate_limit, audit_block
 from services.audit import audit_event
 from services.order_notifications import build_owner_receipt_text, format_order_items, resolve_user_label
+from services.payment_requisites import get_payment_info_text
 
 
 router = Router()
@@ -453,11 +454,7 @@ async def process_sbp_payment_choice(
     data = await state.get_data()
 
     # UI часть (Вывод реквизитов для перевода из конфига клуба)
-    ui_cfg = club_settings.get("ui", {})
-    payment_info = ui_cfg.get("payment_info")
-
-    if not payment_info or "+79000000000" in payment_info:
-        payment_info = "⚠️ Реквизиты временно не указаны. Пожалуйста, свяжитесь с администратором."
+    payment_info = get_payment_info_text(club_settings)
     user_id = callback.from_user.id
     if not await rate_limit(redis, f"rl:bot:sbp:{user_id}", 3, 60):
         await audit_block("bot_flow_blocked", "sbp_rate_limited", user_id=user_id)

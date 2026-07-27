@@ -35,6 +35,7 @@ small{color:#aaa}
     {% endfor %}
   </div>
 </div>
+<div id="payment-info" style="margin:8px 0 0;color:#aaa">Оплата по реквизитам доступна: <b>{{ payment_info }}</b></div>
 <div id="message" style="color:#aaa;min-height:20px"></div>
 <div id="items"></div>
 <a id="cart-link" class="link" href="/webapp/cart?club_id={{ club_id }}">🛒 Открыть корзину</a>
@@ -67,6 +68,8 @@ function checkoutProduct(productId, paymentMethod){
     } else if(d.charged){
       localStorage.removeItem('speedy_cart');
       alert(d.message||'Оплата прошла по сохраненной карте.');
+    } else if(d.review_required){
+      alert(d.message||'Заявка отправлена администратору.');
     } else {
       alert(d.message||'Готово');
     }
@@ -74,10 +77,11 @@ function checkoutProduct(productId, paymentMethod){
 }
 function render(){
   const list=products.filter(p=>!currentCategory||normalizeCategory(p.category)===currentCategory);
-  itemsEl.innerHTML=list.map(p=>`<div class="item">${thumbHtml(p)}<div class="row2"><b>${esc(p.name)}</b><span>${(p.price_kopecks/100).toFixed(2)} ₽</span></div><small>${esc(p.category)} · ${p.stock > 0 ? `осталось ${p.stock}` : 'закончился'}</small>${p.details?`<details class="product-details"><summary>Состав / описание</summary><div class="details-box">${esc(p.details)}</div></details>`:''}<div class="actions" style="margin-top:8px"><span class="pay-badge ${sbpEnabled?'sbp':''}">СБП${sbpEnabled?' доступна':' недоступна'}</span><button data-id="${p.id}" ${p.stock > 0 ? '' : 'disabled'}>В корзину</button><button data-buy="${p.id}" ${p.stock > 0 ? '' : 'disabled'}>Купить сейчас</button><button data-sbp="${p.id}" ${sbpEnabled && p.stock > 0 ? '' : 'disabled'}>СБП</button></div></div>`).join('')||'<p>Товаров пока нет.</p>';
+  itemsEl.innerHTML=list.map(p=>`<div class="item">${thumbHtml(p)}<div class="row2"><b>${esc(p.name)}</b><span>${(p.price_kopecks/100).toFixed(2)} ₽</span></div><small>${esc(p.category)} · ${p.stock > 0 ? `осталось ${p.stock}` : 'закончился'}</small>${p.details?`<details class="product-details"><summary>Состав / описание</summary><div class="details-box">${esc(p.details)}</div></details>`:''}<div class="actions" style="margin-top:8px"><span class="pay-badge ${sbpEnabled?'sbp':''}">СБП${sbpEnabled?' доступна':' недоступна'}</span><button data-id="${p.id}" ${p.stock > 0 ? '' : 'disabled'}>В корзину</button><button data-buy="${p.id}" ${p.stock > 0 ? '' : 'disabled'}>Купить сейчас</button><button data-sbp="${p.id}" ${sbpEnabled && p.stock > 0 ? '' : 'disabled'}>СБП</button><button data-manual="${p.id}" ${p.stock > 0 ? '' : 'disabled'}>По реквизитам</button></div></div>`).join('')||'<p>Товаров пока нет.</p>';
   itemsEl.querySelectorAll('[data-id]').forEach(b=>b.onclick=()=>{const p=products.find(x=>x.id===Number(b.dataset.id)); if(!p||p.stock<=0){document.getElementById('message').textContent='Товар закончился. Выберите другой.'; return;} const items=read(),x=items.find(x=>x.item_type==='product'&&x.product_id===p.id);if(x){if(x.quantity<p.stock)x.quantity++}else items.push({item_type:'product',product_id:p.id,name:p.name,price:p.price_kopecks,max:p.stock,quantity:1});save(items);updateCartLink();added()});
   itemsEl.querySelectorAll('[data-buy]').forEach(b=>b.onclick=()=>{const p=products.find(x=>x.id===Number(b.dataset.buy)); if(!p||p.stock<=0){document.getElementById('message').textContent='Товар закончился. Выберите другой.'; return;} checkoutProduct(Number(b.dataset.buy),'bank_card')});
   itemsEl.querySelectorAll('[data-sbp]').forEach(b=>b.onclick=()=>{const p=products.find(x=>x.id===Number(b.dataset.sbp)); if(!p||p.stock<=0){document.getElementById('message').textContent='Товар закончился. Выберите другой.'; return;} checkoutProduct(Number(b.dataset.sbp),'sbp')});
+  itemsEl.querySelectorAll('[data-manual]').forEach(b=>b.onclick=()=>{const p=products.find(x=>x.id===Number(b.dataset.manual)); if(!p||p.stock<=0){document.getElementById('message').textContent='Товар закончился. Выберите другой.'; return;} checkoutProduct(Number(b.dataset.manual),'requisites')});
 }
 document.getElementById('filters').onclick=e=>{const btn=e.target.closest('[data-cat]');if(!btn)return;currentCategory=normalizeCategory(btn.dataset.cat);document.querySelectorAll('.chip').forEach(x=>x.classList.toggle('active',x===btn));render()};
 render();updateCartLink();

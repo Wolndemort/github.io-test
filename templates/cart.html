@@ -9,8 +9,10 @@
     <select id="payment_method" class="pay-method">
       <option value="bank_card">Картой</option>
       <option value="sbp" {% if not sbp_enabled %}disabled{% endif %}>СБП{% if not sbp_enabled %} (недоступно){% endif %}</option>
+      <option value="requisites">По реквизитам</option>
     </select>
   </label>
+  <div class="muted" style="margin-bottom:8px;">Реквизиты совпадают с ботом: <b>{{ payment_info }}</b></div>
   <button id="checkout" disabled>Оплатить корзину</button>
   <button id="clear" style="margin-top:8px;width:100%">Очистить корзину</button>
 </div>

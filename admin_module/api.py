@@ -1,5 +1,6 @@
 import httpx
 import uuid
+from html import escape
 from loguru import logger
 from sqlalchemy import func
 from handlers.skud import trigger_dingtian_turnstile
@@ -24,6 +25,7 @@ from services.order_notifications import (
     format_order_items,
     notify_product_staff,
 )
+from services.payment_requisites import get_payment_info_text, build_payment_instruction_text
 import hmac
 import os
 import time
@@ -42,6 +44,7 @@ from fastapi.responses import HTMLResponse
 from fastapi import Depends, HTTPException, Security
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -207,6 +210,33 @@ class CashEntryPayload(BaseModel):
 
 def _student_identity_phone(value: str | None) -> str:
     return normalize_ru_phone(value) or ""
+
+
+def _student_age(student: Student) -> int | None:
+    birthday = getattr(student, "birthday", None)
+    if not birthday:
+        return None
+    today = datetime.now().date()
+    return today.year - birthday.year - ((today.month, today.day) < (birthday.month, birthday.day))
+
+
+def _tariff_age_error(student: Student, tariff: dict, discipline_name: str) -> str | None:
+    min_age = max(0, int(tariff.get("min_age", 0) or 0))
+    age = _student_age(student)
+    if min_age <= 0 or age is None or age >= min_age:
+        return None
+    return (
+        f"⚠️ <b>Доступ ограничен по возрасту!</b>\n\n"
+        f"На тариф секции <b>{escape(discipline_name)}</b> принимаются атлеты строго с <b>{min_age} лет</b>.\n"
+        f"Сейчас атлету <b>{escape(student.name)}</b> исполнилось <b>{age} лет</b>."
+    )
+
+
+def _manual_review_keyboard(order_id: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ Подтвердить", callback_data=f"manual_order_confirm_{order_id}"),
+         InlineKeyboardButton(text="❌ Отклонить", callback_data=f"manual_order_decline_{order_id}")]
+    ])
 class WebAppClubPayload(BaseModel):
     init_data: str
     club_id: int
@@ -1093,15 +1123,13 @@ async def cart_checkout(payload: CartCheckoutPayload, request: Request, session:
     if not club or not tg_user or not payload.items:
         raise HTTPException(400, "Корзина недоступна")
     settings = club.club_settings or {}; pay = settings.get("payments", {})
-    if not pay.get("yookassa_shop_id") or not pay.get("yookassa_secret_key"):
-        raise HTTPException(400, "YooKassa не настроена")
     payment_method = (payload.payment_method or "bank_card").strip().lower()
     if payment_method in {"yookassa_sbp", "sbp"}:
         payment_method = "sbp"
+    elif payment_method in {"requisites", "manual", "requisite"}:
+        payment_method = "requisites"
     else:
         payment_method = "bank_card"
-    if payment_method == "sbp" and not bool(pay.get("yookassa_sbp_enabled", True)):
-        raise HTTPException(400, "СБП отключена в настройках клуба")
     await _ensure_cart_user(session, club, tg_user)
     product_ids = [int(x["product_id"]) for x in payload.items if x.get("item_type", "product") == "product"]
     products = (await session.execute(select(ClubProduct).where(ClubProduct.club_id == club.id, ClubProduct.id.in_(product_ids), ClubProduct.is_active.is_(True)).with_for_update())).scalars().all() if product_ids else []
@@ -1122,14 +1150,18 @@ async def cart_checkout(payload: CartCheckoutPayload, request: Request, session:
                 cfg = (settings.get("disciplines", {}).get(str(raw.get("sport_type"))))
                 tariffs = cfg.get("tariffs", []) if cfg else []; idx = int(raw.get("tariff_idx", -1))
                 if idx < 0 or idx >= len(tariffs): raise HTTPException(400, "Тариф недоступен")
-                t = tariffs[idx]; price = int(float(t.get("price", 0)) * 100)
+                t = tariffs[idx]
+                age_error = _tariff_age_error(student, t, cfg.get("name", str(raw.get("sport_type")) if cfg else str(raw.get("sport_type"))))
+                if age_error:
+                    raise HTTPException(400, age_error)
+                price = int(float(t.get("price", 0)) * 100)
                 total += price * qty; normalized.append(("subscription", t, {"student_id": student.id, "discipline": raw.get("sport_type"), "price": price, "quantity": qty}))
             else:
                 days = int(raw.get("days", 0)); price = int(float(settings.get("limits", {}).get("freeze_price_per_day", 0)) * days * 100)
                 if days <= 0 or price <= 0: raise HTTPException(400, "Заморозка недоступна")
                 total += price * qty; normalized.append(("freeze", None, {"student_id": student.id, "days": days, "price": price, "quantity": qty}))
     order_id = f"CART_{uuid.uuid4().hex[:12].upper()}"
-    order = CartOrder(id=order_id, club_id=club.id, user_id=int(tg_user["id"]), amount_kopecks=total, status="NEW")
+    order = CartOrder(id=order_id, club_id=club.id, user_id=int(tg_user["id"]), amount_kopecks=total, status="NEW", provider_payment_id="MANUAL:REQUEST")
     session.add(order)
     # CartItem ссылается на CartOrder внешним ключом; фиксируем родительскую
     # строку до добавления позиций, поскольку ORM-связь не используется.
@@ -1139,6 +1171,32 @@ async def cart_checkout(payload: CartCheckoutPayload, request: Request, session:
         elif kind == "subscription": session.add(CartItem(cart_order_id=order_id, item_type=kind, title="Абонемент", quantity=info["quantity"], unit_price_kopecks=info["price"], payload=info | {"days": obj.get("days", 30), "count": obj.get("count", 0)}))
         else: session.add(CartItem(cart_order_id=order_id, item_type=kind, title="Заморозка", quantity=info["quantity"], unit_price_kopecks=info["price"], payload=info))
     await session.commit()
+    if payment_method == "requisites":
+        payment_info = get_payment_info_text(club.club_settings or {})
+        bot = Bot(club.bot_token)
+        try:
+            order_items = (await session.execute(select(CartItem).where(CartItem.cart_order_id == order_id))).scalars().all()
+            owner_text = build_payment_instruction_text(
+                title="Новая заявка на оплату по реквизитам",
+                amount_kopecks=total,
+                payment_info=payment_info,
+                extra_lines=[
+                    f"Клуб: <b>{escape(club.name)}</b>",
+                    f"Плательщик: <code>{int(tg_user['id'])}</code>",
+                    "",
+                    "Состав заявки:",
+                    format_order_items(order_items),
+                ],
+            )
+            if club.owner_id:
+                await bot.send_message(club.owner_id, owner_text, parse_mode="HTML", reply_markup=_manual_review_keyboard(order_id))
+        finally:
+            await bot.session.close()
+        return {"ok": True, "review_required": True, "message": f"Заявка по реквизитам отправлена администратору.\nРеквизиты: {payment_info}\nПосле подтверждения заказ активируется.", "total_kopecks": total}
+    if not pay.get("yookassa_shop_id") or not pay.get("yookassa_secret_key"):
+        raise HTTPException(400, "YooKassa не настроена")
+    if payment_method == "sbp" and not bool(pay.get("yookassa_sbp_enabled", True)):
+        raise HTTPException(400, "СБП отключена в настройках клуба")
     saved_subscription = (
         await session.execute(
             select(Subscription)
@@ -1147,7 +1205,7 @@ async def cart_checkout(payload: CartCheckoutPayload, request: Request, session:
             .limit(1)
         )
     ).scalar_one_or_none()
-    if (payload.payment_method or "bank_card").strip().lower() in {"bank_card", "card", "bank-card"} and saved_subscription and saved_subscription.rebill_id:
+    if payment_method == "bank_card" and saved_subscription and saved_subscription.rebill_id:
         charge = await YooKassaClient(shop_id=pay["yookassa_shop_id"], secret_key=pay["yookassa_secret_key"], proxy_url=PROXY_URL).charge_payment(
             order_id=order_id,
             amount_kopecks=total,

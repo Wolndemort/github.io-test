@@ -36,6 +36,8 @@ def test_cart_checkout_supports_mixed_items_and_rejects_dead_stock():
     api = Path("admin_module/api.py").read_text(encoding="utf-8")
     assert "kind in {\"subscription\", \"freeze\"}" in api
     assert "if not p or qty < 1 or qty > 99 or p.stock < qty" in api
+    assert "payment_method == \"requisites\"" in api
+    assert "_tariff_age_error" in api
     assert "pay_method_type" not in api
 
 
@@ -102,6 +104,14 @@ def test_cart_webhook_has_idempotent_confirmed_guard():
     assert 'str(order_id).startswith("CART_")' in source
     assert 'cart.status == "CONFIRMED"' in source
     assert 'cart.provider_payment_id = payment_id' in source
+
+
+def test_manual_review_buttons_are_registered_in_bot_router():
+    module = Path("handlers/manual_payment_review.py").read_text(encoding="utf-8")
+    admin_option = Path("handlers/admin_option.py").read_text(encoding="utf-8")
+    assert "manual_order_confirm_" in module
+    assert "manual_order_decline_" in module
+    assert "manual_payment_review_router" in admin_option
 
 def test_product_upload_contract_has_type_and_size_guards():
     source = Path("admin_module/api.py").read_text(encoding="utf-8")

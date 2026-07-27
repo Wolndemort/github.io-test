@@ -15,6 +15,12 @@ smoke -> backup/restore -> server deploy -> health/ready -> webhook/payment audi
 - `certbot`: production certificate renewal on the server; local Desktop uses a separate self-signed certificate.
 - `go2rtc`: video streams independent from the CRM/payment path.
 
+### Payments and checkout notes
+
+- Manual payment by requisites is available in bot and WebApp checkout flows.
+- WebApp checkout uses the same club requisites source as the bot.
+- Age limits on tariffs are enforced both in bot purchase flows and in WebApp/cart checkout.
+
 ## Schema and migration rules
 
 Alembic is mandatory for schema changes; `Base.metadata.create_all()` is not a
@@ -215,6 +221,7 @@ docker compose exec gym-api sh -c 'test -n "$SENTRY_DSN" && echo SENTRY_CONFIGUR
 - Сервер повторно проверяет остаток под блокировкой, списывает товар и создаёт подтверждённые `CartOrder`/`CartItem`.
 - Продажа отображается в `/admin/sales` как `product` с наличным способом оплаты.
 - Отдельный склад не нужен: остатки уже управляются в `/webapp/admin-products` вместе с созданием и редактированием товаров.
+- Owner/staff открывают турникет через `staff-pass`: один тап из панели или профиля, без QR и без student-session, проход пишется в аудит.
 
 ## Что можно делать дальше
 

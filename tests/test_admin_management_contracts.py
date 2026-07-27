@@ -1,6 +1,7 @@
 import pytest
 from pathlib import Path
 from pydantic import ValidationError
+from types import SimpleNamespace
 
 from admin_module.api import router
 from admin_module.schemas import AdminStudentUpdate
@@ -199,6 +200,7 @@ def test_subscription_forms_explain_unlimited_marker_999():
     tariffs = Path("templates/admin_tariffs.html").read_text(encoding="utf-8")
     assert "999" in bot
     assert "999" in tariffs
+    assert "По реквизитам" in bot
     assert "createDiscipline" in tariffs
     assert "newDisciplineName" in tariffs
     assert "Копировать тарифы из дисциплины" in tariffs
@@ -389,6 +391,22 @@ def test_client_cabinet_bottom_bar_is_collapsible_and_uses_high_contrast_actions
     assert ".bottom-bar.collapsed .inner" in page
     assert ".bottom-bar .btn.soft" in page
     assert ".bottom-bar .btn.dark" in page
+    assert "Кабинет сотрудника" in page
+    assert "/webapp/staff-pass?club_id={{ club_id }}&user_id={{ user_id }}" in page
+
+
+@pytest.mark.asyncio
+async def test_client_cabinet_detects_staff_mode_from_owner_or_active_staff():
+    from admin_module.webapp_client_cabinet import _is_staff_webapp_user
+
+    club = SimpleNamespace(id=12, owner_id=777)
+
+    class Db:
+        async def scalar(self, query):
+            return None
+
+    assert await _is_staff_webapp_user(Db(), club, 777) is True
+    assert await _is_staff_webapp_user(Db(), club, 123) is False
 
 
 def test_schedule_webapp_bottom_bar_is_collapsible():
@@ -722,6 +740,8 @@ def test_club_isolation_contracts_cover_webapp_system_api_and_payments():
     webapp = Path("admin_module/webapp_views.py").read_text(encoding="utf-8")
     system_api = Path("admin_module/system_api.py").read_text(encoding="utf-8")
     payments = Path("handlers/payments.py").read_text(encoding="utf-8")
+    requisites = Path("services/payment_requisites.py").read_text(encoding="utf-8")
+    manual_review = Path("handlers/manual_payment_review.py").read_text(encoding="utf-8")
 
     assert "Student.parent_id == user_id, Student.club_id == club.id" in webapp
     assert "club_id: int = Query(...)" in system_api
@@ -730,3 +750,25 @@ def test_club_isolation_contracts_cover_webapp_system_api_and_payments():
     assert "club_id = user.club_id or getattr(club" not in payments
     assert '"club_id": user.club_id' not in system_api
     assert "parent.club_id != data.club_id" not in system_api
+    assert "get_payment_info_text" in requisites
+    assert "manual_order_confirm_" in manual_review
+    assert "manual_order_decline_" in manual_review
+    assert "payment_info" in requisites
+
+
+def test_webapp_subscription_and_cart_support_requisites_and_age_gate():
+    cabinet = Path("admin_module/webapp_client_cabinet.py").read_text(encoding="utf-8")
+    api = Path("admin_module/api.py").read_text(encoding="utf-8")
+    shop = Path("templates/shop.html").read_text(encoding="utf-8")
+    cart = Path("templates/cart.html").read_text(encoding="utf-8")
+
+    assert "_tariff_age_error" in cabinet
+    assert "age_error" in cabinet
+    assert "payment_method == \"requisites\"" in cabinet
+    assert "ЮKassa не настроена" in cabinet
+    assert "payment_method == \"requisites\"" in api
+    assert "PaymentMethod" not in api
+    assert "По реквизитам" in shop
+    assert "payment-info" in shop
+    assert "payment_info" in cart
+    assert "По реквизитам" in cart

@@ -43,6 +43,7 @@ from handlers.admin_settings_panel import (
 from handlers.admin_payments_panel import router as admin_payments_router
 from handlers.admin_tariffs_schedule import router as admin_tariffs_schedule_router
 from handlers.admin_payment_info_panel import router as admin_payment_info_router
+from handlers.manual_payment_review import router as manual_payment_review_router
 
 
 router = Router()
@@ -51,6 +52,7 @@ router.include_router(admin_settings_router)
 router.include_router(admin_payments_router)
 router.include_router(admin_tariffs_schedule_router)
 router.include_router(admin_payment_info_router)
+router.include_router(manual_payment_review_router)
 
 # URL-контракты WebApp для админского магазина/склада
 ADMIN_PRODUCT_SALE_PATH = "/webapp/admin-product-sale"
