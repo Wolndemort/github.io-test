@@ -609,11 +609,15 @@ async def staff_add_role(callback: types.CallbackQuery, state: FSMContext, club:
         await state.clear(); return await callback.answer("Доступ запрещён", show_alert=True)
     role = callback.data.removeprefix("staff_role_")
     data = await state.get_data()
+    existing_user = await session.get(User, data["staff_telegram_id"])
+    staff_name = getattr(existing_user, "full_name", None) or getattr(callback.from_user, "full_name", None)
     existing = (await session.execute(select(ClubStaff).where(ClubStaff.club_id == club.id, ClubStaff.telegram_id == data["staff_telegram_id"]))).scalar_one_or_none()
     if existing:
         existing.role = role; existing.is_active = True
+        if staff_name and not existing.full_name:
+            existing.full_name = staff_name
     else:
-        session.add(ClubStaff(club_id=club.id, telegram_id=data["staff_telegram_id"], role=role, full_name=None))
+        session.add(ClubStaff(club_id=club.id, telegram_id=data["staff_telegram_id"], role=role, full_name=staff_name))
     await session.commit(); await state.clear()
     await callback.message.answer(f"✅ Сотрудник добавлен. Роль: {role}")
     await callback.answer()
