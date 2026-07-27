@@ -24,7 +24,7 @@
         <label>Дисциплина<input name="discipline" value="{{ s.discipline or '' }}"></label>
         <label>Статус<select name="is_frozen"><option value="0" {% if not s.is_frozen %}selected{% endif %}>Активен</option><option value="1" {% if s.is_frozen %}selected{% endif %}>Заморожен</option></select></label>
         <label>Дней заморозки<input name="frozen_days" type="number" min="1" max="365" value="{{ s.frozen_days or '' }}"></label>
-      </div><button type="submit">Сохранить</button><span class="muted msg"></span>
+      </div><div style="display:flex;gap:8px;flex-wrap:wrap"><button type="submit">Сохранить</button><button type="button" class="danger-delete">Удалить</button></div><span class="muted msg"></span>
     </form>
   {% else %}<p>Атлетов нет.</p>{% endfor %}
 </div>
@@ -202,7 +202,7 @@ function studentCardHtml(s) {
         <label>Дисциплина<input name="discipline" value="${esc(s.discipline || '')}"></label>
         <label>Статус<select name="is_frozen"><option value="0" ${s.is_frozen ? '' : 'selected'}>Активен</option><option value="1" ${s.is_frozen ? 'selected' : ''}>Заморожен</option></select></label>
         <label>Дней заморозки<input name="frozen_days" type="number" min="1" max="365" value="${esc(s.frozen_days || '')}"></label>
-      </div><button type="submit">Сохранить</button><span class="muted msg"></span>
+      </div><div style="display:flex;gap:8px;flex-wrap:wrap"><button type="submit">Сохранить</button><button type="button" class="danger-delete">Удалить</button></div><span class="muted msg"></span>
     </form>`;
 }
 
@@ -248,6 +248,25 @@ function attachBirthdayPickers(scope = document) {
       if (digits.length === 8) native.value = `${digits.slice(4)}-${digits.slice(2, 4)}-${digits.slice(0, 2)}`;
       if (native.showPicker) native.showPicker();
       else native.click();
+    });
+    form.querySelector('.danger-delete')?.addEventListener('click', async () => {
+      const name = form.querySelector('input[name="name"]')?.value || 'атлета';
+      if (!confirm(`Удалить ${name}? Это действие нельзя отменить.`)) return;
+      try {
+        const r = await fetch('/admin/students/' + form.dataset.id, {
+          method: 'DELETE',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ init_data: initData, club_id: clubId })
+        });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) {
+          alert(d.detail || 'Не удалось удалить атлета');
+          return;
+        }
+        form.remove();
+      } catch (e) {
+        alert('Ошибка удаления. Попробуйте ещё раз.');
+      }
     });
   });
 }

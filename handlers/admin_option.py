@@ -611,7 +611,7 @@ async def staff_add_role(callback: types.CallbackQuery, state: FSMContext, club:
     if existing:
         existing.role = role; existing.is_active = True
     else:
-        session.add(ClubStaff(club_id=club.id, telegram_id=data["staff_telegram_id"], role=role, full_name=callback.from_user.full_name))
+        session.add(ClubStaff(club_id=club.id, telegram_id=data["staff_telegram_id"], role=role, full_name=None))
     await session.commit(); await state.clear()
     await callback.message.answer(f"✅ Сотрудник добавлен. Роль: {role}")
     await callback.answer()

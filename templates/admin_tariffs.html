@@ -27,11 +27,15 @@ function draw() {
     <p class="muted">Подсказка: безлимитный тариф хранится как <b>999</b> занятий.</p>
     <p class="muted">Изменения синхронизируются с ботом автоматически.</p>
     ${(d.tariffs||[]).map((t,i)=>`<div class="tariff"><input id="p${i}" type="number" step="0.01" value="${t.price||0}"> ₽ <input id="days${i}" type="number" value="${t.days||30}"> дней <input id="count${i}" type="number" value="${t.count||0}" ${d.type==='unlimited'?'disabled':''}> занятий <button data-save="${i}">Сохранить</button><button data-del="${i}">Удалить</button></div>`).join('')}
+    <h3>Создать дисциплину</h3>
+    <input id="newDisciplineName" placeholder="Название дисциплины">
+    <button id="createDiscipline">Создать дисциплину</button>
     <h3>Новый тариф</h3><input id="np" type="number" step="0.01" placeholder="Цена ₽"><input id="nd" type="number" value="30" placeholder="Дней"><input id="nc" type="number" value="0" placeholder="Занятий"><button id="add">Добавить</button>
   </div>`;
   document.getElementById('d').onchange = () => { selected = document.getElementById('d').value; localStorage.setItem(storageKey, selected); draw(); };
   active.onclick = () => change('toggle_active');
   kind.onclick = () => change('toggle_type');
+  createDiscipline.onclick = () => change('create_discipline', null, {name:document.getElementById('newDisciplineName').value});
   add.onclick = () => change('add', null, {price:np.value, days:nd.value, count:nc.value});
   root.querySelectorAll('[data-save]').forEach(b=>b.onclick=()=>{const i=Number(b.dataset.save);change('update',i,{price:document.getElementById('p'+i).value,days:document.getElementById('days'+i).value,count:document.getElementById('count'+i).value})});
   root.querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>change('delete',Number(b.dataset.del)));

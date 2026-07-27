@@ -265,6 +265,41 @@ async def change_admin_tariff(payload: TariffChangePayload, request: Request, se
         if block["type"] == "unlimited":
             for tariff in tariffs:
                 tariff["count"] = 999
+    elif payload.action == "create_discipline":
+        raw_name = str((payload.tariff or {}).get("name", "")).strip()
+        if not raw_name:
+            raise HTTPException(400, "Введите название дисциплины")
+        code = "".join(ch.lower() if ch.isalnum() else "_" for ch in raw_name).strip("_")
+        code = "_".join(part for part in code.split("_") if part)[:32] or "discipline"
+        base_code = code
+        suffix = 2
+        while code in disciplines:
+            code = f"{base_code}_{suffix}"
+            suffix += 1
+        disciplines[code] = {
+            "name": raw_name,
+            "active": True,
+            "type": "lessons",
+            "schedule": {"mon": [], "tue": [], "wed": [], "thu": [], "fri": [], "sat": [], "sun": []},
+            "tariffs": [],
+        }
+        settings["disciplines"] = disciplines
+        await session.execute(update(Club).where(Club.id == club.id).values(club_settings=settings))
+        await session.commit()
+        redis = getattr(request.app.state, "redis_client", None)
+        if redis:
+            await redis.delete(f"club_config:{club.bot_token}")
+        audit_event(
+            "discipline_created",
+            **await audit_actor_context(session, club, tg_user, "webapp/admin-tariffs/change"),
+            club_id=club.id,
+            action="create",
+            object_type="discipline",
+            object_id=code,
+            discipline=code,
+            tariff={"name": raw_name},
+        )
+        return {"success": True, "discipline_code": code}
     elif payload.action == "add":
         tariff = payload.tariff or {}
         tariffs.append({"price": _as_float(tariff.get("price", 0)), "days": max(1, _as_int(tariff.get("days", 30), 30)), "count": 999 if block.get("type") == "unlimited" else max(0, _as_int(tariff.get("count", 0), 0)), "min_age": max(0, _as_int(tariff.get("min_age", 0), 0))})

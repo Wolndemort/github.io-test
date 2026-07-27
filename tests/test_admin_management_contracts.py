@@ -133,6 +133,8 @@ def test_admin_student_dates_are_text_inputs_with_autofill_formatting():
     assert "showPicker" in page
     assert "birthday-picker" in page
     assert "formatDMY" in page
+    assert "danger-delete" in page
+    assert "init_data: initData" in page
 
 
 def test_stats_freeze_dropdown_has_no_visible_title_and_revenue_has_date_filters():
@@ -197,6 +199,8 @@ def test_subscription_forms_explain_unlimited_marker_999():
     tariffs = Path("templates/admin_tariffs.html").read_text(encoding="utf-8")
     assert "999" in bot
     assert "999" in tariffs
+    assert "createDiscipline" in tariffs
+    assert "newDisciplineName" in tariffs
 
 
 def test_cash_register_and_stats_show_distinct_cashflow_terms():
@@ -208,6 +212,14 @@ def test_cash_register_and_stats_show_distinct_cashflow_terms():
     assert "Расходы сегодня" in stats
     assert "Маржа сегодня" in stats
     assert "Расходы за неделю" in stats
+
+
+def test_student_delete_endpoint_and_webapp_form_are_registered():
+    api = Path("admin_module/api.py").read_text(encoding="utf-8")
+    page = Path("templates/admin_students.html").read_text(encoding="utf-8")
+    assert '@router.delete("/admin/students/{student_id}")' in api
+    assert "student_deleted" in api
+    assert "danger-delete" in page
 
 
 def test_admin_settings_menu_top_block_uses_readable_labels():

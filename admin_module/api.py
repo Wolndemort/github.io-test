@@ -720,6 +720,42 @@ async def admin_update_student(
     return {"ok": True}
 
 
+@router.delete("/admin/students/{student_id}")
+async def admin_delete_student(
+    student_id: int,
+    payload: AdminStudentUpdate,
+    db: AsyncSession = Depends(get_session),
+):
+    club = (await db.execute(
+        select(Club).where(Club.id == payload.club_id).with_for_update()
+    )).scalar_one_or_none()
+    if not club:
+        raise HTTPException(status_code=404, detail="Клуб не найден")
+    if not verify_telegram_data(payload.init_data, club.bot_token):
+        raise HTTPException(status_code=403, detail="Доступ запрещён")
+    await verify_webapp_admin(club, payload.init_data)
+    student = await db.get(Student, student_id, with_for_update=True)
+    if not student or student.club_id != payload.club_id:
+        raise HTTPException(status_code=404, detail="Атлет не найден")
+    before = {
+        "name": student.name,
+        "discipline": student.discipline,
+        "parent_phone": student.parent_phone,
+    }
+    await db.delete(student)
+    await db.commit()
+    audit_event(
+        "student_deleted",
+        **await audit_actor_context(db, club, verify_telegram_data(payload.init_data, club.bot_token), "admin/students/{student_id}"),
+        club_id=payload.club_id,
+        action="delete",
+        object_type="student",
+        object_id=student_id,
+        changes=before,
+    )
+    return {"ok": True}
+
+
 @router.post("/admin/students")
 async def admin_create_student(
     payload: AdminStudentCreate,

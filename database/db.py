@@ -3,7 +3,7 @@ from typing import Optional, List
 from sqlalchemy.ext.mutable import MutableDict
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, DeclarativeBase, mapped_column, relationship
-from sqlalchemy import BigInteger, DateTime, String, func, Integer, ForeignKey, Boolean, or_, and_
+from sqlalchemy import BigInteger, DateTime, String, func, Integer, ForeignKey, Boolean, or_, and_, UniqueConstraint
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from config import db_file
 from datetime import datetime, date, timezone
@@ -48,6 +48,9 @@ class User(Base):
 
 class Student(Base):
     __tablename__ = 'students'
+    __table_args__ = (
+        UniqueConstraint("club_id", "name", "birthday", "discipline", "parent_phone", name="uq_students_club_name_bday_disc_phone"),
+    )
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     club_id: Mapped[Optional[int]] = mapped_column(ForeignKey('clubs.id'), index=True)
     parent_id: Mapped[int] = mapped_column(ForeignKey('users.user_id'), nullable=True, index=True)
