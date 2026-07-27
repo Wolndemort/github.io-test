@@ -36,7 +36,9 @@ def test_revenue_filters_are_collapsible_in_sales_and_cash_register():
     cash = Path("templates/cash_register.html").read_text(encoding="utf-8")
 
     assert "<details" in sales and "Фильтры" in sales
-    assert "<details>" in cash and "Фильтры" in cash
+    assert 'name="date_from"' in cash and 'name="date_to"' in cash
+    assert "Касса и финансовый журнал" in cash
+    assert "Все операции" in cash
 
 
 def test_admin_audit_screen_is_exposed_in_webapp_and_super_panel():
