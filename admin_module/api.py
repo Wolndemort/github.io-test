@@ -179,6 +179,12 @@ class ProductPayload(BaseModel):
     image_url: str | None = None
     details: str | None = None
 
+class ProductCategoryChangePayload(BaseModel):
+    init_data: str
+    club_id: int
+    category: str
+    replacement_category: str = "other"
+
 class CartCheckoutPayload(BaseModel):
     init_data: str
     club_id: int

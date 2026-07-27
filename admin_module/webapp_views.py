@@ -18,6 +18,7 @@ from admin_module.api import (
     AdminProductSalePayload,
     CashEntryPayload,
     ProductPayload,
+    ProductCategoryChangePayload,
     ScheduleChangePayload,
     TariffChangePayload,
 )
@@ -38,7 +39,20 @@ from services.schedule_utils import normalize_schedule_block
 from services.payment_requisites import get_payment_info_text
 
 def _normalize_category(value: str | None) -> str:
-    return (value or "other").strip().lower().replace("С‘", "Рµ") or "other"
+    return " ".join((value or "other").strip().casefold().replace("ё", "е").split()) or "other"
+
+async def _canonical_product_category(session: AsyncSession, club_id: int, value: str | None, *, exclude_id: int | None = None) -> str:
+    raw = " ".join((value or "other").strip().split()) or "other"
+    wanted = _normalize_category(raw)
+    query = select(ClubProduct).where(ClubProduct.club_id == club_id)
+    if exclude_id is not None:
+        query = query.where(ClubProduct.id != exclude_id)
+    products = (await session.execute(query.order_by(ClubProduct.id.asc()))).scalars().all()
+    for product in products:
+        existing = " ".join((product.category or "other").strip().split()) or "other"
+        if _normalize_category(existing) == wanted:
+            return existing
+    return raw[:30]
 
 def _build_category_list(products):
     labels = {}
@@ -207,7 +221,8 @@ async def admin_product_sale(payload: AdminProductSalePayload, session: AsyncSes
 async def create_product(payload: ProductPayload, session: AsyncSession = Depends(get_session)):
     club = await session.get(Club, payload.club_id); tg_user = await verify_webapp_staff(club, payload.init_data, session, "products_manage")
     if not payload.name.strip() or payload.price_kopecks <= 0 or payload.stock < 0: raise HTTPException(400, "РќРµРєРѕСЂСЂРµРєС‚РЅС‹Рµ РґР°РЅРЅС‹Рµ С‚РѕРІР°СЂР°")
-    p = ClubProduct(club_id=payload.club_id, name=payload.name.strip()[:120], image_url=(payload.image_url or "")[:500] or None, category=payload.category[:30], price_kopecks=payload.price_kopecks, stock=payload.stock, is_active=payload.is_active, details=(payload.details or "").strip()[:1000] or None)
+    category = await _canonical_product_category(session, payload.club_id, payload.category)
+    p = ClubProduct(club_id=payload.club_id, name=payload.name.strip()[:120], image_url=(payload.image_url or "")[:500] or None, category=category, price_kopecks=payload.price_kopecks, stock=payload.stock, is_active=payload.is_active, details=(payload.details or "").strip()[:1000] or None)
     session.add(p); await session.commit()
     audit_event(
         "product_created",
@@ -223,6 +238,37 @@ async def create_product(payload: ProductPayload, session: AsyncSession = Depend
         is_active=p.is_active,
     )
     return {"success": True}
+
+@router.post("/webapp/admin-product-categories/delete")
+async def delete_product_category(payload: ProductCategoryChangePayload, session: AsyncSession = Depends(get_session)):
+    club = await session.get(Club, payload.club_id)
+    tg_user = await verify_webapp_staff(club, payload.init_data, session, "products_manage")
+    source = " ".join((payload.category or "").strip().split())
+    replacement = " ".join((payload.replacement_category or "other").strip().split()) or "other"
+    if not source:
+        raise HTTPException(400, "Категория не указана")
+    if _normalize_category(source) == _normalize_category(replacement):
+        raise HTTPException(400, "Выберите другую категорию для переноса")
+    products = (await session.execute(select(ClubProduct).where(ClubProduct.club_id == payload.club_id))).scalars().all()
+    affected = [p for p in products if _normalize_category(p.category) == _normalize_category(source)]
+    if not affected:
+        raise HTTPException(404, "Категория не найдена")
+    target = await _canonical_product_category(session, payload.club_id, replacement)
+    for product in affected:
+        product.category = target
+    await session.commit()
+    audit_event(
+        "product_category_deleted",
+        **await audit_actor_context(session, club, tg_user, "webapp/admin-product-categories/delete"),
+        club_id=payload.club_id,
+        action="delete",
+        object_type="product_category",
+        object_id=source,
+        category=source,
+        replacement_category=target,
+        affected_products=len(affected),
+    )
+    return {"success": True, "replacement_category": target, "affected_products": len(affected)}
 
 @router.post("/webapp/admin-products/upload-image")
 async def upload_product_image(club_id: int, init_data: str, image: UploadFile = File(...), session: AsyncSession = Depends(get_session)):
@@ -244,7 +290,8 @@ async def update_product(product_id: int, payload: ProductPayload, session: Asyn
     if not p or p.club_id != payload.club_id: raise HTTPException(404, "РўРѕРІР°СЂ РЅРµ РЅР°Р№РґРµРЅ")
     if not payload.name.strip() or payload.price_kopecks <= 0 or payload.stock < 0: raise HTTPException(400, "РќРµРєРѕСЂСЂРµРєС‚РЅС‹Рµ РґР°РЅРЅС‹Рµ С‚РѕРІР°СЂР°")
     before = {"name": p.name, "image_url": p.image_url, "category": p.category, "price_kopecks": p.price_kopecks, "stock": p.stock, "is_active": p.is_active, "details": p.details}
-    p.name=payload.name.strip()[:120]; p.image_url=(payload.image_url or "")[:500] or None; p.category=payload.category[:30]; p.price_kopecks=payload.price_kopecks; p.stock=payload.stock; p.is_active=payload.is_active; p.details=(payload.details or "").strip()[:1000] or None
+    category = await _canonical_product_category(session, payload.club_id, payload.category, exclude_id=p.id)
+    p.name=payload.name.strip()[:120]; p.image_url=(payload.image_url or "")[:500] or None; p.category=category; p.price_kopecks=payload.price_kopecks; p.stock=payload.stock; p.is_active=payload.is_active; p.details=(payload.details or "").strip()[:1000] or None
     await session.commit()
     audit_event(
         "product_updated",
