@@ -135,6 +135,8 @@ async def admin_product_sale(payload: AdminProductSalePayload, session: AsyncSes
         selected_student = await session.get(Student, int(payload.student_id))
         if not selected_student or selected_student.club_id != payload.club_id:
             raise HTTPException(400, "Selected athlete is unavailable")
+        # Student.parent_id is the Telegram user id used to deliver the receipt.
+        selected_parent_id = selected_student.parent_id
     await session.commit()
     audit_event(
         "product_sale_cash_created",
@@ -158,28 +160,28 @@ async def admin_product_sale(payload: AdminProductSalePayload, session: AsyncSes
             for product, quantity in normalized
         ]
         owner_text = build_owner_receipt_text(
-            title="РќР°Р»РёС‡РЅР°СЏ РїСЂРѕРґР°Р¶Р° С‚РѕРІР°СЂРѕРІ",
+            title="Наличная продажа товаров",
             order_id=order_id,
-            buyer_label="РќР°Р»РёС‡РЅР°СЏ РїСЂРѕРґР°Р¶Р°",
+            buyer_label="Наличная продажа",
             items_text=format_order_items(notice_items, product_only=True),
             amount_kopecks=total,
-            extra_lines=["РЎРїРѕСЃРѕР±: <b>РќР°Р»РёС‡РЅС‹Рµ</b>"],
+            extra_lines=["Способ: <b>Наличные</b>"],
         )
         if club.owner_id:
             await bot.send_message(club.owner_id, owner_text, parse_mode="HTML")
         if selected_parent_id:
-            buyer_label = await resolve_user_label(session, selected_parent_id, empty_label="РџР»Р°С‚РµР»СЊС‰РёРє")
-            student_label = escape(selected_student.name if selected_student else "РђС‚Р»РµС‚")
+            buyer_label = await resolve_user_label(session, selected_parent_id, empty_label="Плательщик")
+            student_label = escape(selected_student.name if selected_student else "Атлет")
             parent_text = build_owner_receipt_text(
-                title="РџРѕРєСѓРїРєР° С‚РѕРІР°СЂРѕРІ РїРѕРґС‚РІРµСЂР¶РґРµРЅР°",
+                title="Покупка товаров подтверждена",
                 order_id=order_id,
                 buyer_label=buyer_label,
                 items_text=format_order_items(notice_items, product_only=True),
                 amount_kopecks=total,
                 extra_lines=[
-                    f"РђС‚Р»РµС‚: <b>{student_label}</b>",
-                    f"РљР»СѓР±: <b>{escape(club.name)}</b>",
-                    "Р§РµРє РёР· РјР°РіР°Р·РёРЅР° СЃС„РѕСЂРјРёСЂРѕРІР°РЅ Р±Р°СЂРёСЃС‚Р°.",
+                    f"Атлет: <b>{student_label}</b>",
+                    f"Клуб: <b>{escape(club.name)}</b>",
+                    "Чек из магазина сформирован на кассе.",
                 ],
             )
             await bot.send_message(selected_parent_id, parent_text, parse_mode="HTML")
@@ -188,12 +190,12 @@ async def admin_product_sale(payload: AdminProductSalePayload, session: AsyncSes
             club,
             session,
             build_staff_alert_text(
-                title="РќРѕРІР°СЏ РїСЂРѕРґР°Р¶Р° С‚РѕРІР°СЂРѕРІ",
+                title="Новая продажа товаров",
                 order_id=order_id,
-                buyer_label="РќР°Р»РёС‡РЅР°СЏ РїСЂРѕРґР°Р¶Р°",
+                buyer_label="Наличная продажа",
                 items_text=format_order_items(notice_items, product_only=True),
                 amount_kopecks=total,
-                badge="в•",
+                badge="📦",
             ),
         )
         await bot.session.close()
