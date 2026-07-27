@@ -145,6 +145,28 @@ def test_admin_products_filter_normalizes_existing_category_values():
     assert "normalizeCategory(x.category)===filter" in page
 
 
+def test_admin_product_categories_use_autocomplete_and_safe_delete_contract():
+    page = Path("templates/admin_products.html").read_text(encoding="utf-8")
+    views = Path("admin_module/webapp_views.py").read_text(encoding="utf-8")
+    api = Path("admin_module/api.py").read_text(encoding="utf-8")
+    assert 'list="categorySuggestions"' in page
+    assert '<datalist id="categorySuggestions"></datalist>' in page
+    assert 'id="preset"' not in page
+    assert "categorySuggestions.insertAdjacentHTML" in page
+    assert 'type="button"' in page and 'id="saveBtn"' in page
+    assert "/webapp/admin-product-categories/delete" in views
+    assert "replacement_category" in views
+    assert "ProductCategoryChangePayload" in api
+    assert "_canonical_product_category" in views
+
+
+def test_manual_requisite_orders_have_unique_provider_ids():
+    api = Path("admin_module/api.py").read_text(encoding="utf-8")
+    cabinet = Path("admin_module/webapp_client_cabinet.py").read_text(encoding="utf-8")
+    assert 'provider_payment_id=f"MANUAL:{order_id}"' in api
+    assert 'provider_payment_id=f"MANUAL:{order_id}"' in cabinet
+
+
 def test_webapp_category_lists_collapse_case_and_yo_variants():
     products = [
         type("P", (), {"category": "Кофе"})(),

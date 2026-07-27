@@ -223,7 +223,7 @@ def admin_keyboard(club_id: int, club_settings: dict, subscription_date: datetim
         shop_row.append(
             types.InlineKeyboardButton(
                 text="📦 Склад товаров",
-                web_app=types.WebAppInfo(url=f"https://{club_id}.speedycrm.ru/webapp/admin-products?club_id={club_id}")
+                web_app=types.WebAppInfo(url=f"https://{club_id}.speedycrm.ru/webapp/admin-products?club_id={club_id}&v=108")
             )
         )
     if shop_row:
