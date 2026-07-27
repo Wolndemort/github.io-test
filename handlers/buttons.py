@@ -32,6 +32,11 @@ def get_profile_keyboard(user, club_id: int, club_settings: dict, is_authorized:
             text="📱 FaceID для прохода",
             web_app=WebAppInfo(url=f"{base_url}/webapp/staff-pass?club_id={club_id}&user_id={user.user_id}")
         ))
+        if club_settings.get("features", {}).get("qr_checkin", True):
+            builder.row(types.InlineKeyboardButton(
+                text="📝 Отметить посещение",
+                callback_data="admin_manual_visit"
+            ))
         if club_settings.get("features", {}).get("schedule", True):
             builder.row(types.InlineKeyboardButton(
                 text="📅 Расписание (WebApp)",
