@@ -83,7 +83,7 @@ const categoryTools = document.getElementById('categoryTools');
 const list = document.getElementById('list');
 const n = document.getElementById('n');
 const c = document.getElementById('c');
-const details = document.getElementById('details');
+const detailsInput = document.getElementById('details');
 const p = document.getElementById('p');
 const s = document.getElementById('s');
 const i = document.getElementById('i');
@@ -154,7 +154,7 @@ function editItem(id){
   p.value=x.price_kopecks/100;
   s.value=x.stock;
   i.value=x.image_url||'';
-  details.value=x.details||'';
+  detailsInput.value=x.details||'';
   a.checked=x.is_active;
   caption.textContent='Изменить товар';
   productForm.scrollIntoView({behavior:'smooth', block:'start'});
@@ -162,7 +162,7 @@ function editItem(id){
 
 function reset(){
   edit=null;
-  n.value=c.value=p.value=s.value=i.value=details.value='';
+  n.value=c.value=p.value=s.value=i.value=detailsInput.value='';
   file.value='';
   a.checked=true;
   caption.textContent='Новый товар';
@@ -178,13 +178,13 @@ async function save(){
       if(!u.ok) return alert(ud.detail||'Ошибка загрузки');
       image=ud.image_url;
     }
-    const body={init_data:tg?.initData||'',club_id:cid,name:n.value,category:c.value||'other',price_kopecks:Math.round(Number(p.value)*100),stock:Number(s.value)||0,is_active:a.checked,image_url:image,details:details.value};
+    const body={init_data:tg?.initData||'',club_id:cid,name:n.value,category:c.value||'other',price_kopecks:Math.round(Number(p.value)*100),stock:Number(s.value)||0,is_active:a.checked,image_url:image,details:document.getElementById('details')?.value||''};
     const r=await fetch(edit?'/webapp/admin-products/'+edit:'/webapp/admin-products',{method:edit?'PATCH':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
     if(!r.ok) return alert((await r.json()).detail||'Ошибка');
     location.reload();
   }catch(error){
     console.error('Не удалось сохранить товар',error);
-    alert('Не удалось сохранить товар. Откройте консоль браузера для подробностей.');
+    alert('Не удалось сохранить товар: '+(error?.message||error));
   }
 }
 
