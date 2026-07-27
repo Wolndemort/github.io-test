@@ -641,7 +641,7 @@ async def webapp_buy_subscription_submit(payload: WebAppBuySubscriptionPayload, 
         active_pending.status = "FAILED"
         await db.commit()
     order_id = f"WEB_{uuid.uuid4().hex[:12].upper()}"
-    order = PaymentOrder(id=order_id, user_id=user_id, student_id=student.id, club_id=club.id, amount_kopecks=amount_kopecks, lesson_count=count, days_to_add=days, discipline=payload.sport_type, status="NEW", type="FIRST", provider_payment_id="MANUAL:REQUEST")
+    order = PaymentOrder(id=order_id, user_id=user_id, student_id=student.id, club_id=club.id, amount_kopecks=amount_kopecks, lesson_count=count, days_to_add=days, discipline=payload.sport_type, status="NEW", type="FIRST", provider_payment_id=f"MANUAL:{order_id}")
     db.add(order)
     await db.commit()
     if payment_method == "requisites":
@@ -847,7 +847,7 @@ async def webapp_buy_freeze_submit(payload: WebAppActionPayload, request: Reques
         discipline="freeze",
         status="NEW",
         type=f"FREEZE_{days}",
-        provider_payment_id="MANUAL:REQUEST",
+        provider_payment_id=f"MANUAL:{order_id}",
     )
     db.add(order)
     await db.commit()

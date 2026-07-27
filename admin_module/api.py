@@ -1209,7 +1209,7 @@ async def cart_checkout(payload: CartCheckoutPayload, request: Request, session:
                 if days <= 0 or price <= 0: raise HTTPException(400, "Заморозка недоступна")
                 total += price * qty; normalized.append(("freeze", None, {"student_id": student.id, "days": days, "price": price, "quantity": qty}))
     order_id = f"CART_{uuid.uuid4().hex[:12].upper()}"
-    order = CartOrder(id=order_id, club_id=club.id, user_id=int(tg_user["id"]), amount_kopecks=total, status="NEW", provider_payment_id="MANUAL:REQUEST")
+    order = CartOrder(id=order_id, club_id=club.id, user_id=int(tg_user["id"]), amount_kopecks=total, status="NEW", provider_payment_id=f"MANUAL:{order_id}")
     session.add(order)
     # CartItem ссылается на CartOrder внешним ключом; фиксируем родительскую
     # строку до добавления позиций, поскольку ORM-связь не используется.

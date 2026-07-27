@@ -81,8 +81,24 @@ const normalizeCategory=x=>String(x??'other').trim().toLowerCase().replace(/ё/g
 const categoryMap=new Map();
 items.forEach(x=>{const raw=String(x.category||'other').trim()||'other',key=normalizeCategory(raw);if(!categoryMap.has(key))categoryMap.set(key,raw);});
 const categories=[...categoryMap.values()].sort((a,b)=>a.localeCompare(b,'ru'));
-categories.forEach(x=>categoryFilter.insertAdjacentHTML('beforeend',`<option value="${esc(x)}">${esc(x)}</option>`));
 const productForm = document.getElementById('productForm');
+const categoryFilter = document.getElementById('categoryFilter');
+const categoryTools = document.getElementById('categoryTools');
+const list = document.getElementById('list');
+const n = document.getElementById('n');
+const c = document.getElementById('c');
+const p = document.getElementById('p');
+const s = document.getElementById('s');
+const i = document.getElementById('i');
+const file = document.getElementById('file');
+const a = document.getElementById('a');
+const caption = document.getElementById('caption');
+const saveBtn = document.getElementById('saveBtn');
+const resetBtn = document.getElementById('resetBtn');
+const createBtn = document.getElementById('createBtn');
+const topBtn = document.getElementById('topBtn');
+const scrollTopBtn = document.getElementById('scrollTopBtn');
+categories.forEach(x=>categoryFilter.insertAdjacentHTML('beforeend',`<option value="${esc(x)}">${esc(x)}</option>`));
 
 function thumb(x){
   if(x.image_url) return `<div class="thumb"><img src="${esc(x.image_url)}" alt="${esc(x.name)}"></div>`;
