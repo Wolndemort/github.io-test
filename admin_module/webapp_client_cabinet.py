@@ -291,6 +291,7 @@ async def get_client_cabinet_page(request: Request, club_id: int, init_data: str
     if not tg_user:
         raise HTTPException(status_code=403, detail="Доступ запрещен")
     user_id = int(tg_user.get("id", 0))
+    is_staff_mode = await _is_staff_webapp_user(db, club, user_id)
     user = await _ensure_webapp_user_linked(db, user_id, club_id)
     if not user:
         return await webapp_auth_help_page(request=request, club_id=club_id, init_data=init_data, db=db)
