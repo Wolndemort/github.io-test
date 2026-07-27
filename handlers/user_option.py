@@ -16,6 +16,7 @@ from config import secret_key
 from sqlalchemy import select
 from sqlalchemy import func
 from handlers.buttons import get_main_menu_keyboard, get_profile_keyboard, get_section_menu_kb
+from admin_module.utils import is_active_staff_member
 from services.schedule_utils import normalize_schedule_block
 from services.visit_history import attach_student_names, group_completed_sessions, summarize_payment_entry, moscow_str
 from aiogram.fsm.context import FSMContext
@@ -187,6 +188,7 @@ async def universal_profile_handler(
         club_settings=club_settings,
         is_authorized=is_auth,
         missing_birthdays=missing_birthdays if is_auth else 0,
+        profile_mode="staff" if await is_active_staff_member(session, club.id, user_id) and user_id != int(club.owner_id or 0) else "client",
     )
     # Переносим event.answer() в самое начало блока отправки,
     # чтобы кнопка отжималась моментально в 100% случаев, предотвращая зависание UI

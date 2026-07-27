@@ -25,6 +25,7 @@ from database.db import (
     get_expire_students_grouped,
 )
 from handlers.buttons import get_profile_keyboard
+from admin_module.utils import is_active_staff_member
 from services.order_notifications import notify_stock_reminders
 from services.analytics import calculate_admin_dashboard, calculate_daily_business_report, reporting_periods
 from services.bot_registry import bots_dict
@@ -309,6 +310,7 @@ async def check_abon_mailing():
                     user=parent_user,
                     club_settings=club_settings,
                     is_authorized=True,
+                    profile_mode="staff" if await is_active_staff_member(session, club.id, parent_user.user_id) and parent_user.user_id != int(club.owner_id or 0) else "client",
                 )
 
                 if not await _notification_once(notification_key, ttl=7 * 86400):

@@ -86,6 +86,8 @@ async def admin_product_sale_page(request: Request, club_id: int = Query(...), i
     products = (await session.execute(select(ClubProduct).where(ClubProduct.club_id == club_id, ClubProduct.is_active.is_(True)).order_by(ClubProduct.category, ClubProduct.name))).scalars().all()
     product_data = [{"id": p.id, "name": p.name, "category": p.category, "price_kopecks": p.price_kopecks, "stock": p.stock, "image_url": p.image_url, "details": p.details} for p in products]
     categories = _build_category_list(products)
+    students = (await session.execute(select(Student).where(Student.club_id == club_id).order_by(Student.name))).scalars().all()
+    student_data = [{"id": s.id, "name": s.name, "parent_id": s.parent_id} for s in students]
     today = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=None)
     recent_orders = (await session.execute(select(CartOrder).where(CartOrder.club_id == club_id, CartOrder.status == "CONFIRMED", CartOrder.created_at >= today).order_by(CartOrder.created_at.desc()).limit(20))).scalars().all()
     recent_sales = []
@@ -98,7 +100,7 @@ async def admin_product_sale_page(request: Request, club_id: int = Query(...), i
             "items": [{"title": item.title, "quantity": item.quantity} for item in item_rows],
             "payment_method": "Наличные" if str(order.provider_payment_id or "").startswith("CASH:") else "Онлайн",
         })
-    return templates.TemplateResponse("admin_product_sale.html", {"request": request, "club_id": club_id, "products": product_data, "categories": categories, "recent_sales": recent_sales, "today": today.date().isoformat()})
+    return templates.TemplateResponse("admin_product_sale.html", {"request": request, "club_id": club_id, "products": product_data, "categories": categories, "students": student_data, "recent_sales": recent_sales, "today": today.date().isoformat()})
 
 @router.post("/webapp/admin-product-sale")
 async def admin_product_sale(payload: AdminProductSalePayload, session: AsyncSession = Depends(get_session)):
@@ -135,8 +137,18 @@ async def admin_product_sale(payload: AdminProductSalePayload, session: AsyncSes
         source="cash_sale",
         method="cash",
         amount_kopecks=total,
+        student_id=selected_student.id if selected_student else None,
+        parent_id=selected_parent_id,
         items=[{"product_id": product.id, "name": product.name, "quantity": quantity} for product, quantity in normalized],
     )
+    selected_student = None
+    selected_parent_id = None
+    if payload.student_id is not None:
+        selected_student = await session.get(Student, int(payload.student_id))
+        if not selected_student or selected_student.club_id != payload.club_id:
+            raise HTTPException(400, "Выбранный атлет недоступен")
+        selected_parent_id = selected_student.parent_id
+
     try:
         bot = Bot(club.bot_token)
         notice_items = [
@@ -153,6 +165,22 @@ async def admin_product_sale(payload: AdminProductSalePayload, session: AsyncSes
         )
         if club.owner_id:
             await bot.send_message(club.owner_id, owner_text, parse_mode="HTML")
+        if selected_parent_id:
+            buyer_label = await resolve_user_label(session, selected_parent_id, empty_label="Плательщик")
+            student_label = escape(selected_student.name if selected_student else "Атлет")
+            parent_text = build_owner_receipt_text(
+                title="Покупка товаров подтверждена",
+                order_id=order_id,
+                buyer_label=buyer_label,
+                items_text=format_order_items(notice_items, product_only=True),
+                amount_kopecks=total,
+                extra_lines=[
+                    f"Атлет: <b>{student_label}</b>",
+                    f"Клуб: <b>{escape(club.name)}</b>",
+                    "Чек из магазина сформирован бариста.",
+                ],
+            )
+            await bot.send_message(selected_parent_id, parent_text, parse_mode="HTML")
         await notify_product_staff(
             bot,
             club,

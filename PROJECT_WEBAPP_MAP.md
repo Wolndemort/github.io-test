@@ -80,6 +80,7 @@ volume as a migration fix.
 - `/webapp/client-cabinet/buy-subscription` — покупка абонемента.
 - `/webapp/client-cabinet/auth` — привязка профиля по номеру.
 - `/webapp/biometric-pass` — FaceID / QR-переход.
+- `/webapp/staff-pass` — отдельный staff-pass без QR и без student-session.
 - `/webapp/client-cabinet/buy-freeze` — экран покупки заморозки.
 - `/webapp/client-cabinet/freeze` — экран бесплатной заморозки.
 - `/webapp/client-cabinet/history` — история оплат и подписок.
@@ -210,6 +211,7 @@ docker compose exec gym-api sh -c 'test -n "$SENTRY_DSN" && echo SENTRY_CONFIGUR
 - Дополнительный вход: `Админ → Настройки клуба → Продажа товаров за наличные`.
 - WebApp: `GET /webapp/admin-product-sale`; оформление: `POST /webapp/admin-product-sale`.
 - Интерфейс использует корзину: `+`, `−`, ручное количество, список выбранных товаров, остатки и итог.
+- В админской продаже товаров можно выбрать атлета, чтобы чек ушёл его родителю.
 - Сервер повторно проверяет остаток под блокировкой, списывает товар и создаёт подтверждённые `CartOrder`/`CartItem`.
 - Продажа отображается в `/admin/sales` как `product` с наличным способом оплаты.
 - Отдельный склад не нужен: остатки уже управляются в `/webapp/admin-products` вместе с созданием и редактированием товаров.

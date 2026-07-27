@@ -8,7 +8,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 router = Router()
 
 
-def get_profile_keyboard(user, club_id: int, club_settings: dict, is_authorized: bool = False, missing_birthdays: int = 0):
+def get_profile_keyboard(user, club_id: int, club_settings: dict, is_authorized: bool = False, missing_birthdays: int = 0, profile_mode: str = "client"):
     """
     Передаем объект user (модель User из БД), чтобы динамически подставлять
     его club_id и user_id в ссылку WebApp.
@@ -21,24 +21,36 @@ def get_profile_keyboard(user, club_id: int, club_settings: dict, is_authorized:
     # Формируем базовый URL с изоляцией поддомена по club_id
     base_url = f"https://{club_id}.speedycrm.ru"
 
-    # 1. Проход и быстрый доступ
-    builder.row(types.InlineKeyboardButton(
-        text="📱 Проход по FaceID",
-        web_app=WebAppInfo(url=f"{base_url}/webapp/biometric-pass?club_id={club_id}&user_id={user.user_id}")
-    ))
+    is_staff_mode = str(profile_mode).strip().casefold() == "staff"
 
-    builder.row(
-        types.InlineKeyboardButton(text="📲 QR-пропуск", callback_data="show_qr"),
-        types.InlineKeyboardButton(text="🔍 Мои атлеты", callback_data="detailed_status_info"),
-    )
-    builder.row(types.InlineKeyboardButton(
-        text="🛒 Магазин и корзина (WebApp)",
-        web_app=WebAppInfo(url=f"{base_url}/webapp/shop?club_id={club_id}")
-    ))
-    builder.row(
-        types.InlineKeyboardButton(text="🧾 История", callback_data="payment_history"),
-        types.InlineKeyboardButton(text="💳 Абонемент", callback_data="choose_section"),
-    )
+    if is_staff_mode:
+        builder.row(types.InlineKeyboardButton(
+            text="🔓 Открыть турникет",
+            web_app=WebAppInfo(url=f"{base_url}/webapp/staff-pass?club_id={club_id}&user_id={user.user_id}")
+        ))
+        builder.row(types.InlineKeyboardButton(
+            text="📱 FaceID для прохода",
+            web_app=WebAppInfo(url=f"{base_url}/webapp/staff-pass?club_id={club_id}&user_id={user.user_id}")
+        ))
+    else:
+        # 1. Проход и быстрый доступ
+        builder.row(types.InlineKeyboardButton(
+            text="📱 Проход по FaceID",
+            web_app=WebAppInfo(url=f"{base_url}/webapp/biometric-pass?club_id={club_id}&user_id={user.user_id}")
+        ))
+
+        builder.row(
+            types.InlineKeyboardButton(text="📲 QR-пропуск", callback_data="show_qr"),
+            types.InlineKeyboardButton(text="🔍 Мои атлеты", callback_data="detailed_status_info"),
+        )
+        builder.row(types.InlineKeyboardButton(
+            text="🛒 Магазин и корзина (WebApp)",
+            web_app=WebAppInfo(url=f"{base_url}/webapp/shop?club_id={club_id}")
+        ))
+        builder.row(
+            types.InlineKeyboardButton(text="🧾 История", callback_data="payment_history"),
+            types.InlineKeyboardButton(text="💳 Абонемент", callback_data="choose_section"),
+        )
 
     # 2. Дополнительные данные атлетов
     if missing_birthdays and missing_birthdays > 0:
@@ -48,17 +60,18 @@ def get_profile_keyboard(user, club_id: int, club_settings: dict, is_authorized:
     # 3. Покупки и абонемент
     if features.get("online_payments", False):
         pass  # Кнопка «💳 Абонемент» выше уже ведёт к покупке.
-    if club_settings.get("limits", {}).get("freeze_price_per_day", 0) > 0:
+    if not is_staff_mode and club_settings.get("limits", {}).get("freeze_price_per_day", 0) > 0:
         builder.row(
             types.InlineKeyboardButton(text="❄️ Купить заморозку", callback_data="buy_freeze"),
             types.InlineKeyboardButton(text="💳 Управление картами", callback_data="manage_subscription"),
         )
 
     # 4. Управление атлетами
-    builder.row(types.InlineKeyboardButton(text="➕ Добавить атлета", callback_data="add_athlete"))
+    if not is_staff_mode:
+        builder.row(types.InlineKeyboardButton(text="➕ Добавить атлета", callback_data="add_athlete"))
 
     # 5. Заморозка действующего абонемента
-    if features.get("freeze", True):
+    if not is_staff_mode and features.get("freeze", True):
         builder.row(types.InlineKeyboardButton(text="❄️ Заморозить абонемент", callback_data="freeze_sub"))
 
     # 6. Навигация и авторизация

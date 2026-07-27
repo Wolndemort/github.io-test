@@ -30,6 +30,19 @@ async def verify_webapp_staff(club: Club, init_data: str | None, session, permis
     return tg_user
 
 
+async def is_active_staff_member(session, club_id: int, telegram_id: int) -> bool:
+    staff = (
+        await session.execute(
+            select(ClubStaff).where(
+                ClubStaff.club_id == club_id,
+                ClubStaff.telegram_id == telegram_id,
+                ClubStaff.is_active.is_(True),
+            )
+        )
+    ).scalar_one_or_none()
+    return bool(staff)
+
+
 def get_club_id_from_host(request: Request) -> int:
     host = request.headers.get("host", "")
     subdomain = host.split(".")[0]

@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>Проход сотрудника</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <link rel="stylesheet" href="{{ url_for('static', path='css/mono.css') }}?v=1.1.0">
+    <style>
+        body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f4f4f4; color: #111; padding: 18px; padding-top: max(18px, env(safe-area-inset-top)); padding-bottom: max(18px, env(safe-area-inset-bottom)); }
+        .wrap { width: 100%; max-width: 680px; margin: 0 auto; }
+        .top { background: linear-gradient(180deg,#fff,#fafafa); border: 1px solid #d9d9d9; border-radius: 24px; padding: 20px; box-shadow: 0 14px 40px rgba(0,0,0,.06); margin-bottom: 12px; }
+        .eyebrow { text-transform: uppercase; letter-spacing: .18em; font-size: 11px; color: #666; }
+        h2 { font-size: 30px; letter-spacing: -.03em; margin: 8px 0 4px; }
+        .btn { display: block; width: 100%; padding: 15px; margin: 10px 0; background: #111; color: white; border: 1px solid #111; border-radius: 16px; font-size: 16px; cursor: pointer; font-weight: 700; }
+        .mono-action { display: block; text-decoration: none; padding: 15px 16px; border-radius: 16px; border: 1px solid #111; color: #111; background: #fff; font-weight: 700; margin: 10px 0; }
+        .hint { color:#666; font-size:14px; line-height:1.5; }
+    </style>
+</head>
+<body class="mono-theme">
+<div class="wrap">
+    <div class="top">
+        <div class="eyebrow">{{ club_name or 'Клуб' }} · Staff</div>
+        <h2>Открыть турникет</h2>
+        <p style="color:#666;margin:0;">Сотрудникам не нужен QR и сессии — только быстрый проход.</p>
+    </div>
+    <a class="mono-action" href="/webapp/client-cabinet?club_id={{ club_id }}">← Назад</a>
+    <button class="btn" onclick="openTurnstile(false)">🔓 Открыть турникет</button>
+    <button class="btn" onclick="openTurnstile(true)">📱 Открыть по FaceID</button>
+    <p id="status" class="hint">Проход будет записан в аудит клуба.</p>
+</div>
+<script>
+const tg = window.Telegram?.WebApp;
+if (tg) tg.expand();
+const bm = tg?.BiometricManager;
+
+async function postOpen(biometricUsed=false) {
+    const res = await fetch('/webapp/staff-open-turnstile', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            club_id: {{ club_id }},
+            init_data: tg?.initData || '',
+            biometric_used: biometricUsed,
+        })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.detail || data.message || 'Ошибка открытия турникета');
+    return data;
+}
+
+function openTurnstile(useBiometric) {
+    const status = document.getElementById('status');
+    status.textContent = 'Открываем турникет...';
+    const go = async (biometricUsed) => {
+        try {
+            const data = await postOpen(biometricUsed);
+            status.textContent = data.message || 'Турникет открыт';
+            tg?.showAlert(data.message || 'Турникет открыт');
+        } catch (e) {
+            const message = e?.message || 'Не удалось открыть турникет';
+            status.textContent = message;
+            tg?.showAlert(message);
+        }
+    };
+
+    if (useBiometric && bm && typeof bm.init === 'function' && typeof bm.authenticate === 'function') {
+        bm.init(() => {
+            if (!bm.isAccessGranted && typeof bm.requestAccess === 'function') {
+                bm.requestAccess({ reason: "Подтвердите личность для прохода" }, (granted) => {
+                    if (!granted) {
+                        status.textContent = 'Доступ к FaceID не выдан';
+                        tg?.showAlert('Доступ к FaceID не выдан');
+                        return;
+                    }
+                    bm.authenticate({ reason: "Подтвердите личность для прохода" }, (ok) => {
+                        if (ok) go(true);
+                        else {
+                            status.textContent = 'FaceID не пройден';
+                            tg?.showAlert('FaceID не пройден');
+                        }
+                    });
+                });
+                return;
+            }
+            bm.authenticate({ reason: "Подтвердите личность для прохода" }, (ok) => {
+                if (ok) go(true);
+                else {
+                    status.textContent = 'FaceID не пройден';
+                    tg?.showAlert('FaceID не пройден');
+                }
+            });
+        });
+        return;
+    }
+
+    go(false);
+}
+</script>
+</body>
+</html>

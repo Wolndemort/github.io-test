@@ -40,6 +40,16 @@
   <div class="card">
     <h2>Продажа товаров</h2>
     <div class="muted">Фильтруйте по категории или ищите товар по названию. Остатки спишутся после подтверждения наличной оплаты.</div>
+    <div style="margin-top:12px">
+      <label style="display:block;margin-bottom:6px;font-weight:700">Атлет для чека</label>
+      <select id="studentSelect" style="width:100%;box-sizing:border-box;border-radius:10px;border:1px solid #444;background:#101010;color:#fff;font-size:15px;padding:11px 12px">
+        <option value="">Не выбирать</option>
+        {% for student in students|default([]) %}
+          <option value="{{ student.id }}">{{ student.name }}</option>
+        {% endfor %}
+      </select>
+      <div class="muted" style="margin-top:6px">Если выбрать атлета, чек уйдёт его родителю.</div>
+    </div>
   </div>
   <div class="card">
     <div class="row" style="justify-content:space-between;align-items:center">
@@ -93,6 +103,7 @@ const historyFromEl=document.getElementById('historyFrom');
 const historyToEl=document.getElementById('historyTo');
 const historyApplyEl=document.getElementById('historyApply');
 const historyClearEl=document.getElementById('historyClear');
+const studentSelectEl=document.getElementById('studentSelect');
 const cart=new Map();
 let currentCategory="";
 let currentSearch="";
@@ -181,6 +192,7 @@ document.getElementById('pay').onclick=async()=>{
     body:JSON.stringify({
       init_data:tg.initData,
       club_id:{{club_id}},
+      student_id:studentSelectEl.value ? Number(studentSelectEl.value) : null,
       items:[...cart].map(([product_id,quantity])=>({product_id,quantity}))
     })
   });

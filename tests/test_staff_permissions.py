@@ -1,5 +1,8 @@
 from pathlib import Path
 
+from types import SimpleNamespace
+
+from handlers.buttons import get_profile_keyboard
 from services.staff_permissions import ROLE_PERMISSIONS
 
 
@@ -76,3 +79,29 @@ def test_manager_tariff_webapp_is_present_and_uses_shared_settings():
     assert 'settings["disciplines"]' in api
     assert "tg.initData" in page
     assert "/webapp/admin-tariffs/change" in page
+
+
+def test_staff_profile_keyboard_hides_qr_and_freeze_but_keeps_admin_full_mode():
+    user = SimpleNamespace(user_id=101)
+    staff_markup = get_profile_keyboard(user, 7, {"features": {"freeze": True}, "limits": {"freeze_price_per_day": 100}}, profile_mode="staff")
+    client_markup = get_profile_keyboard(user, 7, {"features": {"freeze": True}, "limits": {"freeze_price_per_day": 100}}, profile_mode="client")
+
+    staff_texts = [button.text for row in staff_markup.inline_keyboard for button in row]
+    client_texts = [button.text for row in client_markup.inline_keyboard for button in row]
+
+    assert "🔓 Открыть турникет" in staff_texts
+    assert "📲 QR-пропуск" not in staff_texts
+    assert "❄️ Купить заморозку" not in staff_texts
+    assert "❄️ Заморозить абонемент" not in staff_texts
+
+    assert "📲 QR-пропуск" in client_texts
+    assert "❄️ Купить заморозку" in client_texts
+    assert "❄️ Заморозить абонемент" in client_texts
+
+
+def test_staff_pass_template_and_route_are_present():
+    page = Path("templates/staff_pass.html").read_text(encoding="utf-8")
+    api = Path("admin_module/webapp_client_cabinet.py").read_text(encoding="utf-8")
+    assert "Открыть турникет" in page
+    assert "FaceID" in page
+    assert "/webapp/staff-open-turnstile" in api

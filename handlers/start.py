@@ -9,6 +9,7 @@ from sqlalchemy import select, update
 from types import SimpleNamespace
 from loguru import logger
 from handlers.buttons import admin_keyboard, get_profile_keyboard
+from admin_module.utils import is_active_staff_member
 from database.db import User, Student, Club
 from services.audit import audit_event
 
@@ -189,7 +190,13 @@ async def start_handler(
         )
         await message.answer(
             f"📍 <b>{club.name}</b>\n\n{welcome_text}\n\n{status_text}",
-            reply_markup=get_profile_keyboard(current_user, club.id, club_settings=club_settings, is_authorized=True),
+            reply_markup=get_profile_keyboard(
+                current_user,
+                club.id,
+                club_settings=club_settings,
+                is_authorized=True,
+                profile_mode="staff" if await is_active_staff_member(session, club.id, user_id) and user_id != int(club.owner_id or 0) else "client",
+            ),
             parse_mode="HTML"
         )
     else:
@@ -284,7 +291,13 @@ async def accept_legal_handler(
 
             await callback.message.answer(
                 f"📍 <b>{club.name}</b>\n\n{welcome_text}\n\n{status_text}",
-                reply_markup=get_profile_keyboard(current_user, club.id, club_settings=club_settings, is_authorized=True),
+                reply_markup=get_profile_keyboard(
+                    current_user,
+                    club.id,
+                    club_settings=club_settings,
+                    is_authorized=True,
+                    profile_mode="staff" if await is_active_staff_member(session, club.id, user_id) and user_id != int(club.owner_id or 0) else "client",
+                ),
                 parse_mode="HTML"
             )
         else:

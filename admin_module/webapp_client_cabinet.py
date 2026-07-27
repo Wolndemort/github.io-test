@@ -17,13 +17,14 @@ from admin_module.schemas import (
 )
 from admin_module.webapp_verify import verify_telegram_data
 from config import PROXY_URL
-from database.db import Club, PaymentOrder, CartOrder, CartItem, Student, Subscription, User, VisitLog, get_session, process_student_freeze
+from database.db import Club, ClubStaff, PaymentOrder, CartOrder, CartItem, Student, Subscription, User, VisitLog, get_session, process_student_freeze
 from services.audit import audit_event
 from services.abuse_guard import rate_limit, audit_block
 from services.yookassa_client import YooKassaClient
 from services.input_normalization import normalize_ru_phone
 from services.visit_history import attach_student_names, group_completed_sessions, summarize_payment_entry
 from aiogram import Bot
+from handlers.skud import trigger_dingtian_turnstile
 
 
 def _auth_gate_html(target: str, **params):
@@ -129,6 +130,104 @@ async def get_biometric_page(
     if loading_logo and loading.get("logo_rev"):
         loading_logo = f"{loading_logo}?v={loading['logo_rev']}"
     return templates.TemplateResponse("biometric_pass.html", {"request": request, "students": students, "club": club, "club_id": club_id, "user_id": user_id, "biometric_enabled": bool(getattr(linked_user, "is_biometric_enabled", False)), "club_name": club.name if club else "", "logo_url": loading_logo, "loading": {"enabled": bool(loading.get("enabled", False)), "duration_ms": max(300, min(10000, int(loading.get("duration_ms", 1200)))), "message": str(loading.get("message", "Загружаем приложение…"))}})
+
+
+@router.get("/webapp/staff-pass", response_class=HTMLResponse)
+async def get_staff_pass_page(request: Request, club_id: int, user_id: int, init_data: str | None = Query(default=None), db: AsyncSession = Depends(get_session)):
+    if not init_data:
+        return _auth_gate_html("webapp/staff-pass", club_id=club_id, user_id=user_id)
+    club = await db.get(Club, club_id)
+    if not club or not club.bot_token:
+        raise HTTPException(status_code=404, detail="Клуб не найден")
+    tg_user = verify_telegram_data(init_data, club.bot_token)
+    if not tg_user or int(tg_user.get("id", 0)) != user_id:
+        raise HTTPException(status_code=403, detail="Доступ запрещен")
+    is_owner = int(club.owner_id or 0) == user_id
+    is_staff = bool(
+        is_owner
+        or (
+            await db.scalar(
+                select(ClubStaff.id).where(
+                    ClubStaff.club_id == club_id,
+                    ClubStaff.telegram_id == user_id,
+                    ClubStaff.is_active.is_(True),
+                )
+            )
+        )
+    )
+    if not is_staff:
+        raise HTTPException(status_code=403, detail="Доступ только для сотрудников")
+    settings = (club.club_settings or {}) if club else {}
+    ui = settings.get("ui", {}) if isinstance(settings.get("ui", {}), dict) else {}
+    loading = ui.get("loading", {}) if isinstance(ui.get("loading", {}), dict) else {}
+    return templates.TemplateResponse(
+        "staff_pass.html",
+        {
+            "request": request,
+            "club": club,
+            "club_id": club_id,
+            "user_id": user_id,
+            "club_name": club.name if club else "",
+            "loading": {
+                "enabled": bool(loading.get("enabled", False)),
+                "duration_ms": max(300, min(10000, int(loading.get("duration_ms", 1200)))),
+                "message": str(loading.get("message", "Загружаем приложение…")),
+            },
+        },
+    )
+
+
+@router.post("/webapp/staff-open-turnstile")
+async def staff_open_turnstile(payload: dict, request: Request, db: AsyncSession = Depends(get_session)):
+    club_id = int(payload.get("club_id", 0))
+    init_data = str(payload.get("init_data") or "")
+    club = await db.get(Club, club_id)
+    if not club or not club.bot_token:
+        raise HTTPException(status_code=404, detail="Клуб не найден")
+    tg_user = verify_telegram_data(init_data, club.bot_token)
+    if not tg_user:
+        raise HTTPException(status_code=403, detail="Ошибка безопасности данных")
+    user_id = int(tg_user.get("id", 0))
+    is_owner = int(club.owner_id or 0) == user_id
+    is_staff = bool(
+        is_owner
+        or (
+            await db.scalar(
+                select(ClubStaff.id).where(
+                    ClubStaff.club_id == club.id,
+                    ClubStaff.telegram_id == user_id,
+                    ClubStaff.is_active.is_(True),
+                )
+            )
+        )
+    )
+    if not is_staff:
+        raise HTTPException(status_code=403, detail="Доступ только для сотрудников")
+    club_settings = club.club_settings or {}
+    relay_config = dict(club_settings.get("turnstile", {}) or {})
+    turnstile_status = "ℹ️ СКУД отключен"
+    if relay_config.get("enabled", False):
+        if not relay_config.get("base_url"):
+            raise HTTPException(status_code=400, detail="Не настроен адрес турникета")
+        if relay_config.get("base_url") and not str(relay_config.get("base_url")).startswith("http"):
+            relay_config["base_url"] = f"http://{relay_config['base_url']}"
+        opened = await trigger_dingtian_turnstile(relay_config)
+        if not opened:
+            raise HTTPException(status_code=409, detail="Не удалось открыть турникет")
+        turnstile_status = "✅ Турникет открыт"
+    audit_event(
+        "staff_turnstile_opened",
+        club_id=club.id,
+        actor_user_id=user_id,
+        actor_role="owner" if is_owner else "staff",
+        action="open",
+        object_type="turnstile",
+        object_id="staff",
+        location="webapp/staff-pass",
+        method="manual",
+        payload={"biometric_used": bool(payload.get("biometric_used", False))},
+    )
+    return {"success": True, "message": f"Проход для staff подтвержден.\n{turnstile_status}"}
 
 
 @router.get("/webapp/client-cabinet", response_class=HTMLResponse)

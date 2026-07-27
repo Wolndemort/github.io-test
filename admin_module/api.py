@@ -186,6 +186,7 @@ class AdminProductSalePayload(BaseModel):
     init_data: str
     club_id: int
     items: list[dict]
+    student_id: int | None = None
 
 class TariffChangePayload(BaseModel):
     init_data: str
