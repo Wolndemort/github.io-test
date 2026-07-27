@@ -21,8 +21,8 @@ async def create_student(data: StudentCreate, session: AsyncSession = Depends(ge
     if not club:
         raise HTTPException(status_code=404, detail="Club not found")
     parent = await session.get(User, data.parent_id)
-    if not parent or parent.club_id != data.club_id:
-        raise HTTPException(status_code=403, detail="Parent is not linked to this club")
+    if not parent:
+        raise HTTPException(status_code=404, detail="Parent not found")
     new_student = Student(name=data.name.strip(), parent_id=data.parent_id, club_id=data.club_id)
     session.add(new_student)
     await session.commit()
@@ -42,7 +42,6 @@ async def get_all_users(
     return [
         {
             "user_id": user.user_id,
-            "club_id": user.club_id,
             "full_name": user.full_name,
             "is_accepted": user.is_accepted,
             "is_biometric_enabled": user.is_biometric_enabled,

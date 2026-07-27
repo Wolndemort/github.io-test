@@ -594,3 +594,5 @@ def test_club_isolation_contracts_cover_webapp_system_api_and_payments():
     assert "select(User).where(User.club_id == club_id)" in system_api
     assert "select(Student).where(Student.id == student_id, Student.club_id == club_id)" in system_api
     assert "club_id = user.club_id or getattr(club" not in payments
+    assert '"club_id": user.club_id' not in system_api
+    assert "parent.club_id != data.club_id" not in system_api
