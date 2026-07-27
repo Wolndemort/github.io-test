@@ -208,9 +208,13 @@ def test_subscription_forms_explain_unlimited_marker_999():
 def test_cash_register_and_stats_show_distinct_cashflow_terms():
     cash = Path("templates/cash_register.html").read_text(encoding="utf-8")
     stats = Path("templates/stats.html").read_text(encoding="utf-8")
+    assert cash.index("Касса и финансовый журнал") < cash.index("Все операции")
     assert "Маржа" in cash
+    assert 'name="date_from"' in cash
+    assert 'name="date_to"' in cash
     assert "cash_income_total" in cash
     assert "cash_expenses_total" in cash
+    assert "cash_income_total/100" not in cash
     assert "Расходы сегодня" in stats
     assert "Маржа сегодня" in stats
     assert "Расходы за неделю" in stats
