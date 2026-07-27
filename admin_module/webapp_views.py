@@ -321,12 +321,12 @@ async def change_admin_tariff(payload: TariffChangePayload, request: Request, se
     elif payload.action == "copy_from":
         source_disc = str((payload.tariff or {}).get("source_discipline", "")).strip()
         if not source_disc:
-            raise HTTPException(400, "РСЃС‚РѕС‡РЅРёРє РєРѕРїРёСЂРѕРІР°РЅРёСЏ РЅРµ СѓРєР°Р·Р°РЅ")
+            raise HTTPException(400, "Источник копирования не указан")
         if source_disc == payload.discipline:
-            raise HTTPException(400, "РќРµР»СЊР·СЏ РєРѕРїРёСЂРѕРІР°С‚СЊ РґРёСЃС†РёРїР»РёРЅСѓ РІ СЃР°РјСѓ СЃРµР±СЏ")
+            raise HTTPException(400, "Нельзя копировать дисциплину в саму себя")
         source_block = dict(disciplines.get(source_disc, {}))
         if not source_block:
-            raise HTTPException(404, "РСЃС‚РѕС‡РЅРёРє РєРѕРїРёСЂРѕРІР°РЅРёСЏ РЅРµ РЅР°Р№РґРµРЅ")
+            raise HTTPException(404, "Источник копирования не найден")
         source_tariffs = copy.deepcopy(source_block.get("tariffs", []) or [])
         if not source_tariffs:
             raise HTTPException(400, "Р’ РёСЃС…РѕРґРЅРѕР№ РґРёСЃС†РёРїР»РёРЅРµ РЅРµС‚ С‚Р°СЂРёС„РѕРІ")
@@ -446,30 +446,30 @@ async def change_admin_schedule(payload: ScheduleChangePayload, session: AsyncSe
     lessons = list(schedule.get(payload.day, []))
     if payload.action == "delete":
         if payload.index is None or payload.index < 0 or payload.index >= len(lessons):
-            raise HTTPException(400, "Р—Р°РЅСЏС‚РёРµ РЅРµ РЅР°Р№РґРµРЅРѕ")
+            raise HTTPException(400, "Занятие не найдено")
         lessons.pop(payload.index)
     elif payload.action == "copy_day":
         source_day = (payload.source_day or "").strip()
         source_lessons = list(schedule.get(source_day, []))
         if not source_day:
-            raise HTTPException(400, "РСЃС‚РѕС‡РЅРёРє РєРѕРїРёСЂРѕРІР°РЅРёСЏ РЅРµ СѓРєР°Р·Р°РЅ")
+            raise HTTPException(400, "Источник копирования не указан")
         if source_day == payload.day:
-            raise HTTPException(400, "РќРµР»СЊР·СЏ РєРѕРїРёСЂРѕРІР°С‚СЊ РґРµРЅСЊ РІ СЃР°Рј СЃРµР±СЏ")
+            raise HTTPException(400, "Нельзя копировать день в сам себя")
         if not source_lessons:
-            raise HTTPException(400, "Р’ РёСЃС…РѕРґРЅРѕРј РґРЅРµ РЅРµС‚ Р·Р°РЅСЏС‚РёР№")
+            raise HTTPException(400, "В исходном дне нет занятий")
         lessons = [copy.deepcopy(lesson) for lesson in source_lessons]
     elif payload.action == "copy_from":
         source_disc = (payload.source_discipline or "").strip()
         if not source_disc:
-            raise HTTPException(400, "РСЃС‚РѕС‡РЅРёРє РєРѕРїРёСЂРѕРІР°РЅРёСЏ РЅРµ СѓРєР°Р·Р°РЅ")
+            raise HTTPException(400, "Источник копирования не указан")
         if source_disc == payload.discipline:
-            raise HTTPException(400, "РќРµР»СЊР·СЏ РєРѕРїРёСЂРѕРІР°С‚СЊ РґРёСЃС†РёРїР»РёРЅСѓ РІ СЃР°РјСѓ СЃРµР±СЏ")
+            raise HTTPException(400, "Нельзя копировать дисциплину в саму себя")
         source_block = dict(disciplines.get(source_disc, {}))
         if not source_block:
-            raise HTTPException(404, "РСЃС‚РѕС‡РЅРёРє РєРѕРїРёСЂРѕРІР°РЅРёСЏ РЅРµ РЅР°Р№РґРµРЅ")
+            raise HTTPException(404, "Источник копирования не найден")
         source_schedule = normalize_schedule_block(source_block.get("schedule", {}))
         if not any(source_schedule.values()):
-            raise HTTPException(400, "Р’ РёСЃС…РѕРґРЅРѕР№ РґРёСЃС†РёРїР»РёРЅРµ РЅРµС‚ Р·Р°РЅСЏС‚РёР№")
+            raise HTTPException(400, "В исходной дисциплине нет занятий")
         schedule = {day_key: [copy.deepcopy(lesson) for lesson in source_schedule.get(day_key, [])] for day_key in schedule.keys()}
         block["schedule"] = schedule
         disciplines[payload.discipline] = block
@@ -873,3 +873,4 @@ else location.replace(location.pathname+'?user_id={user_id}&init_data='+encodeUR
     return templates.TemplateResponse("biometric_pass.html", {"request": request, "students": students,
         "club_id": club_id, "user_id": user_id, "club_name": club.name if club else "", "logo_url": ui.get("logo_url", ""),
         "loading": {"enabled": bool(loading.get("enabled", False)), "duration_ms": max(300, min(10000, int(loading.get("duration_ms", 1200)))), "message": str(loading.get("message", "Р—Р°РіСЂСѓР¶Р°РµРј РїСЂРёР»РѕР¶РµРЅРёРµвЂ¦"))}})
+
