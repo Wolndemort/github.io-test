@@ -1179,6 +1179,24 @@ async def cart_checkout(payload: CartCheckoutPayload, request: Request, session:
     else:
         payment_method = "bank_card"
     await _ensure_cart_user(session, club, tg_user)
+    pending_cart = (
+        await session.execute(
+            select(CartOrder)
+            .where(
+                CartOrder.club_id == club.id,
+                CartOrder.user_id == int(tg_user["id"]),
+                CartOrder.status == "NEW",
+            )
+            .order_by(CartOrder.created_at.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if pending_cart:
+        pending_age = datetime.utcnow() - (pending_cart.created_at or datetime.utcnow())
+        if pending_age <= timedelta(minutes=10):
+            raise HTTPException(status_code=409, detail="Заявка на оплату уже отправлена. Дождитесь подтверждения администратора.")
+        pending_cart.status = "FAILED"
+        await session.commit()
     product_ids = [int(x["product_id"]) for x in payload.items if x.get("item_type", "product") == "product"]
     products = (await session.execute(select(ClubProduct).where(ClubProduct.club_id == club.id, ClubProduct.id.in_(product_ids), ClubProduct.is_active.is_(True)).with_for_update())).scalars().all() if product_ids else []
     by_id = {p.id: p for p in products}; normalized=[]; total=0

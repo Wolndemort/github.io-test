@@ -167,6 +167,24 @@ def test_manual_requisite_orders_have_unique_provider_ids():
     assert 'provider_payment_id=f"MANUAL:{order_id}"' in cabinet
 
 
+def test_requisites_checkout_flow_covers_products_subscriptions_and_freezes():
+    api = Path("admin_module/api.py").read_text(encoding="utf-8")
+    cabinet = Path("admin_module/webapp_client_cabinet.py").read_text(encoding="utf-8")
+    review = Path("handlers/manual_payment_review.py").read_text(encoding="utf-8")
+    shop = Path("templates/shop.html").read_text(encoding="utf-8")
+    subscription = Path("templates/webapp_buy_subscription.html").read_text(encoding="utf-8")
+    freeze = Path("templates/webapp_buy_freeze.html").read_text(encoding="utf-8")
+    assert 'payment_method == "requisites"' in api
+    assert 'payment_method == "requisites"' in cabinet
+    assert 'item.item_type == "subscription"' in review
+    assert 'item.item_type == "freeze"' in review
+    assert "product.stock -= item.quantity" in review
+    assert "review_required" in shop
+    assert "review_required" in subscription
+    assert "review_required" in freeze
+    assert "Дождитесь подтверждения администратора" in api
+
+
 def test_webapp_category_lists_collapse_case_and_yo_variants():
     products = [
         type("P", (), {"category": "Кофе"})(),
