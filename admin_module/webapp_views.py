@@ -73,7 +73,7 @@ async def admin_product_sale_page(request: Request, club_id: int = Query(...), i
     if not init_data:
         return telegram_init_gate('/webapp/admin-product-sale', club_id, 'Откройте продажу из Telegram')
     await verify_webapp_staff(club, init_data, session, "cash_sale")
-    products = (await session.execute(select(ClubProduct).where(ClubProduct.club_id == club_id, ClubProduct.is_active.is_(True), ClubProduct.stock > 0).order_by(ClubProduct.category, ClubProduct.name))).scalars().all()
+    products = (await session.execute(select(ClubProduct).where(ClubProduct.club_id == club_id, ClubProduct.is_active.is_(True)).order_by(ClubProduct.category, ClubProduct.name))).scalars().all()
     product_data = [{"id": p.id, "name": p.name, "category": p.category, "price_kopecks": p.price_kopecks, "stock": p.stock, "image_url": p.image_url, "details": p.details} for p in products]
     categories = sorted({(p.category or "other").strip() or "other" for p in products})
     today = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=None)

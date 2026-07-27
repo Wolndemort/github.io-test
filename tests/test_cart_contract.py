@@ -27,6 +27,15 @@ def test_client_shop_has_cart_button_and_checkout_endpoint():
     assert "В корзину" in shop
     assert "/webapp/cart/checkout" in shop
     assert "localStorage" in shop
+    assert "закончился" in shop
+    assert "Товар закончился. Выберите другой." in shop
+
+
+def test_cart_checkout_supports_mixed_items_and_rejects_dead_stock():
+    api = Path("admin_module/api.py").read_text(encoding="utf-8")
+    assert "kind in {\"subscription\", \"freeze\"}" in api
+    assert "if not p or qty < 1 or qty > 99 or p.stock < qty" in api
+    assert "pay_method_type" not in api
 
 
 def test_cart_is_separate_page_with_quantity_controls_and_product_limit():
