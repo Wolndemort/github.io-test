@@ -193,7 +193,7 @@ document.getElementById('pay').onclick=async()=>{
   alert('Продажа оформлена: ' + (cart.size ? [...cart].map(([productId, quantity]) => {
     const p = products.find(x => x.id === productId);
     return p ? `${p.name} × ${quantity}` : `${productId} × ${quantity}`;
-  }).join(', ') : 'без позиций') + '. Сумма ' + (d.total_kopeks/100).toFixed(2) + ' ₽');
+  }).join(', ') : 'без позиций') + '. Сумма ' + (Number(d.total_kopecks || d.total_kopeks || 0)/100).toFixed(2) + ' ₽');
   location.reload();
 };
 

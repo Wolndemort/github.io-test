@@ -81,6 +81,7 @@ def test_admin_product_sale_page_shows_today_history_and_clear_confirmation_text
     assert "historyClear" in page
     assert "recentSales" in page
     assert "Продажа оформлена:" in page
+    assert "total_kopecks" in page or "total_kopeks" in page
     assert "created_at\": order.created_at.isoformat()" in api or "created_at': order.created_at.isoformat()" in api
 
 
