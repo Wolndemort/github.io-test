@@ -22,13 +22,29 @@
   <script>
     const tg = window.Telegram?.WebApp;
     tg?.ready(); tg?.expand();
+    const queryInitData = new URLSearchParams(location.search).get('init_data') || '';
+    let initData = queryInitData || tg?.initData || '';
     const status = document.getElementById('status');
     const scanner = new Html5Qrcode('reader');
     const config = { fps: 10, qrbox: { width: 250, height: 250 } };
     let busy = false, lastCode = '', lastAt = 0, stopped = false;
 
-    function startCamera() {
+    async function waitForInitData() {
+      for (let attempt = 0; attempt < 20; attempt++) {
+        initData = queryInitData || tg?.initData || '';
+        if (initData) return true;
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+      return false;
+    }
+
+    async function startCamera() {
       if (stopped) return;
+      if (!(await waitForInitData())) {
+        status.className = 'error';
+        status.textContent = 'Откройте сканер кнопкой из Telegram ещё раз.';
+        return;
+      }
       scanner.start({ facingMode: 'environment' }, config, onScanSuccess)
         .catch(err => { status.className = 'error'; status.textContent = 'Ошибка камеры: ' + err; });
     }
@@ -39,7 +55,7 @@
       busy = true; lastCode = decodedText; lastAt = now;
       status.className = 'ok'; status.textContent = 'Пропуск принят. Ожидаем следующий QR…';
       fetch('/webapp/scanner/scan', { method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ init_data: tg?.initData || '', club_id: new URLSearchParams(location.search).get('club_id'), qr_data: decodedText })
+        body: JSON.stringify({ init_data: initData, club_id: new URLSearchParams(location.search).get('club_id'), qr_data: decodedText })
       }).then(async r => { const data = await r.json(); if (!r.ok) throw new Error(data.detail || 'Ошибка прохода');
         status.textContent = data.success ? `✅ Проход: ${data.student_name}` : `❌ ${data.message}`;
       }).catch(err => { status.className = 'error'; status.textContent = '❌ ' + err.message; })
