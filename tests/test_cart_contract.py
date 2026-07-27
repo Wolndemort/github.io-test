@@ -78,7 +78,7 @@ def test_admin_product_sale_page_shows_today_history_and_clear_confirmation_text
     assert "todayOnly" in page
     assert "recentSales" in page
     assert "Продажа оформлена:" in page
-    assert "today = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)" in api
+    assert "today = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=None)" in api
 
 
 def test_cart_webhook_has_idempotent_confirmed_guard():
