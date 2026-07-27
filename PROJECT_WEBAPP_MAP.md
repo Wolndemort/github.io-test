@@ -20,6 +20,8 @@ smoke -> backup/restore -> server deploy -> health/ready -> webhook/payment audi
 - Manual payment by requisites is available in bot and WebApp checkout flows.
 - WebApp checkout uses the same club requisites source as the bot.
 - Age limits on tariffs are enforced both in bot purchase flows and in WebApp/cart checkout.
+- WebApp client cabinet now has a staff-aware presentation mode: active staff and owners get a staff title, a direct turnstile entry, and a reduced set of client-only actions.
+- Staff users keep access to the shop/cart flow, so product purchases remain available from the same cabinet.
 
 ## Schema and migration rules
 

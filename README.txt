@@ -880,3 +880,10 @@ WebApp-маршруты, формы создания и редактирован
 2. добавляем или обновляем тесты;
 3. прогоняем релевантные тесты;
 4. только после этого считаем задачу закрытой.
+## WebApp cabinet: staff mode
+
+- WebApp cabinet now detects whether the Telegram user is an active club staff member or owner.
+- Staff users get a staff-oriented cabinet title and a direct turnstile entry.
+- Staff UI hides client-only actions such as athlete creation, phone binding and subscription purchase.
+- Staff users still keep access to history and the shop/cart flow, so product purchases remain available.
+- The routing logic for client purchases was not changed; this is a presentation-level split only.
