@@ -13,7 +13,7 @@ input,select,button{padding:10px;margin:4px;border-radius:8px;border:1px solid #
 button{background:#fff;color:#111;font-weight:bold}
 .grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
 .row{border-top:1px solid #333;padding:10px 0;display:flex;justify-content:space-between}
-.income{color:#75e6a5}.expense{color:#ff8888}.muted{color:#aaa}
+.income{color:#75e6a5}.expense{color:#ff8888}.muted{color:#aaa}.delete-op{padding:3px 6px;margin:0 0 0 8px;border:1px solid #754040;background:#241313;color:#ffaaaa;font-size:11px;font-weight:400}
 @media(max-width:650px){.grid{grid-template-columns:1fr 1fr}}
 </style>
 <div class="nav">
@@ -51,6 +51,7 @@ button{background:#fff;color:#111;font-weight:bold}
   <h3>Все операции</h3>
   {% for row in rows %}
   <div class="row">
+    {% if row.source == 'manual' %}<button class="delete-op" type="button" data-id="{{ row.id }}">Удалить</button>{% endif %}
     <span>{{ row.created_at|moscow_time if row.created_at else '' }} · {{ row.category }} · {{ 'Наличные' if row.method == 'cash' else ('Карта / онлайн' if row.method == 'card' else 'Ручная') }}<br><small class="muted">{{ row.description }} · {{ row.source }}</small></span>
     <b class="{{ row.entry_type }}">{{ '+' if row.entry_type == 'income' else '-' }}{{ '%.2f'|format(row.amount_kopecks/100) }} ₽</b>
   </div>
@@ -60,6 +61,16 @@ button{background:#fff;color:#111;font-weight:bold}
 </div>
 <script>
 const tg=Telegram.WebApp;tg.ready();
+document.querySelectorAll('.delete-op').forEach(button=>button.onclick=async()=>{
+  if(!confirm('Удалить эту операцию?')) return;
+  const r=await fetch('/admin/cash/entries/'+button.dataset.id+'/delete',{
+    method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({init_data:tg.initData,club_id:{{club_id}}})
+  });
+  const d=await r.json();
+  if(!r.ok)return alert(d.detail||'Не удалось удалить операцию');
+  location.reload();
+});
 add.onclick=async()=>{
   const r=await fetch('/admin/cash/entries',{
     method:'POST',

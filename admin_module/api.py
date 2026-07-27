@@ -207,6 +207,14 @@ class CashEntryPayload(BaseModel):
     amount_kopecks: int
     description: str = ""
 
+class CashEntryDeletePayload(BaseModel):
+    init_data: str
+    club_id: int
+
+class AuditEntryDeletePayload(BaseModel):
+    init_data: str
+    club_id: int
+
 
 def _student_identity_phone(value: str | None) -> str:
     return normalize_ru_phone(value) or ""
@@ -649,6 +657,40 @@ async def reverse_cash_entry(entry_id: int, payload: CashEntryPayload, session: 
         category=entry.category,
     )
     return {"success": True, "reversal_id": reversal.id}
+
+
+@router.post("/admin/cash/entries/{entry_id}/delete")
+async def delete_cash_entry(entry_id: int, payload: CashEntryDeletePayload, session: AsyncSession = Depends(get_session)):
+    club = await session.get(Club, payload.club_id)
+    tg_user = await verify_webapp_admin(club, payload.init_data)
+    entry = await session.get(CashEntry, entry_id)
+    if not entry or entry.club_id != payload.club_id:
+        raise HTTPException(status_code=404, detail="Кассовая операция не найдена")
+    if entry.reversed_entry_id:
+        raise HTTPException(status_code=409, detail="Сначала удалите сторно этой операции")
+    await session.delete(entry)
+    await session.commit()
+    audit_event(
+        "cash_entry_deleted",
+        **await audit_actor_context(session, club, tg_user, "admin/cash/entries/delete"),
+        club_id=payload.club_id,
+        action="delete",
+        object_type="cash_entry",
+        object_id=entry_id,
+    )
+    return {"success": True}
+
+
+@router.post("/webapp/admin-audit/{entry_id}/delete")
+async def delete_audit_entry(entry_id: int, payload: AuditEntryDeletePayload, session: AsyncSession = Depends(get_session)):
+    club = await session.get(Club, payload.club_id)
+    await verify_webapp_admin(club, payload.init_data)
+    entry = await session.get(AuditEntry, entry_id)
+    if not entry or entry.club_id != payload.club_id:
+        raise HTTPException(status_code=404, detail="Запись журнала не найдена")
+    await session.delete(entry)
+    await session.commit()
+    return {"success": True}
 
 
 @router.patch("/admin/students/{student_id}")

@@ -21,7 +21,7 @@
     details{margin-top:6px}
     summary{cursor:pointer;color:#93c5fd}
     .payload-summary{max-width:420px}
-    .badge{display:inline-block;padding:4px 8px;border-radius:999px;background:#1d4ed8;color:#fff;font-size:12px}
+    .badge{display:inline-block;padding:4px 8px;border-radius:999px;background:#1d4ed8;color:#fff;font-size:12px}.delete-audit{padding:3px 6px;background:#4b1d1d;border:1px solid #7f1d1d;font-size:11px}
   </style>
 </head>
 <body>
@@ -47,6 +47,7 @@
   <div class="card">
     <table>
       <thead>
+        <tr><th>Удалить</th></tr>
         <tr>
           <th>Когда</th>
           <th>Роль</th>
@@ -61,6 +62,7 @@
       <tbody>
         {% for row in rows %}
         <tr>
+          <td><button class="delete-audit" type="button" data-id="{{ row.id }}">Удалить</button></td>
           <td>{{ row.created_at|moscow_time }}</td>
           <td><span class="badge">{{ row.actor_role or '—' }}</span></td>
           <td>
@@ -94,6 +96,16 @@ document.getElementById('closeWebApp')?.addEventListener('click', () => {
   if (tg?.close) tg.close();
   else window.history.length > 1 ? history.back() : window.close();
 });
+document.querySelectorAll('.delete-audit').forEach(button=>button.addEventListener('click', async()=>{
+  if(!confirm('Удалить эту запись журнала?')) return;
+  const r=await fetch('/webapp/admin-audit/'+button.dataset.id+'/delete',{
+    method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({init_data:{{ request.query_params.get('init_data', '')|tojson }},club_id:{{club_id}}})
+  });
+  const d=await r.json();
+  if(!r.ok)return alert(d.detail||'Не удалось удалить запись');
+  location.reload();
+}));
 </script>
 </body>
 </html>
