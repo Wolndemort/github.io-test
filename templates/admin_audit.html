@@ -28,7 +28,7 @@
 <div class="wrap">
   <div class="nav">
     <a href="/admin?club_id={{ club_id }}&init_data={{ request.query_params.get('init_data', '')|urlencode }}">← В панель</a>
-    <a class="secondary" href="#" onclick="window.Telegram?.WebApp?.close(); return false;">Закрыть</a>
+    <button class="secondary" type="button" id="closeWebApp">Закрыть</button>
   </div>
   <div class="card">
     <h2 style="margin-top:0">📜 Аудит клуба</h2>
@@ -88,5 +88,12 @@
     </table>
   </div>
 </div>
+<script>
+document.getElementById('closeWebApp')?.addEventListener('click', () => {
+  const tg = window.Telegram?.WebApp;
+  if (tg?.close) tg.close();
+  else window.history.length > 1 ? history.back() : window.close();
+});
+</script>
 </body>
 </html>

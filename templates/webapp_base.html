@@ -33,7 +33,7 @@
     <div class="mono-hero">
         <div class="mono-kicker">
             <div class="mono-eyebrow">{% block eyebrow %}{{ club_name if club_name is defined and club_name else (club.name if club is defined and club else 'WebApp') }}{% endblock %}</div>
-            <a class="mono-action" style="padding:8px 12px;border-radius:999px;font-size:12px;" href="#" onclick="window.Telegram?.WebApp?.close(); return false;">Закрыть</a>
+            <button class="mono-action" type="button" style="padding:8px 12px;border-radius:999px;font-size:12px;" onclick="(window.Telegram?.WebApp?.close?.() || history.back())">Закрыть</button>
         </div>
         <h1 class="mono-title">{% block header %}WebApp{% endblock %}</h1>
         <p style="margin:0;color:#666;overflow-wrap:anywhere;word-break:break-word;">{% block subheader %}{% endblock %}</p>

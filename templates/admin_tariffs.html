@@ -24,6 +24,7 @@ function draw() {
     <select id="d">${Object.entries(disciplines).map(([k,v])=>`<option value="${k}" ${k===selected?'selected':''}>${esc(v.name||k)}</option>`).join('')}</select>
     <button id="active">${d.active?'Выключить':'Включить'} направление</button>
     <button id="kind">Тип: ${d.type==='unlimited'?'Безлимит':'По занятиям'}</button>
+    <p class="muted">Подсказка: безлимитный тариф хранится как <b>999</b> занятий.</p>
     <p class="muted">Изменения синхронизируются с ботом автоматически.</p>
     ${(d.tariffs||[]).map((t,i)=>`<div class="tariff"><input id="p${i}" type="number" step="0.01" value="${t.price||0}"> ₽ <input id="days${i}" type="number" value="${t.days||30}"> дней <input id="count${i}" type="number" value="${t.count||0}" ${d.type==='unlimited'?'disabled':''}> занятий <button data-save="${i}">Сохранить</button><button data-del="${i}">Удалить</button></div>`).join('')}
     <h3>Новый тариф</h3><input id="np" type="number" step="0.01" placeholder="Цена ₽"><input id="nd" type="number" value="30" placeholder="Дней"><input id="nc" type="number" value="0" placeholder="Занятий"><button id="add">Добавить</button>

@@ -10,6 +10,7 @@ from fastapi import Query
 from services.analytics import (
     generate_students_excel,
     calculate_admin_dashboard,
+    calculate_cash_flow_periods,
     calculate_student_metrics,
     calculate_revenue_periods,
     reporting_periods,
@@ -481,7 +482,8 @@ async def cash_register_page(request: Request, session: AsyncSession = Depends(g
     cash_income = sum(r["amount_kopecks"] for r in rows if r["entry_type"] == "income" and r.get("method") == "cash")
     online_income = sum(r["amount_kopecks"] for r in rows if r["entry_type"] == "income" and r.get("method") == "card")
     expenses = sum(r["amount_kopecks"] for r in rows if r["entry_type"] == "expense")
-    return templates.TemplateResponse("cash_register.html", {"request": request, "club_id": club_id, "rows": rows, "income": income, "cash_income": cash_income, "online_income": online_income, "expenses": expenses, "balance": cash_income - expenses, "date_from": date_from or "", "date_to": date_to or ""})
+    flow = calculate_cash_flow_periods(manual, now=reporting_periods()["now"])
+    return templates.TemplateResponse("cash_register.html", {"request": request, "club_id": club_id, "rows": rows, "income": income, "cash_income": cash_income, "online_income": online_income, "expenses": expenses, "balance": cash_income - expenses, "margin": cash_income - expenses, "cash_income_total": flow["all_income"], "cash_expenses_total": flow["all_expense"], "cash_margin_total": flow["all_margin"], "date_from": date_from or "", "date_to": date_to or ""})
 
 
 @router.get("/webapp/admin-audit", response_class=HTMLResponse)

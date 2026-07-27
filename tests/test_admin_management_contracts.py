@@ -111,6 +111,8 @@ def test_client_webapp_can_create_students_but_cannot_edit_or_delete_them():
     assert "delete-student" not in form
     assert 'input id="birthday" type="text"' in form
     assert "replace(/\\D/g, '')" in form
+    assert "birthdayPicker" in form
+    assert "showPicker" in form
 
 
 def test_boxing_name_no_longer_contains_children_suffix():
@@ -129,7 +131,8 @@ def test_admin_student_dates_are_text_inputs_with_autofill_formatting():
     assert 'input[name="expire_date"]' in page
     assert "replace(/\\D/g, '')" in page
     assert "showPicker" in page
-    assert 'type = \'date\'' in page
+    assert "birthday-picker" in page
+    assert "formatDMY" in page
 
 
 def test_stats_freeze_dropdown_has_no_visible_title_and_revenue_has_date_filters():
@@ -189,11 +192,30 @@ def test_work_schedule_webapp_and_weekend_job_are_registered():
     assert "stock_reminder_pm" in main
 
 
+def test_subscription_forms_explain_unlimited_marker_999():
+    bot = Path("templates/webapp_buy_subscription.html").read_text(encoding="utf-8")
+    tariffs = Path("templates/admin_tariffs.html").read_text(encoding="utf-8")
+    assert "999" in bot
+    assert "999" in tariffs
+
+
+def test_cash_register_and_stats_show_distinct_cashflow_terms():
+    cash = Path("templates/cash_register.html").read_text(encoding="utf-8")
+    stats = Path("templates/stats.html").read_text(encoding="utf-8")
+    assert "Маржа" in cash
+    assert "cash_income_total" in cash
+    assert "cash_expenses_total" in cash
+    assert "Расходы сегодня" in stats
+    assert "Маржа сегодня" in stats
+    assert "Расходы за неделю" in stats
+
+
 def test_admin_settings_menu_top_block_uses_readable_labels():
     panel = Path("handlers/admin_settings_panel.py").read_text(encoding="utf-8").splitlines()
     top_block = "\n".join(panel[29:70])
     assert "🛍 Настройки магазина / YooKassa" in top_block
     assert "График работы" in top_block
+    assert "Касса и журнал" in top_block
     assert "Сайт клуба" in top_block
     assert "Поддержка" in top_block
     assert "⚙️ Настройка лимитов клуба" in top_block
@@ -322,6 +344,7 @@ def test_admin_audit_screen_and_button_are_registered():
     assert "📜 Аудит" in buttons
     assert "actor_role" in page
     assert "Показываются последние 300 записей" in page
+    assert "closeWebApp" in page
 
 
 def test_club_settings_reads_are_guarded_and_super_admin_errors_use_logger():

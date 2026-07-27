@@ -134,6 +134,39 @@ def calculate_revenue_periods(payments: Iterable[Any], now: datetime | None = No
     return {key: round(value / 100, 2) for key, value in totals.items()}
 
 
+def calculate_cash_flow_periods(entries: Iterable[Any], now: datetime | None = None) -> dict[str, float]:
+    """Calculate cash flow from cash entries only.
+
+    Income is positive cash movement, expense is outgoing cash.
+    """
+    periods = reporting_periods(now)
+    totals = {"today_income": 0, "today_expense": 0, "week_income": 0, "week_expense": 0, "month_income": 0, "month_expense": 0, "all_income": 0, "all_expense": 0}
+    for entry in entries:
+        amount = _payment_kopecks(entry)
+        created_at = _utc_naive(getattr(entry, "created_at", None))
+        kind = str(getattr(entry, "entry_type", "") or "").strip().lower()
+        if kind not in {"income", "expense"}:
+            continue
+        if kind == "income":
+            totals["all_income"] += amount
+        else:
+            totals["all_expense"] += amount
+        if created_at is None:
+            continue
+        if created_at >= periods["month"]:
+            totals[f"month_{kind}"] += amount
+        if created_at >= periods["week"]:
+            totals[f"week_{kind}"] += amount
+        if created_at >= periods["today"]:
+            totals[f"today_{kind}"] += amount
+    result = {key: round(value / 100, 2) for key, value in totals.items()}
+    result["today_margin"] = round(result["today_income"] - result["today_expense"], 2)
+    result["week_margin"] = round(result["week_income"] - result["week_expense"], 2)
+    result["month_margin"] = round(result["month_income"] - result["month_expense"], 2)
+    result["all_margin"] = round(result["all_income"] - result["all_expense"], 2)
+    return result
+
+
 def calculate_club_metrics(students_models: List[Any], confirmed_payments: List[Any]) -> Dict[str, Any]:
     metrics = calculate_student_metrics(students_models)
     revenue = int(calculate_revenue_periods(confirmed_payments)["all"])

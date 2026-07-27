@@ -8,8 +8,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from admin_module.router_base import router, templates
 from admin_module.utils import get_club_id_from_host, verify_webapp_admin, webapp_auth_gate
-from database.db import CartOrder, Club, PaymentOrder, Student, User, get_session
-from services.analytics import calculate_admin_dashboard, calculate_revenue_periods, calculate_student_metrics, generate_students_excel, reporting_periods
+from database.db import CartOrder, CashEntry, Club, PaymentOrder, Student, User, get_session
+from services.analytics import calculate_admin_dashboard, calculate_cash_flow_periods, calculate_revenue_periods, calculate_student_metrics, generate_students_excel, reporting_periods
 
 
 @router.get("/admin", response_class=HTMLResponse)
@@ -63,10 +63,12 @@ async def get_revenue_stats(request: Request, session: AsyncSession = Depends(ge
     periods = reporting_periods()
     payments = (await session.execute(select(PaymentOrder.amount_kopecks, PaymentOrder.created_at).where(PaymentOrder.club_id == club_id, PaymentOrder.status == "CONFIRMED", PaymentOrder.created_at >= periods["month"]))).all()
     cart_payments = (await session.execute(select(CartOrder.amount_kopecks, CartOrder.created_at).where(CartOrder.club_id == club_id, CartOrder.status == "CONFIRMED", CartOrder.created_at >= periods["month"]))).all()
+    cash_entries = (await session.execute(select(CashEntry).where(CashEntry.club_id == club_id, CashEntry.created_at >= periods["month"]))).scalars().all()
     rows = [type("PaymentRow", (), {"amount_kopecks": amount, "created_at": created_at}) for amount, created_at in payments]
     rows.extend(type("PaymentRow", (), {"amount_kopecks": amount, "created_at": created_at}) for amount, created_at in cart_payments)
     revenue = calculate_revenue_periods(rows)
     revenue_today, revenue_week, revenue_month = revenue["today"], revenue["week"], revenue["month"]
+    cash_flow = calculate_cash_flow_periods(cash_entries, now=periods["now"])
     students = (await session.execute(select(Student).where(Student.club_id == club_id))).scalars().all()
     if not students:
         return templates.TemplateResponse("stats.html", {"request": request, "empty": True, "club_name": club_name})
@@ -83,7 +85,7 @@ async def get_revenue_stats(request: Request, session: AsyncSession = Depends(ge
     names = {"boxing": "🥊 Бокс", "kickboxing": "🤼‍♂️ Кикбоксинг", "bjj": "🥋 Бразильское джиу-джитсу", "yoga": "🧘‍♂️ Йога"}
     disciplines_stats = [{"name": names.get(k, f"🏃‍♂️ {k}"), "active_athletes": v} for k, v in discipline_counts.items()]
     top_students = [{"name": s.name, "balance": s.balance_lessons or 0, "parent_id": getattr(s, "parent_id", None)} for s in sorted(students, key=lambda x: x.balance_lessons or 0, reverse=True)[:5]]
-    return templates.TemplateResponse("stats.html", {"request": request, "empty": False, "club_id": club_id, "club_name": club_name, "total_athletes": total_athletes, "total_parents": total_parents, "retention_rate": metrics["retention_rate"], "active_passes": active_passes, "frozen_passes": frozen_passes, "burning_passes": burning_passes, "inactive_passes": inactive_passes, "total_lessons_left": total_lessons_left, "disciplines_stats": disciplines_stats, "churned_students": churned_students, "top_students": top_students, "revenue_today": round(revenue_today, 2), "revenue_week": round(revenue_week, 2), "revenue_month": round(revenue_month, 2), "payment_types": {"FIRST": 0, "RECURRENT": 0}})
+    return templates.TemplateResponse("stats.html", {"request": request, "empty": False, "club_id": club_id, "club_name": club_name, "total_athletes": total_athletes, "total_parents": total_parents, "retention_rate": metrics["retention_rate"], "active_passes": active_passes, "frozen_passes": frozen_passes, "burning_passes": burning_passes, "inactive_passes": inactive_passes, "total_lessons_left": total_lessons_left, "disciplines_stats": disciplines_stats, "churned_students": churned_students, "top_students": top_students, "revenue_today": round(revenue_today, 2), "revenue_week": round(revenue_week, 2), "revenue_month": round(revenue_month, 2), "expenses_today": cash_flow["today_expense"], "expenses_week": cash_flow["week_expense"], "expenses_month": cash_flow["month_expense"], "cash_income_today": cash_flow["today_income"], "cash_income_week": cash_flow["week_income"], "cash_income_month": cash_flow["month_income"], "cash_margin_today": cash_flow["today_margin"], "cash_margin_week": cash_flow["week_margin"], "cash_margin_month": cash_flow["month_margin"], "payment_types": {"FIRST": 0, "RECURRENT": 0}})
 
 
 @router.get("/stats/export/excel")

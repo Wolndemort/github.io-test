@@ -27,7 +27,12 @@
         <div class="form">
             <label>Имя атлета<input id="name" placeholder="Иван Иванов"></label>
             <label>Телефон родителя<input id="phone" placeholder="79990000000"></label>
-            <label>Дата рождения<input id="birthday" type="text" inputmode="numeric" maxlength="10" placeholder="ДД.ММ.ГГГГ"></label>
+            <label>Дата рождения
+                <div class="date-field" style="display:flex;gap:6px;align-items:end">
+                    <input id="birthday" type="text" inputmode="numeric" maxlength="10" placeholder="ДД.ММ.ГГГГ" style="flex:1">
+                    <button type="button" id="birthdayPicker" aria-label="Открыть календарь" style="width:46px;height:46px;border:1px solid #ccc;border-radius:10px;background:#fff;font-size:18px">📅</button>
+                </div>
+            </label>
             <label>Направление
                 <select id="discipline">
                     {% for code, info in disciplines.items() %}
@@ -46,41 +51,56 @@
 const tg = window.Telegram?.WebApp;
 if (tg) { tg.ready(); tg.expand(); }
 const birthdayInput = document.getElementById('birthday');
+const birthdayPicker = document.getElementById('birthdayPicker');
+const birthdayNative = document.createElement('input');
+birthdayNative.type = 'date';
+birthdayNative.tabIndex = -1;
+birthdayNative.setAttribute('aria-hidden', 'true');
+birthdayNative.style.position = 'absolute';
+birthdayNative.style.left = '-9999px';
+birthdayNative.style.width = '1px';
+birthdayNative.style.height = '1px';
+document.body.appendChild(birthdayNative);
+const syncText = () => {
+    const digits = birthdayInput.value.replace(/\D/g, '').slice(0, 8);
+    if (digits.length <= 2) birthdayInput.value = digits;
+    else if (digits.length <= 4) birthdayInput.value = `${digits.slice(0, 2)}.${digits.slice(2)}`;
+    else birthdayInput.value = `${digits.slice(0, 2)}.${digits.slice(2, 4)}.${digits.slice(4)}`;
+};
+const syncNative = () => {
+    const value = birthdayInput.value.trim();
+    const digits = value.replace(/\D/g, '');
+    if (digits.length === 8) {
+        birthdayNative.value = `${digits.slice(4)}-${digits.slice(2, 4)}-${digits.slice(0, 2)}`;
+    } else {
+        birthdayNative.value = '';
+    }
+};
 if (birthdayInput) {
-    birthdayInput.addEventListener('input', () => {
-        const digits = birthdayInput.value.replace(/\D/g, '').slice(0, 8);
-        if (digits.length <= 2) birthdayInput.value = digits;
-        else if (digits.length <= 4) birthdayInput.value = `${digits.slice(0, 2)}.${digits.slice(2)}`;
-        else birthdayInput.value = `${digits.slice(0, 2)}.${digits.slice(2, 4)}.${digits.slice(4)}`;
-    });
-    const native = document.createElement('input');
-    native.type = 'date';
-    native.style.position = 'absolute';
-    native.style.left = '-9999px';
-    native.style.width = '1px';
-    native.style.height = '1px';
-    native.tabIndex = -1;
-    birthdayInput.parentElement.appendChild(native);
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.textContent = '📅';
-    btn.style.cssText = 'margin-top:5px;margin-left:6px;border:1px solid #ccc;border-radius:10px;background:#fff;padding:12px 10px;min-width:44px;height:44px';
-    birthdayInput.parentElement.appendChild(btn);
-    btn.addEventListener('click', () => native.showPicker ? native.showPicker() : native.click());
-    native.addEventListener('change', () => {
-        if (!native.value) return;
-        const [y, m, d] = native.value.split('-');
-        birthdayInput.value = `${d}.${m}.${y}`;
+    birthdayInput.addEventListener('input', syncText);
+    birthdayInput.addEventListener('blur', syncNative);
+}
+if (birthdayPicker) {
+    birthdayPicker.addEventListener('click', () => {
+        syncNative();
+        if (birthdayNative.showPicker) birthdayNative.showPicker();
+        else birthdayNative.click();
     });
 }
+birthdayNative.addEventListener('change', () => {
+    if (!birthdayNative.value) return;
+    const [y, m, d] = birthdayNative.value.split('-');
+    birthdayInput.value = `${d}.${m}.${y}`;
+});
 document.getElementById('saveBtn').onclick = async (e) => {
     e.preventDefault();
+    syncNative();
     const payload = {
         init_data: tg?.initData || new URLSearchParams(location.search).get('init_data') || '',
         club_id: {{ club_id }},
         name: document.getElementById('name').value,
         phone: document.getElementById('phone').value,
-        birthday: document.getElementById('birthday').value,
+        birthday: birthdayInput.value.trim(),
     };
     const res = await fetch('/webapp/client-cabinet/create-student', {
         method: 'POST',
