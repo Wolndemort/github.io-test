@@ -75,10 +75,13 @@ def test_admin_product_sale_page_shows_today_history_and_clear_confirmation_text
     page = Path("templates/admin_product_sale.html").read_text(encoding="utf-8")
     api = Path("admin_module/webapp_views.py").read_text(encoding="utf-8")
     assert "История продаж" in page
-    assert "todayOnly" in page
+    assert "historyFrom" in page
+    assert "historyTo" in page
+    assert "historyApply" in page
+    assert "historyClear" in page
     assert "recentSales" in page
     assert "Продажа оформлена:" in page
-    assert "today = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=None)" in api
+    assert "created_at\": order.created_at.isoformat()" in api or "created_at': order.created_at.isoformat()" in api
 
 
 def test_cart_webhook_has_idempotent_confirmed_guard():

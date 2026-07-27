@@ -44,7 +44,12 @@
   <div class="card">
     <div class="row" style="justify-content:space-between;align-items:center">
       <h3 style="margin:0;">История продаж</h3>
-      <button id="todayOnly" type="button">Сегодня</button>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <input id="historyFrom" type="date" style="flex:1;min-width:140px">
+      <input id="historyTo" type="date" style="flex:1;min-width:140px">
+      <button id="historyApply" type="button">Показать</button>
+      <button id="historyClear" type="button">Сбросить</button>
     </div>
     <details open>
       <summary>Последние продажи</summary>
@@ -84,10 +89,15 @@ const itemsEl=document.getElementById('items');
 const selectedEl=document.getElementById('selected');
 const searchEl=document.getElementById('search');
 const salesHistoryEl=document.getElementById('salesHistory');
+const historyFromEl=document.getElementById('historyFrom');
+const historyToEl=document.getElementById('historyTo');
+const historyApplyEl=document.getElementById('historyApply');
+const historyClearEl=document.getElementById('historyClear');
 const cart=new Map();
 let currentCategory="";
 let currentSearch="";
-let historyTodayOnly=true;
+let historyFrom="";
+let historyTo="";
 
 const esc=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const normalizeCategory=x=>String(x??'other').trim().toLowerCase().replace(/\s+/g,' ').replace(/ё/g,'е');
@@ -108,10 +118,17 @@ function renderSummary(total, selected){
 }
 
 function renderHistory(){
-  const list=(recentSales||[]).filter(x=>!historyTodayOnly || String(x.created_at||'').startsWith('{{ today }}'));
+  const list=(recentSales||[]).filter(x=>{
+    const created = String(x.created_at||'');
+    if (!created) return false;
+    const day = created.slice(0,10);
+    if (historyFrom && day < historyFrom) return false;
+    if (historyTo && day > historyTo) return false;
+    return true;
+  });
   salesHistoryEl.innerHTML=list.length
     ? list.map(x=>`<div class="item" style="grid-template-columns:1fr auto"><div><b>${esc(x.id)}</b><br><span class="muted">${esc(x.payment_method)} · ${esc((x.items||[]).map(i=>`${i.title} × ${i.quantity}`).join(', '))}</span></div><div><b>${(Number(x.amount_kopecks||0)/100).toFixed(2)} ₽</b><div class="muted">${esc(String(x.created_at||'').replace('T',' ').slice(0,16))}</div></div></div>`).join('')
-    : '<span class="muted">Сегодня продаж ещё нет.</span>';
+    : '<span class="muted">Продаж за выбранный период нет.</span>';
 }
 
 function draw(){
@@ -142,7 +159,18 @@ document.getElementById('filters').onclick=e=>{
   draw();
 };
 searchEl.addEventListener('input',()=>{currentSearch=normalizeText(searchEl.value);draw()});
-document.getElementById('todayOnly').onclick=()=>{historyTodayOnly=!historyTodayOnly;document.getElementById('todayOnly').textContent=historyTodayOnly?'Сегодня':'Все';renderHistory();};
+historyApplyEl.onclick=()=>{
+  historyFrom=historyFromEl.value||"";
+  historyTo=historyToEl.value||"";
+  renderHistory();
+};
+historyClearEl.onclick=()=>{
+  historyFrom="";
+  historyTo="";
+  historyFromEl.value="";
+  historyToEl.value="";
+  renderHistory();
+};
 
 document.getElementById('pay').onclick=async()=>{
   const b=document.getElementById('pay');

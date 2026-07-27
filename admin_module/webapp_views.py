@@ -83,7 +83,7 @@ async def admin_product_sale_page(request: Request, club_id: int = Query(...), i
         item_rows = (await session.execute(select(CartItem).where(CartItem.cart_order_id == order.id).order_by(CartItem.id.asc()))).scalars().all()
         recent_sales.append({
             "id": order.id,
-            "created_at": order.created_at,
+            "created_at": order.created_at.isoformat() if order.created_at else None,
             "amount_kopecks": order.amount_kopecks,
             "items": [{"title": item.title, "quantity": item.quantity} for item in item_rows],
             "payment_method": "Наличные" if str(order.provider_payment_id or "").startswith("CASH:") else "Онлайн",
