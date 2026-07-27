@@ -169,18 +169,23 @@ function reset(){
 }
 
 async function save(){
-  let image=i.value||null;
-  if(file.files[0]){
-    const fd=new FormData();fd.append('image',file.files[0]);
-    const u=await fetch('/webapp/admin-products/upload-image?club_id='+cid+'&init_data='+encodeURIComponent(tg?.initData||''),{method:'POST',body:fd}),
-          ud=await u.json();
-    if(!u.ok) return alert(ud.detail||'Ошибка загрузки');
-    image=ud.image_url;
+  try{
+    let image=i.value||null;
+    if(file.files[0]){
+      const fd=new FormData();fd.append('image',file.files[0]);
+      const u=await fetch('/webapp/admin-products/upload-image?club_id='+cid+'&init_data='+encodeURIComponent(tg?.initData||''),{method:'POST',body:fd}),
+            ud=await u.json();
+      if(!u.ok) return alert(ud.detail||'Ошибка загрузки');
+      image=ud.image_url;
+    }
+    const body={init_data:tg?.initData||'',club_id:cid,name:n.value,category:c.value||'other',price_kopecks:Math.round(Number(p.value)*100),stock:Number(s.value)||0,is_active:a.checked,image_url:image,details:details.value};
+    const r=await fetch(edit?'/webapp/admin-products/'+edit:'/webapp/admin-products',{method:edit?'PATCH':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    if(!r.ok) return alert((await r.json()).detail||'Ошибка');
+    location.reload();
+  }catch(error){
+    console.error('Не удалось сохранить товар',error);
+    alert('Не удалось сохранить товар. Откройте консоль браузера для подробностей.');
   }
-  const body={init_data:tg?.initData||'',club_id:cid,name:n.value,category:c.value||'other',price_kopecks:Math.round(Number(p.value)*100),stock:Number(s.value)||0,is_active:a.checked,image_url:image,details:details.value};
-  const r=await fetch(edit?'/webapp/admin-products/'+edit:'/webapp/admin-products',{method:edit?'PATCH':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-  if(!r.ok) return alert((await r.json()).detail||'Ошибка');
-  location.reload();
 }
 
 async function del(id){

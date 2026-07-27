@@ -91,7 +91,7 @@ async def admin_products_page(request: Request, club_id: int = Query(...), init_
     if not init_data: return telegram_init_gate('/webapp/admin-products', club_id, 'РћС‚РєСЂРѕР№С‚Рµ РєР°С‚Р°Р»РѕРі РёР· Telegram')
     await verify_webapp_staff(club, init_data, session, "products_view")
     products = (await session.execute(select(ClubProduct).where(ClubProduct.club_id == club_id).order_by(ClubProduct.id.desc()))).scalars().all()
-    product_data = [{"id": p.id, "name": p.name, "category": p.category, "price_kopecks": p.price_kopecks, "stock": p.stock, "is_active": p.is_active, "image_url": p.image_url} for p in products]
+    product_data = [{"id": p.id, "name": p.name, "category": p.category, "price_kopecks": p.price_kopecks, "stock": p.stock, "is_active": p.is_active, "image_url": p.image_url, "details": p.details} for p in products]
     return templates.TemplateResponse("admin_products.html", {"request": request, "club": club, "club_id": club_id, "products": product_data})
 
 @router.get("/webapp/admin-product-sale", response_class=HTMLResponse)
