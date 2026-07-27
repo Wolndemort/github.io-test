@@ -401,12 +401,18 @@ def test_admin_schedule_webapp_supports_copy_from_day_and_dark_contrast():
     page = Path("templates/admin_schedule.html").read_text(encoding="utf-8")
     api = Path("admin_module/webapp_views.py").read_text(encoding="utf-8")
     assert "copy_day" in page
+    assert "copy_from" in page
     assert "copyFrom" in page
+    assert "copyFromDisc" in page
     assert "selectionMeta" in page
     assert "Копировать занятия из дня" in page
+    assert "Копировать расписание из дисциплины" in page
     assert "source_day" in api
+    assert "source_discipline" in api
     assert "Нельзя копировать день в сам себя" in api
+    assert "Нельзя копировать дисциплину в саму себя" in api
     assert "В исходном дне нет занятий" in api
+    assert "В исходной дисциплине нет занятий" in api
 
 
 @pytest.mark.asyncio
@@ -481,6 +487,93 @@ async def test_admin_schedule_copy_day_duplicates_existing_lessons(monkeypatch):
     assert captured["name"] == "schedule_changed"
     assert captured["kwargs"]["source_day"] == "mon"
     assert captured["kwargs"]["day"] == "tue"
+
+
+@pytest.mark.asyncio
+async def test_admin_schedule_copy_from_discipline_duplicates_entire_schedule(monkeypatch):
+    from admin_module import webapp_views
+    from admin_module.api import ScheduleChangePayload
+
+    club = type(
+        "Club",
+        (object,),
+        {
+            "id": 7,
+            "club_settings": {
+                "disciplines": {
+                    "jiu_jitsu": {
+                        "name": "Джиу-джитсу",
+                        "schedule": {
+                            "mon": [{"time": "10:00", "coach": "Тренер А", "max_slots": 12}],
+                            "tue": [{"time": "12:00", "coach": "Тренер Б", "max_slots": 8}],
+                        },
+                    },
+                    "grappling": {
+                        "name": "Грэпплинг",
+                        "schedule": {
+                            "mon": [],
+                            "tue": [],
+                        },
+                    },
+                }
+            },
+        },
+    )()
+
+    class FakeResult:
+        def scalar_one_or_none(self):
+            return club
+
+    class FakeSession:
+        def __init__(self):
+            self.committed = False
+
+        async def execute(self, *args, **kwargs):
+            return FakeResult()
+
+        async def commit(self):
+            self.committed = True
+
+        def add(self, obj):
+            self.added = obj
+
+    captured = {}
+
+    async def fake_actor_context(*args, **kwargs):
+        return {}
+
+    def fake_audit_event(name, **kwargs):
+        captured["name"] = name
+        captured["kwargs"] = kwargs
+
+    async def fake_verify(*args, **kwargs):
+        return {"id": 1001}
+
+    monkeypatch.setattr(webapp_views, "verify_webapp_staff", fake_verify)
+    monkeypatch.setattr(webapp_views, "audit_actor_context", fake_actor_context)
+    monkeypatch.setattr(webapp_views, "audit_event", fake_audit_event)
+
+    payload = ScheduleChangePayload(
+        init_data="init",
+        club_id=7,
+        action="copy_from",
+        discipline="grappling",
+        day="mon",
+        source_discipline="jiu_jitsu",
+    )
+
+    result = await webapp_views.change_admin_schedule(payload, session=FakeSession())
+
+    assert result == {"success": True}
+    assert club.club_settings["disciplines"]["grappling"]["schedule"]["mon"] == [
+        {"time": "10:00", "coach": "Тренер А", "max_slots": 12, "taken_slots": 0},
+    ]
+    assert club.club_settings["disciplines"]["grappling"]["schedule"]["tue"] == [
+        {"time": "12:00", "coach": "Тренер Б", "max_slots": 8, "taken_slots": 0},
+    ]
+    assert captured["name"] == "schedule_copied"
+    assert captured["kwargs"]["source_discipline"] == "jiu_jitsu"
+    assert captured["kwargs"]["discipline"] == "grappling"
 
 
 def test_master_bot_registers_new_club_bot_without_restart():

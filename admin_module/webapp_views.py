@@ -418,6 +418,35 @@ async def change_admin_schedule(payload: ScheduleChangePayload, session: AsyncSe
         if not source_lessons:
             raise HTTPException(400, "В исходном дне нет занятий")
         lessons = [copy.deepcopy(lesson) for lesson in source_lessons]
+    elif payload.action == "copy_from":
+        source_disc = (payload.source_discipline or "").strip()
+        if not source_disc:
+            raise HTTPException(400, "Источник копирования не указан")
+        if source_disc == payload.discipline:
+            raise HTTPException(400, "Нельзя копировать дисциплину в саму себя")
+        source_block = dict(disciplines.get(source_disc, {}))
+        if not source_block:
+            raise HTTPException(404, "Источник копирования не найден")
+        source_schedule = normalize_schedule_block(source_block.get("schedule", {}))
+        if not any(source_schedule.values()):
+            raise HTTPException(400, "В исходной дисциплине нет занятий")
+        schedule = {day_key: [copy.deepcopy(lesson) for lesson in source_schedule.get(day_key, [])] for day_key in schedule.keys()}
+        block["schedule"] = schedule
+        disciplines[payload.discipline] = block
+        settings["disciplines"] = disciplines
+        club.club_settings = settings
+        session.add(club)
+        await session.commit()
+        audit_event(
+            "schedule_copied",
+            **await audit_actor_context(session, club, tg_user, "webapp/admin-schedule/change"),
+            action="copy",
+            object_type="schedule",
+            object_id=payload.discipline,
+            discipline=payload.discipline,
+            source_discipline=source_disc,
+        )
+        return {"success": True}
     elif payload.action in {"add", "update"}:
         lesson = payload.lesson or {}
         raw_max_slots = lesson.get("max_slots", lesson.get("slots", lesson.get("limit", 0)))

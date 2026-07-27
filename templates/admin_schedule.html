@@ -88,6 +88,19 @@ button,.copy-btn{background:#fff!important;color:#090909!important;font-weight:7
   </div>
 </div>
 
+<div class="card">
+  <div class="copy-panel">
+    <label>
+      Копировать расписание из дисциплины
+      <select id="copyFromDisc">
+        <option value="">Выберите дисциплину</option>
+      </select>
+    </label>
+    <button id="copyFromDiscBtn" class="copy-btn" type="button">Копировать</button>
+    <div class="hint">Скопирует все занятия по дням из другой дисциплины в текущую.</div>
+  </div>
+</div>
+
 <div id="list"></div>
 
 <div class="card controls">
@@ -122,6 +135,8 @@ const coachInput = document.getElementById('coach');
 const saveBtn = document.getElementById('saveBtn');
 const copyFrom = document.getElementById('copyFrom');
 const copyBtn = document.getElementById('copyBtn');
+const copyFromDisc = document.getElementById('copyFromDisc');
+const copyFromDiscBtn = document.getElementById('copyFromDiscBtn');
 const selectionMeta = document.getElementById('selectionMeta');
 const storageKey = 'admin-schedule:{{ club_id }}';
 
@@ -164,6 +179,13 @@ function updateCopyOptions() {
     : `<option value="">Нет доступных дней для копирования</option>`;
   copyFrom.disabled = !items.length;
   copyBtn.disabled = !items.length;
+
+  const disciplinesItems = Object.entries(data).filter(([key]) => key !== disciplineSelect.value && Object.values(((data[key] || {}).schedule || {})).some(arr => (arr || []).length > 0));
+  copyFromDisc.innerHTML = disciplinesItems.length
+    ? `<option value="">Выберите дисциплину</option>` + disciplinesItems.map(([key, info]) => `<option value="${key}">${info?.name || key}</option>`).join('')
+    : `<option value="">Нет доступных дисциплин для копирования</option>`;
+  copyFromDisc.disabled = !disciplinesItems.length;
+  copyFromDiscBtn.disabled = !disciplinesItems.length;
 }
 
 function render() {
@@ -224,6 +246,11 @@ function copyDay() {
   send('copy_day', { source_day: copyFrom.value, lesson: null, index: null }).catch(e => alert(e.message));
 }
 
+function copyFromDiscipline() {
+  if (!copyFromDisc.value) return;
+  send('copy_from', { source_discipline: copyFromDisc.value, lesson: null, index: null, source_day: null }).catch(e => alert(e.message));
+}
+
 function removeL(i) {
   if (confirm('Удалить занятие?')) {
     idx = null;
@@ -247,6 +274,7 @@ daySelect.addEventListener('change', () => {
 
 saveBtn.addEventListener('click', save);
 copyBtn.addEventListener('click', copyDay);
+copyFromDiscBtn.addEventListener('click', copyFromDiscipline);
 
 render();
 </script>

@@ -163,6 +163,7 @@ class ScheduleChangePayload(BaseModel):
     index: int | None = None
     lesson: dict | None = None
     source_day: str | None = None
+    source_discipline: str | None = None
 
 class ProductPayload(BaseModel):
     init_data: str
