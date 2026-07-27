@@ -350,7 +350,7 @@ async def show_daily_report(
 
 
 @router.callback_query(F.data == "admin_turnstile_main")
-async def admin_turnstile_main(callback: types.CallbackQuery, club_settings: dict, is_owner: bool | None = None, is_super_admin: bool | None = None):
+async def admin_turnstile_main(callback: types.CallbackQuery, club_settings: dict, club: Club, is_owner: bool | None = None, is_super_admin: bool | None = None):
     if not (is_owner or is_super_admin):
         return await callback.answer("Доступ запрещён", show_alert=True)
     turnstile_config = club_settings.get("turnstile", {})
@@ -358,6 +358,7 @@ async def admin_turnstile_main(callback: types.CallbackQuery, club_settings: dic
     builder = InlineKeyboardBuilder()
 
     if not is_enabled:
+        builder.row(types.InlineKeyboardButton(text="🔓 Открыть турникет", web_app=types.WebAppInfo(url=f"https://{club.id}.speedycrm.ru/webapp/staff-pass?club_id={club.id}")))
         builder.row(types.InlineKeyboardButton(text="🪛 Настроить и включить", callback_data="setup_t_start"))
         builder.row(types.InlineKeyboardButton(text="🛠 Назад в настройки", callback_data="admin_settings"))
         await callback.message.edit_text(
@@ -368,6 +369,7 @@ async def admin_turnstile_main(callback: types.CallbackQuery, club_settings: dic
             parse_mode="HTML"
         )
     else:
+        builder.row(types.InlineKeyboardButton(text="🔓 Открыть турникет", web_app=types.WebAppInfo(url=f"https://{club.id}.speedycrm.ru/webapp/staff-pass?club_id={club.id}")))
         builder.row(types.InlineKeyboardButton(text="🔄 зменить настройки", callback_data="setup_t_start"))
         builder.row(types.InlineKeyboardButton(text="🛑 Выключить СКУД", callback_data="disable_t_confirm"))
         builder.row(types.InlineKeyboardButton(text="🛠 Назад в настройки", callback_data="admin_settings"))
@@ -474,7 +476,7 @@ async def disable_turnstile(callback: types.CallbackQuery, session: AsyncSession
             await session.rollback()
             await callback.answer("❌ Не удалось сохранить изменения в БД", show_alert=True)
             return
-        await admin_turnstile_main(callback, club_settings=current_settings)
+        await admin_turnstile_main(callback, club_settings=current_settings, club=club)
     else:
         await callback.answer("СКУД и так не был настроен", show_alert=True)
 

@@ -2,7 +2,7 @@ from pathlib import Path
 
 from types import SimpleNamespace
 
-from handlers.buttons import get_profile_keyboard
+from handlers.buttons import admin_keyboard, get_profile_keyboard
 from services.staff_permissions import ROLE_PERMISSIONS
 
 
@@ -102,6 +102,20 @@ def test_staff_profile_keyboard_hides_qr_and_freeze_but_keeps_admin_full_mode():
 def test_staff_pass_template_and_route_are_present():
     page = Path("templates/staff_pass.html").read_text(encoding="utf-8")
     api = Path("admin_module/webapp_client_cabinet.py").read_text(encoding="utf-8")
+    settings = Path("handlers/admin_settings_panel.py").read_text(encoding="utf-8")
     assert "Открыть турникет" in page
     assert "FaceID" in page
     assert "/webapp/staff-open-turnstile" in api
+    assert "/webapp/staff-pass" in settings
+    assert "admin_turnstile_main" in settings
+
+
+def test_admin_keyboard_exposes_staff_turnstile_entry_for_full_access_and_staff():
+    full_markup = admin_keyboard(7, {}, staff_permissions=None)
+    staff_markup = admin_keyboard(7, {}, staff_permissions={"cash_view"})
+
+    full_texts = [button.text for row in full_markup.inline_keyboard for button in row]
+    staff_texts = [button.text for row in staff_markup.inline_keyboard for button in row]
+
+    assert "🔓 Открыть турникет" in full_texts
+    assert "🔓 Открыть турникет" in staff_texts

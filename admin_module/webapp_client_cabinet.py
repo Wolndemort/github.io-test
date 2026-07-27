@@ -133,23 +133,24 @@ async def get_biometric_page(
 
 
 @router.get("/webapp/staff-pass", response_class=HTMLResponse)
-async def get_staff_pass_page(request: Request, club_id: int, user_id: int, init_data: str | None = Query(default=None), db: AsyncSession = Depends(get_session)):
+async def get_staff_pass_page(request: Request, club_id: int, user_id: int | None = None, init_data: str | None = Query(default=None), db: AsyncSession = Depends(get_session)):
     if not init_data:
-        return _auth_gate_html("webapp/staff-pass", club_id=club_id, user_id=user_id)
+        return _auth_gate_html("webapp/staff-pass", club_id=club_id, user_id=user_id or "")
     club = await db.get(Club, club_id)
     if not club or not club.bot_token:
         raise HTTPException(status_code=404, detail="Клуб не найден")
     tg_user = verify_telegram_data(init_data, club.bot_token)
-    if not tg_user or int(tg_user.get("id", 0)) != user_id:
+    resolved_user_id = int(user_id or tg_user.get("id", 0) if tg_user else 0)
+    if not tg_user or int(tg_user.get("id", 0)) != resolved_user_id:
         raise HTTPException(status_code=403, detail="Доступ запрещен")
-    is_owner = int(club.owner_id or 0) == user_id
+    is_owner = int(club.owner_id or 0) == resolved_user_id
     is_staff = bool(
         is_owner
         or (
             await db.scalar(
                 select(ClubStaff.id).where(
                     ClubStaff.club_id == club_id,
-                    ClubStaff.telegram_id == user_id,
+                    ClubStaff.telegram_id == resolved_user_id,
                     ClubStaff.is_active.is_(True),
                 )
             )
@@ -166,7 +167,7 @@ async def get_staff_pass_page(request: Request, club_id: int, user_id: int, init
             "request": request,
             "club": club,
             "club_id": club_id,
-            "user_id": user_id,
+            "user_id": resolved_user_id,
             "club_name": club.name if club else "",
             "loading": {
                 "enabled": bool(loading.get("enabled", False)),
