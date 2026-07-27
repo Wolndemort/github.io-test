@@ -43,6 +43,12 @@ async def is_active_staff_member(session, club_id: int, telegram_id: int) -> boo
     return bool(staff)
 
 
+async def is_staff_or_owner(session, club: Club, telegram_id: int) -> bool:
+    if int(getattr(club, "owner_id", 0) or 0) == int(telegram_id):
+        return True
+    return await is_active_staff_member(session, club.id, telegram_id)
+
+
 def get_club_id_from_host(request: Request) -> int:
     host = request.headers.get("host", "")
     subdomain = host.split(".")[0]
