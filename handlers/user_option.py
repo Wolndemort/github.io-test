@@ -508,10 +508,11 @@ async def universal_price_handler(callback: types.CallbackQuery, club_settings: 
             count = t.get('count', '?')
             price = t.get('price', '—')
             days = t.get('days')
+            count_label = "Безлимит" if count == 999 else count
 
             # Если дни есть — пишем (30 дн.), если нет — просто пропускаем этот кусок
             days_info = f" ({days} дн.)" if days else ""
-            price_text += f"• {count} зан. — {price}₽{days_info}\n"
+            price_text += f"• {count_label} — {price}₽{days_info}\n"
 
     await callback.message.edit_text(
         text=price_text,
