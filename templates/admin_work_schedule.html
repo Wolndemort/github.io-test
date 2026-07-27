@@ -6,7 +6,7 @@
 </div>
 <h2>График работы — {{ club.name }}</h2>
 <div class="card">
-  <select id="day">{% for k,v in {"mon":"Пн","tue":"Вт","wed":"Ср","thu":"Чт","fri":"Пт","sat":"Сб","sun":"Вс"}.items() %}<option value="{{k}}">{{v}}</option>{% endfor %}</select>
+  <select id="day">{% for k,v in {"mon":"По будням","tue":"Вт","wed":"Ср","thu":"Чт","fri":"Пт","sat":"Сб","sun":"Вс"}.items() %}<option value="{{k}}">{{v}}</option>{% endfor %}</select>
   <input id="openAt" type="time" value="09:00">
   <input id="closeAt" type="time" value="18:00">
   <input id="note" placeholder="Примечание, например: выходной / короткий день">
@@ -23,7 +23,7 @@ const openAt = document.getElementById('openAt');
 const closeAt = document.getElementById('closeAt');
 const note = document.getElementById('note');
 const list = document.getElementById('list');
-const days = {mon:'Пн',tue:'Вт',wed:'Ср',thu:'Чт',fri:'Пт',sat:'Сб',sun:'Вс'};
+const days = {mon:'По будням',tue:'Вт',wed:'Ср',thu:'Чт',fri:'Пт',sat:'Сб',sun:'Вс'};
 function render(){
   list.innerHTML = Object.keys(days).map(day => {
     const x = data[day];

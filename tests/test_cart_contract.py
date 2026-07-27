@@ -71,6 +71,16 @@ def test_admin_product_screen_supports_image_and_editing():
     assert "is_active" in page
 
 
+def test_admin_product_sale_page_shows_today_history_and_clear_confirmation_text():
+    page = Path("templates/admin_product_sale.html").read_text(encoding="utf-8")
+    api = Path("admin_module/webapp_views.py").read_text(encoding="utf-8")
+    assert "История продаж" in page
+    assert "todayOnly" in page
+    assert "recentSales" in page
+    assert "Продажа оформлена:" in page
+    assert "today = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)" in api
+
+
 def test_cart_webhook_has_idempotent_confirmed_guard():
     source = Path("admin_module/payments_webhook.py").read_text(encoding="utf-8")
     assert 'str(order_id).startswith("CART_")' in source

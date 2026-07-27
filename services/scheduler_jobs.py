@@ -239,7 +239,7 @@ async def send_work_schedule_notice(mode: str):
                 intro = "Наш клуб работает в воскресенье по следующему графику:"
                 days = ["sun"]
             else:
-                intro = "Наш клуб работает в понедельник по следующему графику:"
+                intro = "Наш клуб работает по будням по следующему графику:"
                 days = ["mon", "tue", "wed", "thu", "fri"]
 
             text = _format_work_schedule_notice(

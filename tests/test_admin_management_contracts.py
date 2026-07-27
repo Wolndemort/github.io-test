@@ -201,6 +201,8 @@ def test_subscription_forms_explain_unlimited_marker_999():
     assert "999" in tariffs
     assert "createDiscipline" in tariffs
     assert "newDisciplineName" in tariffs
+    assert "Копировать тарифы из дисциплины" in tariffs
+    assert "copyFromDisc" in tariffs
 
 
 def test_cash_register_and_stats_show_distinct_cashflow_terms():

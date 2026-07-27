@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import os
 import uuid
+from datetime import datetime, timezone
 
 import httpx
 from aiogram import Bot
@@ -75,7 +76,19 @@ async def admin_product_sale_page(request: Request, club_id: int = Query(...), i
     products = (await session.execute(select(ClubProduct).where(ClubProduct.club_id == club_id, ClubProduct.is_active.is_(True), ClubProduct.stock > 0).order_by(ClubProduct.category, ClubProduct.name))).scalars().all()
     product_data = [{"id": p.id, "name": p.name, "category": p.category, "price_kopecks": p.price_kopecks, "stock": p.stock, "image_url": p.image_url, "details": p.details} for p in products]
     categories = sorted({(p.category or "other").strip() or "other" for p in products})
-    return templates.TemplateResponse("admin_product_sale.html", {"request": request, "club_id": club_id, "products": product_data, "categories": categories})
+    today = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    recent_orders = (await session.execute(select(CartOrder).where(CartOrder.club_id == club_id, CartOrder.status == "CONFIRMED", CartOrder.created_at >= today).order_by(CartOrder.created_at.desc()).limit(20))).scalars().all()
+    recent_sales = []
+    for order in recent_orders:
+        item_rows = (await session.execute(select(CartItem).where(CartItem.cart_order_id == order.id).order_by(CartItem.id.asc()))).scalars().all()
+        recent_sales.append({
+            "id": order.id,
+            "created_at": order.created_at,
+            "amount_kopecks": order.amount_kopecks,
+            "items": [{"title": item.title, "quantity": item.quantity} for item in item_rows],
+            "payment_method": "Наличные" if str(order.provider_payment_id or "").startswith("CASH:") else "Онлайн",
+        })
+    return templates.TemplateResponse("admin_product_sale.html", {"request": request, "club_id": club_id, "products": product_data, "categories": categories, "recent_sales": recent_sales, "today": today.date().isoformat()})
 
 @router.post("/webapp/admin-product-sale")
 async def admin_product_sale(payload: AdminProductSalePayload, session: AsyncSession = Depends(get_session)):
@@ -265,6 +278,39 @@ async def change_admin_tariff(payload: TariffChangePayload, request: Request, se
         if block["type"] == "unlimited":
             for tariff in tariffs:
                 tariff["count"] = 999
+    elif payload.action == "copy_from":
+        source_disc = str((payload.tariff or {}).get("source_discipline", "")).strip()
+        if not source_disc:
+            raise HTTPException(400, "Источник копирования не указан")
+        if source_disc == payload.discipline:
+            raise HTTPException(400, "Нельзя копировать дисциплину в саму себя")
+        source_block = dict(disciplines.get(source_disc, {}))
+        if not source_block:
+            raise HTTPException(404, "Источник копирования не найден")
+        source_tariffs = copy.deepcopy(source_block.get("tariffs", []) or [])
+        if not source_tariffs:
+            raise HTTPException(400, "В исходной дисциплине нет тарифов")
+        block["type"] = source_block.get("type", block.get("type", "lessons"))
+        block["tariffs"] = source_tariffs
+        block["active"] = True
+        disciplines[payload.discipline] = block
+        settings["disciplines"] = disciplines
+        await session.execute(update(Club).where(Club.id == club.id).values(club_settings=settings))
+        await session.commit()
+        redis = getattr(request.app.state, "redis_client", None)
+        if redis:
+            await redis.delete(f"club_config:{club.bot_token}")
+        audit_event(
+            "discipline_copied",
+            **await audit_actor_context(session, club, tg_user, "webapp/admin-tariffs/change"),
+            club_id=club.id,
+            action="copy",
+            object_type="discipline",
+            object_id=payload.discipline,
+            discipline=payload.discipline,
+            source_discipline=source_disc,
+        )
+        return {"success": True, "copied_from": source_disc}
     elif payload.action == "create_discipline":
         raw_name = str((payload.tariff or {}).get("name", "")).strip()
         if not raw_name:

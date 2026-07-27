@@ -19,6 +19,10 @@ let selected = localStorage.getItem(storageKey) || Object.keys(disciplines)[0];
 
 function draw() {
   const d = disciplines[selected] || {};
+  const copyOptions = Object.entries(disciplines)
+    .filter(([k, v]) => k !== selected && (v || {}).tariffs && (v.tariffs || []).length)
+    .map(([k, v]) => `<option value="${k}">${esc(v.name || k)} — ${(v.tariffs || []).length}</option>`)
+    .join('');
   root.innerHTML = `<div class="card">
     <h2>Тарифы и дисциплины</h2>
     <select id="d">${Object.entries(disciplines).map(([k,v])=>`<option value="${k}" ${k===selected?'selected':''}>${esc(v.name||k)}</option>`).join('')}</select>
@@ -26,6 +30,9 @@ function draw() {
     <button id="kind">Тип: ${d.type==='unlimited'?'Безлимит':'По занятиям'}</button>
     <p class="muted">Подсказка: безлимитный тариф хранится как <b>999</b> занятий.</p>
     <p class="muted">Изменения синхронизируются с ботом автоматически.</p>
+    <h3>Копировать тарифы из дисциплины</h3>
+    <select id="copyFromDisc">${copyOptions ? `<option value="">Выберите источник</option>${copyOptions}` : '<option value="">Нет доступных источников</option>'}</select>
+    <button id="copyFromBtn" ${copyOptions ? '' : 'disabled'}>Копировать тарифы</button>
     ${(d.tariffs||[]).map((t,i)=>`<div class="tariff"><input id="p${i}" type="number" step="0.01" value="${t.price||0}"> ₽ <input id="days${i}" type="number" value="${t.days||30}"> дней <input id="count${i}" type="number" value="${t.count||0}" ${d.type==='unlimited'?'disabled':''}> занятий <button data-save="${i}">Сохранить</button><button data-del="${i}">Удалить</button></div>`).join('')}
     <h3>Создать дисциплину</h3>
     <input id="newDisciplineName" placeholder="Название дисциплины">
@@ -36,6 +43,7 @@ function draw() {
   active.onclick = () => change('toggle_active');
   kind.onclick = () => change('toggle_type');
   createDiscipline.onclick = () => change('create_discipline', null, {name:document.getElementById('newDisciplineName').value});
+  copyFromBtn.onclick = () => change('copy_from', null, {source_discipline:document.getElementById('copyFromDisc').value});
   add.onclick = () => change('add', null, {price:np.value, days:nd.value, count:nc.value});
   root.querySelectorAll('[data-save]').forEach(b=>b.onclick=()=>{const i=Number(b.dataset.save);change('update',i,{price:document.getElementById('p'+i).value,days:document.getElementById('days'+i).value,count:document.getElementById('count'+i).value})});
   root.querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>change('delete',Number(b.dataset.del)));

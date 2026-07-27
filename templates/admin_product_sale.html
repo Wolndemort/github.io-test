@@ -41,6 +41,16 @@
     <h2>Продажа товаров</h2>
     <div class="muted">Фильтруйте по категории или ищите товар по названию. Остатки спишутся после подтверждения наличной оплаты.</div>
   </div>
+  <div class="card">
+    <div class="row" style="justify-content:space-between;align-items:center">
+      <h3 style="margin:0;">История продаж</h3>
+      <button id="todayOnly" type="button">Сегодня</button>
+    </div>
+    <details open>
+      <summary>Последние продажи</summary>
+      <div id="salesHistory" style="margin-top:10px;"></div>
+    </details>
+  </div>
 
   <div class="bar">
     <div class="card" style="margin:0">
@@ -69,12 +79,15 @@
 const tg=Telegram.WebApp;tg.ready();
 const products={{products|tojson}};
 const categories={{ categories|tojson }};
+const recentSales={{ recent_sales|default([])|tojson }};
 const itemsEl=document.getElementById('items');
 const selectedEl=document.getElementById('selected');
 const searchEl=document.getElementById('search');
+const salesHistoryEl=document.getElementById('salesHistory');
 const cart=new Map();
 let currentCategory="";
 let currentSearch="";
+let historyTodayOnly=true;
 
 const esc=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const normalizeCategory=x=>String(x??'other').trim().toLowerCase().replace(/\s+/g,' ').replace(/ё/g,'е');
@@ -92,6 +105,13 @@ function renderSummary(total, selected){
   selectedEl.innerHTML=selected.length?'<b>В корзине:</b> '+selected.map(x=>`${esc(x.name)} × ${x.qty}`).join(', '):'';
   document.getElementById('total').textContent='Итого: '+(total/100).toFixed(2)+' ₽';
   document.getElementById('pay').disabled=total<=0;
+}
+
+function renderHistory(){
+  const list=(recentSales||[]).filter(x=>!historyTodayOnly || String(x.created_at||'').startsWith('{{ today }}'));
+  salesHistoryEl.innerHTML=list.length
+    ? list.map(x=>`<div class="item" style="grid-template-columns:1fr auto"><div><b>${esc(x.id)}</b><br><span class="muted">${esc(x.payment_method)} · ${esc((x.items||[]).map(i=>`${i.title} × ${i.quantity}`).join(', '))}</span></div><div><b>${(Number(x.amount_kopecks||0)/100).toFixed(2)} ₽</b><div class="muted">${esc(String(x.created_at||'').replace('T',' ').slice(0,16))}</div></div></div>`).join('')
+    : '<span class="muted">Сегодня продаж ещё нет.</span>';
 }
 
 function draw(){
@@ -122,6 +142,7 @@ document.getElementById('filters').onclick=e=>{
   draw();
 };
 searchEl.addEventListener('input',()=>{currentSearch=normalizeText(searchEl.value);draw()});
+document.getElementById('todayOnly').onclick=()=>{historyTodayOnly=!historyTodayOnly;document.getElementById('todayOnly').textContent=historyTodayOnly?'Сегодня':'Все';renderHistory();};
 
 document.getElementById('pay').onclick=async()=>{
   const b=document.getElementById('pay');
@@ -141,11 +162,15 @@ document.getElementById('pay').onclick=async()=>{
     b.disabled=false;
     return;
   }
-  alert('Продажа оформлена на '+(d.total_kopeks/100).toFixed(2)+' ₽');
+  alert('Продажа оформлена: ' + (cart.size ? [...cart].map(([productId, quantity]) => {
+    const p = products.find(x => x.id === productId);
+    return p ? `${p.name} × ${quantity}` : `${productId} × ${quantity}`;
+  }).join(', ') : 'без позиций') + '. Сумма ' + (d.total_kopeks/100).toFixed(2) + ' ₽');
   location.reload();
 };
 
 draw();
+renderHistory();
 </script>
 </body>
 </html>
