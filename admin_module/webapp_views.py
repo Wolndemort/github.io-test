@@ -76,7 +76,7 @@ async def admin_product_sale_page(request: Request, club_id: int = Query(...), i
     products = (await session.execute(select(ClubProduct).where(ClubProduct.club_id == club_id, ClubProduct.is_active.is_(True), ClubProduct.stock > 0).order_by(ClubProduct.category, ClubProduct.name))).scalars().all()
     product_data = [{"id": p.id, "name": p.name, "category": p.category, "price_kopecks": p.price_kopecks, "stock": p.stock, "image_url": p.image_url, "details": p.details} for p in products]
     categories = sorted({(p.category or "other").strip() or "other" for p in products})
-    today = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    today = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=None)
     recent_orders = (await session.execute(select(CartOrder).where(CartOrder.club_id == club_id, CartOrder.status == "CONFIRMED", CartOrder.created_at >= today).order_by(CartOrder.created_at.desc()).limit(20))).scalars().all()
     recent_sales = []
     for order in recent_orders:
