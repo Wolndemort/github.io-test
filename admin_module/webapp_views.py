@@ -36,6 +36,16 @@ from admin_module.api import (
 )
 from services.schedule_utils import normalize_schedule_block
 
+def _normalize_category(value: str | None) -> str:
+    return (value or "other").strip().lower().replace("ё", "е") or "other"
+
+def _build_category_list(products):
+    labels = {}
+    for product in products:
+        raw = (getattr(product, "category", None) or "other").strip() or "other"
+        labels.setdefault(_normalize_category(raw), raw)
+    return [labels[key] for key in sorted(labels)]
+
 @router.get("/webapp/shop", response_class=HTMLResponse)
 async def client_shop(request: Request, club_id: int = Query(...), init_data: str | None = Query(None), session: AsyncSession = Depends(get_session)):
     club = await session.get(Club, club_id)
@@ -43,7 +53,7 @@ async def client_shop(request: Request, club_id: int = Query(...), init_data: st
     if not club or not verify_telegram_data(init_data, club.bot_token): raise HTTPException(403, "Доступ запрещён")
     products = (await session.execute(select(ClubProduct).where(ClubProduct.club_id == club_id, ClubProduct.is_active.is_(True), ClubProduct.stock > 0).order_by(ClubProduct.category, ClubProduct.name))).scalars().all()
     product_data = [{"id": p.id, "name": p.name, "category": p.category, "price_kopecks": p.price_kopecks, "stock": p.stock, "image_url": p.image_url, "details": p.details} for p in products]
-    categories = sorted({(p.category or "other").strip() or "other" for p in products})
+    categories = _build_category_list(products)
     sbp_enabled = bool((club.club_settings or {}).get("payments", {}).get("yookassa_sbp_enabled", True))
     return templates.TemplateResponse("shop.html", {"request": request, "club": club, "club_id": club_id, "products": product_data, "categories": categories, "sbp_enabled": sbp_enabled})
 
@@ -75,7 +85,7 @@ async def admin_product_sale_page(request: Request, club_id: int = Query(...), i
     await verify_webapp_staff(club, init_data, session, "cash_sale")
     products = (await session.execute(select(ClubProduct).where(ClubProduct.club_id == club_id, ClubProduct.is_active.is_(True)).order_by(ClubProduct.category, ClubProduct.name))).scalars().all()
     product_data = [{"id": p.id, "name": p.name, "category": p.category, "price_kopecks": p.price_kopecks, "stock": p.stock, "image_url": p.image_url, "details": p.details} for p in products]
-    categories = sorted({(p.category or "other").strip() or "other" for p in products})
+    categories = _build_category_list(products)
     today = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=None)
     recent_orders = (await session.execute(select(CartOrder).where(CartOrder.club_id == club_id, CartOrder.status == "CONFIRMED", CartOrder.created_at >= today).order_by(CartOrder.created_at.desc()).limit(20))).scalars().all()
     recent_sales = []

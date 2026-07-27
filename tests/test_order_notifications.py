@@ -85,3 +85,27 @@ async def test_notify_product_staff_sends_only_to_active_cash_staff():
     assert [x["chat_id"] for x in bot.sent] == [101]
     assert bot.sent[0]["disable_notification"] is False
     assert bot.sent[0]["parse_mode"] == "HTML"
+
+
+@pytest.mark.asyncio
+async def test_cash_receipt_text_mentions_buyer_student_amount_and_date():
+    session = SimpleNamespace(get=AsyncMock(return_value=SimpleNamespace(full_name="Мама Атлета", user_id=77)))
+    buyer = await resolve_user_label(session, 77)
+    receipt = build_owner_receipt_text(
+        title="Оплата наличными подтверждена",
+        order_id="CASH_ABON_1_0",
+        buyer_label=buyer,
+        items_text=format_order_items([SimpleNamespace(title="Бокс · Безлимит (30 дн.)", quantity=1, product_id=1)]),
+        amount_kopecks=12000,
+        extra_lines=[
+            "Атлет: <b>Иван Иванов</b>",
+            "Клуб: <b>Клуб</b>",
+            "Абонемент до: <b>01.08.2026</b>",
+        ],
+    )
+
+    assert "Оплата наличными подтверждена" in receipt
+    assert "Мама Атлета" in receipt
+    assert "Иван Иванов" in receipt
+    assert "120.00 ₽" in receipt
+    assert "Дата:" in receipt

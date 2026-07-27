@@ -17,6 +17,7 @@ from handlers.states import PaymentStates
 from redis.asyncio import Redis
 from services.abuse_guard import rate_limit, audit_block
 from services.audit import audit_event
+from services.order_notifications import build_owner_receipt_text, format_order_items, resolve_user_label
 
 
 router = Router()
@@ -1218,6 +1219,7 @@ async def final_cash_pay(
 
     if result:
         new_expire, parent_id = result
+        student = await session.get(Student, student_id)
 
         # Формируем красивое отображение тарифа для экрана админа (прячем техническое 999)
         t_label = f"Безлимит ({days} дн.)" if count == 999 else f"{count} зан. ({days} дн.)"
@@ -1234,12 +1236,26 @@ async def final_cash_pay(
         if parent_id:
             try:
                 club_name = club_settings.get("ui", {}).get("club_name", club.name)
+                parent_label = await resolve_user_label(session, parent_id, empty_label="Плательщик")
+                student_label = getattr(student, "name", None) or f"ID {student_id}"
+                cash_receipt = build_owner_receipt_text(
+                    title="Оплата наличными подтверждена",
+                    order_id=f"CASH_ABON_{student_id}_{tariff_idx}",
+                    buyer_label=parent_label,
+                    items_text=format_order_items([
+                        type("ItemView", (), {"title": f"{disc_cfg.get('name')} · {t_label}", "quantity": 1, "product_id": 1})()
+                    ]),
+                    amount_kopecks=int(float(selected_tariff.get("price", 0) or 0) * 100),
+                    extra_lines=[
+                        f"Атлет: <b>{student_label}</b>",
+                        f"Клуб: <b>{club_name}</b>",
+                        f"Абонемент до: <b>{new_expire}</b>",
+                        "График занятий смотрите во вкладке <b>Расписание</b>.",
+                    ],
+                )
                 await callback.bot.send_message(
                     chat_id=parent_id,
-                    text=f"💵 <b>Оплата наличными подтверждена!</b>\n\n"
-                         f"🏛 Клуб: <b>{club_name}</b>\n"
-                         f"🥋 Направление: {disc_cfg.get('name')}\n"
-                         f"📅 Абонемент успешно активирован до: <b>{new_expire}</b>.",
+                    text=cash_receipt,
                     parse_mode="HTML"
                 )
             except Exception as e:

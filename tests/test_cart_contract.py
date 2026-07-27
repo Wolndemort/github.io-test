@@ -3,6 +3,7 @@ from pathlib import Path
 
 from database.db import CartOrder, CartItem, ClubProduct
 from admin_module.api import router, _student_identity_phone
+from admin_module.webapp_views import _build_category_list
 
 
 def test_cart_models_have_separate_order_and_item_tables():
@@ -130,6 +131,18 @@ def test_admin_products_filter_normalizes_existing_category_values():
     page = Path("templates/admin_products.html").read_text(encoding="utf-8")
     assert "normalizeCategory" in page
     assert "normalizeCategory(x.category)===filter" in page
+
+
+def test_webapp_category_lists_collapse_case_and_yo_variants():
+    products = [
+        type("P", (), {"category": "Кофе"})(),
+        type("P", (), {"category": "кофе"})(),
+        type("P", (), {"category": "кофё"})(),
+        type("P", (), {"category": "Чай"})(),
+    ]
+    categories = _build_category_list(products)
+    assert categories.count("Кофе") == 1
+    assert categories.count("Чай") == 1
 
 
 def test_products_support_details_and_shop_renders_them_without_price_wrap():
