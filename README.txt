@@ -887,3 +887,51 @@ WebApp-маршруты, формы создания и редактирован
 - Staff UI hides client-only actions such as athlete creation, phone binding and subscription purchase.
 - Staff users still keep access to history and the shop/cart flow, so product purchases remain available.
 - The routing logic for client purchases was not changed; this is a presentation-level split only.
+
+## Permanent product contracts (2026-07-28)
+
+Keep these rules when extending the project:
+
+### Attendance and sessions
+
+- All QR, Face ID, bot manual check-in and staff WebApp check-in paths must use `services/gate_control.py:process_athlete_gate_pass`.
+- A new session is opened only when `Student.last_visit` is outside `session_timeout_minutes`.
+- A repeated check-in during an active session must not create a second lesson deduction or a second parent notification.
+- The result must expose `already_marked`/`is_inside_session` so the operator sees that the student is already inside.
+- Bot search has two explicit actions: `без турникета` and `с турникетом`.
+- Staff WebApp `/webapp/staff-checkin` has the same two actions. `open_turnstile=False` records the visit and session without calling the relay; `True` uses the relay.
+- Owners and super-admins have full access. Coaches need both `qr_checkin` and `manual_checkin` permissions.
+- Never add an extra Face ID server check on top of the existing signed Telegram WebApp flow: this previously broke working Face ID behavior.
+
+### Parents
+
+- `Student.parent_id` is legacy and must remain intact for existing data and compatibility.
+- Additional parents are stored in `student_parents(student_id, parent_id, is_primary)`.
+- Phone binding must add a `StudentParent` relation and must not replace an existing primary `parent_id`.
+- Every parent-related lookup for access, cabinet visibility, Face ID and notifications must include both the legacy parent and `student_parents`.
+- Use `get_student_parent_ids()` to send one notification per unique parent.
+
+### Finance and notifications
+
+- The financial journal must include confirmed online and manual operations for subscriptions, freezes and products, including cash subscriptions (`PaymentOrder` with `CASH` marker).
+- For every successful purchase, notify the customer and the club owner. For manual/requisites payments, notify the customer on approval or rejection.
+- When a client freezes a subscription, notify the owner.
+- On a new student entry, notify all parents and the owner when the entry was made by a staff member. Do not notify again for a repeated active-session check-in.
+- Notification failures must be logged and must never roll back a successfully saved visit, freeze or payment.
+
+### Operator locations
+
+- Main admin keyboard: `📝 Отметить посещение` opens student search; each result has `без турникета` and `с турникетом`.
+- Staff WebApp cabinet: `Отметить посещение` opens `/webapp/staff-checkin`, with search by name, surname fragment or phone and the same two actions.
+- The general admin keyboard contains the single `💰 Касса и журнал` entry. Do not duplicate it inside club settings.
+
+### Athlete history UI
+
+- The athlete card shows current balance, active session end time, `↓ 1 занятие за новый вход`, and a clear note that a repeated entry does not deduct again.
+- The history page may be extended visually, but it must not mutate balances or session state.
+
+### Required verification before future changes
+
+- Run `venv\\Scripts\\python.exe -m pytest -q --disable-warnings`.
+- Check QR, Face ID, bot check-in, staff check-in with and without relay, repeated check-in, one-parent and multi-parent phone binding, online/manual product/subscription/freeze notifications, and the cash register.
+- Update contract tests and this section whenever a route, permission, notification or session rule changes.

@@ -286,7 +286,13 @@ async def staff_checkin(payload: dict, db: AsyncSession = Depends(get_session)):
                 await bot.send_message(int(club.owner_id), f"🟢 <b>Посещение отмечено сотрудником</b>\nАтлет: <b>{result['student_name']}</b>\nСотрудник ID: <code>{user_id}</code>\nРежим: {'с турникетом' if payload.get('open_turnstile') else 'без турникета'}", parse_mode="HTML")
         finally:
             await bot.session.close()
-    return {"success": True, "message": result["message"], "already_marked": result.get("already_marked", False), "turnstile": result.get("turnstile_status")}
+    active_until = None
+    student = await db.get(Student, int(payload["student_id"]))
+    if student and student.last_visit:
+        active_until = (student.last_visit.replace(tzinfo=None) + timedelta(minutes=int((club.club_settings or {}).get("limits", {}).get("session_timeout_minutes", 150)))).isoformat()
+    active_until_text = active_until.replace("T", " ")[:16] if active_until else ""
+    operator_message = ("ℹ️ Посещение уже отмечено. Активная сессия до " if result.get("already_marked") else "✅ Посещение успешно отмечено. Сессия активна до ") + active_until_text
+    return {"success": True, "message": operator_message, "already_marked": result.get("already_marked", False), "active_until": active_until, "turnstile": result.get("turnstile_status")}
 
 
 @router.post("/webapp/staff-open-turnstile")
