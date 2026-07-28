@@ -223,7 +223,7 @@ def admin_keyboard(club_id: int, club_settings: dict, subscription_date: datetim
         shop_row.append(
             types.InlineKeyboardButton(
                 text="📦 Склад товаров",
-                web_app=types.WebAppInfo(url=f"https://{club_id}.speedycrm.ru/webapp/admin-products?club_id={club_id}&v=109")
+                web_app=types.WebAppInfo(url=f"https://{club_id}.speedycrm.ru/webapp/admin-products?club_id={club_id}&v=110")
             )
         )
     if shop_row:
@@ -316,7 +316,7 @@ def get_scanner_keyboard(club_id: int):
 
     # Полный путь к сканеру с большими пробелами для удобства
     # Сканер обслуживается самим CRM-доменом, а не GitHub Pages.
-    scanner_url = f"https://{club_id}.speedycrm.ru/webapp/scanner?club_id={club_id}&v=107"
+    scanner_url = f"https://{club_id}.speedycrm.ru/webapp/scanner?club_id={club_id}&v=108"
 
     builder.row(types.KeyboardButton(
         text="📸 ОТКРЫТЬ СКАНЕР (ВХОД)",
