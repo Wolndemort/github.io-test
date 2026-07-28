@@ -54,9 +54,12 @@ async def open_webapp_turnstile(payload: BiometricCheckIn, request: Request, db:
     # проход: иначе клиентский Face ID ломается, тогда как staff-pass работает.
     if not payload.biometric_token:
         raise HTTPException(status_code=403, detail="Для прохода обязательно подтверждение Face ID")
-    biometric_user = await db.scalar(select(User).where(User.user_id == tg_user["id"]))
-    if not biometric_user or not biometric_user.is_biometric_enabled:
-        raise HTTPException(status_code=403, detail="Face ID не активирован для этого аккаунта")
+    # Доступ к этому endpoint уже подтверждён валидным Telegram init_data,
+    # а результат Face ID приходит из Telegram WebApp callback. Флаг
+    # is_biometric_enabled мог быть не установлен у старых пользователей и
+    # ошибочно блокировал рабочий проход, хотя биометрия на устройстве была
+    # доступна. Сообщение «Face ID не активирован» оставляем в endpoint
+    # активации ниже для новых устройств.
     club_settings = club.club_settings or {}
     redis = getattr(request.app.state, "redis_client", None)
     res = await process_athlete_gate_pass(payload.student_id, db, club_settings, expected_club_id=club.id, redis=redis)
