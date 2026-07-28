@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="{{ url_for('static', path='css/mono.css') }}?v=1.1.1">
   <style>
     .wrap{max-width:1100px!important}.grid{grid-template-columns:repeat(4,minmax(0,1fr))!important}
-    .birthday-picker{display:none!important}.date-field{display:block!important}
+    .date-field{display:block}.date-field input{letter-spacing:.04em}.date-field input::placeholder{color:#999}
   </style>
 </head>
 <body class="mono-theme"><div class="wrap"><button id="fullscreen" type="button" style="float:right;width:auto">⛶</button>
@@ -18,7 +18,7 @@
     <form class="student card" data-name="{{ s.name|lower }}" data-birthday="{{ s.birthday.isoformat() if s.birthday else '' }}" data-parent="{{ '1' if s.parent_id else '0' }}" data-missing="{{ '1' if not s.birthday else '0' }}" data-active="{{ '1' if s.expire_date and s.expire_date > now else '0' }}" data-nosub="{{ '1' if not s.expire_date else '0' }}" data-frozen="{{ '1' if s.is_frozen else '0' }}" data-discipline="{{ s.discipline or '' }}" data-id="{{ s.id }}">
       <label>Имя атлета<input name="name" value="{{ s.name or '' }}" maxlength="150"></label><span class="muted">ID {{ s.id }} · баланс: {{ s.balance_lessons }} · {{ s.discipline or 'без дисциплины' }}</span>
       <div class="grid"><label>Телефон родителя<input name="parent_phone" value="{{ s.parent_phone or '' }}" placeholder="79990000000"></label>{% if s.parent_id %}<button type="button" class="mono-action" style="display:inline-block;margin-top:6px;text-decoration:none" onclick="openChat(event, {{ s.parent_id }})">💬 Чат</button>{% endif %}
-        <label>Дата рождения {% if not s.birthday %}<span class="missing">не указана</span>{% endif %}<div class="date-field" style="display:flex;gap:6px;align-items:end"><input name="birthday" type="text" inputmode="numeric" maxlength="10" placeholder="ДД.ММ.ГГГГ" value="{{ s.birthday.strftime('%d.%m.%Y') if s.birthday else '' }}"><button type="button" class="birthday-picker" aria-label="Открыть календарь" style="width:46px;height:46px;border:1px solid #ccc;border-radius:10px;background:#fff;font-size:18px">📅</button></div></label>
+        <label>Дата рождения {% if not s.birthday %}<span class="missing">не указана</span>{% endif %}<div class="date-field"><input name="birthday" type="text" inputmode="numeric" maxlength="10" placeholder="ДД.ММ.ГГГГ" value="{{ s.birthday.strftime('%d.%m.%Y') if s.birthday else '' }}"></div></label>
         <label>Баланс занятий<input name="balance_lessons" type="number" min="0" max="999" value="{{ s.balance_lessons if s.balance_lessons else '' }}" placeholder="0"></label>
         <label>До даты<input name="expire_date" type="text" inputmode="numeric" maxlength="10" placeholder="ДД.ММ.ГГГГ" value="{{ s.expire_date.strftime('%d.%m.%Y') if s.expire_date else '' }}"></label>
         <label>Бесплатных заморозок<input name="can_freeze" type="number" min="0" max="99" value="{{ s.can_freeze if s.can_freeze else '' }}" placeholder="0"></label>
@@ -37,7 +37,7 @@
       <label>Телефон<input id="newPhone" placeholder="79990000000"></label>
     </div>
     <div class="row">
-      <label>Дата рождения<div class="date-field" style="display:flex;gap:6px;align-items:end"><input id="newBirthday" type="text" inputmode="numeric" maxlength="10" placeholder="ДД.ММ.ГГГГ" style="flex:1"><button type="button" class="birthday-picker" aria-label="Открыть календарь" style="width:46px;height:46px;border:1px solid #ccc;border-radius:10px;background:#fff;font-size:18px">📅</button></div></label>
+      <label>Дата рождения<div class="date-field"><input id="newBirthday" type="text" inputmode="numeric" maxlength="10" placeholder="ДД.ММ.ГГГГ"></div></label>
       <label>Дисциплина<select id="newDiscipline"></select></label>
     </div>
     <label>Тариф<select id="newTariff"></select></label>
@@ -99,39 +99,6 @@ function filter() {
     if (!el || el.dataset.datePickerAttached) return;
     el.dataset.datePickerAttached = '1';
     formatDateInput(el);
-    const native = document.createElement('input');
-    native.type = 'date';
-    native.style.position = 'absolute';
-    native.style.left = '-9999px';
-    native.style.width = '1px';
-    native.style.height = '1px';
-    native.tabIndex = -1;
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.textContent = '📅';
-    button.style.cssText = 'margin-left:6px;border:1px solid #ccc;border-radius:10px;background:#fff;padding:0 10px;min-width:44px;height:40px;vertical-align:middle';
-    const host = el.parentElement;
-    if (host) {
-      host.style.display = 'flex';
-      host.style.gap = '6px';
-      host.style.alignItems = 'end';
-      host.appendChild(button);
-      host.appendChild(native);
-    }
-    const syncTextFromNative = () => {
-      if (!native.value) return;
-      const [y, m, d] = native.value.split('-');
-      el.value = `${d}.${m}.${y}`;
-    };
-    button.addEventListener('click', () => {
-      if (native.showPicker) native.showPicker();
-      else native.click();
-    });
-    native.addEventListener('change', syncTextFromNative);
-    el.addEventListener('blur', () => {
-      const digits = el.value.replace(/\D/g, '').slice(0, 8);
-      if (digits.length === 8) native.value = `${digits.slice(4)}-${digits.slice(2, 4)}-${digits.slice(0, 2)}`;
-    });
   };
   document.querySelectorAll('input[name="birthday"], input[name="expire_date"], #newBirthday').forEach(attachDatePicker);
   document.querySelectorAll('.student').forEach(x => {
@@ -196,7 +163,7 @@ function studentCardHtml(s) {
     <form class="student card" data-name="${esc((s.name || '').toLowerCase())}" data-birthday="${esc(s.birthday || '')}" data-parent="${s.parent_id ? '1' : '0'}" data-missing="${s.birthday ? '0' : '1'}" data-active="${s.expire_date ? '1' : '0'}" data-nosub="${s.expire_date ? '0' : '1'}" data-frozen="${s.is_frozen ? '1' : '0'}" data-discipline="${esc(s.discipline || '')}" data-id="${s.id}">
       <label>Имя атлета<input name="name" value="${esc(s.name || '')}" maxlength="150"></label><span class="muted">ID ${s.id} · баланс: ${s.balance_lessons || 0} · ${esc(s.discipline || 'без дисциплины')}</span>
       <div class="grid"><label>Телефон родителя<input name="parent_phone" value="${esc(s.parent_phone || '')}" placeholder="79990000000"></label>${s.parent_id ? `<button type="button" class="mono-action" style="display:inline-block;margin-top:6px;text-decoration:none" onclick="openChat(event, ${s.parent_id})">💬 Чат</button>` : ''}
-        <label>Дата рождения ${s.birthday ? '' : '<span class="missing">не указана</span>'}<div class="date-field" style="display:flex;gap:6px;align-items:end"><input name="birthday" type="text" inputmode="numeric" maxlength="10" placeholder="ДД.ММ.ГГГГ" value="${esc(formatDMY(s.birthday))}"><button type="button" class="birthday-picker" aria-label="Открыть календарь" style="width:46px;height:46px;border:1px solid #ccc;border-radius:10px;background:#fff;font-size:18px">📅</button></div></label>
+        <label>Дата рождения ${s.birthday ? '' : '<span class="missing">не указана</span>'}<div class="date-field"><input name="birthday" type="text" inputmode="numeric" maxlength="10" placeholder="ДД.ММ.ГГГГ" value="${esc(formatDMY(s.birthday))}"></div></label>
         <label>Баланс занятий<input name="balance_lessons" type="number" min="0" max="999" value="${s.balance_lessons ? s.balance_lessons : ''}" placeholder="0"></label>
         <label>До даты<input name="expire_date" type="text" inputmode="numeric" maxlength="10" placeholder="ДД.ММ.ГГГГ" value="${esc(s.expire_date || '')}"></label>
       <label>Бесплатных заморозок<input name="can_freeze" type="number" min="0" max="99" value="${s.can_freeze ? s.can_freeze : ''}" placeholder="0"></label>
@@ -218,37 +185,11 @@ function attachBirthdayPickers(scope = document) {
   scope.querySelectorAll('input[name="birthday"], input[name="expire_date"], #newBirthday').forEach(input => {
     if (input.dataset.birthdayPickerAttached) return;
     input.dataset.birthdayPickerAttached = '1';
-    const host = input.parentElement;
-    const button = host?.querySelector('.birthday-picker');
-    const native = document.createElement('input');
-    native.type = 'date';
-    native.tabIndex = -1;
-    native.setAttribute('aria-hidden', 'true');
-    native.style.position = 'absolute';
-    native.style.left = '-9999px';
-    native.style.width = '1px';
-    native.style.height = '1px';
-    document.body.appendChild(native);
     input.addEventListener('input', () => {
       const digits = input.value.replace(/\D/g, '').slice(0, 8);
       if (digits.length <= 2) input.value = digits;
       else if (digits.length <= 4) input.value = `${digits.slice(0, 2)}.${digits.slice(2)}`;
       else input.value = `${digits.slice(0, 2)}.${digits.slice(2, 4)}.${digits.slice(4)}`;
-    });
-    input.addEventListener('blur', () => {
-      const digits = input.value.replace(/\D/g, '').slice(0, 8);
-      if (digits.length === 8) native.value = `${digits.slice(4)}-${digits.slice(2, 4)}-${digits.slice(0, 2)}`;
-    });
-    native.addEventListener('change', () => {
-      if (!native.value) return;
-      const [y, m, d] = native.value.split('-');
-      input.value = `${d}.${m}.${y}`;
-    });
-    button?.addEventListener('click', () => {
-      const digits = input.value.replace(/\D/g, '').slice(0, 8);
-      if (digits.length === 8) native.value = `${digits.slice(4)}-${digits.slice(2, 4)}-${digits.slice(0, 2)}`;
-      if (native.showPicker) native.showPicker();
-      else native.click();
     });
      const form = input.closest('form');
      if (!form || form.dataset.deleteAttached) return;
