@@ -130,13 +130,16 @@
         <div class="actions">
             {% if is_staff_mode %}
             <a class="btn dark mono-action dark" href="/webapp/staff-pass?club_id={{ club_id }}&user_id={{ user_id }}">Открыть турникет</a>
+            <a class="btn soft mono-action" href="/webapp/biometric-pass?club_id={{ club_id }}&user_id={{ user_id }}">📱 Face ID ребёнка</a>
             {% endif %}
+            {% if not is_staff_mode %}
             <a class="btn dark mono-action dark" href="/webapp/biometric-pass?club_id={{ club_id }}&user_id={{ user_id }}">Открыть проход по FaceID</a>
+            {% endif %}
             {% if not is_staff_mode %}
             <a class="btn soft mono-action" href="/webapp/client-cabinet/create-student?club_id={{ club_id }}">Создать атлета</a>
-            <a class="btn soft mono-action" href="/webapp/client-cabinet/buy-subscription?club_id={{ club_id }}">Купить абонемент</a>
             <a class="btn soft mono-action" href="/webapp/client-cabinet/auth?club_id={{ club_id }}">Привязать профиль по номеру</a>
             {% endif %}
+            <a class="btn soft mono-action" href="/webapp/client-cabinet/buy-subscription?club_id={{ club_id }}">💳 Купить абонемент ребёнку</a>
             <a class="btn soft mono-action" href="/webapp/client-cabinet/history?club_id={{ club_id }}">История оплат</a>
             <a class="btn soft mono-action" href="/webapp/shop?club_id={{ club_id }}">Магазин и корзина</a>
             <a class="btn soft mono-action" href="/webapp/client-cabinet?club_id={{ club_id }}">Обновить кабинет</a>
