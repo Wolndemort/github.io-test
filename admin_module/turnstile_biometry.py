@@ -48,7 +48,11 @@ async def open_webapp_turnstile(payload: BiometricCheckIn, request: Request, db:
         raise HTTPException(status_code=403, detail="Ошибка безопасности: неверные данные WebApp")
     if student.parent_id != tg_user["id"]:
         raise HTTPException(status_code=403, detail="Доступ запрещён: вы не родитель этого атлета")
-    if not payload.biometric_token or payload.biometric_token == "verified_by_device":
+    # Telegram на части клиентов после успешного authenticate() не возвращает
+    # строковый токен. WebApp уже получил подтверждение isAuthenticated=True и
+    # отправляет совместимый маркер verified_by_device. Нельзя отклонять такой
+    # проход: иначе клиентский Face ID ломается, тогда как staff-pass работает.
+    if not payload.biometric_token:
         raise HTTPException(status_code=403, detail="Для прохода обязательно подтверждение Face ID")
     biometric_user = await db.scalar(select(User).where(User.user_id == tg_user["id"]))
     if not biometric_user or not biometric_user.is_biometric_enabled:
