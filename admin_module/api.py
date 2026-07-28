@@ -440,6 +440,18 @@ async def admin_students_page(
     })
 
 
+def _order_payment_method(order) -> str:
+    provider = str(getattr(order, "provider_payment_id", "") or "").upper()
+    order_type = str(getattr(order, "type", "") or "").upper()
+    if provider.startswith("CASH") or order_type.startswith("CASH"):
+        return "cash"
+    if provider.startswith("MANUAL") or "REQUISITE" in order_type:
+        return "requisites"
+    if "SBP" in order_type or provider.startswith("SBP"):
+        return "sbp"
+    return "card" if provider else "other"
+
+
 @router.get("/admin/sales", response_class=HTMLResponse)
 async def admin_sales_page(
     request: Request,
@@ -479,7 +491,7 @@ async def admin_sales_page(
     operations = []
     for order in payment_orders:
         operation_category = "freeze" if str(order.type).startswith("FREEZE") else "subscription"
-        operation_method = "cash" if str(order.provider_payment_id or "").startswith("CASH:") or str(order.type).startswith("CASH") else ("card" if order.provider_payment_id else "other")
+        operation_method = _order_payment_method(order)
         operation_discipline = order.discipline or ""
         operations.append({"id": order.id, "created_at": order.created_at, "amount": order.amount_kopecks or 0,
                            "method": operation_method, "category": operation_category, "discipline": operation_discipline,
@@ -490,7 +502,7 @@ async def admin_sales_page(
             payload = item.payload or {}
             operation_category = item.item_type
             operation_discipline = payload.get("discipline", "")
-            operation_method = "cash" if str(order.provider_payment_id or "").startswith("CASH:") else ("card" if order.provider_payment_id else "other")
+            operation_method = "cash" if str(order.provider_payment_id or "").startswith("CASH:") else ("requisites" if str(order.provider_payment_id or "").startswith("MANUAL:") else ("sbp" if "SBP" in str(order.provider_payment_id or "").upper() else ("card" if order.provider_payment_id else "other")))
             operations.append({"id": order.id, "created_at": order.created_at, "amount": (item.unit_price_kopecks or 0) * (item.quantity or 1),
                                "method": operation_method, "category": operation_category, "discipline": operation_discipline,
                                "title": item.title, "status": order.status,
@@ -526,13 +538,15 @@ async def cash_register_page(request: Request, session: AsyncSession = Depends(g
     if start: payment_query = payment_query.where(PaymentOrder.created_at >= start); cart_query = cart_query.where(CartOrder.created_at >= start)
     if end: payment_query = payment_query.where(PaymentOrder.created_at < end); cart_query = cart_query.where(CartOrder.created_at < end)
     for row in (await session.execute(payment_query)).scalars().all():
-        is_cash = str(row.provider_payment_id or "").startswith("CASH") or str(row.type).startswith("CASH")
-        income_rows.append({"id": row.id, "created_at": row.created_at, "entry_type": "income", "category": "freeze" if str(row.type).startswith("FREEZE") else "subscription", "amount_kopecks": row.amount_kopecks or 0, "description": ("Наличный" if is_cash else "Онлайн") + " платёж", "source": "sale", "method": "cash" if is_cash else "card"})
+        method = _order_payment_method(row)
+        income_rows.append({"id": row.id, "created_at": row.created_at, "entry_type": "income", "category": "freeze" if str(row.type).startswith("FREEZE") else "subscription", "amount_kopecks": row.amount_kopecks or 0, "description": {"cash": "Наличный", "sbp": "СБП", "requisites": "По реквизитам", "card": "Онлайн"}.get(method, "Платёж") + " платёж", "source": "sale", "method": method})
     for row in (await session.execute(cart_query)).scalars().all():
         is_cash = str(row.provider_payment_id or "").startswith("CASH")
+        method = "cash" if is_cash else ("requisites" if str(row.provider_payment_id or "").startswith("MANUAL:") else ("sbp" if "SBP" in str(row.provider_payment_id or "").upper() else "card"))
         cart_items = (await session.execute(select(CartItem).where(CartItem.cart_order_id == row.id).order_by(CartItem.id.asc()))).scalars().all()
         item_titles = ", ".join(item.title for item in cart_items if item.title)
-        income_rows.append({"id": row.id, "created_at": row.created_at, "entry_type": "income", "category": "product", "amount_kopecks": row.amount_kopecks or 0, "description": f"{('Наличная' if is_cash else 'Онлайн')} продажа товара: {item_titles}" if item_titles else ("Наличная" if is_cash else "Онлайн") + " продажа товара", "source": "sale", "method": "cash" if is_cash else "card"})
+        method_label = {"cash": "Наличная", "sbp": "СБП", "requisites": "По реквизитам", "card": "Онлайн"}.get(method, "")
+        income_rows.append({"id": row.id, "created_at": row.created_at, "entry_type": "income", "category": "product", "amount_kopecks": row.amount_kopecks or 0, "description": f"{method_label} продажа товара: {item_titles}" if item_titles else f"{method_label} продажа товара", "source": "sale", "method": method})
     rows = income_rows + [{"id": e.id, "created_at": e.created_at, "entry_type": e.entry_type, "category": e.category, "amount_kopecks": e.amount_kopecks, "description": e.description, "source": "manual", "method": "cash"} for e in manual]
     rows.sort(key=lambda x: x["created_at"] or datetime.min, reverse=True)
     income = sum(r["amount_kopecks"] for r in rows if r["entry_type"] == "income")

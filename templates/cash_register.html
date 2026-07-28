@@ -52,7 +52,7 @@ button{background:#fff;color:#111;font-weight:bold}
   {% for row in rows %}
   <div class="row">
     {% if row.source == 'manual' %}<button class="delete-op" type="button" title="Удалить операцию" aria-label="Удалить операцию" data-id="{{ row.id }}">🗑️</button>{% elif row.source == 'sale' and row.method == 'cash' and row.category == 'product' %}<button class="delete-sale" type="button" title="Удалить наличную продажу" aria-label="Удалить наличную продажу" data-sale-id="{{ row.id }}">🗑️</button>{% endif %}
-    <span>{{ row.created_at|moscow_time if row.created_at else '' }} · {{ row.category }} · {{ 'Наличные' if row.method == 'cash' else ('Карта / онлайн' if row.method == 'card' else 'Ручная') }}<br><small class="muted">{{ row.description }} · {{ row.source }}</small></span>
+    <span>{{ row.created_at|moscow_time if row.created_at else '' }} · {{ row.category }} · {{ {'cash':'Наличные','sbp':'СБП','requisites':'По реквизитам','card':'Карта / онлайн'}.get(row.method, 'Ручная') }}<br><small class="muted">{{ row.description }} · {{ row.source }}</small></span>
     <b class="{{ row.entry_type }}">{{ '+' if row.entry_type == 'income' else '-' }}{{ '%.2f'|format(row.amount_kopecks/100) }} ₽</b>
   </div>
   {% else %}

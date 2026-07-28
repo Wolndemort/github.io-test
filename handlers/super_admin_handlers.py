@@ -157,12 +157,24 @@ async def super_staff_role(callback: types.CallbackQuery, state: FSMContext, ses
     role = callback.data.removeprefix("super_staff_role_")
     data = await state.get_data()
     staff = (await session.execute(select(ClubStaff).where(ClubStaff.club_id == data["staff_club_id"], ClubStaff.telegram_id == data["staff_telegram_id"]))).scalar_one_or_none()
+    try:
+        telegram_chat = await callback.bot.get_chat(data["staff_telegram_id"])
+    except Exception:
+        telegram_chat = None
+    staff_name = getattr(telegram_chat, "full_name", None)
+    staff_username = getattr(telegram_chat, "username", None)
     if staff:
         staff.role = role; staff.is_active = True
+        staff.full_name = staff.full_name or staff_name
     else:
-        session.add(ClubStaff(club_id=data["staff_club_id"], telegram_id=data["staff_telegram_id"], role=role, full_name=None))
+        session.add(ClubStaff(club_id=data["staff_club_id"], telegram_id=data["staff_telegram_id"], role=role, full_name=staff_name))
     await session.commit(); await state.clear()
-    await callback.message.answer(f"✅ Сотрудник добавлен в клуб. Роль: {role}")
+    await callback.message.answer(f"✅ Сотрудник добавлен в клуб. Роль: {role}\nИмя: {staff_name or 'неизвестно'}\nUsername: @{staff_username if staff_username else 'нет'}")
+    try:
+        club = await session.get(Club, data["staff_club_id"])
+        await callback.bot.send_message(data["staff_telegram_id"], f"🎉 <b>Вы приняты в команду клуба {club.name if club else ''}!</b>\nВаша должность: <b>{role}</b>\nВам доступен кабинет сотрудника.", parse_mode="HTML")
+    except Exception:
+        logger.warning("Не удалось уведомить сотрудника о назначении: %s", data["staff_telegram_id"])
     await callback.answer()
     audit_event(
         "super_staff_saved",

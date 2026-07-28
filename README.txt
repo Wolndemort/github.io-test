@@ -935,3 +935,26 @@ Keep these rules when extending the project:
 - Run `venv\\Scripts\\python.exe -m pytest -q --disable-warnings`.
 - Check QR, Face ID, bot check-in, staff check-in with and without relay, repeated check-in, one-parent and multi-parent phone binding, online/manual product/subscription/freeze notifications, and the cash register.
 - Update contract tests and this section whenever a route, permission, notification or session rule changes.
+
+### Payment-method matrix for the cash register
+
+Every confirmed financial operation must be represented by `PaymentOrder` (subscriptions/freezes) or `CartOrder` plus `CartItem` (products). The register and sales journal classify them as follows:
+
+| Operation | Storage | Journal method |
+|---|---|---|
+| Cash subscription | confirmed `PaymentOrder`, `CASH...` provider/type | `cash` / Наличные |
+| Cash product | confirmed `CartOrder`, `CASH:` provider | `cash` / Наличные |
+| Online card | confirmed webhook order with provider payment ID | `card` / Карта / онлайн |
+| Online SBP | confirmed `FIRST_SBP`/`FREEZE_SBP` or SBP provider order | `sbp` / СБП |
+| Requisites/manual transfer | confirmed `MANUAL:` order after owner approval | `requisites` / По реквизитам |
+| Manual cash entry | `CashEntry` | cash movement / Ручная операция |
+
+Categories remain independent of payment method: `subscription`, `freeze`, and `product`. A new payment route must create the corresponding confirmed source order and must be covered by the sales and cash-register contract tests; never write only an audit event and expect it to appear in finance.
+
+### Staff onboarding is not client onboarding
+
+- A newly hired employee is identified by `ClubStaff.telegram_id`; they do not need a client `User` record, phone binding, or a student card to open the staff WebApp cabinet.
+- The client cabinet bypass applies only to an active owner/staff identity. Ordinary clients still use the normal Telegram/phone binding flow.
+- Never create a fake student or bind a staff phone just to make the cabinet open. Staff are not parents and must not inflate parent/client statistics.
+- Hiring displays the Telegram name and username when Telegram allows `get_chat`, and sends the employee a role notification.
+- Removing a staff member sends an увольнение notification. Notification delivery failures are logged and do not undo the database role change.

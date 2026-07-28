@@ -362,7 +362,7 @@ async def get_client_cabinet_page(request: Request, club_id: int, init_data: str
     user_id = int(tg_user.get("id", 0))
     is_staff_mode = await _is_staff_webapp_user(db, club, user_id)
     user = await _ensure_webapp_user_linked(db, user_id, club_id)
-    if not user:
+    if not user and not is_staff_mode:
         return await webapp_auth_help_page(request=request, club_id=club_id, init_data=init_data, db=db)
     settings = (club.club_settings or {}) if club else {}
     students = (await db.execute(select(Student).outerjoin(StudentParent, StudentParent.student_id == Student.id).where(Student.club_id == club_id, or_(Student.parent_id == user_id, StudentParent.parent_id == user_id)).distinct().order_by(Student.name))).scalars().all()
@@ -383,7 +383,7 @@ async def get_client_cabinet_page(request: Request, club_id: int, init_data: str
             "is_staff_mode": is_staff_mode,
             "logo_url": f"{_absolute_webapp_url(request, loading['logo_url'])}?v={loading.get('logo_rev', '')}" if loading.get("logo_url") else "",
             "students": students,
-            "user_name": user.full_name or tg_user.get("first_name", ""),
+            "user_name": (user.full_name if user else None) or tg_user.get("first_name", ""),
             "now": datetime.now(),
             "summary": {
                 "total": len(students),
