@@ -918,6 +918,18 @@ async def admin_confirm_payment(
     if not target_discipline:
         return await callback.answer("Не удалось определить дисциплину клуба.", show_alert=True)
 
+    # В callback хранится только компактный набор параметров, поэтому цену
+    # восстанавливаем из настроек клуба, а не обращаемся к несуществующим
+    # переменным старого обработчика.
+    discipline_cfg = club_settings.get("disciplines", {}).get(target_discipline, {}) or {}
+    selected_tariff = next(
+        (tariff for tariff in discipline_cfg.get("tariffs", [])
+         if int(tariff.get("count", 0) or 0) == count
+         and int(tariff.get("days", 30) or 30) == days_to_add),
+        {},
+    )
+    amount_kopecks = int(round(float(selected_tariff.get("price", 0) or 0) * 100))
+
     # 4. ЛОГИКА ЗАЧИСЛЕНИЯ абонемента в СУБД (Передаем дисциплину!)
     # Чтобы логика add_abon не ломалась, мы передаем target_discipline внутрь.
     # Убедитесь, что ваша функция add_abon принимает аргумент discipline!
@@ -934,12 +946,12 @@ async def admin_confirm_payment(
             user_id=int(parent_id) if parent_id else None,
             student_id=student_id,
             club_id=club.id,
-            amount_kopecks=int(float(selected_tariff.get("price", 0) or 0) * 100),
+            amount_kopecks=amount_kopecks,
             lesson_count=count,
-            days_to_add=days,
+            days_to_add=days_to_add,
             status="CONFIRMED",
             type="CASH",
-            discipline=sport_type,
+            discipline=target_discipline,
             provider_payment_id=f"CASH_SUB_{uuid.uuid4().hex[:16].upper()}",
         ))
         await session.commit()
