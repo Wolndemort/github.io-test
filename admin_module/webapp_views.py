@@ -19,6 +19,7 @@ from admin_module.router_base import router, templates
 from admin_module.api import (
     AdminProductSalePayload,
     CashEntryPayload,
+    CashSaleDeletePayload,
     ProductPayload,
     ProductCategoryChangePayload,
     ScheduleChangePayload,
@@ -37,6 +38,7 @@ from admin_module.api import (
     format_order_items,
     notify_product_staff,
 )
+from services.order_notifications import resolve_user_label
 from services.schedule_utils import normalize_schedule_block
 from services.payment_requisites import get_payment_info_text
 
@@ -216,8 +218,37 @@ async def admin_product_sale(payload: AdminProductSalePayload, session: AsyncSes
         )
         await bot.session.close()
     except Exception:
-        logger.exception("РќРµ СѓРґР°Р»РѕСЃСЊ РѕС‚РїСЂР°РІРёС‚СЊ СѓРІРµРґРѕРјР»РµРЅРёРµ Рѕ РЅР°Р»РёС‡РЅРѕР№ РїСЂРѕРґР°Р¶Рµ С‚РѕРІР°СЂРѕРІ %s", order_id)
+        logger.exception("Не удалось отправить уведомление о наличной продаже товаров %s", order_id)
+        try:
+            await bot.session.close()
+        except Exception:
+            pass
     return {"ok": True, "order_id": order_id, "total_kopecks": total}
+
+@router.post("/admin/cash/sales/{order_id}/delete")
+async def delete_cash_product_sale(order_id: str, payload: CashSaleDeletePayload, session: AsyncSession = Depends(get_session)):
+    if not payload.confirmed:
+        raise HTTPException(400, "Требуется подтверждение удаления продажи")
+    club = await session.get(Club, payload.club_id)
+    tg_user = await verify_webapp_admin(club, payload.init_data)
+    order = await session.get(CartOrder, order_id)
+    if not order or order.club_id != payload.club_id or order.status != "CONFIRMED":
+        raise HTTPException(404, "Наличная продажа не найдена")
+    if not str(order.provider_payment_id or "").startswith("CASH:"):
+        raise HTTPException(403, "Удалять можно только наличные продажи товаров")
+    items = (await session.execute(select(CartItem).where(CartItem.cart_order_id == order.id))).scalars().all()
+    restored_items = []
+    for item in items:
+        if item.product_id:
+            product = await session.get(ClubProduct, item.product_id)
+            if product:
+                product.stock += item.quantity or 1
+        restored_items.append({"product_id": item.product_id, "quantity": item.quantity})
+        await session.delete(item)
+    order.status = "CANCELLED"
+    await session.commit()
+    audit_event("product_sale_cash_deleted", **await audit_actor_context(session, club, tg_user, "admin/cash/sales/delete"), club_id=payload.club_id, action="delete", object_type="cart_order", object_id=order_id, method="cash", amount_kopecks=order.amount_kopecks, restored_items=restored_items)
+    return {"success": True}
 
 @router.post("/webapp/admin-products")
 async def create_product(payload: ProductPayload, session: AsyncSession = Depends(get_session)):

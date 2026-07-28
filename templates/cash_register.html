@@ -51,7 +51,7 @@ button{background:#fff;color:#111;font-weight:bold}
   <h3>Все операции</h3>
   {% for row in rows %}
   <div class="row">
-    {% if row.source == 'manual' %}<button class="delete-op" type="button" title="Удалить операцию" aria-label="Удалить операцию" data-id="{{ row.id }}">🗑️</button>{% endif %}
+    {% if row.source == 'manual' %}<button class="delete-op" type="button" title="Удалить операцию" aria-label="Удалить операцию" data-id="{{ row.id }}">🗑️</button>{% elif row.source == 'sale' and row.method == 'cash' and row.category == 'product' %}<button class="delete-sale" type="button" title="Удалить наличную продажу" aria-label="Удалить наличную продажу" data-sale-id="{{ row.id }}">🗑️</button>{% endif %}
     <span>{{ row.created_at|moscow_time if row.created_at else '' }} · {{ row.category }} · {{ 'Наличные' if row.method == 'cash' else ('Карта / онлайн' if row.method == 'card' else 'Ручная') }}<br><small class="muted">{{ row.description }} · {{ row.source }}</small></span>
     <b class="{{ row.entry_type }}">{{ '+' if row.entry_type == 'income' else '-' }}{{ '%.2f'|format(row.amount_kopecks/100) }} ₽</b>
   </div>
@@ -70,6 +70,11 @@ document.querySelectorAll('.delete-op').forEach(button=>button.onclick=async()=>
   const d=await r.json();
   if(!r.ok)return alert(d.detail||'Не удалось удалить операцию');
   location.reload();
+});
+document.querySelectorAll('.delete-sale').forEach(button=>button.onclick=async()=>{
+  if(!confirm('Удалить эту наличную продажу? Товар вернётся на остаток.')) return;
+  const r=await fetch('/admin/cash/sales/'+encodeURIComponent(button.dataset.saleId)+'/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({init_data:tg.initData,club_id:{{club_id}},confirmed:true})});
+  const d=await r.json(); if(!r.ok)return alert(d.detail||'Не удалось удалить продажу'); location.reload();
 });
 add.onclick=async()=>{
   const r=await fetch('/admin/cash/entries',{

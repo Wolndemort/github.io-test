@@ -218,6 +218,11 @@ class CashEntryDeletePayload(BaseModel):
     club_id: int
     confirmed: bool = False
 
+class CashSaleDeletePayload(BaseModel):
+    init_data: str
+    club_id: int
+    confirmed: bool = False
+
 class AuditEntryDeletePayload(BaseModel):
     init_data: str
     club_id: int
