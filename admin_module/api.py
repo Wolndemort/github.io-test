@@ -24,6 +24,7 @@ from services.order_notifications import (
     build_staff_alert_text,
     format_order_items,
     notify_product_staff,
+    resolve_user_label,
 )
 from services.payment_requisites import get_payment_info_text, build_payment_instruction_text
 import hmac
@@ -482,7 +483,8 @@ async def admin_sales_page(
         operation_discipline = order.discipline or ""
         operations.append({"id": order.id, "created_at": order.created_at, "amount": order.amount_kopecks or 0,
                            "method": operation_method, "category": operation_category, "discipline": operation_discipline,
-                           "title": "Заморозка" if operation_category == "freeze" else "Абонемент", "status": order.status})
+                           "title": "Заморозка" if operation_category == "freeze" else "Абонемент", "status": order.status,
+                           "buyer_label": await resolve_user_label(session, order.user_id, empty_label="Плательщик")})
     for order in cart_orders:
         for item in items_by_order.get(order.id, []):
             payload = item.payload or {}
@@ -491,7 +493,8 @@ async def admin_sales_page(
             operation_method = "cash" if str(order.provider_payment_id or "").startswith("CASH:") else ("card" if order.provider_payment_id else "other")
             operations.append({"id": order.id, "created_at": order.created_at, "amount": (item.unit_price_kopecks or 0) * (item.quantity or 1),
                                "method": operation_method, "category": operation_category, "discipline": operation_discipline,
-                               "title": item.title, "status": order.status})
+                               "title": item.title, "status": order.status,
+                               "buyer_label": await resolve_user_label(session, order.user_id, empty_label="Плательщик")})
     operations = [item for item in operations
                   if (weekday is None or moscow_weekday(item["created_at"]) == weekday)
                   and (not payment_method or item["method"] == payment_method)
