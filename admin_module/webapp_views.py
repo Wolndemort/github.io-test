@@ -119,7 +119,7 @@ async def admin_product_sale_page(request: Request, club_id: int = Query(...), i
             "created_at": order.created_at.isoformat() if order.created_at else None,
             "amount_kopecks": order.amount_kopecks,
             "items": [{"title": item.title, "quantity": item.quantity} for item in item_rows],
-            "payment_method": "РќР°Р»РёС‡РЅС‹Рµ" if str(order.provider_payment_id or "").startswith("CASH:") else "РћРЅР»Р°Р№РЅ",
+            "payment_method": "Наличные" if str(order.provider_payment_id or "").startswith("CASH:") else "Онлайн",
         })
     return templates.TemplateResponse("admin_product_sale.html", {"request": request, "club_id": club_id, "products": product_data, "categories": categories, "students": student_data, "recent_sales": recent_sales, "today": today.date().isoformat()})
 
@@ -141,20 +141,20 @@ async def admin_product_sale(payload: AdminProductSalePayload, session: AsyncSes
         product.stock -= quantity
         total += product.price_kopecks * quantity
         normalized.append((product, quantity))
-    order_id = f"CASH_PRODUCT_{uuid.uuid4().hex[:12].upper()}"
-    order = CartOrder(id=order_id, club_id=payload.club_id, user_id=None, amount_kopecks=total, status="CONFIRMED", provider_payment_id=f"CASH:{order_id}")
-    session.add(order)
-    await session.flush()
-    for product, quantity in normalized:
-        session.add(CartItem(cart_order_id=order_id, product_id=product.id, item_type="product", title=product.name, quantity=quantity, unit_price_kopecks=product.price_kopecks, payload={"category": product.category, "payment_method": "cash"}))
     selected_student = None
     selected_parent_id = None
     if payload.student_id is not None:
         selected_student = await session.get(Student, int(payload.student_id))
         if not selected_student or selected_student.club_id != payload.club_id:
             raise HTTPException(400, "Selected athlete is unavailable")
-        # Student.parent_id is the Telegram user id used to deliver the receipt.
         selected_parent_id = selected_student.parent_id
+    order_id = f"CASH_PRODUCT_{uuid.uuid4().hex[:12].upper()}"
+    buyer_user_id = selected_parent_id or int(tg_user.get("id"))
+    order = CartOrder(id=order_id, club_id=payload.club_id, user_id=buyer_user_id, amount_kopecks=total, status="CONFIRMED", provider_payment_id=f"CASH:{order_id}")
+    session.add(order)
+    await session.flush()
+    for product, quantity in normalized:
+        session.add(CartItem(cart_order_id=order_id, product_id=product.id, item_type="product", title=product.name, quantity=quantity, unit_price_kopecks=product.price_kopecks, payload={"category": product.category, "payment_method": "cash"}))
     await session.commit()
     audit_event(
         "product_sale_cash_created",
@@ -177,18 +177,18 @@ async def admin_product_sale(payload: AdminProductSalePayload, session: AsyncSes
             type("ItemView", (), {"title": product.name, "quantity": quantity, "product_id": product.id})()
             for product, quantity in normalized
         ]
+        buyer_label = await resolve_user_label(session, buyer_user_id, empty_label="Наличная продажа")
         owner_text = build_owner_receipt_text(
             title="Наличная продажа товаров",
             order_id=order_id,
-            buyer_label="Наличная продажа",
+            buyer_label=buyer_label,
             items_text=format_order_items(notice_items, product_only=True),
             amount_kopecks=total,
             extra_lines=["Способ: <b>Наличные</b>"],
         )
         if club.owner_id:
             await bot.send_message(club.owner_id, owner_text, parse_mode="HTML")
-        if selected_parent_id:
-            buyer_label = await resolve_user_label(session, selected_parent_id, empty_label="Плательщик")
+        if buyer_user_id:
             student_label = escape(selected_student.name if selected_student else "Атлет")
             parent_text = build_owner_receipt_text(
                 title="Покупка товаров подтверждена",
@@ -202,7 +202,7 @@ async def admin_product_sale(payload: AdminProductSalePayload, session: AsyncSes
                     "Чек из магазина сформирован на кассе.",
                 ],
             )
-            await bot.send_message(selected_parent_id, parent_text, parse_mode="HTML")
+            await bot.send_message(buyer_user_id, parent_text, parse_mode="HTML")
         await notify_product_staff(
             bot,
             club,
@@ -210,7 +210,7 @@ async def admin_product_sale(payload: AdminProductSalePayload, session: AsyncSes
             build_staff_alert_text(
                 title="Новая продажа товаров",
                 order_id=order_id,
-                buyer_label="Наличная продажа",
+                buyer_label=buyer_label,
                 items_text=format_order_items(notice_items, product_only=True),
                 amount_kopecks=total,
                 badge="📦",

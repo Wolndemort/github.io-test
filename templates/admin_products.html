@@ -69,6 +69,7 @@
 const tg=window.Telegram?.WebApp;
 tg?.ready();
 const cid={{club_id}},items={{products|tojson}};
+const initData=tg?.initData||new URLSearchParams(window.location.search).get('init_data')||'';
 let edit=null,imageValue=null;
 const esc=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const normalizeCategory=x=>String(x??'other').trim().toLowerCase().replace(/ё/g,'е').replace(/\s+/g,' ');
@@ -138,7 +139,7 @@ async function deleteCategory(category){
   const replacement=prompt('Перенести товары из категории «'+category+'» в категорию:', 'other');
   if(replacement===null)return;
   if(!confirm('Удалить категорию «'+category+'»? Товары будут перенесены в «'+(replacement||'other')+'».'))return;
-  const r=await fetch('/webapp/admin-product-categories/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({init_data:tg.initData,club_id:cid,category,replacement_category:replacement||'other'})});
+  const r=await fetch('/webapp/admin-product-categories/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({init_data:initData,club_id:cid,category,replacement_category:replacement||'other'})});
   const d=await r.json();
   if(!r.ok)return alert(d.detail||'Не удалось удалить категорию');
   location.reload();
@@ -174,13 +175,13 @@ async function save(){
     if(file.files[0]){
       saveStage='загрузка изображения';
       const fd=new FormData();fd.append('image',file.files[0]);
-      const uploadUrl='/webapp/admin-products/upload-image?club_id='+encodeURIComponent(String(cid))+'&init_data='+encodeURIComponent(tg?.initData||'');
+      const uploadUrl='/webapp/admin-products/upload-image?club_id='+encodeURIComponent(String(cid))+'&init_data='+encodeURIComponent(initData);
       const u=await fetch(uploadUrl,{method:'POST',body:fd}),
             ud=await u.json();
       if(!u.ok) return alert(ud.detail||'Ошибка загрузки');
       image=ud.image_url;
     }
-    const body={init_data:tg?.initData||'',club_id:cid,name:n.value,category:c.value||'other',price_kopecks:Math.round(Number(p.value)*100),stock:Number(s.value)||0,is_active:a.checked,image_url:image,details:document.getElementById('details')?.value||''};
+    const body={init_data:initData,club_id:cid,name:n.value,category:c.value||'other',price_kopecks:Math.round(Number(p.value)*100),stock:Number(s.value)||0,is_active:a.checked,image_url:image,details:document.getElementById('details')?.value||''};
     saveStage='сохранение товара';
     const productUrl=edit?('/webapp/admin-products/'+encodeURIComponent(String(edit))):'/webapp/admin-products';
     const r=await fetch(productUrl,{method:edit?'PATCH':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
@@ -194,7 +195,7 @@ async function save(){
 
 async function del(id){
   if(!confirm('Удалить товар?')) return;
-  const r=await fetch('/webapp/admin-products/'+id+'?club_id='+cid+'&init_data='+encodeURIComponent(tg?.initData||''),{method:'DELETE'});
+  const r=await fetch('/webapp/admin-products/'+id+'?club_id='+cid+'&init_data='+encodeURIComponent(initData),{method:'DELETE'});
   if(r.ok) location.reload(); else alert('Ошибка');
 }
 
