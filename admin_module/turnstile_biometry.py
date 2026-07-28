@@ -9,7 +9,7 @@ from admin_module.router_base import router
 from admin_module.schemas import BiometricCheckIn, BiometricEnable
 from admin_module.webapp_verify import verify_telegram_data
 from admin_module.security import get_api_key
-from database.db import Club, Student, User, get_session
+from database.db import Club, Student, User, get_session, get_student_parent_ids
 from handlers.skud import trigger_dingtian_turnstile
 from services.gate_control import process_athlete_gate_pass
 
@@ -46,7 +46,7 @@ async def open_webapp_turnstile(payload: BiometricCheckIn, request: Request, db:
     tg_user = verify_telegram_data(payload.init_data, club.bot_token)
     if not tg_user or "id" not in tg_user:
         raise HTTPException(status_code=403, detail="Ошибка безопасности: неверные данные WebApp")
-    if student.parent_id != tg_user["id"]:
+    if int(tg_user["id"]) not in await get_student_parent_ids(student.id, db):
         raise HTTPException(status_code=403, detail="Доступ запрещён: вы не родитель этого атлета")
     # Telegram на части клиентов после успешного authenticate() не возвращает
     # строковый токен. WebApp уже получил подтверждение isAuthenticated=True и
@@ -65,12 +65,16 @@ async def open_webapp_turnstile(payload: BiometricCheckIn, request: Request, db:
     res = await process_athlete_gate_pass(payload.student_id, db, club_settings, expected_club_id=club.id, redis=redis)
     if not res["success"]:
         return {"success": False, "message": res["message"]}
-    if not res["is_inside_session"] and student.parent_id:
+    if not res["is_inside_session"]:
         try:
             bots_dict = getattr(request.app.state, "bots_dict", {})
             bot = bots_dict.get(club.bot_token)
             if bot:
-                await bot.send_message(chat_id=int(student.parent_id), text=f"🔔 <b>{club.name}</b>: {res['student_name']} вошёл в зал (через кнопку WebApp).", parse_mode="HTML")
+                notice = f"🔔 <b>{club.name}</b>: {res['student_name']} вошёл в зал (Face ID/WebApp)."
+                for parent_id in await get_student_parent_ids(student.id, db):
+                    await bot.send_message(chat_id=parent_id, text=notice, parse_mode="HTML")
+                if club.owner_id and int(club.owner_id) != int(tg_user["id"]):
+                    await bot.send_message(chat_id=int(club.owner_id), text=f"🟢 <b>ПРОХОД FACE ID</b>\nАтлет: <b>{res['student_name']}</b>\nИнициатор: <code>{tg_user['id']}</code>", parse_mode="HTML")
         except Exception:
             pass
     return {"success": True, "message": f"{res['message']}\n{res['turnstile_status']}"}

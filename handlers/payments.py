@@ -1231,6 +1231,13 @@ async def final_cash_pay(
         student = await session.get(Student, student_id)
 
         # Формируем красивое отображение тарифа для экрана админа (прячем техническое 999)
+        cash_amount = int(float(selected_tariff.get("price", 0) or 0) * 100)
+        session.add(PaymentOrder(id=f"CASH_ABON_{uuid.uuid4().hex[:24]}", user_id=parent_id,
+                                 student_id=student_id, club_id=club.id, discipline=sport_type,
+                                 amount_kopecks=cash_amount, status="CONFIRMED",
+                                 type="CASH_SUBSCRIPTION", provider_payment_id=f"CASH:{uuid.uuid4().hex}",
+                                 lesson_count=count, days_to_add=days))
+        await session.commit()
         t_label = f"Безлимит ({days} дн.)" if count == 999 else f"{count} зан. ({days} дн.)"
 
         await callback.message.edit_text(
@@ -1267,6 +1274,8 @@ async def final_cash_pay(
                     text=cash_receipt,
                     parse_mode="HTML"
                 )
+                if club.owner_id and int(club.owner_id) != int(parent_id):
+                    await callback.bot.send_message(chat_id=int(club.owner_id), text=cash_receipt, parse_mode="HTML")
             except Exception as e:
                 logger.error(f"Ошибка отправки уведомления родителю {parent_id}: {e}")
 

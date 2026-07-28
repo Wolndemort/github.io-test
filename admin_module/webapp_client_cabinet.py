@@ -4,7 +4,7 @@ from html import escape
 
 from fastapi import Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
-from sqlalchemy import select
+from sqlalchemy import select, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from admin_module.router_base import router, templates
@@ -17,7 +17,7 @@ from admin_module.schemas import (
 )
 from admin_module.webapp_verify import verify_telegram_data
 from config import PROXY_URL
-from database.db import Club, ClubStaff, PaymentOrder, CartOrder, CartItem, Student, Subscription, User, VisitLog, get_session, process_student_freeze
+from database.db import Club, ClubStaff, PaymentOrder, CartOrder, CartItem, Student, StudentParent, Subscription, User, VisitLog, get_session, get_student_parent_ids, process_student_freeze
 from services.audit import audit_event
 from services.abuse_guard import rate_limit, audit_block
 from services.yookassa_client import YooKassaClient
@@ -27,6 +27,8 @@ from services.payment_requisites import get_payment_info_text, build_payment_ins
 from aiogram import Bot
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from handlers.skud import trigger_dingtian_turnstile
+from services.gate_control import process_athlete_gate_pass
+from services.staff_permissions import staff_can
 
 
 def _auth_gate_html(target: str, **params):
@@ -226,6 +228,67 @@ async def get_staff_pass_page(request: Request, club_id: int, user_id: int | Non
     )
 
 
+@router.get("/webapp/staff-checkin", response_class=HTMLResponse)
+async def staff_checkin_page(request: Request, club_id: int, init_data: str | None = Query(default=None), db: AsyncSession = Depends(get_session)):
+    if not init_data:
+        return _auth_gate_html("webapp/staff-checkin", club_id=club_id)
+    club = await db.get(Club, club_id)
+    tg_user = verify_telegram_data(init_data, club.bot_token) if club and club.bot_token else None
+    if not tg_user:
+        raise HTTPException(status_code=403, detail="Доступ запрещён")
+    user_id = int(tg_user["id"])
+    staff = (await db.execute(select(ClubStaff).where(ClubStaff.club_id == club_id, ClubStaff.telegram_id == user_id, ClubStaff.is_active.is_(True)))).scalar_one_or_none()
+    if int(club.owner_id or 0) != user_id and not (staff and staff_can(staff, "manual_checkin")):
+        raise HTTPException(status_code=403, detail="Нет права отмечать посещения")
+    return templates.TemplateResponse("staff_checkin.html", {"request": request, "club": club, "club_id": club_id, "user_id": user_id})
+
+
+@router.get("/webapp/staff-checkin/search")
+async def staff_checkin_search(club_id: int, q: str = Query(default=""), init_data: str = Query(default=""), db: AsyncSession = Depends(get_session)):
+    club = await db.get(Club, club_id)
+    tg_user = verify_telegram_data(init_data, club.bot_token) if club and club.bot_token else None
+    if not tg_user:
+        raise HTTPException(status_code=403, detail="Доступ запрещён")
+    user_id = int(tg_user["id"])
+    staff = (await db.execute(select(ClubStaff).where(ClubStaff.club_id == club_id, ClubStaff.telegram_id == user_id, ClubStaff.is_active.is_(True)))).scalar_one_or_none()
+    if int(club.owner_id or 0) != user_id and not (staff and staff_can(staff, "manual_checkin")):
+        raise HTTPException(status_code=403, detail="Нет права отмечать посещения")
+    q = (q or "").strip()
+    stmt = select(Student).where(Student.club_id == club_id).order_by(Student.name).limit(30)
+    if q:
+        pattern = f"%{q}%"
+        stmt = stmt.where(Student.name.ilike(pattern) | Student.parent_phone.ilike(pattern))
+    students = (await db.execute(stmt)).scalars().all()
+    return [{"id": s.id, "name": s.name, "phone": s.parent_phone or "", "active": bool(s.expire_date and s.expire_date > datetime.now())} for s in students]
+
+
+@router.post("/webapp/staff-checkin")
+async def staff_checkin(payload: dict, db: AsyncSession = Depends(get_session)):
+    club_id = int(payload.get("club_id", 0)); init_data = str(payload.get("init_data") or "")
+    club = await db.get(Club, club_id)
+    tg_user = verify_telegram_data(init_data, club.bot_token) if club and club.bot_token else None
+    if not tg_user:
+        raise HTTPException(status_code=403, detail="Доступ запрещён")
+    user_id = int(tg_user["id"])
+    staff = (await db.execute(select(ClubStaff).where(ClubStaff.club_id == club_id, ClubStaff.telegram_id == user_id, ClubStaff.is_active.is_(True)))).scalar_one_or_none()
+    if int(club.owner_id or 0) != user_id and not (staff and staff_can(staff, "manual_checkin")):
+        raise HTTPException(status_code=403, detail="Нет права отмечать посещения")
+    result = await process_athlete_gate_pass(int(payload["student_id"]), db, club.club_settings or {}, expected_club_id=club_id, open_turnstile=bool(payload.get("open_turnstile", False)))
+    if not result.get("success"):
+        raise HTTPException(status_code=409, detail=result.get("message", "Посещение не записано"))
+    if not result.get("is_inside_session"):
+        bot = Bot(club.bot_token)
+        try:
+            actor = "администратором" if int(club.owner_id or 0) == user_id else "сотрудником"
+            for parent_id in await get_student_parent_ids(int(payload["student_id"]), db):
+                await bot.send_message(parent_id, f"🔔 <b>Вход зафиксирован {actor}</b>\nАтлет: <b>{result['student_name']}</b>\n{result['message']}", parse_mode="HTML")
+            if club.owner_id and int(club.owner_id) != user_id:
+                await bot.send_message(int(club.owner_id), f"🟢 <b>Посещение отмечено сотрудником</b>\nАтлет: <b>{result['student_name']}</b>\nСотрудник ID: <code>{user_id}</code>\nРежим: {'с турникетом' if payload.get('open_turnstile') else 'без турникета'}", parse_mode="HTML")
+        finally:
+            await bot.session.close()
+    return {"success": True, "message": result["message"], "turnstile": result.get("turnstile_status")}
+
+
 @router.post("/webapp/staff-open-turnstile")
 async def staff_open_turnstile(payload: dict, request: Request, db: AsyncSession = Depends(get_session)):
     club_id = int(payload.get("club_id", 0))
@@ -296,7 +359,7 @@ async def get_client_cabinet_page(request: Request, club_id: int, init_data: str
     if not user:
         return await webapp_auth_help_page(request=request, club_id=club_id, init_data=init_data, db=db)
     settings = (club.club_settings or {}) if club else {}
-    students = (await db.execute(select(Student).where(Student.parent_id == user_id, Student.club_id == club_id).order_by(Student.name))).scalars().all()
+    students = (await db.execute(select(Student).outerjoin(StudentParent, StudentParent.student_id == Student.id).where(Student.club_id == club_id, or_(Student.parent_id == user_id, StudentParent.parent_id == user_id)).distinct().order_by(Student.name))).scalars().all()
     active_students = sum(1 for s in students if not s.is_frozen and s.expire_date and s.expire_date > datetime.now())
     frozen_students = sum(1 for s in students if s.is_frozen)
     expired_students = sum(1 for s in students if not s.is_frozen and (not s.expire_date or s.expire_date <= datetime.now()))
@@ -770,8 +833,10 @@ async def webapp_bind_phone_submit(payload: WebAppBindPhonePayload, request: Req
         db.add(user)
         await db.flush()
     for student in students:
-        student.parent_id = user_id
-        db.add(student)
+        if student.parent_id is None:
+            student.parent_id = user_id
+        if not await db.get(StudentParent, {"student_id": student.id, "parent_id": user_id}):
+            db.add(StudentParent(student_id=student.id, parent_id=user_id, is_primary=(student.parent_id == user_id)))
     await db.commit()
     audit_event("webapp_phone_bound", club_id=club.id, user_id=user_id, students=[s.id for s in students], phone_tail=clean_phone_10[-4:])
     return {"ok": True, "message": f"Привязаны атлеты: {', '.join(s.name for s in students)}"}

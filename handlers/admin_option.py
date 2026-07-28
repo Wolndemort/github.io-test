@@ -12,10 +12,11 @@ from handlers.buttons import get_scanner_keyboard
 from aiogram.types import FSInputFile
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from database.db import get_all_users_count, get_total_athletes_count, get_active_subs_count, User, get_daily_stats, Student, \
-    Club, PaymentOrder, CartOrder, VisitLog, ClubStaff
+    Club, PaymentOrder, CartOrder, VisitLog, ClubStaff, StudentParent, User, get_student_parent_ids
 from sqlalchemy import select
 from handlers.buttons import admin_keyboard
 from handlers.states import AdminManualAdd
+from handlers.states import AdminStates
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 import re
@@ -387,6 +388,59 @@ async def cash_search_results(
         await message.answer("⚠️ Произошла ошибка при обращении к базе данных.")
 
 
+@router.callback_query(F.data == "admin_add_parent")
+async def start_add_parent(callback: types.CallbackQuery, session: AsyncSession, state: FSMContext,
+                           club: Club, is_owner: bool, is_super_admin: bool, staff):
+    if not (is_owner or is_super_admin or (staff and "athletes_manage" in permissions_for_staff(staff))):
+        return await callback.answer("Доступ запрещён", show_alert=True)
+    students = (await session.execute(select(Student).where(Student.club_id == club.id).order_by(Student.name))).scalars().all()
+    if not students:
+        return await callback.answer("В клубе пока нет студентов", show_alert=True)
+    builder = InlineKeyboardBuilder()
+    for student in students:
+        builder.row(types.InlineKeyboardButton(text=student.name[:60], callback_data=f"admin_parent_student_{student.id}"))
+    builder.row(types.InlineKeyboardButton(text="⬅️ Отмена", callback_data="admin"))
+    await callback.message.answer("Выберите студента, которому добавляем родителя:", reply_markup=builder.as_markup())
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("admin_parent_student_"))
+async def choose_parent_student(callback: types.CallbackQuery, state: FSMContext, session: AsyncSession, club: Club):
+    student_id = int(callback.data.removeprefix("admin_parent_student_"))
+    student = (await session.execute(select(Student).where(Student.id == student_id, Student.club_id == club.id))).scalar_one_or_none()
+    if not student:
+        return await callback.answer("Студент не найден", show_alert=True)
+    await state.update_data(parent_student_id=student.id)
+    await state.set_state(AdminStates.waiting_for_parent_id)
+    await callback.message.answer(f"Студент: {student.name}\nВведите Telegram ID родителя (только число):")
+    await callback.answer()
+
+
+@router.message(AdminStates.waiting_for_parent_id)
+async def save_student_parent(message: types.Message, state: FSMContext, session: AsyncSession, club: Club):
+    raw_id = (message.text or "").strip()
+    if not raw_id.isdigit():
+        return await message.answer("ID должен быть числом. Например: 123456789")
+    parent_id = int(raw_id)
+    data = await state.get_data()
+    student_id = data.get("parent_student_id")
+    student = (await session.execute(select(Student).where(Student.id == student_id, Student.club_id == club.id))).scalar_one_or_none()
+    if not student:
+        await state.clear()
+        return await message.answer("Студент не найден")
+    parent = await session.get(User, parent_id)
+    if not parent or parent.club_id != club.id:
+        return await message.answer("Родитель с таким Telegram ID не найден в этом клубе.")
+    existing = await session.get(StudentParent, {"student_id": student.id, "parent_id": parent_id})
+    if existing:
+        await state.clear()
+        return await message.answer(f"Этот родитель уже привязан к студенту {student.name}.")
+    session.add(StudentParent(student_id=student.id, parent_id=parent_id, is_primary=False))
+    await session.commit()
+    await state.clear()
+    await message.answer(f"✅ Родитель {parent_id} добавлен к студенту {student.name}.")
+
+
 @router.callback_query(F.data == "admin_manual_visit")
 async def start_manual_visit_search(callback: types.CallbackQuery, state: FSMContext, is_owner: bool, is_super_admin: bool, staff):
     if not (is_owner or is_super_admin or (staff and "qr_checkin" in permissions_for_staff(staff))):
@@ -479,7 +533,8 @@ async def process_manual_checkin(
 
     # 2. Передаем задачу нашему универсальному сервису прохода!
     res = await process_athlete_gate_pass(
-        student_id, session, club_settings, expected_club_id=club.id, redis=redis
+        student_id, session, club_settings, expected_club_id=club.id, redis=redis,
+        open_turnstile=False
     )
     audit_event(
         "manual_checkin",
@@ -506,11 +561,8 @@ async def process_manual_checkin(
     # 3. SaaS-УВЕДОМЛЕНИЕ ДЛЯ КЛИЕНТА (РОДИТЕЛЯ) — шлем только если сессия новая
     if not res["is_inside_session"] and res["parent_id"]:
         try:
-            await callback.bot.send_message(
-                chat_id=int(res["parent_id"]),
-                text=f"🔔 <b>Вход зафиксирован администратором:</b> {res['student_name']}\n📊 {res['message']}\nПриятной тренировки! 💪",
-                parse_mode="HTML"
-            )
+            for parent_id in await get_student_parent_ids(student_id, session):
+                await callback.bot.send_message(chat_id=parent_id, text=f"🔔 <b>Вход зафиксирован сотрудником:</b> {res['student_name']}\n📊 {res['message']}\nПриятной тренировки! 💪", parse_mode="HTML")
         except Exception as parent_err:
             logger.warning(f"Не удалось уведомить родителя через ручной чекин: {parent_err}")
 

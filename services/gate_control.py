@@ -12,6 +12,7 @@ async def process_athlete_gate_pass(
     club_settings: dict,
     expected_club_id: int | None = None,
     redis=None,
+    open_turnstile: bool = True,
 ) -> dict:
     """
     Универсальный сервис контроля СКУД, сессий и разморозки.
@@ -128,7 +129,7 @@ async def process_athlete_gate_pass(
     # попытку. При успешном открытии ниже будет тот же commit, что и раньше.
     relay_config = dict(club_settings.get("turnstile", {}) or {})
     turnstile_status = "ℹ️ СКУД отключен"
-    if relay_config.get("enabled", False):
+    if open_turnstile and relay_config.get("enabled", False):
         lock_key = f"turnstile:opening:{club.id}"
         relay_lock_acquired = True
         if redis is not None:

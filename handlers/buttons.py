@@ -241,6 +241,7 @@ def admin_keyboard(club_id: int, club_settings: dict, subscription_date: datetim
     operation_buttons = []
     if (is_full_access or "athletes_manage" in allowed) and features.get("manual_add", True):
         operation_buttons.append(types.InlineKeyboardButton(text="🆕 Добавить атлета", callback_data="admin_add_manual"))
+        operation_buttons.append(types.InlineKeyboardButton(text="👨‍👩‍👧 Добавить родителя", callback_data="admin_add_parent"))
 
     if (is_full_access or "qr_checkin" in allowed) and features.get("qr_checkin", True):
         operation_buttons.append(types.InlineKeyboardButton(text="📝 Отметить посещение", callback_data="admin_manual_visit"))
@@ -406,6 +407,5 @@ def get_cash_options_kb(discipline_cfg: dict) -> types.InlineKeyboardMarkup:
     # Кнопка возврата в список (используем ваш callback_data)
     builder.row(types.InlineKeyboardButton(text="🔙 Назад", callback_data="admin_cash_list"))
     return builder.as_markup()
-
 
 

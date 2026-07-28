@@ -50,7 +50,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from starlette import status
-from database.db import User, Student, Club, ClubStaff, ClubProduct, CartOrder, CartItem, CashEntry, AuditEntry
+from database.db import User, Student, Club, ClubStaff, ClubProduct, CartOrder, CartItem, CashEntry, AuditEntry, get_student_parent_ids
 from database.db import purchase_student_freeze
 from admin_module.schemas import AdminStudentUpdate, AdminStudentCreate
 from database.db import get_session
@@ -345,8 +345,8 @@ async def scanner_scan(
         admin_text = (f"🟢 <b>ПРОХОД</b>\n👤 Атлет: <b>{result['student_name']}</b>\n"
                       f"📅 До: {result['expire_str']}\n{result['turnstile_status']}")
         await bot.send_message(club.owner_id, admin_text, parse_mode="HTML")
-        if result.get("parent_id"):
-            await bot.send_message(int(result["parent_id"]),
+        for parent_id in await get_student_parent_ids(student_id, session):
+            await bot.send_message(parent_id,
                                    f"❗ <b>{result['club_name']}</b>: {result['student_name']} вошел в зал.",
                                    parse_mode="HTML")
     finally:

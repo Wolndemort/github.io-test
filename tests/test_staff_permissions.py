@@ -8,7 +8,7 @@ from services.staff_permissions import ROLE_PERMISSIONS
 
 def test_staff_roles_have_separate_least_privilege_permissions():
     assert ROLE_PERMISSIONS["cashier"] == {"cash_sale", "products_view", "products_manage"}
-    assert ROLE_PERMISSIONS["coach"] == {"schedule_view", "schedule_edit", "qr_checkin"}
+    assert ROLE_PERMISSIONS["coach"] == {"schedule_view", "schedule_edit", "qr_checkin", "manual_checkin"}
     assert ROLE_PERMISSIONS["manager"] == {
         "cash_sale",
         "products_view",
@@ -18,6 +18,7 @@ def test_staff_roles_have_separate_least_privilege_permissions():
         "schedule_edit",
         "tariffs_manage",
         "qr_checkin",
+        "manual_checkin",
     }
     for role in ROLE_PERMISSIONS:
         assert "athletes_view" not in ROLE_PERMISSIONS[role]

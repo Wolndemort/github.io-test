@@ -61,7 +61,6 @@ async def admin_settings_menu(callback: types.CallbackQuery, club_settings: dict
     builder.row(types.InlineKeyboardButton(text="💰 Настройка тарифов", callback_data="admin_tariffs_sections"))
     builder.row(types.InlineKeyboardButton(text="💰 Тарифы (WebApp)", web_app=types.WebAppInfo(url=f"https://{club_id}.speedycrm.ru/webapp/admin-tariffs?club_id={club_id}")))
     builder.row(types.InlineKeyboardButton(text="⏰ Планировщики", callback_data="admin_schedulers"))
-    builder.row(types.InlineKeyboardButton(text="💰 Касса и журнал", web_app=types.WebAppInfo(url=f"https://{club_id}.speedycrm.ru/admin/cash?club_id={club_id}")))
     builder.row(types.InlineKeyboardButton(text="💳 Изменить реквизиты", callback_data="admin_edit_payments"))
     turnstile_config = club_settings.get("turnstile", {})
     t_status = "✅" if turnstile_config.get("enabled", False) else "❌"

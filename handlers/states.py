@@ -26,6 +26,7 @@ class AdminStates(StatesGroup):
     waiting_for_broadcast_text = State()
     waiting_for_staff_telegram_id = State()
     waiting_for_staff_role = State()
+    waiting_for_parent_id = State()
 
 # --- ДОБАВЛЯЕМ ДЛЯ SAAS СИСТЕМЫ ---
 

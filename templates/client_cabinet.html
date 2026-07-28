@@ -130,6 +130,7 @@
         <div class="actions">
             {% if is_staff_mode %}
             <a class="btn dark mono-action dark" href="/webapp/staff-pass?club_id={{ club_id }}&user_id={{ user_id }}">Открыть турникет</a>
+            <a class="btn dark mono-action dark" href="/webapp/staff-checkin?club_id={{ club_id }}">Отметить посещение</a>
             <a class="btn soft mono-action" href="/webapp/biometric-pass?club_id={{ club_id }}&user_id={{ user_id }}">📱 Face ID ребёнка</a>
             {% endif %}
             {% if not is_staff_mode %}

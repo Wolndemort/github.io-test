@@ -68,6 +68,24 @@ class Student(Base):
     parent: Mapped["User"] = relationship(back_populates="students")
     parent_phone: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     discipline: Mapped[Optional[str]] = mapped_column(String(50), nullable=True, default="boxing")
+    parents: Mapped[List["StudentParent"]] = relationship(back_populates="student", cascade="all, delete-orphan")
+
+
+class StudentParent(Base):
+    __tablename__ = "student_parents"
+    student_id: Mapped[int] = mapped_column(ForeignKey("students.id", ondelete="CASCADE"), primary_key=True)
+    parent_id: Mapped[int] = mapped_column(ForeignKey("users.user_id", ondelete="CASCADE"), primary_key=True)
+    is_primary: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
+    student: Mapped["Student"] = relationship(back_populates="parents")
+    parent: Mapped["User"] = relationship()
+
+
+async def get_student_parent_ids(student_id: int, session: AsyncSession) -> list[int]:
+    """Return legacy and additional parent IDs without duplicating notifications."""
+    result = await session.execute(select(Student.parent_id).where(Student.id == student_id))
+    primary = result.scalar_one_or_none()
+    extra = await session.execute(select(StudentParent.parent_id).where(StudentParent.student_id == student_id))
+    return list(dict.fromkeys(([int(primary)] if primary else []) + [int(x) for x in extra.scalars().all()]))
 
 
 class Club(Base):

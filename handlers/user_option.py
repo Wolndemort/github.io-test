@@ -9,7 +9,7 @@ from aiogram.utils.keyboard import ReplyKeyboardBuilder
 from aiogram.filters import Command
 from sqlalchemy.ext.asyncio import AsyncSession
 from redis.asyncio import Redis
-from database.db import Student, process_student_freeze, Club, User, VisitLog, PaymentOrder, Subscription, CartOrder, CartItem
+from database.db import Student, StudentParent, get_student_parent_ids, process_student_freeze, Club, User, VisitLog, PaymentOrder, Subscription, CartOrder, CartItem
 from services.abuse_guard import rate_limit, audit_block
 from services.audit import audit_event
 from config import secret_key
@@ -820,11 +820,8 @@ async def _handle_qr_scan_data(
 
     if res["parent_id"]:
         try:
-            await message.bot.send_message(
-                chat_id=int(res["parent_id"]),
-                text=f"❗ <b>{res['club_name']}</b>: {res['student_name']} вошел в зал.",
-                parse_mode="HTML"
-            )
+            for parent_id in await get_student_parent_ids(scanned_id, session):
+                await message.bot.send_message(chat_id=parent_id, text=f"❗ <b>{res['club_name']}</b>: {res['student_name']} вошел в зал.", parse_mode="HTML")
         except Exception:
             pass
 
@@ -1208,9 +1205,12 @@ async def process_user_contact(
             session.add(new_user)
             await session.flush()  # Синхронизируем с базой, чтобы ID зафиксировался
 
-        # Привязываем Telegram ID ко всем найденным карточкам атлетов
+        # Привязываем Telegram ID ко всем найденным карточкам, не заменяя первого родителя.
         for student in students:
-            student.parent_id = user_id
+            if student.parent_id is None:
+                student.parent_id = user_id
+            if not await session.get(StudentParent, {"student_id": student.id, "parent_id": user_id}):
+                session.add(StudentParent(student_id=student.id, parent_id=user_id, is_primary=(student.parent_id == user_id)))
             # Сохраняем номер в карточке атлета, чтобы админ видел его
             # после успешной привязки, а последующие поиски были стабильными.
             student.parent_phone = normalized_phone
