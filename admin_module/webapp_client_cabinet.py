@@ -286,7 +286,7 @@ async def staff_checkin(payload: dict, db: AsyncSession = Depends(get_session)):
                 await bot.send_message(int(club.owner_id), f"🟢 <b>Посещение отмечено сотрудником</b>\nАтлет: <b>{result['student_name']}</b>\nСотрудник ID: <code>{user_id}</code>\nРежим: {'с турникетом' if payload.get('open_turnstile') else 'без турникета'}", parse_mode="HTML")
         finally:
             await bot.session.close()
-    return {"success": True, "message": result["message"], "turnstile": result.get("turnstile_status")}
+    return {"success": True, "message": result["message"], "already_marked": result.get("already_marked", False), "turnstile": result.get("turnstile_status")}
 
 
 @router.post("/webapp/staff-open-turnstile")
@@ -477,7 +477,7 @@ async def webapp_freeze_page(request: Request, club_id: int, student_id: int, in
     if not tg_user:
         raise HTTPException(status_code=403, detail="Доступ запрещен")
     student = await db.get(Student, student_id)
-    if not student or student.club_id != club_id or student.parent_id != int(tg_user.get("id", 0)):
+    if not student or student.club_id != club_id or int(tg_user.get("id", 0)) not in await get_student_parent_ids(student_id, db):
         raise HTTPException(status_code=403, detail="Атлет не найден")
     freeze_days = (club.club_settings or {}).get("limits", {}).get("freeze_days_step", 7)
     now = datetime.now()
@@ -559,8 +559,12 @@ async def webapp_student_page(request: Request, club_id: int, student_id: int, i
         attach_student_names(visits, {student.id: student.name}),
         int((club.club_settings or {}).get("limits", {}).get("session_timeout_minutes", 150)),
     )
+    timeout_minutes = int((club.club_settings or {}).get("limits", {}).get("session_timeout_minutes", 150))
+    now = datetime.now()
+    active_session = bool(student.last_visit and now - student.last_visit.replace(tzinfo=None) < timedelta(minutes=timeout_minutes))
+    active_until = (student.last_visit.replace(tzinfo=None) + timedelta(minutes=timeout_minutes)) if active_session else None
     freeze_price_per_day = (club.club_settings or {}).get("limits", {}).get("freeze_price_per_day", 0)
-    return templates.TemplateResponse("webapp_student.html", {"request": request, "club": club, "student": student, "club_id": club_id, "freeze_price_per_day": freeze_price_per_day, "visit_sessions": visit_sessions, "now": datetime.now()})
+    return templates.TemplateResponse("webapp_student.html", {"request": request, "club": club, "student": student, "club_id": club_id, "freeze_price_per_day": freeze_price_per_day, "visit_sessions": visit_sessions, "active_session": active_session, "active_until": active_until, "now": now})
 
 
 @router.get("/webapp/client-cabinet/history", response_class=HTMLResponse)

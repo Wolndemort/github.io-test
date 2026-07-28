@@ -45,6 +45,9 @@
         </div>
         <div class="mono-pill"><div class="label">Freezes</div><div class="value">{{ student.can_freeze if student.can_freeze is not none else 0 }}</div></div>
     </div>
+    {% if active_session %}
+    <div class="mono-pill" style="margin-top:10px;border-color:#16803c"><div class="label">Активная сессия</div><div class="value">до {{ active_until|moscow_time }} · ↓ 1 занятие за новый вход</div><div class="label">Осталось сейчас: {{ 'Безлимит' if student.balance_lessons == 999 else (student.balance_lessons if student.balance_lessons is not none else 0) }}</div></div>
+    {% endif %}
 </div>
 <div class="mono-card">
     <div class="mono-grid-2">
@@ -66,6 +69,7 @@
 </div>
 <div class="mono-card">
     <div class="mono-kicker"><div class="name">История посещений</div><span>сессии</span></div>
+    {% if active_session %}<div class="mono-pill" style="margin-bottom:10px">🟢 <b>Сессия идёт сейчас</b> → повторный вход до {{ active_until|moscow_time }} не создаёт новое списание.</div>{% endif %}
     {% if visit_sessions %}
         <ul>
         {% for session in visit_sessions %}

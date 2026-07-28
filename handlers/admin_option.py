@@ -489,9 +489,9 @@ async def manual_visit_results(
             status = "🟢" if is_active else "🔴"
 
             # В callback_data зашиваем ID студента для хендлера списания занятия
-            builder.row(types.InlineKeyboardButton(
-                text=f"{status} {s.name}",
-                callback_data=f"admin_manual_checkin_{s.id}")
+            builder.row(
+                types.InlineKeyboardButton(text=f"{status} {s.name} · без турникета", callback_data=f"admin_manual_checkin_{s.id}"),
+                types.InlineKeyboardButton(text="с турникетом", callback_data=f"admin_manual_checkin_relay_{s.id}"),
             )
 
         builder.row(types.InlineKeyboardButton(text="⬅️ Отмена", callback_data="admin"))
@@ -529,12 +529,13 @@ async def process_manual_checkin(
            ["✅ ВХОД ОТМЕЧЕН", "🔴 ДОСТУП ЗАПРЕЩЕН", "Вход отмечен вручную"]):
         return await callback.answer("Этот запрос уже обработан! ⚠️", show_alert=True)
 
+    use_relay = "_relay_" in callback.data
     student_id = int(callback.data.split("_")[-1])
 
     # 2. Передаем задачу нашему универсальному сервису прохода!
     res = await process_athlete_gate_pass(
         student_id, session, club_settings, expected_club_id=club.id, redis=redis,
-        open_turnstile=False
+        open_turnstile=use_relay
     )
     audit_event(
         "manual_checkin",
@@ -579,7 +580,7 @@ async def process_manual_checkin(
         parse_mode="HTML"
     )
 
-    await callback.answer("Посещение зафиксировано")
+    await callback.answer("Посещение уже отмечено: активная сессия продолжается" if res.get("already_marked") else "Посещение зафиксировано", show_alert=bool(res.get("already_marked")))
     await state.clear()
 
 

@@ -235,7 +235,7 @@ def test_admin_settings_menu_top_block_uses_readable_labels():
     top_block = "\n".join(panel[29:70])
     assert "🛍 Настройки магазина / YooKassa" in top_block
     assert "График работы" in top_block
-    assert "Касса и журнал" in top_block
+    assert "Касса и журнал" not in top_block
     assert "Сайт клуба" in top_block
     assert "Поддержка" in top_block
     assert "⚙️ Настройка лимитов клуба" in top_block
@@ -679,7 +679,8 @@ def test_bot_manual_add_button_has_registered_flow_and_no_orphan_states():
     assert "AdminManualAdd.waiting_for_tariff" in handler
     assert "admin_manual_no_sub_" in handler
     assert "waiting_for_lessons" not in states
-    assert "waiting_for_parent_id" not in states
+    assert "waiting_for_parent_id" in states
+    assert 'callback_data="admin_add_parent"' in buttons
 
 
 def test_ru_phone_and_date_inputs_are_normalized():

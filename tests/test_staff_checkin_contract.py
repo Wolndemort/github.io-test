@@ -21,4 +21,5 @@ def test_staff_webapp_has_both_checkin_modes_and_search():
 
 def test_manual_bot_checkin_uses_no_relay_mode():
     source = (ROOT / "handlers/admin_option.py").read_text(encoding="utf-8")
-    assert "open_turnstile=False" in source
+    assert "open_turnstile=use_relay" in source
+    assert "без турникета" in source and "с турникетом" in source

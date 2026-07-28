@@ -197,4 +197,5 @@ async def process_athlete_gate_pass(
         "returned_early_days": returned_early_days,
         "balance": balance,
         "is_inside_session": is_inside_session
+        ,"already_marked": is_inside_session
     }
