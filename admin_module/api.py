@@ -216,6 +216,7 @@ class CashEntryPayload(BaseModel):
 class CashEntryDeletePayload(BaseModel):
     init_data: str
     club_id: int
+    confirmed: bool = False
 
 class AuditEntryDeletePayload(BaseModel):
     init_data: str
@@ -667,6 +668,8 @@ async def reverse_cash_entry(entry_id: int, payload: CashEntryPayload, session: 
 
 @router.post("/admin/cash/entries/{entry_id}/delete")
 async def delete_cash_entry(entry_id: int, payload: CashEntryDeletePayload, session: AsyncSession = Depends(get_session)):
+    if not payload.confirmed:
+        raise HTTPException(status_code=400, detail="Требуется подтверждение удаления операции")
     club = await session.get(Club, payload.club_id)
     tg_user = await verify_webapp_admin(club, payload.init_data)
     entry = await session.get(CashEntry, entry_id)

@@ -6,6 +6,8 @@ import uuid
 from datetime import datetime, timezone
 
 import httpx
+from io import BytesIO
+from PIL import Image, ImageOps, UnidentifiedImageError
 from aiogram import Bot
 from fastapi import Depends, File, HTTPException, Query, Request, UploadFile
 from fastapi.responses import HTMLResponse, StreamingResponse
@@ -273,12 +275,23 @@ async def delete_product_category(payload: ProductCategoryChangePayload, session
 @router.post("/webapp/admin-products/upload-image")
 async def upload_product_image(club_id: int, init_data: str, image: UploadFile = File(...), session: AsyncSession = Depends(get_session)):
     club = await session.get(Club, club_id); await verify_webapp_staff(club, init_data, session, "products_manage")
-    allowed = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp"}
-    if image.content_type not in allowed: raise HTTPException(400, "Р Р°Р·СЂРµС€РµРЅС‹ JPG, PNG Рё WEBP")
     data = await image.read()
     if len(data) > 8 * 1024 * 1024: raise HTTPException(400, "РР·РѕР±СЂР°Р¶РµРЅРёРµ РЅРµ РґРѕР»Р¶РЅРѕ Р±С‹С‚СЊ Р±РѕР»СЊС€Рµ 8 РњР‘")
+    # Mobile Telegram/WebView may send a real JPEG with application/octet-stream
+    # (or an empty MIME type). Detect the bytes instead of trusting the header and
+    # normalize the result so EXIF orientation and all supported formats work.
+    try:
+        with Image.open(BytesIO(data)) as source:
+            if source.format not in {"JPEG", "PNG", "WEBP"}:
+                raise HTTPException(400, "Разрешены JPG, PNG и WEBP")
+            normalized = ImageOps.exif_transpose(source).convert("RGB")
+            output = BytesIO()
+            normalized.save(output, format="JPEG", quality=88, optimize=True)
+            data = output.getvalue()
+    except UnidentifiedImageError as exc:
+        raise HTTPException(400, "Файл не является корректным изображением JPG, PNG или WEBP") from exc
     folder = "static/uploads/products"; os.makedirs(folder, exist_ok=True)
-    filename = f"club_{club_id}_{uuid.uuid4().hex}{allowed[image.content_type]}"
+    filename = f"club_{club_id}_{uuid.uuid4().hex}.jpg"
     path = os.path.join(folder, filename)
     with open(path, "wb") as handle: handle.write(data)
     return {"image_url": f"/static/uploads/products/{filename}"}
