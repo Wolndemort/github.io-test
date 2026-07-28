@@ -1204,7 +1204,12 @@ async def cart_checkout(payload: CartCheckoutPayload, request: Request, session:
     ).scalar_one_or_none()
     if pending_cart:
         pending_age = datetime.utcnow() - (pending_cart.created_at or datetime.utcnow())
-        if pending_age <= timedelta(minutes=10):
+        # Только оплата по реквизитам действительно ждёт ручного
+        # подтверждения администратора. Для СБП/карты заказ NEW означает
+        # лишь незавершённую попытку оплаты: пользователь мог закрыть
+        # страницу YooKassa, поэтому такая попытка не должна блокировать
+        # следующую оплату.
+        if payment_method == "requisites" and pending_age <= timedelta(minutes=10):
             raise HTTPException(status_code=409, detail="Заявка на оплату уже отправлена. Дождитесь подтверждения администратора.")
         pending_cart.status = "FAILED"
         await session.commit()
