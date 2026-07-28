@@ -28,7 +28,7 @@ from admin_module.api import (
 from admin_module.utils import verify_webapp_staff
 from admin_module.webapp_shared import get_club_id_from_host, telegram_init_gate, webapp_auth_gate, verify_webapp_admin
 from admin_module.webapp_verify import verify_telegram_data
-from database.db import Club, ClubProduct, Student, User, get_session
+from database.db import Club, ClubProduct, Student, User, get_session, get_student_parent_ids
 from database.db import CartItem, CartOrder
 from services.audit import audit_event
 from admin_module.api import audit_actor_context
@@ -143,11 +143,13 @@ async def admin_product_sale(payload: AdminProductSalePayload, session: AsyncSes
         normalized.append((product, quantity))
     selected_student = None
     selected_parent_id = None
+    selected_parent_ids = []
     if payload.student_id is not None:
         selected_student = await session.get(Student, int(payload.student_id))
         if not selected_student or selected_student.club_id != payload.club_id:
             raise HTTPException(400, "Selected athlete is unavailable")
-        selected_parent_id = selected_student.parent_id
+        selected_parent_ids = await get_student_parent_ids(selected_student.id, session)
+        selected_parent_id = selected_parent_ids[0] if selected_parent_ids else None
     order_id = f"CASH_PRODUCT_{uuid.uuid4().hex[:12].upper()}"
     buyer_user_id = selected_parent_id or int(tg_user.get("id"))
     order = CartOrder(id=order_id, club_id=payload.club_id, user_id=buyer_user_id, amount_kopecks=total, status="CONFIRMED", provider_payment_id=f"CASH:{order_id}")
@@ -205,10 +207,11 @@ async def admin_product_sale(payload: AdminProductSalePayload, session: AsyncSes
                     "Чек из магазина сформирован на кассе.",
                 ],
             )
-            try:
-                await bot.send_message(buyer_user_id, parent_text, parse_mode="HTML")
-            except Exception:
-                logger.exception("Не удалось отправить чек плательщику по продаже %s", order_id)
+            for parent_id in (selected_parent_ids or [buyer_user_id]):
+                try:
+                    await bot.send_message(parent_id, parent_text, parse_mode="HTML")
+                except Exception:
+                    logger.exception("Не удалось отправить чек родителю %s по продаже %s", parent_id, order_id)
         await notify_product_staff(
             bot,
             club,
