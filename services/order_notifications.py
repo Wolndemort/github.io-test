@@ -88,7 +88,7 @@ async def notify_product_staff(bot: Bot, club: Club, session, text: str) -> None
     targets = [
         staff.telegram_id
         for staff in staff_rows
-        if str(getattr(staff, "role", "")).strip().casefold() == "cashier"
+        if str(getattr(staff, "role", "")).strip().casefold() in {"cashier", "barista"}
     ]
     for telegram_id in targets:
         try:

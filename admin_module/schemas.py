@@ -51,6 +51,10 @@ class StudentCreate(BaseModel):
 class BiometricCheckIn(BaseModel):
     init_data: str
     student_id: int
+    # Токен, который Telegram WebApp возвращает после Face ID.
+    # Поле было случайно потеряно из общей схемы, из-за чего endpoint
+    # падал уже после успешной валидации запроса.
+    biometric_token: str | None = None
 
 
 class BiometricEnable(BaseModel):

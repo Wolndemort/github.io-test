@@ -187,7 +187,10 @@ async def admin_product_sale(payload: AdminProductSalePayload, session: AsyncSes
             extra_lines=["Способ: <b>Наличные</b>"],
         )
         if club.owner_id:
-            await bot.send_message(club.owner_id, owner_text, parse_mode="HTML")
+            try:
+                await bot.send_message(club.owner_id, owner_text, parse_mode="HTML")
+            except Exception:
+                logger.exception("Не удалось отправить чек владельцу по продаже %s", order_id)
         if buyer_user_id:
             student_label = escape(selected_student.name if selected_student else "Атлет")
             parent_text = build_owner_receipt_text(
@@ -202,7 +205,10 @@ async def admin_product_sale(payload: AdminProductSalePayload, session: AsyncSes
                     "Чек из магазина сформирован на кассе.",
                 ],
             )
-            await bot.send_message(buyer_user_id, parent_text, parse_mode="HTML")
+            try:
+                await bot.send_message(buyer_user_id, parent_text, parse_mode="HTML")
+            except Exception:
+                logger.exception("Не удалось отправить чек плательщику по продаже %s", order_id)
         await notify_product_staff(
             bot,
             club,
