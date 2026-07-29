@@ -21,6 +21,18 @@ def test_manual_and_qr_checkins_share_the_same_gate_service():
     assert 'expected_club_id=club.id' in user
 
 
+def test_admin_and_coach_have_explicit_qr_entry_and_permission():
+    buttons = (ROOT / "handlers/buttons.py").read_text(encoding="utf-8")
+    perms = (ROOT / "services/staff_permissions.py").read_text(encoding="utf-8")
+    admin = (ROOT / "handlers/admin_option.py").read_text(encoding="utf-8")
+
+    assert 'scanner_url = f"https://{club_id}.speedycrm.ru/webapp/scanner?club_id={club_id}&v=108"' in buttons
+    assert 'text="📸 ОТКРЫТЬ СКАНЕР (ВХОД)"' in buttons
+    assert '"coach": {"schedule_view", "schedule_edit", "qr_checkin", "manual_checkin"}' in perms
+    assert '"manager": {"cash_sale", "products_view", "products_manage", "cash_view", "schedule_view", "schedule_edit", "tariffs_manage", "qr_checkin", "manual_checkin"}' in perms
+    assert 'if not (is_owner or is_super_admin or (staff and "qr_checkin" in permissions_for_staff(staff)))' in admin
+
+
 def test_qr_scanner_stays_open_until_explicit_stop():
     page = (ROOT / "templates/scanner.html").read_text(encoding="utf-8")
     assert "scanner.start" in page
