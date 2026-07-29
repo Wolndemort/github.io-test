@@ -46,6 +46,15 @@
     body.mono-theme .card button:hover,
     body.mono-theme .card .mono-action:hover,
     #modal button:hover{background:#f7f7f7!important}
+    /* The inherited card text rule is intentionally light, but modal controls
+       are white surfaces and must keep their own dark text. */
+    #modal .box button,
+    #modal .box button *{color:#111!important;-webkit-text-fill-color:#111!important}
+    #modal .box button:disabled{color:#111!important;-webkit-text-fill-color:#111!important;opacity:.62}
+    #modal .box input,
+    #modal .box select,
+    #modal .box textarea{color:#fff!important;-webkit-text-fill-color:#fff!important}
+    .wrap>.card:first-of-type .mono-action{background:#fff!important;color:#111!important;border:1px solid #d9d9d9!important}
     body.mono-theme .wrap>.card:first-of-type,
     body.mono-theme .wrap>.card:nth-of-type(2),
     .student.card{border-radius:22px}
