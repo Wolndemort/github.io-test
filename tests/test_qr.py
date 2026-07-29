@@ -1,5 +1,6 @@
 import pytest
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 from handlers.user_option import parse_qr_scan
 
@@ -37,7 +38,7 @@ async def test_parse_qr_scan_new_session_success(mock_gate_service, mock_gen_sig
     message = AsyncMock()
     message.web_app_data.data = f"student:1:{datetime.now(timezone.utc):%Y-%m-%d-%H}:valid_sig"
     message.answer = AsyncMock()
-    message.bot.send_message = AsyncMock()
+    message.bot = SimpleNamespace(send_message=AsyncMock())
 
     # 2. Запуск хендлера
     await parse_qr_scan(message, session, club, club_settings, redis)
@@ -86,7 +87,7 @@ async def test_parse_qr_scan_inside_session_success(mock_gate_service, mock_gen_
     message = AsyncMock()
     message.web_app_data.data = f"student:1:{datetime.now(timezone.utc):%Y-%m-%d-%H}:valid_sig"
     message.answer = AsyncMock()
-    message.bot.send_message = AsyncMock()
+    message.bot = SimpleNamespace(send_message=AsyncMock())
 
     # Запуск
     await parse_qr_scan(message, session, club, club_settings, redis)
