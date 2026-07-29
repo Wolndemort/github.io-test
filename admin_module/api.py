@@ -787,7 +787,10 @@ async def admin_update_student(
             student.expire_date = None
         else:
             try:
-                student.expire_date = datetime.strptime(payload.expire_date, "%Y-%m-%d").replace()
+                expire_date = parse_user_date(payload.expire_date)
+                if not expire_date:
+                    raise ValueError
+                student.expire_date = datetime.combine(expire_date, datetime.min.time())
             except ValueError:
                 raise HTTPException(status_code=400, detail="Некорректная дата окончания")
     if payload.can_freeze is not None:
@@ -799,7 +802,10 @@ async def admin_update_student(
         if student.is_frozen:
             if payload.frozen_at:
                 try:
-                    student.frozen_at = datetime.strptime(payload.frozen_at, "%Y-%m-%d")
+                    frozen_date = parse_user_date(payload.frozen_at)
+                    if not frozen_date:
+                        raise ValueError
+                    student.frozen_at = datetime.combine(frozen_date, datetime.min.time())
                 except ValueError:
                     raise HTTPException(status_code=400, detail="Некорректная дата начала заморозки")
             elif not student.frozen_at:

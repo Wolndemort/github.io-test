@@ -690,6 +690,7 @@ def test_ru_phone_and_date_inputs_are_normalized():
     assert parse_user_date("15.08.2012").isoformat() == "2012-08-15"
     assert parse_user_date("15082012").isoformat() == "2012-08-15"
     assert parse_user_date("15-08-2012").isoformat() == "2012-08-15"
+    assert parse_user_date("2012-08-15").isoformat() == "2012-08-15"
 
 
 def test_daily_report_has_no_manual_add_fragment():
@@ -704,7 +705,7 @@ def test_admin_student_update_accepts_valid_migration_fields():
         club_id=7,
         birthday="2012-05-10",
         balance_lessons=999,
-        expire_date="2026-12-31",
+        expire_date="31.12.2026",
         can_freeze=1,
         is_frozen=0,
         frozen_days=None,

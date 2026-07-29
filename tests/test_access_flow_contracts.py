@@ -30,6 +30,13 @@ def test_qr_scanner_stays_open_until_explicit_stop():
     assert "finally(() => setTimeout" in page
 
 
+def test_qr_scanner_page_does_not_require_init_data_gate():
+    source = (ROOT / "admin_module/api.py").read_text(encoding="utf-8")
+    assert '@router.get("/webapp/scanner", response_class=HTMLResponse)' in source
+    assert "must not return 401 here" in source
+    assert "TemplateResponse(\n        \"scanner.html\"" in source
+
+
 def test_face_id_is_enforced_server_side_for_webapp_turnstile():
     source = (ROOT / "admin_module/turnstile_biometry.py").read_text(encoding="utf-8")
     assert "payload.biometric_token" in source
