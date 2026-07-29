@@ -12,6 +12,7 @@ from admin_module.security import get_api_key
 from database.db import Club, Student, User, get_session, get_student_parent_ids
 from handlers.skud import trigger_dingtian_turnstile
 from services.gate_control import process_athlete_gate_pass
+from services.audit import audit_event
 
 
 @router.post("/open-turnstile")
@@ -87,6 +88,13 @@ async def enable_biometry(payload: BiometricEnable, db: AsyncSession = Depends(g
     telegram_user_id = tg_user.get("id")
     if not telegram_user_id:
         raise HTTPException(status_code=400, detail="Неверные данные Telegram")
+    audit_event(
+        "biometric_enable_requested",
+        actor_user_id=int(telegram_user_id),
+        action="request",
+        object_type="biometric",
+        location="webapp/enable-biometry",
+    )
     user_res = await db.execute(select(User).where(User.user_id == telegram_user_id))
     parent_user = user_res.scalar_one_or_none()
     if not parent_user:
@@ -107,6 +115,15 @@ async def enable_biometry(payload: BiometricEnable, db: AsyncSession = Depends(g
         raise HTTPException(status_code=430, detail="Ошибка безопасности данных")
     parent_user.is_biometric_enabled = True
     await db.commit()
+    audit_event(
+        "biometric_enabled",
+        club_id=club.id,
+        actor_user_id=int(telegram_user_id),
+        action="enable",
+        object_type="biometric",
+        object_id=int(telegram_user_id),
+        location="webapp/enable-biometry",
+    )
     return {"success": True, "message": "Биометрия успешно активирована в профиле!"}
 
 

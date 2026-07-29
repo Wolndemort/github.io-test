@@ -108,15 +108,67 @@ if (!bm || typeof bm.init !== 'function' || typeof bm.requestAccess !== 'functio
         }
     });
 }
+// Some Android Telegram builds do not invoke the callback passed to init().
+// Initialize synchronously as required by the current WebApp API as well.
+try {
+    if (bm && typeof bm.init === 'function') {
+        bm.init();
+        isBiometricReady = true;
+        if (!bm.isAccessGranted && !serverBiometryEnabled) {
+            const setupBox = document.getElementById('setup-biometry-box');
+            if (setupBox) setupBox.style.display = 'block';
+        }
+    }
+} catch (error) {
+    console.error('Face ID synchronous init failed', error);
+}
 function setupBiometrics() {
-    if (!bm || !isBiometricReady) return;
+    if (!bm) {
+        const message = 'Face ID недоступен в этом Telegram. Используйте QR-пропуск из меню бота.';
+        document.getElementById('status-hint').textContent = message;
+        tg?.showAlert(message);
+        return;
+    }
+    // Telegram WebApp API differs between Android builds: init() is
+    // synchronous on newer clients and does not call the supplied callback.
+    // Do not silently ignore a tap when an older client did not initialize it.
+    if (!isBiometricReady) {
+        try { bm.init(); isBiometricReady = true; } catch (error) {
+            console.error('Face ID init failed', error);
+        }
+    }
+    if (!isBiometricReady || typeof bm.requestAccess !== 'function') {
+        const message = 'Не удалось запустить Face ID. Обновите Telegram и разрешите биометрию в настройках телефона.';
+        document.getElementById('status-hint').textContent = message;
+        tg?.showAlert(message);
+        return;
+    }
+    let accessCallbackCalled = false;
+    const accessTimeout = setTimeout(() => {
+        if (accessCallbackCalled) return;
+        const message = 'Telegram не ответил на запрос Face ID. Откройте приложение через официальный Telegram и проверьте разрешения биометрии.';
+        document.getElementById('status-hint').textContent = message;
+        tg?.showAlert(message);
+    }, 10000);
     bm.requestAccess({ reason: "Создание безопасного ключа устройства для прохода" }, (accessGranted) => {
+        accessCallbackCalled = true;
+        clearTimeout(accessTimeout);
         if (accessGranted) {
             fetch('/webapp/enable-biometry', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ init_data: tg.initData }) })
-            .then(res => res.json())
-            .then(() => { tg.showAlert("Устройство успешно связано. Теперь доступ готов."); location.reload(); });
+            .then(async res => {
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(data.detail || data.message || `Ошибка активации (${res.status})`);
+                return data;
+            })
+            .then(data => { tg.showAlert(data.message || "Устройство успешно связано. Теперь доступ готов."); location.reload(); })
+            .catch(error => {
+                console.error('Face ID activation failed', error);
+                document.getElementById('status-hint').textContent = error.message || 'Не удалось активировать Face ID.';
+                tg?.showAlert(error.message || 'Не удалось активировать Face ID.');
+            });
         } else {
-            tg.showAlert("Доступ отклонен. Без активации проход невозможен.");
+            document.getElementById('status-hint').textContent = 'Доступ к Face ID отклонён. Разрешите биометрию или используйте QR-пропуск.';
+            tg.showAlert("Доступ к Face ID отклонён.");
         }
     });
 }

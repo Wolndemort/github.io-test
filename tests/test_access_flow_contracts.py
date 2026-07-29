@@ -54,3 +54,13 @@ def test_face_id_is_enforced_server_side_for_webapp_turnstile():
     assert "payload.biometric_token" in source
     assert "Face ID не активирован" in source
     assert "is_biometric_enabled" in source
+
+
+def test_face_id_activation_handles_android_clients_without_init_callback():
+    page = (ROOT / "templates/biometric_pass.html").read_text(encoding="utf-8")
+    endpoint = (ROOT / "admin_module/turnstile_biometry.py").read_text(encoding="utf-8")
+    assert "bm.init();" in page
+    assert "isBiometricReady = true" in page
+    assert "Face ID activation failed" in page
+    assert "biometric_enable_requested" in endpoint
+    assert "biometric_enabled" in endpoint
