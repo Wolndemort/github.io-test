@@ -57,14 +57,14 @@ def get_profile_keyboard(user, club_id: int, club_settings: dict, is_authorized:
             web_app=WebAppInfo(url=f"{base_url}/webapp/biometric-pass?club_id={club_id}&user_id={user.user_id}")
         ))
 
+        builder.row(types.InlineKeyboardButton(
+            text="🛒 Магазин и корзина",
+            web_app=WebAppInfo(url=f"{base_url}/webapp/shop?club_id={club_id}")
+        ))
         builder.row(
             types.InlineKeyboardButton(text="📲 QR-пропуск", callback_data="show_qr"),
             types.InlineKeyboardButton(text="🔍 Мои атлеты", callback_data="detailed_status_info"),
         )
-        builder.row(types.InlineKeyboardButton(
-            text="🛒 Магазин и корзина (WebApp)",
-            web_app=WebAppInfo(url=f"{base_url}/webapp/shop?club_id={club_id}")
-        ))
         builder.row(
             types.InlineKeyboardButton(text="🧾 История", callback_data="payment_history"),
             types.InlineKeyboardButton(text="💳 Абонемент", callback_data="choose_section"),
@@ -407,5 +407,4 @@ def get_cash_options_kb(discipline_cfg: dict) -> types.InlineKeyboardMarkup:
     # Кнопка возврата в список (используем ваш callback_data)
     builder.row(types.InlineKeyboardButton(text="🔙 Назад", callback_data="admin_cash_list"))
     return builder.as_markup()
-
 

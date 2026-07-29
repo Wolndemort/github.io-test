@@ -131,8 +131,8 @@ def test_admin_student_dates_are_text_inputs_with_autofill_formatting():
     assert 'input[name="birthday"]' in page
     assert 'input[name="expire_date"]' in page
     assert "replace(/\\D/g, '')" in page
-    assert "showPicker" in page
-    assert "birthday-picker" in page
+    assert "showPicker" not in page
+    assert "birthday-picker" not in page
     assert "formatDMY" in page
     assert "danger-delete" in page
     assert "init_data: initData" in page

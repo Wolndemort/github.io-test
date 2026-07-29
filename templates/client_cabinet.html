@@ -44,6 +44,9 @@
         .bottom-bar .btn.soft { background: #f7f7f7; border-color: #111; color: #111; }
         .bottom-bar .btn.dark { background: #111; color: #fff; border-color: #111; }
         .student-actions { display: grid; gap: 8px; margin-top: 10px; }
+        .quick-actions { border-color:#111; box-shadow:0 14px 32px rgba(0,0,0,.08); }
+        .quick-actions .actions { grid-template-columns:repeat(2,minmax(0,1fr)); }
+        .quick-actions .primary-action { font-size:17px; padding:17px 14px; }
         .section-title { display:flex; align-items:center; justify-content:space-between; margin-bottom: 10px; }
         .section-title span { text-transform: uppercase; letter-spacing: .16em; font-size: 11px; color: #666; }
         .status-line { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; white-space: normal; }
@@ -58,6 +61,7 @@
             .status { margin-top: 8px; white-space: normal; }
             .hero { padding: 16px; border-radius: 20px; }
             .card { padding: 14px; border-radius: 18px; }
+            .quick-actions .actions { grid-template-columns:1fr; }
         }
         @media (max-width: 420px) {
             .wrap { padding: 10px; }
@@ -126,15 +130,14 @@
         {% endif %}
     </div>
 
-    <div class="card mono-card">
+    <div class="card mono-card quick-actions">
         <div class="actions">
+            <a class="btn dark mono-action dark primary-action" href="/webapp/biometric-pass?club_id={{ club_id }}&user_id={{ user_id }}">📱 Открыть проход</a>
+            <a class="btn dark mono-action dark primary-action" href="/webapp/shop?club_id={{ club_id }}">🛒 Магазин</a>
             {% if is_staff_mode %}
             <a class="btn dark mono-action dark" href="/webapp/staff-pass?club_id={{ club_id }}&user_id={{ user_id }}">Открыть турникет</a>
             <a class="btn dark mono-action dark" href="/webapp/staff-checkin?club_id={{ club_id }}">Отметить посещение</a>
             <a class="btn soft mono-action" href="/webapp/biometric-pass?club_id={{ club_id }}&user_id={{ user_id }}">📱 Face ID ребёнка</a>
-            {% endif %}
-            {% if not is_staff_mode %}
-            <a class="btn dark mono-action dark" href="/webapp/biometric-pass?club_id={{ club_id }}&user_id={{ user_id }}">Открыть проход по FaceID</a>
             {% endif %}
             {% if not is_staff_mode %}
             <a class="btn soft mono-action" href="/webapp/client-cabinet/create-student?club_id={{ club_id }}">Создать атлета</a>
@@ -142,7 +145,6 @@
             {% endif %}
             <a class="btn soft mono-action" href="/webapp/client-cabinet/buy-subscription?club_id={{ club_id }}">💳 Купить абонемент ребёнку</a>
             <a class="btn soft mono-action" href="/webapp/client-cabinet/history?club_id={{ club_id }}">История оплат</a>
-            <a class="btn soft mono-action" href="/webapp/shop?club_id={{ club_id }}">Магазин и корзина</a>
             <a class="btn soft mono-action" href="/webapp/client-cabinet?club_id={{ club_id }}">Обновить кабинет</a>
             <a class="btn soft mono-action" href="#" onclick="window.Telegram?.WebApp?.close(); return false;">Вернуться в профиль бота</a>
         </div>
