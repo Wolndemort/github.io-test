@@ -111,6 +111,10 @@
 
     <!-- 📜 4. СКУД: ПОСЛЕДНИЕ ПОСЕЩЕНИЯ (ИСТОРИЯ СЕССИЙ) -->
     <div class="card mono-card">
+        <a class="tg-link" href="/webapp/admin-freeze?club_id={{ club_id }}" onclick="this.href='/webapp/admin-freeze?club_id={{ club_id }}&init_data='+encodeURIComponent(window.Telegram?.WebApp?.initData||'');">❄️ Заморозка атлетов</a>
+    </div>
+
+    <div class="card mono-card">
         <details>
             <summary>📜 История последних посещений</summary>
             <details class="athlete-dropdown" open>

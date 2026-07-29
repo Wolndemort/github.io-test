@@ -15,8 +15,10 @@
 <div class="wrap">
   <div class="card"><a href="/webapp/staff-pass?club_id={{ club_id }}" style="color:#fff">← В кабинет сотрудника</a><h2>Заморозка абонементов</h2><p class="muted">Доступ только для администратора. Стандартный срок: {{ freeze_days }} дн.</p></div>
   <div class="card">
+    <input id="student-search" type="search" placeholder="Поиск атлета" style="box-sizing:border-box;width:100%;padding:12px;border-radius:10px;border:1px solid #555;background:#101010;color:#fff;margin-bottom:8px">
+    <p id="empty-search" class="muted" style="display:none">Атлет не найден.</p>
     {% for student in students %}
-    <div class="student">
+    <div class="student" data-student-name="{{ student.name|lower }}">
       <div><b>{{ student.name }}</b><br><span class="muted">{% if student.is_frozen %}❄️ Заморожен{% else %}Активен{% endif %} · до {{ student.expire_date.strftime('%d.%m.%Y') if student.expire_date else 'нет даты' }}</span></div>
       <button class="btn {{ 'unfreeze' if student.is_frozen else 'freeze' }}" data-id="{{ student.id }}" data-action="{{ 'unfreeze' if student.is_frozen else 'freeze' }}">{{ 'Разморозить' if student.is_frozen else 'Заморозить' }}</button>
     </div>
@@ -26,6 +28,11 @@
 </div>
 <script>
 const tg=window.Telegram?.WebApp; tg?.ready(); tg?.expand();
+document.getElementById('student-search').oninput=(event)=>{
+  const query=event.target.value.trim().toLowerCase(); let visible=0;
+  document.querySelectorAll('.student').forEach(row=>{const match=!query||row.dataset.studentName.includes(query); row.style.display=match?'flex':'none'; if(match) visible++;});
+  document.getElementById('empty-search').style.display=visible?'none':'block';
+};
 document.querySelectorAll('[data-action]').forEach(button=>button.onclick=async()=>{
   const action=button.dataset.action;
   if(!confirm(action==='freeze'?'Заморозить абонемент этого атлета?':'Разморозить абонемент этого атлета?')) return;

@@ -422,10 +422,6 @@ else location.replace(location.pathname+'?club_id=' + encodeURIComponent(new URL
             continue
         visit_at = visit.visited_at.replace(tzinfo=None)
         display_visit_at = visit_at + timedelta(hours=3)
-        if date_from and display_visit_at.date() < moscow_date_boundary(date_from).date():
-            continue
-        if date_to and display_visit_at.date() > moscow_date_boundary(date_to).date():
-            continue
         elapsed = now_local - visit_at
         if elapsed < timedelta(minutes=timeout_minutes):
             continue

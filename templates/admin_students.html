@@ -9,6 +9,7 @@
     .wrap{max-width:1100px!important}.grid{grid-template-columns:repeat(4,minmax(0,1fr))!important}
     .date-field{display:block}.date-field input{letter-spacing:.04em}.date-field input::placeholder{color:#999}
     .student.card{padding:20px;border-radius:22px;gap:14px}.student.card>label:first-child{font-size:14px;font-weight:700}.student.card input,.student.card select{min-height:44px}.student.card .grid{display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:14px}.student.card .grid>label{display:flex;flex-direction:column;gap:6px;min-width:0}.student.card .grid>label input,.student.card .grid>label select{width:100%;min-width:0}.student.card .grid>button{align-self:end;width:100%;margin:0!important}.student.card>div:last-of-type{margin-top:4px}.student.card button{min-height:42px}
+    .filter-checks{display:grid!important;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px 14px;margin-top:12px}.filter-checks label{display:grid!important;grid-template-columns:22px minmax(0,1fr);align-items:center;gap:7px;min-width:0;line-height:1.25}.filter-checks input{width:20px!important;height:20px;min-height:20px!important;margin:0}.student.card>label:first-child{display:flex;flex-direction:column;gap:7px}.student.card>.muted{display:block;margin:0 0 2px;padding:7px 10px;border-radius:9px;background:#101010}.student.card>.muted::first-letter{color:#fff}
     #list{display:grid;gap:14px}.wrap>.card:first-of-type>.muted,.wrap>.card:first-of-type>p{display:none}.wrap>.card:first-of-type{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 16px}.wrap>.card:first-of-type h2{margin:0;min-width:0}.wrap>.card:first-of-type>a{display:inline-block;width:auto;flex:0 0 auto;padding:10px 14px}
     .wrap>.card:nth-of-type(2){display:block}.wrap>.card:nth-of-type(2)>label{display:flex;flex-direction:column;gap:6px;min-width:0}.wrap>.card:nth-of-type(2)>label input{width:100%;min-width:0}.wrap>.card:nth-of-type(2) .filter-panel{margin:12px 0}.wrap>.card:nth-of-type(2)>a{display:block;width:100%;white-space:nowrap}
     #fullscreen{position:fixed;right:18px;bottom:88px;z-index:60;width:46px;height:46px;border-radius:50%;border:1px solid #d9d9d9;background:#fff;color:#111;box-shadow:0 8px 22px #0005;float:none!important}
@@ -63,6 +64,8 @@
     #modal .actions{position:sticky;bottom:0;padding-top:12px;background:linear-gradient(to top, #151515 75%, rgba(21,21,21,0));}
     #saveCreate,#cancelCreate{flex:1}
     @media(max-width:380px){.student.card .grid{grid-template-columns:1fr!important}}
+    @media(max-width:700px){.filter-checks{grid-template-columns:repeat(2,minmax(0,1fr))}}
+    @media(min-width:1050px){.filter-checks{grid-template-columns:repeat(4,minmax(0,1fr))}}
     @media(max-width:420px){.wrap>.card:first-of-type{align-items:stretch;flex-direction:column}.wrap>.card:first-of-type>a{width:100%}}
     @media(max-width:650px){ #modal .row{grid-template-columns:1fr 1fr}#modal .box{margin:0 auto;max-height:calc(100dvh - 24px)}}
   </style>

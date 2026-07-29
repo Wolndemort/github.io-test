@@ -25,7 +25,6 @@
         <p style="color:#666;margin:0;">Сотрудникам не нужен QR и сессии — только быстрый проход.</p>
     </div>
     <a class="mono-action" href="/webapp/client-cabinet?club_id={{ club_id }}">← Назад</a>
-    {% if is_admin %}<a class="mono-action" href="/webapp/admin-freeze?club_id={{ club_id }}" onclick="this.href='/webapp/admin-freeze?club_id={{ club_id }}&init_data='+encodeURIComponent(window.Telegram?.WebApp?.initData||'')">❄️ Заморозка атлетов</a>{% endif %}
     <button class="btn" onclick="openTurnstile(false)">🔓 Открыть турникет</button>
     <button class="btn" onclick="openTurnstile(true)">📱 Открыть по FaceID</button>
     <p id="status" class="hint">Проход будет записан в аудит клуба.</p>
