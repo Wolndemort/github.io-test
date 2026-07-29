@@ -30,7 +30,8 @@
     let busy = false, lastCode = '', lastAt = 0, stopped = false;
 
     async function waitForInitData() {
-      for (let attempt = 0; attempt < 20; attempt++) {
+      for (let attempt = 0; attempt < 100; attempt++) {
+        tg?.ready();
         initData = queryInitData || tg?.initData || '';
         if (initData) return true;
         await new Promise(resolve => setTimeout(resolve, 100));
@@ -40,19 +41,21 @@
 
     async function startCamera() {
       if (stopped) return;
-      if (!(await waitForInitData())) {
-        status.className = 'error';
-        status.textContent = 'Откройте сканер кнопкой из Telegram ещё раз.';
-        return;
-      }
+      status.textContent = 'Запрашиваем доступ к камере…';
       scanner.start({ facingMode: 'environment' }, config, onScanSuccess)
         .catch(err => { status.className = 'error'; status.textContent = 'Ошибка камеры: ' + err; });
     }
 
-    function onScanSuccess(decodedText) {
+    async function onScanSuccess(decodedText) {
       const now = Date.now();
       if (busy || (decodedText === lastCode && now - lastAt < 5000)) return;
       busy = true; lastCode = decodedText; lastAt = now;
+      if (!(await waitForInitData())) {
+        busy = false;
+        status.className = 'error';
+        status.textContent = 'Telegram не передал данные авторизации. Закройте сканер и откройте его кнопкой из Telegram ещё раз.';
+        return;
+      }
       status.className = 'ok'; status.textContent = 'Пропуск принят. Ожидаем следующий QR…';
       fetch('/webapp/scanner/scan', { method:'POST', headers:{'Content-Type':'application/json'},
         body: JSON.stringify({ init_data: initData, club_id: new URLSearchParams(location.search).get('club_id'), qr_data: decodedText })
