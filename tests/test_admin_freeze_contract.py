@@ -13,7 +13,9 @@ def test_admin_freeze_screen_is_owner_only_and_has_both_actions():
     assert "Разморозить" in page
 
 
-def test_staff_pass_exposes_admin_freeze_link_only_for_admin_context():
-    page = Path("templates/staff_pass.html").read_text(encoding="utf-8")
-    assert "{% if is_admin %}" in page
+def test_admin_dashboard_exposes_admin_freeze_link():
+    page = Path("templates/admin.html").read_text(encoding="utf-8")
+    staff_page = Path("templates/staff_pass.html").read_text(encoding="utf-8")
     assert "/webapp/admin-freeze" in page
+    assert "Заморозка атлетов" in page
+    assert "/webapp/admin-freeze" not in staff_page
