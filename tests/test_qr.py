@@ -5,7 +5,31 @@ from unittest.mock import AsyncMock, patch
 from handlers.user_option import parse_qr_scan
 
 
+class FakeResult:
+    def __init__(self, primary=None, extra=None):
+        self._primary = primary
+        self._extra = extra or []
+
+    def scalar_one_or_none(self):
+        return self._primary
+
+    def scalars(self):
+        return self
+
+    def all(self):
+        return list(self._extra)
+
+
+class FakeSession:
+    def __init__(self):
+        self.result = FakeResult()
+
+    async def execute(self, _stmt):
+        return self.result
+
+
 @pytest.mark.asyncio
+@patch("handlers.user_option.get_student_parent_ids", new=AsyncMock(return_value=[12345]))
 @patch("handlers.user_option.generate_signature")
 @patch("handlers.user_option.process_athlete_gate_pass")
 async def test_parse_qr_scan_new_session_success(mock_gate_service, mock_gen_sig):
@@ -28,7 +52,7 @@ async def test_parse_qr_scan_new_session_success(mock_gate_service, mock_gen_sig
         "is_inside_session": False
     }
 
-    session = AsyncMock()
+    session = FakeSession()
     club = AsyncMock()
     club.id = 1
     club.name = "Test Club"
@@ -56,6 +80,7 @@ async def test_parse_qr_scan_new_session_success(mock_gate_service, mock_gen_sig
 
 
 @pytest.mark.asyncio
+@patch("handlers.user_option.get_student_parent_ids", new=AsyncMock(return_value=[12345]))
 @patch("handlers.user_option.generate_signature")
 @patch("handlers.user_option.process_athlete_gate_pass")
 async def test_parse_qr_scan_inside_session_success(mock_gate_service, mock_gen_sig):
@@ -77,7 +102,7 @@ async def test_parse_qr_scan_inside_session_success(mock_gate_service, mock_gen_
         "is_inside_session": True
     }
 
-    session = AsyncMock()
+    session = FakeSession()
     club = AsyncMock()
     club.id = 1
     club.name = "Test Club"
@@ -106,7 +131,7 @@ async def test_parse_qr_scan_inside_session_success(mock_gate_service, mock_gen_
 @patch("handlers.user_option.generate_signature", return_value="expected_sig")
 @patch("handlers.user_option.process_athlete_gate_pass")
 async def test_parse_qr_scan_rejects_invalid_signature(mock_gate_service, _mock_gen_sig):
-    session = AsyncMock()
+    session = FakeSession()
     club = AsyncMock()
     club.id = 1
     redis = AsyncMock()
@@ -124,7 +149,7 @@ async def test_parse_qr_scan_rejects_invalid_signature(mock_gate_service, _mock_
 @patch("handlers.user_option.generate_signature", return_value="expected_sig")
 @patch("handlers.user_option.process_athlete_gate_pass")
 async def test_parse_qr_scan_rejects_expired_qr(mock_gate_service, _mock_gen_sig):
-    session = AsyncMock()
+    session = FakeSession()
     club = AsyncMock()
     club.id = 1
     redis = AsyncMock()
