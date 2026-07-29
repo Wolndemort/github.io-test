@@ -1006,6 +1006,24 @@ async def admin_create_student(
         discipline=payload.discipline.strip()[:50] or None,
     )
     db.add(new_student)
+    await db.flush()
+    sale_order = None
+    if payload.tariff_idx is not None:
+        price_kopecks = int(tariff.get("price", 0) or 0) * 100
+        sale_order = PaymentOrder(
+            id=f"ADMIN_{uuid.uuid4().hex[:24].upper()}",
+            user_id=int(verify_telegram_data(payload.init_data, club.bot_token).get("id")),
+            student_id=new_student.id,
+            club_id=club.id,
+            discipline=payload.discipline.strip()[:50] or None,
+            amount_kopecks=price_kopecks,
+            status="CONFIRMED",
+            type="FIRST",
+            provider_payment_id=f"CASH:ADMIN_{uuid.uuid4().hex[:24].upper()}",
+            lesson_count=count,
+            days_to_add=days,
+        )
+        db.add(sale_order)
     await db.commit()
     await db.refresh(new_student)
     audit_event(
@@ -1021,6 +1039,8 @@ async def admin_create_student(
         expire_date=new_student.expire_date.isoformat() if new_student.expire_date else None,
         has_subscription=payload.tariff_idx is not None,
         parent_phone=new_student.parent_phone,
+        sale_order_id=sale_order.id if sale_order else None,
+        sale_amount_kopecks=sale_order.amount_kopecks if sale_order else None,
     )
     return {
         "ok": True,

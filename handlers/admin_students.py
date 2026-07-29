@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+import uuid
 
 from aiogram import Router, F, types
 from aiogram.fsm.context import FSMContext
@@ -8,7 +9,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from database.db import Club, Student, User
+from database.db import Club, PaymentOrder, Student, User
 from handlers.states import AdminManualAdd
 from services.input_normalization import normalize_ru_phone, parse_user_date
 from services.staff_permissions import permissions_for_staff
@@ -149,8 +150,7 @@ async def _finish_manual_add(
         await callback.message.answer("⚠️ Такой атлет уже есть в базе клуба. Новая запись не создана.")
         return await callback.answer()
 
-    session.add(
-        Student(
+    new_student = Student(
             parent_id=None,
             club_id=club.id,
             name=name,
@@ -162,7 +162,23 @@ async def _finish_manual_add(
             is_frozen=0,
             discipline=discipline,
         )
-    )
+    session.add(new_student)
+    await session.flush()
+    if tariff_idx is not None:
+        price_kopecks = int(tariff.get("price", 0) or 0) * 100
+        session.add(PaymentOrder(
+            id=f"ADMIN_{uuid.uuid4().hex[:24].upper()}",
+            user_id=callback.from_user.id,
+            student_id=new_student.id,
+            club_id=club.id,
+            discipline=discipline,
+            amount_kopecks=price_kopecks,
+            status="CONFIRMED",
+            type="FIRST",
+            provider_payment_id=f"CASH:ADMIN_{uuid.uuid4().hex[:24].upper()}",
+            lesson_count=count,
+            days_to_add=int(tariff.get("days", 30) or 30),
+        ))
     await session.commit()
     await state.clear()
     await callback.message.answer("✅ Атлет успешно добавлен в базу клуба.")
