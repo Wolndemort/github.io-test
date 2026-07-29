@@ -100,6 +100,13 @@ def test_staff_profile_keyboard_hides_qr_and_freeze_but_keeps_admin_full_mode():
     assert "❄️ Заморозить абонемент" in client_texts
 
 
+def test_only_full_admin_keyboard_exposes_admin_freeze_webapp():
+    buttons = Path("handlers/buttons.py").read_text(encoding="utf-8")
+    assert 'text="❄️ Заморозка атлетов"' in buttons
+    assert 'if is_full_access:' in buttons
+    assert "/webapp/admin-freeze?club_id=" in buttons
+
+
 def test_staff_pass_template_and_route_are_present():
     page = Path("templates/staff_pass.html").read_text(encoding="utf-8")
     api = Path("admin_module/webapp_client_cabinet.py").read_text(encoding="utf-8")

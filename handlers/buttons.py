@@ -218,6 +218,11 @@ def admin_keyboard(club_id: int, club_settings: dict, subscription_date: datetim
             text="🔓 Открыть турникет",
             web_app=types.WebAppInfo(url=f"https://{club_id}.speedycrm.ru/webapp/staff-pass?club_id={club_id}")
         ))
+    if is_full_access:
+        builder.row(types.InlineKeyboardButton(
+            text="❄️ Заморозка атлетов",
+            web_app=types.WebAppInfo(url=f"https://{club_id}.speedycrm.ru/webapp/admin-freeze?club_id={club_id}")
+        ))
 
     shop_row = []
     if is_full_access or "cash_sale" in allowed:
@@ -407,4 +412,3 @@ def get_cash_options_kb(discipline_cfg: dict) -> types.InlineKeyboardMarkup:
     # Кнопка возврата в список (используем ваш callback_data)
     builder.row(types.InlineKeyboardButton(text="🔙 Назад", callback_data="admin_cash_list"))
     return builder.as_markup()
-
