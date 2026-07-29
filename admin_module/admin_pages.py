@@ -17,6 +17,8 @@ async def get_admin_dashboard(
     request: Request,
     session: AsyncSession = Depends(get_session),
     init_data: str | None = Query(default=None),
+    date_from: str | None = Query(default=None),
+    date_to: str | None = Query(default=None),
 ):
     club_id = get_club_id_from_host(request)
     if not init_data:
@@ -33,6 +35,8 @@ else location.replace(location.pathname+'?club_id=' + encodeURIComponent(new URL
     timeout_minutes = club_settings.get("limits", {}).get("session_timeout_minutes", 150)
     students = list((await session.execute(select(Student).where(Student.club_id == club_id))).scalars().all())
     now_local = reporting_periods()["now"]
+    start_date = moscow_date_boundary(date_from).date() if date_from else None
+    end_date = moscow_date_boundary(date_to).date() if date_to else None
     active_sessions, past_sessions = [], []
     for student in students:
         if student.last_visit:
@@ -42,13 +46,18 @@ else location.replace(location.pathname+'?club_id=' + encodeURIComponent(new URL
             # БД хранит наивные UTC-времена; для админского интерфейса показываем МСК.
             display_last_visit = last_visit_naive + timedelta(hours=3)
             display_session_end = session_end + timedelta(hours=3)
+            display_date = display_last_visit.date()
+            if start_date and display_date < start_date:
+                continue
+            if end_date and display_date > end_date:
+                continue
             info = {"student_id": student.id, "name": student.name, "balance": student.balance_lessons or 0, "parent_id": student.parent_id, "last_visit": display_last_visit.strftime("%d.%m.%Y %H:%M"), "session_end": display_session_end.strftime("%H:%M"), "time_passed_mins": int(time_passed.total_seconds() // 60)}
             (active_sessions if time_passed < timedelta(minutes=timeout_minutes) else past_sessions).append(info)
             if time_passed < timedelta(minutes=timeout_minutes):
                 info["mins_left"] = max(0, int((session_end - now_local).total_seconds() // 60))
     active_sessions.sort(key=lambda x: x["time_passed_mins"])
     past_sessions.sort(key=lambda x: x["time_passed_mins"])
-    return templates.TemplateResponse("admin.html", {"request": request, "club_id": club_id, "active_sessions": active_sessions, "past_sessions": past_sessions[:20], "timeout_minutes": timeout_minutes, **calculate_admin_dashboard(students)})
+    return templates.TemplateResponse("admin.html", {"request": request, "club_id": club_id, "active_sessions": active_sessions, "past_sessions": past_sessions, "timeout_minutes": timeout_minutes, "filters": {"date_from": date_from or "", "date_to": date_to or ""}, **calculate_admin_dashboard(students)})
 
 
 @router.get("/revenue", response_class=HTMLResponse)

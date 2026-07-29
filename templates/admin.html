@@ -8,6 +8,14 @@
     <!-- ФИКС: Убран request. и добавлена версия v=1.0.4 для жесткого сброса кэша Telegram -->
     <link rel="stylesheet" href="{{ url_for('static', path='css/admin.css') }}?v=1.0.4">
     <link rel="stylesheet" href="{{ url_for('static', path='css/mono.css') }}?v=1.1.0">
+    <style>
+        .history-filter{display:grid;grid-template-columns:1fr 1fr auto auto;gap:8px;align-items:end;margin:10px 0 14px}
+        .history-filter label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:#9ca3af}
+        .history-filter input{margin:0;width:100%}
+        .history-filter button,.history-filter a{margin:0;height:44px;align-self:end}
+        .history-filter a{display:block;text-align:center;padding:10px 14px;border-radius:10px}
+        @media(max-width:720px){.history-filter{grid-template-columns:1fr 1fr}.history-filter button,.history-filter a{width:100%}}
+    </style>
 </head>
 <body class="mono-theme">
     <div class="mono-shell">
@@ -104,9 +112,21 @@
     <!-- 📜 4. СКУД: ПОСЛЕДНИЕ ПОСЕЩЕНИЯ (ИСТОРИЯ СЕССИЙ) -->
     <div class="card mono-card">
         <details>
-            <summary>📜 История последних посещений (Топ-20)</summary>
+            <summary>📜 История последних посещений</summary>
             <details class="athlete-dropdown" open>
             <summary style="display:none"></summary>
+            <form method="get" class="history-filter">
+                <input type="hidden" name="club_id" value="{{ club_id }}">
+                <input type="hidden" name="init_data" value="{{ request.query_params.get('init_data', '')|e }}">
+                <label>С даты
+                    <input type="date" name="date_from" value="{{ filters.date_from if filters is defined else '' }}">
+                </label>
+                <label>По дату
+                    <input type="date" name="date_to" value="{{ filters.date_to if filters is defined else '' }}">
+                </label>
+                <button type="submit">Показать</button>
+                <a class="tg-link" href="/admin?club_id={{ club_id }}&init_data={{ request.query_params.get('init_data', '')|urlencode }}">Сбросить</a>
+            </form>
             <div class="scroll-box long-scroll">
                 {% for session in past_sessions %}
                 <div class="list-item border-gray">
