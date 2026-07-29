@@ -290,9 +290,17 @@ async def staff_checkin(payload: dict, db: AsyncSession = Depends(get_session)):
     student = await db.get(Student, int(payload["student_id"]))
     if student and student.last_visit:
         active_until = (student.last_visit.replace(tzinfo=None) + timedelta(minutes=int((club.club_settings or {}).get("limits", {}).get("session_timeout_minutes", 150)))).isoformat()
+    remaining_lessons = None
+    if student:
+        current_balance = int(getattr(student, "balance_lessons", 0) or 0)
+        remaining_lessons = current_balance if current_balance == 999 else max(0, current_balance - (0 if result.get("is_inside_session") else 1))
     active_until_text = active_until.replace("T", " ")[:16] if active_until else ""
-    operator_message = ("ℹ️ Посещение уже отмечено. Активная сессия до " if result.get("already_marked") else "✅ Посещение успешно отмечено. Сессия активна до ") + active_until_text
-    return {"success": True, "message": operator_message, "already_marked": result.get("already_marked", False), "active_until": active_until, "turnstile": result.get("turnstile_status")}
+    balance_text = "безлимит" if remaining_lessons == 999 else (f"{remaining_lessons} занятий" if remaining_lessons is not None else "—")
+    if result.get("already_marked"):
+        operator_message = f"ℹ️ Посещение уже отмечено. Активная сессия до {active_until_text}. Осталось: {balance_text}."
+    else:
+        operator_message = f"✅ Посещение успешно отмечено. Сессия активна до {active_until_text}. После закрытия спишется 1 занятие. Осталось: {balance_text}."
+    return {"success": True, "message": operator_message, "already_marked": result.get("already_marked", False), "active_until": active_until, "turnstile": result.get("turnstile_status"), "remaining_lessons": remaining_lessons}
 
 
 @router.post("/webapp/staff-open-turnstile")

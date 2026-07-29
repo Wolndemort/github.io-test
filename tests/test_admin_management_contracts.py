@@ -691,6 +691,8 @@ def test_ru_phone_and_date_inputs_are_normalized():
     assert parse_user_date("15082012").isoformat() == "2012-08-15"
     assert parse_user_date("15-08-2012").isoformat() == "2012-08-15"
     assert parse_user_date("2012-08-15").isoformat() == "2012-08-15"
+    from services.input_normalization import parse_user_date_any
+    assert parse_user_date_any("31.12.2099").isoformat() == "2099-12-31"
 
 
 def test_daily_report_has_no_manual_add_fragment():
@@ -713,6 +715,21 @@ def test_admin_student_update_accepts_valid_migration_fields():
     )
     assert payload.club_id == 7
     assert payload.balance_lessons == 999
+
+
+def test_cash_register_and_manual_checkin_contracts_expose_readable_labels():
+    cash = Path("templates/cash_register.html").read_text(encoding="utf-8")
+    staff = Path("templates/staff_checkin.html").read_text(encoding="utf-8")
+    cabinet = Path("admin_module/webapp_client_cabinet.py").read_text(encoding="utf-8")
+
+    assert "category_label" in cash
+    assert "Наличные" in cash
+    assert "По реквизитам" in cash
+    assert "Карта / онлайн" in cash
+    assert "remaining_lessons" in cabinet
+    assert "После закрытия спишется 1 занятие" in cabinet
+    assert "Осталось:" in cabinet
+    assert "remaining_lessons" in cabinet
 
 
 def test_legacy_student_create_requires_club_id():

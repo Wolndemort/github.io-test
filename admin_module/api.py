@@ -69,7 +69,7 @@ from admin_module.webapp_shared import (
     verify_webapp_admin,
     audit_actor_context,
 )
-from services.input_normalization import normalize_ru_phone, parse_user_date
+from services.input_normalization import normalize_ru_phone, parse_user_date, parse_user_date_any
 from services.audit import audit_event
 import admin_module.webapp_client_cabinet  # noqa: F401
 import admin_module.turnstile_biometry  # noqa: F401 - registers SKUD WebApp routes
@@ -455,6 +455,23 @@ def _order_payment_method(order) -> str:
     return "card" if provider else "other"
 
 
+def _money_operation_category_label(category: str, source: str = "") -> str:
+    normalized = str(category or "").strip().casefold()
+    if normalized == "subscription":
+        return "Абонемент"
+    if normalized == "freeze":
+        return "Заморозка"
+    if normalized == "product":
+        return "Товар"
+    if normalized in {"income", "expense"}:
+        return "Приход" if normalized == "income" else "Расход"
+    if normalized == "reversal":
+        return "Сторно"
+    if source == "sale":
+        return "Продажа"
+    return category or "Операция"
+
+
 @router.get("/admin/sales", response_class=HTMLResponse)
 async def admin_sales_page(
     request: Request,
@@ -498,7 +515,7 @@ async def admin_sales_page(
         operation_discipline = order.discipline or ""
         operations.append({"id": order.id, "created_at": order.created_at, "amount": order.amount_kopecks or 0,
                            "method": operation_method, "category": operation_category, "discipline": operation_discipline,
-                           "title": "Заморозка" if operation_category == "freeze" else "Абонемент", "status": order.status,
+                           "title": _money_operation_category_label(operation_category), "status": order.status,
                            "buyer_label": await resolve_user_label(session, order.user_id, empty_label="Плательщик")})
     for order in cart_orders:
         for item in items_by_order.get(order.id, []):
@@ -542,15 +559,16 @@ async def cash_register_page(request: Request, session: AsyncSession = Depends(g
     if end: payment_query = payment_query.where(PaymentOrder.created_at < end); cart_query = cart_query.where(CartOrder.created_at < end)
     for row in (await session.execute(payment_query)).scalars().all():
         method = _order_payment_method(row)
-        income_rows.append({"id": row.id, "created_at": row.created_at, "entry_type": "income", "category": "freeze" if str(row.type).startswith("FREEZE") else "subscription", "amount_kopecks": row.amount_kopecks or 0, "description": {"cash": "Наличный", "sbp": "СБП", "requisites": "По реквизитам", "card": "Онлайн"}.get(method, "Платёж") + " платёж", "source": "sale", "method": method})
+        category = "freeze" if str(row.type).startswith("FREEZE") else "subscription"
+        income_rows.append({"id": row.id, "created_at": row.created_at, "entry_type": "income", "category": category, "category_label": _money_operation_category_label(category, "sale"), "amount_kopecks": row.amount_kopecks or 0, "description": {"cash": "Наличный", "sbp": "СБП", "requisites": "По реквизитам", "card": "Онлайн"}.get(method, "Платёж") + " платёж", "source": "sale", "method": method})
     for row in (await session.execute(cart_query)).scalars().all():
         is_cash = str(row.provider_payment_id or "").startswith("CASH")
         method = "cash" if is_cash else ("requisites" if str(row.provider_payment_id or "").startswith("MANUAL:") else ("sbp" if "SBP" in str(row.provider_payment_id or "").upper() else "card"))
         cart_items = (await session.execute(select(CartItem).where(CartItem.cart_order_id == row.id).order_by(CartItem.id.asc()))).scalars().all()
         item_titles = ", ".join(item.title for item in cart_items if item.title)
         method_label = {"cash": "Наличная", "sbp": "СБП", "requisites": "По реквизитам", "card": "Онлайн"}.get(method, "")
-        income_rows.append({"id": row.id, "created_at": row.created_at, "entry_type": "income", "category": "product", "amount_kopecks": row.amount_kopecks or 0, "description": f"{method_label} продажа товара: {item_titles}" if item_titles else f"{method_label} продажа товара", "source": "sale", "method": method})
-    rows = income_rows + [{"id": e.id, "created_at": e.created_at, "entry_type": e.entry_type, "category": e.category, "amount_kopecks": e.amount_kopecks, "description": e.description, "source": "manual", "method": "cash"} for e in manual]
+        income_rows.append({"id": row.id, "created_at": row.created_at, "entry_type": "income", "category": "product", "category_label": _money_operation_category_label("product", "sale"), "amount_kopecks": row.amount_kopecks or 0, "description": f"{method_label} продажа товара: {item_titles}" if item_titles else f"{method_label} продажа товара", "source": "sale", "method": method})
+    rows = income_rows + [{"id": e.id, "created_at": e.created_at, "entry_type": e.entry_type, "category": e.category, "category_label": _money_operation_category_label(e.category), "amount_kopecks": e.amount_kopecks, "description": e.description, "source": "manual", "method": "cash"} for e in manual]
     rows.sort(key=lambda x: x["created_at"] or datetime.min, reverse=True)
     income = sum(r["amount_kopecks"] for r in rows if r["entry_type"] == "income")
     cash_income = sum(r["amount_kopecks"] for r in rows if r["entry_type"] == "income" and r.get("method") == "cash")
@@ -787,7 +805,7 @@ async def admin_update_student(
             student.expire_date = None
         else:
             try:
-                expire_date = parse_user_date(payload.expire_date)
+                expire_date = parse_user_date_any(payload.expire_date)
                 if not expire_date:
                     raise ValueError
                 student.expire_date = datetime.combine(expire_date, datetime.min.time())

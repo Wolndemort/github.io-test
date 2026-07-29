@@ -110,7 +110,7 @@ async def admin_product_sale_page(request: Request, club_id: int = Query(...), i
     students = (await session.execute(select(Student).where(Student.club_id == club_id).order_by(Student.name))).scalars().all()
     student_data = [{"id": s.id, "name": s.name, "parent_id": s.parent_id} for s in students]
     today = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=None)
-    recent_orders = (await session.execute(select(CartOrder).where(CartOrder.club_id == club_id, CartOrder.status == "CONFIRMED", CartOrder.created_at >= today).order_by(CartOrder.created_at.desc()).limit(20))).scalars().all()
+    recent_orders = (await session.execute(select(CartOrder).where(CartOrder.club_id == club_id, CartOrder.status == "CONFIRMED", CartOrder.created_at >= today).order_by(CartOrder.created_at.desc()).limit(50))).scalars().all()
     recent_sales = []
     for order in recent_orders:
         item_rows = (await session.execute(select(CartItem).where(CartItem.cart_order_id == order.id).order_by(CartItem.id.asc()))).scalars().all()

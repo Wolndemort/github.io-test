@@ -13,6 +13,13 @@ def normalize_ru_phone(value: str | None) -> str | None:
 
 
 def parse_user_date(value: str | date | None) -> date | None:
+    parsed = parse_user_date_any(value)
+    if parsed and parsed > date.today():
+        raise ValueError("Некорректная дата")
+    return parsed
+
+
+def parse_user_date_any(value: str | date | None) -> date | None:
     if value is None or isinstance(value, date):
         return value
     raw = str(value).strip()
@@ -21,7 +28,7 @@ def parse_user_date(value: str | date | None) -> date | None:
     for pattern in ("%d.%m.%Y", "%d%m%Y", "%d-%m-%Y", "%d/%m/%Y", "%Y-%m-%d"):
         try:
             parsed = datetime.strptime(raw, pattern).date()
-            if parsed > date.today() or parsed.year < 1900:
+            if parsed.year < 1900:
                 raise ValueError
             return parsed
         except ValueError:
