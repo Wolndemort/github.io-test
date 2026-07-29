@@ -67,6 +67,7 @@ class Student(Base):
     last_visit: Mapped[Optional[datetime]] = mapped_column(DateTime)
     parent: Mapped["User"] = relationship(back_populates="students")
     parent_phone: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    parent_phone_secondary: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     discipline: Mapped[Optional[str]] = mapped_column(String(50), nullable=True, default="boxing")
     parents: Mapped[List["StudentParent"]] = relationship(back_populates="student", cascade="all, delete-orphan")
 
@@ -76,6 +77,7 @@ class StudentParent(Base):
     student_id: Mapped[int] = mapped_column(ForeignKey("students.id", ondelete="CASCADE"), primary_key=True)
     parent_id: Mapped[int] = mapped_column(ForeignKey("users.user_id", ondelete="CASCADE"), primary_key=True)
     is_primary: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
+    phone: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     student: Mapped["Student"] = relationship(back_populates="parents")
     parent: Mapped["User"] = relationship()
 

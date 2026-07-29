@@ -13,7 +13,7 @@ from database.db import Student, StudentParent, get_student_parent_ids, process_
 from services.abuse_guard import rate_limit, audit_block
 from services.audit import audit_event
 from config import secret_key
-from sqlalchemy import select
+from sqlalchemy import select, or_
 from sqlalchemy import func
 from handlers.buttons import get_main_menu_keyboard, get_profile_keyboard, get_section_menu_kb
 from admin_module.utils import is_staff_or_owner
@@ -1175,7 +1175,7 @@ async def process_user_contact(
     try:
         # Ищем студентов, у которых телефон содержит последние 10 цифр
         stmt = select(Student).where(
-            Student.parent_phone.contains(clean_phone_10),
+            or_(Student.parent_phone.contains(clean_phone_10), Student.parent_phone_secondary.contains(clean_phone_10)),
             Student.club_id == club.id
         )
         result = await session.execute(stmt)
@@ -1207,13 +1207,12 @@ async def process_user_contact(
 
         # Привязываем Telegram ID ко всем найденным карточкам, не заменяя первого родителя.
         for student in students:
-            if student.parent_id is None:
+            matched_primary = clean_phone_10 in str(student.parent_phone or "")
+            if student.parent_id is None and matched_primary:
                 student.parent_id = user_id
-            if not await session.get(StudentParent, {"student_id": student.id, "parent_id": user_id}):
-                session.add(StudentParent(student_id=student.id, parent_id=user_id, is_primary=(student.parent_id == user_id)))
-            # Сохраняем номер в карточке атлета, чтобы админ видел его
-            # после успешной привязки, а последующие поиски были стабильными.
-            student.parent_phone = normalized_phone
+            existing_link = await session.get(StudentParent, {"student_id": student.id, "parent_id": user_id})
+            if not existing_link:
+                session.add(StudentParent(student_id=student.id, parent_id=user_id, is_primary=matched_primary, phone=normalized_phone))
             session.add(student)
 
         await session.commit()

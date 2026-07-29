@@ -15,6 +15,13 @@ class AdminFreezePayload(BaseModel):
     action: str
 
 
+class StudentInvitePayload(BaseModel):
+    init_data: str
+    club_id: int
+    student_id: int
+    parent_slot: int = 1
+
+
 class WebAppClubPayload(BaseModel):
     init_data: str
     club_id: int
@@ -81,6 +88,7 @@ class AdminStudentUpdate(BaseModel):
     frozen_days: int | None = None
     discipline: str | None = None
     parent_phone: str | None = None
+    parent_phone_secondary: str | None = None
 
 
 class AdminStudentCreate(BaseModel):
@@ -88,6 +96,7 @@ class AdminStudentCreate(BaseModel):
     club_id: int
     name: str
     phone: str | None = None
+    phone_secondary: str | None = None
     birthday: str | None = None
     discipline: str
     tariff_idx: int | None = None

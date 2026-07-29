@@ -890,10 +890,11 @@ async def webapp_bind_phone_submit(payload: WebAppBindPhonePayload, request: Req
     students = (
         await db.execute(
             select(Student)
-            .where(Student.parent_phone.contains(clean_phone_10), Student.club_id == club.id)
+            .where(or_(Student.parent_phone.contains(clean_phone_10), Student.parent_phone_secondary.contains(clean_phone_10)), Student.club_id == club.id)
             .with_for_update()
         )
     ).scalars().all()
+    students = [student for student in students if clean_phone_10 in str(student.parent_phone or "") or clean_phone_10 in str(student.parent_phone_secondary or "")]
     if not students:
         raise HTTPException(status_code=404, detail="Атлеты с этим номером не найдены")
     user_id = int(tg_user.get("id", 0))
@@ -903,10 +904,12 @@ async def webapp_bind_phone_submit(payload: WebAppBindPhonePayload, request: Req
         db.add(user)
         await db.flush()
     for student in students:
-        if student.parent_id is None:
+        matched_primary = clean_phone_10 in str(student.parent_phone or "")
+        if student.parent_id is None and matched_primary:
             student.parent_id = user_id
-        if not await db.get(StudentParent, {"student_id": student.id, "parent_id": user_id}):
-            db.add(StudentParent(student_id=student.id, parent_id=user_id, is_primary=(student.parent_id == user_id)))
+        existing_link = await db.get(StudentParent, {"student_id": student.id, "parent_id": user_id})
+        if not existing_link:
+            db.add(StudentParent(student_id=student.id, parent_id=user_id, is_primary=matched_primary, phone=normalized_phone))
     await db.commit()
     audit_event("webapp_phone_bound", club_id=club.id, user_id=user_id, students=[s.id for s in students], phone_tail=clean_phone_10[-4:])
     return {"ok": True, "message": f"Привязаны атлеты: {', '.join(s.name for s in students)}"}

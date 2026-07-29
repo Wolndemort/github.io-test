@@ -10,6 +10,7 @@
     .date-field{display:block}.date-field input{letter-spacing:.04em}.date-field input::placeholder{color:#999}
     .student.card{padding:20px;border-radius:22px;gap:14px}.student.card>label:first-child{font-size:14px;font-weight:700}.student.card input,.student.card select{min-height:44px}.student.card .grid{display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:14px}.student.card .grid>label{display:flex;flex-direction:column;gap:6px;min-width:0}.student.card .grid>label input,.student.card .grid>label select{width:100%;min-width:0}.student.card .grid>button{align-self:end;width:100%;margin:0!important}.student.card>div:last-of-type{margin-top:4px}.student.card button{min-height:42px}
     .filter-checks{display:grid!important;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px 14px;margin-top:12px}.filter-checks label{display:grid!important;grid-template-columns:22px minmax(0,1fr);align-items:center;gap:7px;min-width:0;line-height:1.25}.filter-checks input{width:20px!important;height:20px;min-height:20px!important;margin:0}.student.card>label:first-child{display:flex;flex-direction:column;gap:7px}.student.card>.muted{display:block;margin:0 0 2px;padding:7px 10px;border-radius:9px;background:#101010}.student.card>.muted::first-letter{color:#fff}
+    .student-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.student-actions button{flex:0 1 auto}.invite-parent{background:#e4f8ec!important;color:#123!important}.invite-status{display:inline-flex;align-items:center;padding:10px 12px;border-radius:12px;background:#dff8e9;color:#14532d;font-weight:700;font-size:13px}
     #list{display:grid;gap:14px}.wrap>.card:first-of-type>.muted,.wrap>.card:first-of-type>p{display:none}.wrap>.card:first-of-type{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 16px}.wrap>.card:first-of-type h2{margin:0;min-width:0}.wrap>.card:first-of-type>a{display:inline-block;width:auto;flex:0 0 auto;padding:10px 14px}
     .wrap>.card:nth-of-type(2){display:block}.wrap>.card:nth-of-type(2)>label{display:flex;flex-direction:column;gap:6px;min-width:0}.wrap>.card:nth-of-type(2)>label input{width:100%;min-width:0}.wrap>.card:nth-of-type(2) .filter-panel{margin:12px 0}.wrap>.card:nth-of-type(2)>a{display:block;width:100%;white-space:nowrap}
     #fullscreen{position:fixed;right:18px;bottom:88px;z-index:60;width:46px;height:46px;border-radius:50%;border:1px solid #d9d9d9;background:#fff;color:#111;box-shadow:0 8px 22px #0005;float:none!important}
@@ -75,7 +76,7 @@
   <div class="card"><label>Поиск<input id="search" placeholder="Имя атлета"></label><details class="filter-panel"><summary>Фильтры</summary><div class="filter-checks"><label><input class="student-filter" data-filter="missing" id="missing" type="checkbox"> Без даты рождения</label><label><input class="student-filter" data-filter="active" type="checkbox"> С активным абонементом</label><label><input class="student-filter" data-filter="noSubscription" type="checkbox"> Без абонемента</label><label><input class="student-filter" data-filter="frozen" type="checkbox"> Замороженные</label><label><input class="student-filter" data-filter="noParent" type="checkbox"> Без родителя</label><label class="age-filter"><input class="student-filter age-filter" data-age-min="0" data-age-max="6" type="checkbox"> 0–6 лет</label><label class="age-filter"><input class="student-filter age-filter" data-age-min="7" data-age-max="12" type="checkbox"> 7–12 лет</label><label class="age-filter"><input class="student-filter age-filter" data-age-min="13" data-age-max="17" type="checkbox"> 13–17 лет</label><label class="age-filter"><input class="student-filter age-filter" data-age-min="18" type="checkbox"> 18+ лет</label>{% for code,info in club_settings.get('disciplines', {}).items() %}<label><input class="student-filter discipline-filter" data-discipline="{{ code }}" type="checkbox"> {{ info.name if info.name else code }}</label>{% endfor %}</div></details><a class="mono-action" href="/admin/sales?club_id={{ club_id }}&init_data={{ request.query_params.get('init_data','')|urlencode }}">📈 Продажи</a></div>
   <div id="list">
   {% for s in students %}
-    <form class="student card" data-name="{{ s.name|lower }}" data-birthday="{{ s.birthday.isoformat() if s.birthday else '' }}" data-parent="{{ '1' if s.parent_id else '0' }}" data-missing="{{ '1' if not s.birthday else '0' }}" data-active="{{ '1' if s.expire_date and s.expire_date > now else '0' }}" data-nosub="{{ '1' if not s.expire_date else '0' }}" data-frozen="{{ '1' if s.is_frozen else '0' }}" data-discipline="{{ s.discipline or '' }}" data-id="{{ s.id }}">
+    <form class="student card" data-name="{{ s.name|lower }}" data-birthday="{{ s.birthday.isoformat() if s.birthday else '' }}" data-parent="{{ '1' if s.parent_id else '0' }}" data-parent1="{{ '1' if 1 in linked_parent_slots.get(s.id, set()) else '0' }}" data-parent2="{{ '1' if 2 in linked_parent_slots.get(s.id, set()) else '0' }}" data-secondary-phone="{{ s.parent_phone_secondary or '' }}" data-missing="{{ '1' if not s.birthday else '0' }}" data-active="{{ '1' if s.expire_date and s.expire_date > now else '0' }}" data-nosub="{{ '1' if not s.expire_date else '0' }}" data-frozen="{{ '1' if s.is_frozen else '0' }}" data-discipline="{{ s.discipline or '' }}" data-id="{{ s.id }}">
       <label>Имя атлета<input name="name" value="{{ s.name or '' }}" maxlength="150"></label><span class="muted">ID {{ s.id }} · баланс: {{ s.balance_lessons }} · {{ s.discipline or 'без дисциплины' }}</span>
       <div class="grid"><label>Телефон родителя<input name="parent_phone" value="{{ s.parent_phone or '' }}" placeholder="79990000000"></label>{% if s.parent_id %}<button type="button" class="mono-action" style="display:inline-block;margin-top:6px;text-decoration:none" onclick="openChat(event, {{ s.parent_id }})">💬 Чат</button>{% endif %}
         <label>Дата рождения {% if not s.birthday %}<span class="missing">не указана</span>{% endif %}<div class="date-field"><input name="birthday" type="text" inputmode="numeric" maxlength="10" placeholder="ДД.ММ.ГГГГ" value="{{ s.birthday.strftime('%d.%m.%Y') if s.birthday else '' }}"></div></label>
@@ -94,7 +95,8 @@
     <h3 style="margin-top:0">Новый атлет</h3>
     <div class="row">
       <label>Имя и фамилия<input id="newName" placeholder="Иван Иванов"></label>
-      <label>Телефон<input id="newPhone" placeholder="79990000000"></label>
+      <label>Телефон родителя 1<input id="newPhone" placeholder="79990000000"></label>
+      <label>Телефон родителя 2<input id="newPhoneSecondary" placeholder="79990000000"></label>
     </div>
     <div class="row">
       <label>Дата рождения<div class="date-field"><input id="newBirthday" type="text" inputmode="numeric" maxlength="10" placeholder="ДД.ММ.ГГГГ"></div></label>
@@ -109,6 +111,7 @@ const tg = window.Telegram?.WebApp;
 if (tg) { tg.ready(); tg.expand(); }
 const initData = tg?.initData || new URLSearchParams(window.location.search).get('init_data') || '';
 const clubId = {{ club_id }};
+const isAdmin = {{ 'true' if is_admin else 'false' }};
 const disciplines = {{ club_settings.get('disciplines', {})|tojson }};
 const modal = document.getElementById('modal');
 const fab = document.getElementById('fab');
@@ -175,7 +178,53 @@ function filter() {
   });
 }
 
+function ensureSecondParentPhone(form) {
+  const grid = form.querySelector('.grid');
+  if (!grid || grid.querySelector('input[name="parent_phone_secondary"]')) return;
+  const label = document.createElement('label');
+  label.textContent = 'Телефон родителя 2';
+  const input = document.createElement('input');
+  input.name = 'parent_phone_secondary'; input.placeholder = '79990000000'; input.value = form.dataset.secondaryPhone || '';
+  label.appendChild(input); grid.insertBefore(label, grid.children[1] || null);
+}
+
+function attachInviteButton(form) {
+  if (!isAdmin) return;
+  const actions = form.querySelector('button.danger-delete')?.parentElement;
+  if (!actions) return;
+  actions.classList.add('student-actions');
+  [1, 2].forEach(slot => {
+    const phone = form.querySelector(`input[name="parent_phone${slot === 2 ? '_secondary' : ''}"]`);
+    let button = actions.querySelector(`.invite-parent[data-slot="${slot}"]`);
+    let status = actions.querySelector(`.invite-status[data-slot="${slot}"]`);
+    const linked = form.dataset[`parent${slot}`] === '1';
+    if (!phone?.value.trim()) { button?.remove(); status?.remove(); return; }
+    if (linked) {
+      button?.remove();
+      if (!status) { status=document.createElement('span'); status.className='invite-status'; status.dataset.slot=slot; actions.appendChild(status); }
+      status.textContent=`✓ Родитель ${slot} привязан`;
+      return;
+    }
+    status?.remove();
+    if (!button) { button=document.createElement('button'); button.type='button'; button.className='invite-parent'; button.dataset.slot=slot; actions.appendChild(button); }
+    button.textContent=`Пригласить родителя ${slot}`;
+    button.onclick=async()=>{
+      button.disabled=true; button.textContent='Готовим ссылку…';
+      try {
+        const response=await fetch('/admin/students/'+form.dataset.id+'/invite',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({init_data:initData,club_id:clubId,student_id:Number(form.dataset.id),parent_slot:slot})});
+        const data=await response.json().catch(()=>({}));
+        if(!response.ok) throw new Error(data.detail||'Не удалось создать приглашение');
+        if(data.status==='linked'){form.dataset[`parent${slot}`]='1';attachInviteButton(form);return;}
+        button.textContent=`Приглашение ${slot} отправлено`;
+        if(data.url){if(tg?.openTelegramLink)tg.openTelegramLink(data.url);else window.open(data.url,'_blank','noopener,noreferrer');}
+      }catch(error){button.disabled=false;button.textContent=`Пригласить родителя ${slot}`;alert(error.message||'Не удалось создать приглашение');}
+    };
+  });
+}
+
 function bindEdit(form) {
+  ensureSecondParentPhone(form);
+  attachInviteButton(form);
   form.addEventListener('submit', async e => {
     e.preventDefault();
     const saveButton = form.querySelector('button[type="submit"]');
@@ -194,6 +243,7 @@ function bindEdit(form) {
       is_frozen: Number(f.get('is_frozen')),
       frozen_days: f.get('frozen_days') ? Number(f.get('frozen_days')) : null,
       parent_phone: f.get('parent_phone'),
+      parent_phone_secondary: f.get('parent_phone_secondary'),
       discipline: f.get('discipline')
     };
     const msg = form.querySelector('.msg');
@@ -204,6 +254,7 @@ function bindEdit(form) {
         body: JSON.stringify(payload)
       });
       if (r.ok) {
+        attachInviteButton(form);
         msg.textContent = 'Сохранено';
       } else {
         const d = await r.json().catch(() => ({}));
@@ -298,6 +349,7 @@ async function createStudent() {
     club_id: clubId,
     name,
     phone: document.getElementById('newPhone').value.trim() || null,
+    phone_secondary: document.getElementById('newPhoneSecondary').value.trim() || null,
     birthday: document.getElementById('newBirthday').value || null,
     discipline: discSel.value,
     tariff_idx: noSub.checked ? null : Number(tariffSel.value)
@@ -320,6 +372,7 @@ async function createStudent() {
     closeModal();
     document.getElementById('newName').value = '';
     document.getElementById('newPhone').value = '';
+    document.getElementById('newPhoneSecondary').value = '';
     document.getElementById('newBirthday').value = '';
     noSub.checked = false;
     fillTariffs();

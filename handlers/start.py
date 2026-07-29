@@ -124,6 +124,26 @@ async def start_handler(
             parse_mode="HTML"
         )
 
+    start_payload = ((message.text or "").split(maxsplit=1)[1].strip() if len((message.text or "").split(maxsplit=1)) > 1 else "")
+    if start_payload.startswith("invite_"):
+        raw_invite = start_payload.removeprefix("invite_").split("_")
+        try:
+            invited_student_id = int(raw_invite[0])
+            invited_parent_slot = int(raw_invite[1]) if len(raw_invite) > 1 else 1
+        except ValueError:
+            invited_student_id = invited_parent_slot = 0
+        invited_student = await session.get(Student, invited_student_id) if invited_student_id else None
+        invited_phone = (invited_student.parent_phone if invited_parent_slot == 1 else invited_student.parent_phone_secondary) if invited_student else None
+        if invited_student and invited_student.club_id == club.id and invited_phone:
+            contact_keyboard = ReplyKeyboardBuilder()
+            contact_keyboard.row(types.KeyboardButton(text="📱 Поделиться контактом", request_contact=True))
+            return await message.answer(
+                f"📍 Вас зарегистрировали в клубе <b>{club.name}</b> для атлета <b>{invited_student.name}</b>.\n\n"
+                "Чтобы открыть личный кабинет, нажмите кнопку и подтвердите свой номер телефона.",
+                reply_markup=contact_keyboard.as_markup(resize_keyboard=True, one_time_keyboard=False, is_persistent=True),
+                parse_mode="HTML",
+            )
+
     # 3. ОТРИСОВКА ГЛАВНОГО МЕНЮ ДЛЯ /START
     welcome_text = club_settings.get("ui", {}).get("welcome_text") or "Добро пожаловать!"
 

@@ -50,9 +50,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from starlette import status
-from database.db import User, Student, Club, ClubStaff, ClubProduct, CartOrder, CartItem, CashEntry, AuditEntry, VisitLog, get_student_parent_ids
+from database.db import User, Student, StudentParent, Club, ClubStaff, ClubProduct, CartOrder, CartItem, CashEntry, AuditEntry, VisitLog, get_student_parent_ids
 from database.db import purchase_student_freeze
-from admin_module.schemas import AdminStudentUpdate, AdminStudentCreate
+from admin_module.schemas import AdminStudentUpdate, AdminStudentCreate, StudentInvitePayload
 from database.db import get_session
 from config import fastapi_key
 from aiogram import Bot
@@ -454,10 +454,20 @@ async def admin_students_page(
     if not init_data:
         return webapp_auth_gate(request, club_id)
     club = (await session.execute(select(Club).where(Club.id == club_id))).scalar_one_or_none()
-    await verify_webapp_staff(club, init_data, session, "athletes_view")
+    tg_user = await verify_webapp_staff(club, init_data, session, "athletes_view")
     students = (await session.execute(
         select(Student).where(Student.club_id == club_id).order_by(Student.name)
     )).scalars().all()
+    student_ids = [student.id for student in students]
+    parent_links = (await session.execute(select(StudentParent).where(StudentParent.student_id.in_(student_ids)))).scalars().all() if student_ids else []
+    linked_parent_slots = {}
+    for link in parent_links:
+        linked_parent_slots.setdefault(link.student_id, set())
+        if link.phone:
+            for slot, phone in ((1, next((s.parent_phone for s in students if s.id == link.student_id), None)), (2, next((s.parent_phone_secondary for s in students if s.id == link.student_id), None))):
+                if phone and phone == link.phone:
+                    linked_parent_slots[link.student_id].add(slot)
+    is_admin = int(tg_user.get("id", 0)) == int(club.owner_id or 0) or int(tg_user.get("id", 0)) in SUPER_ADMIN_IDS
     return templates.TemplateResponse("admin_students.html", {
         "request": request,
         "club_id": club_id,
@@ -465,6 +475,8 @@ async def admin_students_page(
         "students": students,
         "club_settings": club.club_settings or {},
         "now": datetime.now(),
+        "linked_parent_slots": linked_parent_slots,
+        "is_admin": is_admin,
     })
 
 
@@ -877,6 +889,16 @@ async def admin_update_student(
             if not normalized_phone:
                 raise HTTPException(status_code=400, detail="Некорректный номер телефона")
             student.parent_phone = normalized_phone
+    if payload.parent_phone_secondary is not None:
+        if not payload.parent_phone_secondary.strip():
+            student.parent_phone_secondary = None
+        else:
+            normalized_secondary = normalize_ru_phone(payload.parent_phone_secondary)
+            if not normalized_secondary:
+                raise HTTPException(status_code=400, detail="Некорректный номер второго родителя")
+            if normalized_secondary == student.parent_phone:
+                raise HTTPException(status_code=400, detail="Номера родителей должны отличаться")
+            student.parent_phone_secondary = normalized_secondary
     await db.commit()
     after = {
         "name": student.name,
@@ -923,6 +945,8 @@ async def admin_delete_student(
         "name": student.name,
         "discipline": student.discipline,
         "parent_phone": student.parent_phone,
+        "parent_phone_secondary": student.parent_phone_secondary,
+        "parent_phone_secondary": student.parent_phone_secondary,
     }
     await db.delete(student)
     await db.commit()
@@ -989,10 +1013,17 @@ async def admin_create_student(
         days = int(tariff.get("days", 30) or 30)
         expire_date = datetime.now() + timedelta(days=days)
 
+    primary_phone = normalize_ru_phone(payload.phone) if payload.phone else None
+    secondary_phone = normalize_ru_phone(payload.phone_secondary) if payload.phone_secondary else None
+    if payload.phone_secondary and not secondary_phone:
+        raise HTTPException(status_code=400, detail="Некорректный номер второго родителя")
+    if primary_phone and secondary_phone and primary_phone == secondary_phone:
+        raise HTTPException(status_code=400, detail="Номера родителей должны отличаться")
     new_student = Student(
         name=name,
         club_id=club.id,
-        parent_phone=normalize_ru_phone(payload.phone) if payload.phone else None,
+        parent_phone=primary_phone,
+        parent_phone_secondary=secondary_phone,
         birthday=birthday,
         parent_id=None,
         balance_lessons=count,
@@ -1051,6 +1082,7 @@ async def admin_create_student(
             "frozen_days": new_student.frozen_days or "",
             "discipline": new_student.discipline or "",
             "parent_phone": new_student.parent_phone or "",
+            "parent_phone_secondary": new_student.parent_phone_secondary or "",
         },
         "meta": {
             "count": count,
@@ -1059,6 +1091,33 @@ async def admin_create_student(
             "discipline_name": disc_cfg.get("name", payload.discipline),
         },
     }
+
+
+@router.post("/admin/students/{student_id}/invite")
+async def admin_student_invite(student_id: int, payload: StudentInvitePayload, db: AsyncSession = Depends(get_session)):
+    club = await db.get(Club, payload.club_id)
+    await verify_webapp_admin(club, payload.init_data)
+    student = await db.get(Student, student_id)
+    if not student or student.club_id != payload.club_id:
+        raise HTTPException(status_code=404, detail="Атлет не найден")
+    if payload.parent_slot not in {1, 2}:
+        raise HTTPException(status_code=400, detail="Некорректный номер родителя")
+    phone = student.parent_phone if payload.parent_slot == 1 else student.parent_phone_secondary
+    if not phone:
+        raise HTTPException(status_code=409, detail="Сначала сохраните номер этого родителя")
+    linked_parent = await db.scalar(select(StudentParent).where(StudentParent.student_id == student.id, StudentParent.phone == phone))
+    if linked_parent:
+        return {"ok": True, "status": "linked", "message": "Родитель уже привязан"}
+    bot = Bot(club.bot_token)
+    try:
+        bot_info = await bot.get_me()
+        username = str(bot_info.username or "").lstrip("@")
+    finally:
+        await bot.session.close()
+    if not username:
+        raise HTTPException(status_code=503, detail="У бота не настроен username")
+    audit_event("student_invite_created", club_id=club.id, student_id=student.id, parent_slot=payload.parent_slot, parent_phone_tail=str(phone)[-4:], invite_target=username)
+    return {"ok": True, "status": "invited", "url": f"https://t.me/{username}?start=invite_{student.id}_{payload.parent_slot}", "message": "Ссылка приглашения готова"}
 
 
 @router.get("/revenue", response_class=HTMLResponse)
