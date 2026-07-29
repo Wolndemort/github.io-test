@@ -89,7 +89,7 @@ document.querySelectorAll('.student-card').forEach((card) => {
         selectStudent(card.dataset.studentId, card.dataset.studentName || 'атлет');
     }, { passive: false });
 });
-if (!bm || typeof bm.init !== 'function') {
+if (!bm || typeof bm.init !== 'function' || typeof bm.requestAccess !== 'function') {
     const hint = document.getElementById('status-hint');
     if (hint) {
         hint.textContent = 'На этом устройстве биометрический API Telegram WebApp недоступен. Используйте QR-пропуск из меню бота.';
