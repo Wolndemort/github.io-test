@@ -14,8 +14,10 @@ from admin_module.schemas import (
     WebAppBindPhonePayload,
     WebAppCreateStudentPayload,
     WebAppBuySubscriptionPayload,
+    AdminFreezePayload,
 )
 from admin_module.webapp_verify import verify_telegram_data
+from admin_module.webapp_shared import verify_webapp_admin
 from config import PROXY_URL
 from database.db import Club, ClubStaff, PaymentOrder, CartOrder, CartItem, Student, StudentParent, Subscription, User, VisitLog, get_session, get_student_parent_ids, process_student_freeze
 from services.audit import audit_event
@@ -29,6 +31,7 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from handlers.skud import trigger_dingtian_turnstile
 from services.gate_control import process_athlete_gate_pass
 from services.staff_permissions import staff_can
+from middlewares.db_saas_midleware import SUPER_ADMIN_IDS
 
 
 def _auth_gate_html(target: str, **params):
@@ -218,6 +221,7 @@ async def get_staff_pass_page(request: Request, club_id: int, user_id: int | Non
             "club": club,
             "club_id": club_id,
             "user_id": resolved_user_id,
+            "is_admin": is_owner or resolved_user_id in {int(value) for value in SUPER_ADMIN_IDS},
             "club_name": club.name if club else "",
             "loading": {
                 "enabled": bool(loading.get("enabled", False)),
@@ -226,6 +230,54 @@ async def get_staff_pass_page(request: Request, club_id: int, user_id: int | Non
             },
         },
     )
+
+
+@router.get("/webapp/admin-freeze", response_class=HTMLResponse)
+async def admin_freeze_page(request: Request, club_id: int, init_data: str | None = Query(default=None), db: AsyncSession = Depends(get_session)):
+    if not init_data:
+        return _auth_gate_html("webapp/admin-freeze", club_id=club_id)
+    club = await db.get(Club, club_id)
+    await verify_webapp_admin(club, init_data)
+    students = (await db.execute(select(Student).where(Student.club_id == club_id).order_by(Student.name))).scalars().all()
+    freeze_days = int((club.club_settings or {}).get("limits", {}).get("freeze_days_step", 7))
+    return templates.TemplateResponse("admin_freeze.html", {"request": request, "club": club, "club_id": club_id, "students": students, "freeze_days": freeze_days})
+
+
+@router.post("/webapp/admin-freeze")
+async def admin_freeze_submit(payload: AdminFreezePayload, db: AsyncSession = Depends(get_session)):
+    club = await db.get(Club, payload.club_id)
+    tg_user = await verify_webapp_admin(club, payload.init_data)
+    student = await db.get(Student, payload.student_id, with_for_update=True)
+    if not student or student.club_id != club.id:
+        raise HTTPException(status_code=404, detail="Атлет не найден")
+    action = payload.action.strip().casefold()
+    settings = club.club_settings or {}
+    if action == "freeze":
+        days = int(settings.get("limits", {}).get("freeze_days_step", 7))
+        result = await process_student_freeze(student.id, club.id, settings, db, days)
+        if result == "disabled":
+            raise HTTPException(status_code=400, detail="Заморозка отключена в настройках клуба")
+        if not result:
+            raise HTTPException(status_code=409, detail="Заморозка недоступна: проверьте абонемент, лимит или текущий статус")
+        audit_event("admin_freeze_applied", club_id=club.id, actor_user_id=int(tg_user["id"]), student_id=student.id, days=days)
+        return {"ok": True, "message": f"{student.name}: заморожен на {days} дней"}
+    if action == "unfreeze":
+        if not student.is_frozen:
+            raise HTTPException(status_code=409, detail="Абонемент уже активен")
+        now = datetime.utcnow()
+        started = student.frozen_at.replace(tzinfo=None) if student.frozen_at else now
+        freeze_days = int(student.frozen_days or settings.get("limits", {}).get("freeze_days_step", 7))
+        elapsed = max(0, (now.date() - started.date()).days)
+        returned_days = max(0, freeze_days - elapsed)
+        if student.expire_date and returned_days:
+            student.expire_date -= timedelta(days=returned_days)
+        student.is_frozen = 0
+        student.frozen_at = None
+        student.frozen_days = None
+        await db.commit()
+        audit_event("admin_unfreeze_applied", club_id=club.id, actor_user_id=int(tg_user["id"]), student_id=student.id, returned_days=returned_days)
+        return {"ok": True, "message": f"{student.name}: разморожен, возвращено дней: {returned_days}"}
+    raise HTTPException(status_code=400, detail="Неизвестное действие")
 
 
 @router.get("/webapp/staff-checkin", response_class=HTMLResponse)

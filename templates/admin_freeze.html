@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <style>
+    body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#090909;color:#fff;padding:14px}
+    .wrap{max-width:760px;margin:auto}.card{background:#151515;border:1px solid #333;border-radius:16px;padding:14px;margin:10px 0}
+    .student{border-top:1px solid #333;padding:12px 0;display:flex;gap:10px;justify-content:space-between;align-items:center}
+    .muted{color:#aaa;font-size:13px}.btn{border:0;border-radius:9px;padding:10px 12px;font-weight:700;cursor:pointer}.freeze{background:#dff8e9;color:#111}.unfreeze{background:#ffe4e4;color:#111}
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <div class="card"><a href="/webapp/staff-pass?club_id={{ club_id }}" style="color:#fff">← В кабинет сотрудника</a><h2>Заморозка абонементов</h2><p class="muted">Доступ только для администратора. Стандартный срок: {{ freeze_days }} дн.</p></div>
+  <div class="card">
+    {% for student in students %}
+    <div class="student">
+      <div><b>{{ student.name }}</b><br><span class="muted">{% if student.is_frozen %}❄️ Заморожен{% else %}Активен{% endif %} · до {{ student.expire_date.strftime('%d.%m.%Y') if student.expire_date else 'нет даты' }}</span></div>
+      <button class="btn {{ 'unfreeze' if student.is_frozen else 'freeze' }}" data-id="{{ student.id }}" data-action="{{ 'unfreeze' if student.is_frozen else 'freeze' }}">{{ 'Разморозить' if student.is_frozen else 'Заморозить' }}</button>
+    </div>
+    {% else %}<p class="muted">Атлетов пока нет.</p>{% endfor %}
+    <p id="status" class="muted"></p>
+  </div>
+</div>
+<script>
+const tg=window.Telegram?.WebApp; tg?.ready(); tg?.expand();
+document.querySelectorAll('[data-action]').forEach(button=>button.onclick=async()=>{
+  const action=button.dataset.action;
+  if(!confirm(action==='freeze'?'Заморозить абонемент этого атлета?':'Разморозить абонемент этого атлета?')) return;
+  button.disabled=true;
+  const status=document.getElementById('status'); status.textContent='Сохраняем…';
+  try {
+    const response=await fetch('/webapp/admin-freeze',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({init_data:tg?.initData||'',club_id:{{ club_id }},student_id:Number(button.dataset.id),action})});
+    const data=await response.json().catch(()=>({}));
+    if(!response.ok) throw new Error(data.detail||'Не удалось изменить статус');
+    status.textContent=data.message||'Готово'; location.reload();
+  } catch(error) { status.textContent=error.message||'Ошибка'; button.disabled=false; }
+});
+</script>
+</body>
+</html>

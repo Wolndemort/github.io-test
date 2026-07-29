@@ -8,6 +8,13 @@ class WebAppActionPayload(BaseModel):
     payment_method: str = "bank_card"
 
 
+class AdminFreezePayload(BaseModel):
+    init_data: str
+    club_id: int
+    student_id: int
+    action: str
+
+
 class WebAppClubPayload(BaseModel):
     init_data: str
     club_id: int
