@@ -285,22 +285,9 @@ class WebAppHistoryQuery(BaseModel):
 
 @router.get("/webapp/scanner", response_class=HTMLResponse)
 async def get_qr_scanner(request: Request, club_id: int = Query(...)):
-    # Telegram may initially load the WebApp without putting init_data into the
-    # URL. Bootstrap it through the WebApp bridge before rendering the camera:
-    # otherwise the scanner starts unauthenticated and asks the user to open it
-    # again (notably on the first launch for both owners and coaches).
-    init_data = request.query_params.get("init_data")
-    if not init_data:
-        return HTMLResponse(
-            f"""<!doctype html><meta charset='utf-8'>
-<script src='https://telegram.org/js/telegram-web-app.js'></script>
-<script>
-const tg=window.Telegram?.WebApp; tg?.ready();
-if (!tg?.initData) document.body.innerText='Откройте сканер из Telegram';
-else location.replace('/webapp/scanner?club_id={club_id}&init_data='+encodeURIComponent(tg.initData));
-</script>""",
-            status_code=401,
-        )
+    # Telegram can load the WebApp shell before exposing initData in the URL.
+    # scanner.html reads it from Telegram.WebApp and the scan endpoint performs
+    # the actual authentication, so the page itself must not return 401 here.
     return templates.TemplateResponse(
         "scanner.html", {"request": request, "club_id": club_id}
     )
