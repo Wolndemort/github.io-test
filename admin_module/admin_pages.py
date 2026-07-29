@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from admin_module.router_base import router, templates
 from admin_module.utils import get_club_id_from_host, verify_webapp_admin, webapp_auth_gate
-from database.db import CartOrder, CashEntry, Club, PaymentOrder, Student, User, get_session
+from database.db import CartOrder, CashEntry, Club, PaymentOrder, Student, User, VisitLog, get_session
 from services.analytics import calculate_admin_dashboard, calculate_cash_flow_periods, calculate_revenue_periods, calculate_student_metrics, generate_students_excel, reporting_periods, moscow_date_boundary
 
 
@@ -34,6 +34,10 @@ else location.replace(location.pathname+'?club_id=' + encodeURIComponent(new URL
     club_settings = club.club_settings or {} if club else {}
     timeout_minutes = club_settings.get("limits", {}).get("session_timeout_minutes", 150)
     students = list((await session.execute(select(Student).where(Student.club_id == club_id))).scalars().all())
+    students_by_id = {student.id: student for student in students}
+    visit_logs = list((await session.execute(
+        select(VisitLog).where(VisitLog.club_id == club_id).order_by(VisitLog.visited_at.desc())
+    )).scalars().all())
     now_local = reporting_periods()["now"]
     start_date = moscow_date_boundary(date_from).date() if date_from else None
     end_date = moscow_date_boundary(date_to).date() if date_to else None
@@ -55,8 +59,33 @@ else location.replace(location.pathname+'?club_id=' + encodeURIComponent(new URL
             (active_sessions if time_passed < timedelta(minutes=timeout_minutes) else past_sessions).append(info)
             if time_passed < timedelta(minutes=timeout_minutes):
                 info["mins_left"] = max(0, int((session_end - now_local).total_seconds() // 60))
+    # История должна строиться по журналу СКУД, а не по последнему визиту
+    # ученика: last_visit хранит только одну (последнюю) отметку.
+    past_sessions = []
+    for visit in visit_logs:
+        student = students_by_id.get(visit.student_id)
+        if not student or not visit.visited_at:
+            continue
+        visit_at = visit.visited_at.replace(tzinfo=None)
+        display_visit_at = visit_at + timedelta(hours=3)
+        if start_date and display_visit_at.date() < start_date:
+            continue
+        if end_date and display_visit_at.date() > end_date:
+            continue
+        elapsed = now_local - visit_at
+        if elapsed < timedelta(minutes=timeout_minutes):
+            continue
+        past_sessions.append({
+            "student_id": student.id,
+            "name": student.name,
+            "balance": student.balance_lessons or 0,
+            "parent_id": student.parent_id,
+            "last_visit": display_visit_at.strftime("%d.%m.%Y %H:%M"),
+            "session_end": (visit_at + timedelta(minutes=timeout_minutes, hours=3)).strftime("%H:%M"),
+            "time_passed_mins": int(elapsed.total_seconds() // 60),
+        })
     active_sessions.sort(key=lambda x: x["time_passed_mins"])
-    past_sessions.sort(key=lambda x: x["time_passed_mins"])
+    past_sessions.sort(key=lambda x: x["last_visit"], reverse=True)
     return templates.TemplateResponse("admin.html", {"request": request, "club_id": club_id, "active_sessions": active_sessions, "past_sessions": past_sessions, "timeout_minutes": timeout_minutes, "filters": {"date_from": date_from or "", "date_to": date_to or ""}, **calculate_admin_dashboard(students)})
 
 

@@ -40,7 +40,7 @@
         <a class="link" href="/admin/sales?club_id={{ club_id }}&init_data={{ request.query_params.get('init_data','')|urlencode }}">Сбросить</a>
     </form>
     <div class="card"><b>Операций: {{ operations|length }}</b>
-        {% for item in operations %}<div class="sale"><div><b>{{ item.title }}</b><br><span class="muted">{{ item.created_at|moscow_time if item.created_at else '' }} · {{ item.category }} · {{ item.method }}{% if item.discipline %} · {{ item.discipline }}{% endif %}</span><br><span class="muted">Плательщик: {{ item.buyer_label|safe }}</span><br><span class="muted">Заказ: {{ item.id }}</span></div><b>{{ '%.2f'|format(item.amount / 100) }} ₽</b></div>
+        {% for item in operations %}<div class="sale"><div><b>{{ item.title }}</b><br><span class="muted">{{ item.created_at|moscow_time if item.created_at else '' }} · {{ item.category }} · {{ item.method }}{% if item.discipline %} · {{ item.discipline }}{% endif %}</span><br><span class="muted">Кому: {{ item.buyer_label|safe }} · Что и за что: {{ item.title }} ({{ item.category }})</span><br><span class="muted">Заказ: {{ item.id }}</span></div><b>{{ '%.2f'|format(item.amount / 100) }} ₽</b></div>
         {% else %}<p class="muted">По выбранным фильтрам операций нет.</p>{% endfor %}
     </div>
     <div class="card" style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;text-align:center">

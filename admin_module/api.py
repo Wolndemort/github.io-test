@@ -50,7 +50,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from starlette import status
-from database.db import User, Student, Club, ClubStaff, ClubProduct, CartOrder, CartItem, CashEntry, AuditEntry, get_student_parent_ids
+from database.db import User, Student, Club, ClubStaff, ClubProduct, CartOrder, CartItem, CashEntry, AuditEntry, VisitLog, get_student_parent_ids
 from database.db import purchase_student_freeze
 from admin_module.schemas import AdminStudentUpdate, AdminStudentCreate
 from database.db import get_session
@@ -390,6 +390,10 @@ else location.replace(location.pathname+'?club_id=' + encodeURIComponent(new URL
     )
 
     students = list(result.scalars().all())
+    students_by_id = {student.id: student for student in students}
+    visit_logs = list((await session.execute(
+        select(VisitLog).where(VisitLog.club_id == club_id).order_by(VisitLog.visited_at.desc())
+    )).scalars().all())
     now_local = datetime.now(timezone.utc).replace(tzinfo=None)
     active_sessions, past_sessions = [], []
     for student in students:
@@ -409,8 +413,33 @@ else location.replace(location.pathname+'?club_id=' + encodeURIComponent(new URL
                 active_sessions.append(session_info)
             else:
                 past_sessions.append(session_info)
+    # last_visit содержит только последнюю отметку. Для истории берём весь
+    # журнал СКУД, иначе таблица всегда показывала максимум одного визита.
+    past_sessions = []
+    for visit in visit_logs:
+        student = students_by_id.get(visit.student_id)
+        if not student or not visit.visited_at:
+            continue
+        visit_at = visit.visited_at.replace(tzinfo=None)
+        display_visit_at = visit_at + timedelta(hours=3)
+        if date_from and display_visit_at.date() < moscow_date_boundary(date_from).date():
+            continue
+        if date_to and display_visit_at.date() > moscow_date_boundary(date_to).date():
+            continue
+        elapsed = now_local - visit_at
+        if elapsed < timedelta(minutes=timeout_minutes):
+            continue
+        past_sessions.append({
+            "student_id": student.id,
+            "name": student.name,
+            "balance": student.balance_lessons or 0,
+            "parent_id": student.parent_id,
+            "last_visit": display_visit_at.strftime("%d.%m.%Y %H:%M"),
+            "session_end": (visit_at + timedelta(minutes=timeout_minutes, hours=3)).strftime("%H:%M"),
+            "time_passed_mins": int(elapsed.total_seconds() // 60),
+        })
     active_sessions.sort(key=lambda x: x["time_passed_mins"])
-    past_sessions.sort(key=lambda x: x["time_passed_mins"])
+    past_sessions.sort(key=lambda x: x["last_visit"], reverse=True)
     return templates.TemplateResponse("admin.html", {
         "request": request, "club_id": club_id,
         "active_sessions": active_sessions, "past_sessions": past_sessions[:20],
@@ -560,15 +589,18 @@ async def cash_register_page(request: Request, session: AsyncSession = Depends(g
     for row in (await session.execute(payment_query)).scalars().all():
         method = _order_payment_method(row)
         category = "freeze" if str(row.type).startswith("FREEZE") else "subscription"
-        income_rows.append({"id": row.id, "created_at": row.created_at, "entry_type": "income", "category": category, "category_label": _money_operation_category_label(category, "sale"), "amount_kopecks": row.amount_kopecks or 0, "description": {"cash": "Наличный", "sbp": "СБП", "requisites": "По реквизитам", "card": "Онлайн"}.get(method, "Платёж") + " платёж", "source": "sale", "method": method})
+        buyer = await resolve_user_label(session, row.user_id, empty_label="Плательщик")
+        student = await session.get(Student, row.student_id) if row.student_id else None
+        income_rows.append({"id": row.id, "created_at": row.created_at, "entry_type": "income", "category": category, "category_label": _money_operation_category_label(category, "sale"), "amount_kopecks": row.amount_kopecks or 0, "description": {"cash": "Наличный", "sbp": "СБП", "requisites": "По реквизитам", "card": "Онлайн"}.get(method, "Платёж") + " платёж", "reason": f"{_money_operation_category_label(category)} для {student.name}" if student else _money_operation_category_label(category), "actor_label": buyer, "recipient_label": student.name if student else "—", "source": "sale", "method": method})
     for row in (await session.execute(cart_query)).scalars().all():
         is_cash = str(row.provider_payment_id or "").startswith("CASH")
         method = "cash" if is_cash else ("requisites" if str(row.provider_payment_id or "").startswith("MANUAL:") else ("sbp" if "SBP" in str(row.provider_payment_id or "").upper() else "card"))
         cart_items = (await session.execute(select(CartItem).where(CartItem.cart_order_id == row.id).order_by(CartItem.id.asc()))).scalars().all()
         item_titles = ", ".join(item.title for item in cart_items if item.title)
         method_label = {"cash": "Наличная", "sbp": "СБП", "requisites": "По реквизитам", "card": "Онлайн"}.get(method, "")
-        income_rows.append({"id": row.id, "created_at": row.created_at, "entry_type": "income", "category": "product", "category_label": _money_operation_category_label("product", "sale"), "amount_kopecks": row.amount_kopecks or 0, "description": f"{method_label} продажа товара: {item_titles}" if item_titles else f"{method_label} продажа товара", "source": "sale", "method": method})
-    rows = income_rows + [{"id": e.id, "created_at": e.created_at, "entry_type": e.entry_type, "category": e.category, "category_label": _money_operation_category_label(e.category), "amount_kopecks": e.amount_kopecks, "description": e.description, "source": "manual", "method": "cash"} for e in manual]
+        buyer = await resolve_user_label(session, row.user_id, empty_label="Покупатель")
+        income_rows.append({"id": row.id, "created_at": row.created_at, "entry_type": "income", "category": "product", "category_label": _money_operation_category_label("product", "sale"), "amount_kopecks": row.amount_kopecks or 0, "description": f"{method_label} продажа товара: {item_titles}" if item_titles else f"{method_label} продажа товара", "reason": item_titles or "Продажа товара", "actor_label": buyer, "recipient_label": buyer, "source": "sale", "method": method})
+    rows = income_rows + [{"id": e.id, "created_at": e.created_at, "entry_type": e.entry_type, "category": e.category, "category_label": _money_operation_category_label(e.category), "amount_kopecks": e.amount_kopecks, "description": e.description, "reason": e.description or _money_operation_category_label(e.category), "actor_label": await resolve_user_label(session, e.created_by, empty_label="Сотрудник"), "recipient_label": "—", "source": "manual", "method": "cash"} for e in manual]
     rows.sort(key=lambda x: x["created_at"] or datetime.min, reverse=True)
     income = sum(r["amount_kopecks"] for r in rows if r["entry_type"] == "income")
     cash_income = sum(r["amount_kopecks"] for r in rows if r["entry_type"] == "income" and r.get("method") == "cash")
