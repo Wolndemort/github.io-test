@@ -92,7 +92,7 @@ document.querySelectorAll('.student-card').forEach((card) => {
 if (!bm || typeof bm.init !== 'function' || typeof bm.requestAccess !== 'function') {
     const hint = document.getElementById('status-hint');
     if (hint) {
-        hint.textContent = 'На этом устройстве биометрический API Telegram WebApp недоступен. Используйте QR-пропуск из меню бота.';
+        hint.textContent = 'Включите код-пароль и Face ID/отпечаток в настройках телефона, затем перезапустите Telegram. Если биометрия недоступна, используйте QR-пропуск из меню бота.';
         hint.className = 'hint';
     }
     const setupBox = document.getElementById('setup-biometry-box');
