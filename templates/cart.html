@@ -36,7 +36,9 @@ document.getElementById('checkout').onclick=async()=>{
   if(!r.ok){alert(d.detail||'Ошибка');b.disabled=false;return}
   localStorage.removeItem('speedy_cart');
   if(d.payment_url){
-    location.href=d.payment_url
+    const tg = window.Telegram?.WebApp;
+    if (tg?.openLink) tg.openLink(d.payment_url, {try_instant_view: false});
+    else location.href = d.payment_url;
   } else if(d.charged){
     alert(d.message||'Оплата прошла по сохраненной карте');
     draw()

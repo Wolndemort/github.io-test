@@ -115,7 +115,9 @@ document.getElementById('buyNow').addEventListener('click', async () => {
   });
   const data = await res.json();
   if (res.ok && data.payment_url) {
-    location.href = data.payment_url;
+    const tg = window.Telegram?.WebApp;
+    if (tg?.openLink) tg.openLink(data.payment_url, {try_instant_view: false});
+    else location.href = data.payment_url;
   } else if (res.ok && data.charged) {
     document.getElementById('msg').innerText = data.message || 'Оплата прошла по сохраненной карте.';
   } else if (res.ok && data.review_required) {
