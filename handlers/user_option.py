@@ -549,6 +549,14 @@ async def finalize_freeze_action(
     # Достаем шаг заморозки из конфига клуба
     freeze_days = club_settings.get("limits", {}).get("freeze_days_step", 7)
     student = await session.get(Student, student_id)
+    if not student or student.club_id != club.id:
+        return await callback.answer("❌ Атлет не найден.", show_alert=True)
+    linked = await session.scalar(select(StudentParent.student_id).where(
+        StudentParent.student_id == student_id,
+        StudentParent.parent_id == callback.from_user.id,
+    ))
+    if student.parent_id != callback.from_user.id and not linked:
+        return await callback.answer("❌ Нет доступа к этому атлету.", show_alert=True)
 
     # ИСПРАВЛЕНО: Порядок аргументов строго соответствует функции бд
     new_date = await process_student_freeze(
@@ -990,7 +998,7 @@ async def start_birthday_edit(callback: types.CallbackQuery, state: FSMContext, 
     except ValueError:
         return await callback.answer("Некорректный атлет.", show_alert=True)
     student = await session.get(Student, student_id)
-    linked = await session.scalar(select(StudentParent.student_id).where(StudentParent.student_id == student.id, StudentParent.parent_id == callback.from_user.id))
+    linked = await session.scalar(select(StudentParent.student_id).where(StudentParent.student_id == student.id, StudentParent.parent_id == callback.from_user.id)) if student else None
     if not student or student.club_id != club.id or (student.parent_id != callback.from_user.id and not linked):
         return await callback.answer("Атлет не найден.", show_alert=True)
     await state.update_data(edit_birthday_student_id=student_id)

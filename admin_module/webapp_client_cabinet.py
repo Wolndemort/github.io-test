@@ -456,7 +456,12 @@ async def get_client_cabinet_page(request: Request, club_id: int, init_data: str
     if not user and not is_staff_mode:
         return await webapp_auth_help_page(request=request, club_id=club_id, init_data=init_data, db=db)
     settings = (club.club_settings or {}) if club else {}
-    students = (await db.execute(select(Student).outerjoin(StudentParent, StudentParent.student_id == Student.id).where(Student.club_id == club_id, or_(Student.parent_id == user_id, StudentParent.parent_id == user_id)).distinct().order_by(Student.name))).scalars().all()
+    students = (await db.execute(
+        select(Student).outerjoin(StudentParent, StudentParent.student_id == Student.id).where(
+            Student.club_id == club_id,
+            or_(Student.parent_id == user_id, StudentParent.parent_id == user_id),
+        ).distinct().order_by(Student.name)
+    )).scalars().all()
     active_students = sum(1 for s in students if not s.is_frozen and s.expire_date and s.expire_date > datetime.now())
     frozen_students = sum(1 for s in students if s.is_frozen)
     expired_students = sum(1 for s in students if not s.is_frozen and (not s.expire_date or s.expire_date <= datetime.now()))
