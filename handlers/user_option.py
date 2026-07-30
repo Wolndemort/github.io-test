@@ -612,10 +612,10 @@ async def choose_student_for_freeze(
     user_id = callback.from_user.id
 
     # 1. Тянем атлетов ТОЛЬКО этого родителя и ТОЛЬКО этого клуба
-    stmt = select(Student).where(
-        or_(Student.parent_id == user_id, StudentParent.parent_id == user_id),
-        Student.club_id == club.id
-    ).order_by(Student.name)
+    stmt = (select(Student)
+            .outerjoin(StudentParent, StudentParent.student_id == Student.id)
+            .where(or_(Student.parent_id == user_id, StudentParent.parent_id == user_id), Student.club_id == club.id)
+            .distinct().order_by(Student.name))
 
     result = await session.execute(stmt)
     students = result.scalars().all()
@@ -672,9 +672,12 @@ async def choose_student_for_paid_freeze(callback: types.CallbackQuery, session:
     price = club_settings.get("limits", {}).get("freeze_price_per_day", 0)
     if price <= 0:
         return await callback.answer("Покупка заморозки сейчас недоступна.", show_alert=True)
-    result = await session.execute(select(Student).where(
-        or_(Student.parent_id == callback.from_user.id, StudentParent.parent_id == callback.from_user.id), Student.club_id == club.id
-    ).order_by(Student.name))
+    result = await session.execute(
+        select(Student).outerjoin(StudentParent, StudentParent.student_id == Student.id).where(
+            or_(Student.parent_id == callback.from_user.id, StudentParent.parent_id == callback.from_user.id),
+            Student.club_id == club.id
+        ).distinct().order_by(Student.name)
+    )
     students = result.scalars().all()
     builder = InlineKeyboardBuilder()
     now = datetime.now()
@@ -722,10 +725,10 @@ async def choose_student_for_qr(
     user_id = callback.from_user.id
 
     # 2. Изоляция: тянем студентов ТОЛЬКО этого родителя и ТОЛЬКО этого клуба
-    stmt = select(Student).where(
-        or_(Student.parent_id == user_id, StudentParent.parent_id == user_id),
-        Student.club_id == club.id
-    ).order_by(Student.name)
+    stmt = (select(Student)
+            .outerjoin(StudentParent, StudentParent.student_id == Student.id)
+            .where(or_(Student.parent_id == user_id, StudentParent.parent_id == user_id), Student.club_id == club.id)
+            .distinct().order_by(Student.name))
 
     result = await session.execute(stmt)
     students = result.scalars().all()

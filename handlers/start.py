@@ -170,10 +170,14 @@ async def start_handler(
         )
 
     # Запрашиваем студента с затиранием кэша сессии
-    stmt = select(Student).where(
-        or_(Student.parent_id == user_id, StudentParent.parent_id == user_id),
-        Student.club_id == club.id
-    ).execution_options(populate_existing=True)
+    stmt = (select(Student)
+            .outerjoin(StudentParent, StudentParent.student_id == Student.id)
+            .where(
+                or_(Student.parent_id == user_id, StudentParent.parent_id == user_id),
+                Student.club_id == club.id
+            )
+            .distinct()
+            .execution_options(populate_existing=True))
     # У одного родителя может быть несколько атлетов. Берём первого для
     # стартового экрана, а подробный список показывает отдельная кнопка.
     student = (await session.execute(stmt)).scalars().first()
