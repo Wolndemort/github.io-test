@@ -216,7 +216,24 @@ function attachInviteButton(form) {
         if(!response.ok) throw new Error(data.detail||'Не удалось создать приглашение');
         if(data.status==='linked'){form.dataset[`parent${slot}`]='1';attachInviteButton(form);return;}
         button.textContent=`Приглашение ${slot} отправлено`;
-        if(data.url){if(tg?.openTelegramLink)tg.openTelegramLink(data.url);else window.open(data.url,'_blank','noopener,noreferrer');}
+        if(data.url){
+          const shareText=`Приглашение в клуб для родителя ${slot}:\n${data.url}`;
+          try {
+            if(navigator.share){
+              await navigator.share({title:'Приглашение в клуб',text:shareText});
+            } else if(navigator.clipboard){
+              await navigator.clipboard.writeText(data.url);
+              alert('Ссылка скопирована. Отправьте её родителю.');
+            } else {
+              window.prompt('Скопируйте ссылку и отправьте её родителю:', data.url);
+            }
+          } catch(shareError) {
+            if(shareError?.name !== 'AbortError') {
+              try { await navigator.clipboard.writeText(data.url); alert('Ссылка скопирована. Отправьте её родителю.'); }
+              catch(_) { window.prompt('Скопируйте ссылку и отправьте её родителю:', data.url); }
+            }
+          }
+        }
       }catch(error){button.disabled=false;button.textContent=`Пригласить родителя ${slot}`;alert(error.message||'Не удалось создать приглашение');}
     };
   });
