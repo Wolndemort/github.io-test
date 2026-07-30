@@ -3,8 +3,8 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from services.yookassa_client import YooKassaClient
 import uuid
 from config import PROXY_URL
-from database.db import PaymentOrder, User
-from sqlalchemy import select, and_
+from database.db import PaymentOrder, User, StudentParent
+from sqlalchemy import select, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from loguru import logger
 from database.db import Student, Club,Subscription 
@@ -89,7 +89,8 @@ async def select_athlete_handler(
     # 🌟 ФИКС: Жестко ищем детей только этого родителя И строго в рамках текущего КЛУБА
     res = await session.execute(
         select(Student)
-        .where(Student.parent_id == callback.from_user.id)
+        .outerjoin(StudentParent, StudentParent.student_id == Student.id)
+        .where(or_(Student.parent_id == callback.from_user.id, StudentParent.parent_id == callback.from_user.id))
         .where(Student.club_id == club_id)  # <--- Защита от смешивания данных разных клубов
     )
     students = res.scalars().all()

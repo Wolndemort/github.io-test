@@ -5,7 +5,7 @@ from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.utils.keyboard import ReplyKeyboardBuilder, InlineKeyboardBuilder
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update
+from sqlalchemy import select, update, or_
 from types import SimpleNamespace
 from loguru import logger
 from handlers.buttons import admin_keyboard, get_profile_keyboard
@@ -171,7 +171,7 @@ async def start_handler(
 
     # Запрашиваем студента с затиранием кэша сессии
     stmt = select(Student).where(
-        Student.parent_id == user_id,
+        or_(Student.parent_id == user_id, StudentParent.parent_id == user_id),
         Student.club_id == club.id
     ).execution_options(populate_existing=True)
     # У одного родителя может быть несколько атлетов. Берём первого для
@@ -205,7 +205,7 @@ async def start_handler(
             object_type="profile",
             object_id=user_id,
             location="bot/start",
-            students=[s.id for s in (await session.execute(select(Student).where(Student.parent_id == user_id, Student.club_id == club.id))).scalars().all()],
+            students=[s.id for s in (await session.execute(select(Student).outerjoin(StudentParent, StudentParent.student_id == Student.id).where(or_(Student.parent_id == user_id, StudentParent.parent_id == user_id), Student.club_id == club.id).distinct())).scalars().all()],
             authorized=True,
         )
         await message.answer(

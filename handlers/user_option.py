@@ -114,7 +114,7 @@ async def universal_profile_handler(
 
     # Запрашиваем студентов этого родителя для текущего клуба
     stmt = select(Student).where(
-        Student.parent_id == user_id,
+        or_(Student.parent_id == user_id, StudentParent.parent_id == user_id),
         Student.club_id == club_id
     ).order_by(Student.name).execution_options(populate_existing=True)
 
@@ -233,7 +233,7 @@ async def detailed_status_handler(
 
     # Запрашиваем студентов этого родителя для текущего клуба
     stmt = select(Student).where(
-        Student.parent_id == user_id,
+        or_(Student.parent_id == user_id, StudentParent.parent_id == user_id),
         Student.club_id == club.id
     ).order_by(Student.name)
 
@@ -370,7 +370,7 @@ async def payment_history_handler(
         location="bot/profile/detailed_status",
     )
     students = (await session.execute(
-        select(Student).where(Student.parent_id == user_id, Student.club_id == club.id).order_by(Student.name)
+        select(Student).outerjoin(StudentParent, StudentParent.student_id == Student.id).where(or_(Student.parent_id == user_id, StudentParent.parent_id == user_id), Student.club_id == club.id).distinct().order_by(Student.name)
     )).scalars().all()
 
     if not students:
@@ -602,7 +602,7 @@ async def choose_student_for_freeze(
 
     # 1. Тянем атлетов ТОЛЬКО этого родителя и ТОЛЬКО этого клуба
     stmt = select(Student).where(
-        Student.parent_id == user_id,
+        or_(Student.parent_id == user_id, StudentParent.parent_id == user_id),
         Student.club_id == club.id
     ).order_by(Student.name)
 
@@ -662,7 +662,7 @@ async def choose_student_for_paid_freeze(callback: types.CallbackQuery, session:
     if price <= 0:
         return await callback.answer("Покупка заморозки сейчас недоступна.", show_alert=True)
     result = await session.execute(select(Student).where(
-        Student.parent_id == callback.from_user.id, Student.club_id == club.id
+        or_(Student.parent_id == callback.from_user.id, StudentParent.parent_id == callback.from_user.id), Student.club_id == club.id
     ).order_by(Student.name))
     students = result.scalars().all()
     builder = InlineKeyboardBuilder()
@@ -712,7 +712,7 @@ async def choose_student_for_qr(
 
     # 2. Изоляция: тянем студентов ТОЛЬКО этого родителя и ТОЛЬКО этого клуба
     stmt = select(Student).where(
-        Student.parent_id == user_id,
+        or_(Student.parent_id == user_id, StudentParent.parent_id == user_id),
         Student.club_id == club.id
     ).order_by(Student.name)
 
@@ -954,7 +954,7 @@ async def start_add_athlete(callback: types.CallbackQuery, state: FSMContext, cl
 @router.callback_query(F.data == "edit_birthday")
 async def choose_birthday_edit_student(callback: types.CallbackQuery, session: AsyncSession, club: Club):
     students = (await session.execute(
-        select(Student).where(Student.parent_id == callback.from_user.id, Student.club_id == club.id).order_by(Student.name)
+        select(Student).outerjoin(StudentParent, StudentParent.student_id == Student.id).where(or_(Student.parent_id == callback.from_user.id, StudentParent.parent_id == callback.from_user.id), Student.club_id == club.id).distinct().order_by(Student.name)
     )).scalars().all()
     if not students:
         return await callback.answer("У вас пока нет атлетов в этом клубе.", show_alert=True)
@@ -976,7 +976,8 @@ async def start_birthday_edit(callback: types.CallbackQuery, state: FSMContext, 
     except ValueError:
         return await callback.answer("Некорректный атлет.", show_alert=True)
     student = await session.get(Student, student_id)
-    if not student or student.club_id != club.id or student.parent_id != callback.from_user.id:
+    linked = await session.scalar(select(StudentParent.student_id).where(StudentParent.student_id == student.id, StudentParent.parent_id == callback.from_user.id))
+    if not student or student.club_id != club.id or (student.parent_id != callback.from_user.id and not linked):
         return await callback.answer("Атлет не найден.", show_alert=True)
     await state.update_data(edit_birthday_student_id=student_id)
     await state.set_state(RegistrationStates.waiting_for_birthday_edit)
@@ -1000,7 +1001,8 @@ async def save_birthday_edit(message: types.Message, state: FSMContext, session:
             return await message.answer("❌ Введите корректную дату ДД.ММ.ГГГГ или 0 для удаления.")
     data = await state.get_data()
     student = await session.get(Student, data.get("edit_birthday_student_id"), with_for_update=True)
-    if not student or student.parent_id != message.from_user.id:
+    linked = await session.scalar(select(StudentParent.student_id).where(StudentParent.student_id == student.id, StudentParent.parent_id == message.from_user.id))
+    if not student or (student.parent_id != message.from_user.id and not linked):
         await state.clear()
         return await message.answer("❌ Атлет не найден или доступ запрещён.")
     student.birthday = birthday
@@ -1063,7 +1065,7 @@ async def process_athlete_birthday(
     user_id = message.from_user.id
 
     existing_students = (await session.execute(
-        select(Student).where(Student.club_id == club_id, Student.parent_id == user_id)
+        select(Student).outerjoin(StudentParent, StudentParent.student_id == Student.id).where(Student.club_id == club_id, or_(Student.parent_id == user_id, StudentParent.parent_id == user_id)).distinct()
     )).scalars().all()
     duplicate = next((student for student in existing_students
                       if student.name.strip().casefold() == (name or "").strip().casefold()

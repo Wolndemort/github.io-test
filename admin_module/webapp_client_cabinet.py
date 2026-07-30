@@ -123,7 +123,10 @@ async def _ensure_webapp_user_linked(db: AsyncSession, user_id: int, club_id: in
     if not user:
         return None
     has_students = await db.scalar(
-        select(Student.id).where(Student.parent_id == user_id, Student.club_id == club_id).limit(1)
+        select(Student.id).outerjoin(StudentParent, StudentParent.student_id == Student.id).where(
+            Student.club_id == club_id,
+            or_(Student.parent_id == user_id, StudentParent.parent_id == user_id),
+        ).limit(1)
     )
     if not has_students:
             return None
@@ -174,7 +177,7 @@ async def get_biometric_page(
     tg_user = verify_telegram_data(init_data, club.bot_token if club else "")
     if not tg_user or int(tg_user.get("id", 0)) != user_id:
         raise HTTPException(status_code=403, detail="Доступ запрещен")
-    students = (await db.execute(select(Student).where(Student.parent_id == user_id, Student.club_id == club_id))).scalars().all()
+    students = (await db.execute(select(Student).outerjoin(StudentParent, StudentParent.student_id == Student.id).where(Student.club_id == club_id, or_(Student.parent_id == user_id, StudentParent.parent_id == user_id)).distinct())).scalars().all()
     linked_user = await db.get(User, user_id)
     settings = (club.club_settings or {}) if club else {}
     ui = settings.get("ui", {}) if isinstance(settings.get("ui", {}), dict) else {}
@@ -652,7 +655,9 @@ async def webapp_student_page(request: Request, club_id: int, student_id: int, i
     if not tg_user:
         raise HTTPException(status_code=403, detail="Доступ запрещен")
     student = await db.get(Student, student_id)
-    if not student or student.club_id != club_id or student.parent_id != int(tg_user.get("id", 0)):
+    parent_id = int(tg_user.get("id", 0))
+    linked = await db.scalar(select(StudentParent.student_id).where(StudentParent.student_id == student_id, StudentParent.parent_id == parent_id))
+    if not student or student.club_id != club_id or (student.parent_id != parent_id and not linked):
         raise HTTPException(status_code=403, detail="Атлет не найден")
     visits = (await db.execute(
         select(VisitLog)
@@ -685,7 +690,7 @@ async def webapp_history_page(request: Request, club_id: int, student_id: int | 
     user = await _ensure_webapp_user_linked(db, user_id, club_id)
     if not user:
         return await webapp_auth_help_page(request=request, club_id=club_id, init_data=init_data, db=db)
-    students = (await db.execute(select(Student).where(Student.parent_id == user_id, Student.club_id == club_id).order_by(Student.name))).scalars().all()
+    students = (await db.execute(select(Student).outerjoin(StudentParent, StudentParent.student_id == Student.id).where(Student.club_id == club_id, or_(Student.parent_id == user_id, StudentParent.parent_id == user_id)).distinct().order_by(Student.name))).scalars().all()
     student_ids = [student.id for student in students]
     if student_id:
         student_ids = [student_id] if student_id in student_ids else []
