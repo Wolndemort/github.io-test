@@ -9,6 +9,8 @@ def test_admin_freeze_screen_is_owner_only_and_has_both_actions():
     assert "await verify_webapp_admin(club, init_data)" in source
     assert 'action == "freeze"' in source
     assert 'action == "unfreeze"' in source
+    assert "Абонемент заморожен администратором" in source
+    assert "Абонемент разморожен администратором" in source
     assert "Заморозить" in page
     assert "Разморозить" in page
 

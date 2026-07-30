@@ -34,7 +34,7 @@ from handlers import start, user_option, buttons, payments, admin_option, super_
     super_admin_payment
 from handlers.buttons import get_profile_keyboard
 from services.bot_registry import bots_dict, register_existing_bots, close_all_bots
-from services.scheduler_jobs import saas_daily_morning_check, check_abon_mailing, send_daily_report_to_admins, send_backup_to_admin, send_work_schedule_notice, send_stock_reminder_notice
+from services.scheduler_jobs import saas_daily_morning_check, check_abon_mailing, send_daily_report_to_admins, send_backup_to_admin, send_work_schedule_notice, send_stock_reminder_notice, expire_student_freezes
 from middlewares.db_saas_midleware import ClubMiddleware
 from middlewares.main_middleware import DbSessionMiddleware
 from admin_module.api import router
@@ -132,6 +132,7 @@ async def lifespan(app: FastAPI):
     # Как закончишь тесты в ЛК ЮKassa — просто убери решетку (#) в начале строки.
     #scheduler.add_job(saas_recurrent_payments_job, 'cron', hour=3, minute=0, args=[AsyncSessionLocal])
     scheduler.add_job(auto_close_sessions_job, 'interval', minutes=1, id="auto_close_sessions", replace_existing=True, coalesce=True, max_instances=1, misfire_grace_time=60)
+    scheduler.add_job(expire_student_freezes, 'interval', minutes=5, id="expire_student_freezes", replace_existing=True, coalesce=True, max_instances=1, misfire_grace_time=300)
     # Ночной блок (23:00) — Полный бэкап всей базы данных тебе в личку
     scheduler.add_job(send_backup_to_admin, 'cron', hour=23, minute=0, id="daily_database_backup", replace_existing=True, coalesce=True, max_instances=1, misfire_grace_time=3600)
     scheduler.start()

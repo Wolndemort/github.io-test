@@ -77,3 +77,23 @@ async def test_finite_tariff_replaces_existing_unlimited_balance():
     )
 
     assert student.balance_lessons == 8
+
+
+@pytest.mark.asyncio
+async def test_two_purchases_while_frozen_extend_existing_date_and_sum_lessons():
+    student = make_student(
+        expire_date=datetime(2026, 8, 17, 23, 59, 59),
+        balance_lessons=5,
+        is_frozen=1,
+        frozen_at=datetime(2026, 7, 30, 12, 0, 0),
+        frozen_days=7,
+    )
+    settings = {"disciplines": {"boxing": {"type": "lessons"}}, "features": {"freeze": True}}
+    await add_abon(1, 8, make_session(student), 2, settings, days_to_add=30, discipline="boxing")
+    assert student.is_frozen == 0
+    assert student.frozen_at is None
+    assert student.frozen_days is None
+    first_expire = student.expire_date
+    await add_abon(1, 12, make_session(student), 2, settings, days_to_add=30, discipline="boxing")
+    assert student.balance_lessons == 25
+    assert student.expire_date == first_expire + timedelta(days=30)

@@ -2,7 +2,7 @@
 
 import asyncio
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from html import escape
 
 from aiogram import types
@@ -31,6 +31,38 @@ from admin_module.utils import is_staff_or_owner
 from services.order_notifications import notify_stock_reminders
 from services.analytics import calculate_admin_dashboard, calculate_daily_business_report, reporting_periods
 from services.bot_registry import bots_dict
+
+
+async def expire_student_freezes():
+    """Automatically finish freezes whose paid/free period has elapsed."""
+    now = reporting_periods()["now"].replace(tzinfo=None)
+    async with AsyncSessionLocal() as session:
+        students = (await session.execute(
+            select(Student).where(Student.is_frozen == 1, Student.frozen_at.is_not(None))
+        )).scalars().all()
+        for student in students:
+            frozen_at = student.frozen_at.replace(tzinfo=None)
+            freeze_days = int(student.frozen_days or 0)
+            if not freeze_days or now < frozen_at + timedelta(days=freeze_days):
+                continue
+            student.is_frozen = 0
+            student.frozen_at = None
+            student.frozen_days = None
+            club = await session.get(Club, student.club_id)
+            bot = bots_dict.get(club.bot_token) if club else None
+            if bot:
+                text = f"❄️ <b>Заморозка завершена</b>\n\nАтлет: <b>{escape(student.name)}</b>\nАбонемент снова активен."
+                for parent_id in await get_student_parent_ids(student.id, session):
+                    try:
+                        await bot.send_message(parent_id, text, parse_mode="HTML")
+                    except Exception as exc:
+                        logger.warning(f"Не удалось уведомить родителя {parent_id} о завершении заморозки: {exc}")
+                if club.owner_id:
+                    try:
+                        await bot.send_message(club.owner_id, text, parse_mode="HTML")
+                    except Exception as exc:
+                        logger.warning(f"Не удалось уведомить владельца о завершении заморозки: {exc}")
+        await session.commit()
 
 
 async def send_backup_to_admin():

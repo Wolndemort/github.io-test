@@ -125,3 +125,21 @@ async def test_paid_freeze_then_gate_pass_reduces_expire_by_paid_days():
     assert student.frozen_days is None
     assert student.frozen_at is None
     assert student.expire_date.date() <= (datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(days=26)).date()
+
+
+@pytest.mark.asyncio
+async def test_gate_unfreeze_after_full_period_does_not_change_base_expiry():
+    student = make_student(
+        expire_date=datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(days=23),
+        frozen_days=14,
+        is_frozen=1,
+        frozen_at=datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=14),
+    )
+    session = make_session(student)
+    before = student.expire_date
+    result = await process_athlete_gate_pass(
+        1, session, {"limits": {"freeze_days_step": 7}}, expected_club_id=10
+    )
+    assert result["is_was_frozen"] is True
+    assert result["returned_early_days"] == 0
+    assert student.expire_date == before

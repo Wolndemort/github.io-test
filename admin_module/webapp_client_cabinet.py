@@ -260,6 +260,15 @@ async def admin_freeze_submit(payload: AdminFreezePayload, db: AsyncSession = De
         if not result:
             raise HTTPException(status_code=409, detail="Заморозка недоступна: проверьте абонемент, лимит или текущий статус")
         audit_event("admin_freeze_applied", club_id=club.id, actor_user_id=int(tg_user["id"]), student_id=student.id, days=days)
+        try:
+            bot = Bot(club.bot_token)
+            text = f"❄️ <b>Абонемент заморожен администратором</b>\n\nАтлет: <b>{escape(student.name)}</b>\nСрок: <b>{days} дн.</b>\nНовая дата окончания: <b>{student.expire_date.strftime('%d.%m.%Y')}</b>"
+            for parent_id in await get_student_parent_ids(student.id, db):
+                if parent_id != int(tg_user["id"]):
+                    await bot.send_message(parent_id, text, parse_mode="HTML")
+            await bot.session.close()
+        except Exception:
+            pass
         return {"ok": True, "message": f"{student.name}: заморожен на {days} дней"}
     if action == "unfreeze":
         if not student.is_frozen:
@@ -276,6 +285,15 @@ async def admin_freeze_submit(payload: AdminFreezePayload, db: AsyncSession = De
         student.frozen_days = None
         await db.commit()
         audit_event("admin_unfreeze_applied", club_id=club.id, actor_user_id=int(tg_user["id"]), student_id=student.id, returned_days=returned_days)
+        try:
+            bot = Bot(club.bot_token)
+            text = f"✅ <b>Абонемент разморожен администратором</b>\n\nАтлет: <b>{escape(student.name)}</b>\nВозвращено дней: <b>{returned_days}</b>\nДата окончания: <b>{student.expire_date.strftime('%d.%m.%Y') if student.expire_date else '—'}</b>"
+            for parent_id in await get_student_parent_ids(student.id, db):
+                if parent_id != int(tg_user["id"]):
+                    await bot.send_message(parent_id, text, parse_mode="HTML")
+            await bot.session.close()
+        except Exception:
+            pass
         return {"ok": True, "message": f"{student.name}: разморожен, возвращено дней: {returned_days}"}
     raise HTTPException(status_code=400, detail="Неизвестное действие")
 
