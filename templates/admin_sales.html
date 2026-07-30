@@ -40,7 +40,7 @@
         <a class="link" href="/admin/sales?club_id={{ club_id }}&init_data={{ request.query_params.get('init_data','')|urlencode }}">Сбросить</a>
     </form>
     <div class="card"><b>Операций: {{ operations|length }}</b>
-        {% for item in operations %}<div class="sale"><div><b>{{ item.title }}</b><br><span class="muted">{{ item.created_at|moscow_time if item.created_at else '' }} · {{ item.category }} · {{ item.method }}{% if item.discipline %} · {{ item.discipline }}{% endif %}</span><br><span class="muted">Кому: {{ item.buyer_label|safe }} · Что и за что: {{ item.title }} ({{ item.category }})</span><br><span class="muted">Заказ: {{ item.id }}</span></div><b>{{ '%.2f'|format(item.amount / 100) }} ₽</b></div>
+        {% for item in operations %}<div class="sale"><div><b>{{ item.title }}</b><br><span class="muted">{{ item.created_at|moscow_time if item.created_at else '' }} · {{ item.category }} · {{ item.method }}{% if item.discipline %} · {{ item.discipline }}{% endif %}</span><br><span class="muted">Кому: {{ item.buyer_label|safe }} · Что и за что: {{ item.title }} ({{ item.category }})</span><br><span class="muted">Заказ: {{ item.id }}</span>{% if item.category != 'product' %}<br><select data-method-order="{{ item.id }}"><option value="">Изменить способ оплаты</option><option value="card">Карта / онлайн</option><option value="cash">Наличные</option><option value="sbp">СБП</option><option value="requisites">По реквизитам</option></select>{% endif %}</div><b>{{ '%.2f'|format(item.amount / 100) }} ₽</b></div>
         {% else %}<p class="muted">По выбранным фильтрам операций нет.</p>{% endfor %}
     </div>
     <div class="card" style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;text-align:center">
@@ -50,5 +50,14 @@
         <div style="grid-column:1/-1" class="muted">Период: {{ filters.date_from or 'начало' }} — {{ filters.date_to or 'сегодня' }}</div>
     </div>
 </div>
+<script>
+document.querySelectorAll('[data-method-order]').forEach(select => select.addEventListener('change', async () => {
+  if (!select.value) return;
+  const r = await fetch('/admin/sales/' + encodeURIComponent(select.dataset.methodOrder) + '/payment-method', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({init_data: new URLSearchParams(location.search).get('init_data') || '',club_id: {{ club_id }},payment_method:select.value})});
+  const data = await r.json().catch(()=>({}));
+  if (!r.ok) { alert(data.detail || 'Не удалось изменить способ оплаты'); return; }
+  location.reload();
+}));
+</script>
 </body>
 </html>

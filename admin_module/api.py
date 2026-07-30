@@ -206,6 +206,11 @@ class TariffChangePayload(BaseModel):
     index: int | None = None
     tariff: dict | None = None
 
+class AdminSaleMethodPayload(BaseModel):
+    init_data: str
+    club_id: int
+    payment_method: str
+
 class CashEntryPayload(BaseModel):
     init_data: str
     club_id: int
@@ -483,13 +488,31 @@ async def admin_students_page(
 def _order_payment_method(order) -> str:
     provider = str(getattr(order, "provider_payment_id", "") or "").upper()
     order_type = str(getattr(order, "type", "") or "").upper()
-    if provider.startswith("CASH") or order_type.startswith("CASH"):
+    if provider.startswith(("CASH", "OVERRIDE:CASH")) or order_type.startswith("CASH"):
         return "cash"
-    if provider.startswith("MANUAL") or "REQUISITE" in order_type:
+    if provider.startswith(("MANUAL", "OVERRIDE:REQUISITES")) or "REQUISITE" in order_type:
         return "requisites"
-    if "SBP" in order_type or provider.startswith("SBP"):
+    if "SBP" in order_type or provider.startswith(("SBP", "OVERRIDE:SBP")):
         return "sbp"
     return "card" if provider else "other"
+
+
+@router.post("/admin/sales/{order_id}/payment-method")
+async def change_payment_method(order_id: str, payload: AdminSaleMethodPayload, session: AsyncSession = Depends(get_session)):
+    club = await session.get(Club, payload.club_id)
+    tg_user = await verify_webapp_admin(club, payload.init_data)
+    method = str(payload.payment_method or "").strip().lower()
+    if method not in {"cash", "card", "sbp", "requisites"}:
+        raise HTTPException(400, "Недопустимый способ оплаты")
+    order = await session.get(PaymentOrder, order_id, with_for_update=True)
+    if not order or order.club_id != payload.club_id or order.status != "CONFIRMED":
+        raise HTTPException(404, "Операция не найдена")
+    old_method = _order_payment_method(order)
+    original = str(order.provider_payment_id or "")
+    order.provider_payment_id = f"OVERRIDE:{method.upper()}:{original}"[:255]
+    await session.commit()
+    audit_event("payment_method_changed", **await audit_actor_context(session, club, tg_user, "admin/sales/payment-method"), club_id=club.id, action="update", object_type="payment_order", object_id=order.id, old_method=old_method, new_method=method)
+    return {"ok": True, "payment_method": method}
 
 
 def _money_operation_category_label(category: str, source: str = "") -> str:
