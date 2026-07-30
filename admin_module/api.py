@@ -1201,6 +1201,10 @@ async def get_revenue_stats(
     for row in type_res.all():
         if row[0] in payment_types:
             payment_types[row[0]] = row[1]
+    cash_entries = (await session.execute(
+        select(CashEntry).where(CashEntry.club_id == club_id)
+    )).scalars().all()
+    cash_flow = calculate_cash_flow_periods(cash_entries, now=now_local)
 
     # ==========================================
     # БЛОК 2: АТЛЕТЫ И АБОНЕМЕНТЫ (Для твоего HTML)
@@ -1281,6 +1285,15 @@ async def get_revenue_stats(
             "revenue_today": round(revenue_today, 2),
             "revenue_week": round(revenue_week, 2),
             "revenue_month": round(revenue_month, 2),
+            "expenses_today": cash_flow["today_expense"],
+            "expenses_week": cash_flow["week_expense"],
+            "expenses_month": cash_flow["month_expense"],
+            "cash_income_today": cash_flow["today_income"],
+            "cash_income_week": cash_flow["week_income"],
+            "cash_income_month": cash_flow["month_income"],
+            "cash_margin_today": cash_flow["today_margin"],
+            "cash_margin_week": cash_flow["week_margin"],
+            "cash_margin_month": cash_flow["month_margin"],
             "payment_types": payment_types,
             "filters": {"date_from": date_from or "", "date_to": date_to or ""},
         }

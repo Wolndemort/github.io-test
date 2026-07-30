@@ -33,6 +33,10 @@
         }
         .empty-note { font-size: 14px; color: #a9a9a9; padding-top: 5px; }
         .muted-note { color: #a9a9a9; font-size: 13px; }
+        .revenue-filter input[type="date"] { background:#fff; color:#111; color-scheme:light; border:1px solid #aaa; }
+        .revenue-filter button, .revenue-filter a { display:inline-block; padding:10px 14px; border-radius:10px; border:1px solid #aaa; text-decoration:none; font-weight:700; }
+        .revenue-filter button { background:#111; color:#fff; }
+        .revenue-filter a { background:#fff; color:#111; }
     </style>
 </head>
 <body class="mono-theme">
@@ -140,6 +144,15 @@
             <div class="label">Выручка за месяц</div>
             <div class="value">{{ '%.2f'|format(revenue_month|default(0)) }} ₽</div>
             <div class="muted-note">Расходы: {{ '%.2f'|format(expenses_month|default(0)) }} ₽ · Маржа: {{ '%.2f'|format(cash_margin_month|default(0)) }} ₽</div>
+            <details class="athlete-dropdown">
+                <summary>Финансовая детализация</summary>
+                <div class="scroll-box">
+                    <div class="list-item"><span>Выручка сегодня</span><b>{{ '%.2f'|format(revenue_today|default(0)) }} ₽</b></div>
+                    <div class="list-item"><span>Расходы сегодня</span><b>{{ '%.2f'|format(expenses_today|default(0)) }} ₽</b></div>
+                    <div class="list-item"><span>Маржа сегодня</span><b>{{ '%.2f'|format(cash_margin_today|default(0)) }} ₽</b></div>
+                    <div class="list-item"><span>Доходы кассы за месяц</span><b>{{ '%.2f'|format(cash_income_month|default(0)) }} ₽</b></div>
+                </div>
+            </details>
         </div>
     </div>
 
@@ -158,14 +171,17 @@
 
     <div class="card mono-card">
         <div class="label">Выручка по датам</div>
-        <form method="get" action="/revenue" class="grid" style="grid-template-columns:1fr 1fr auto;gap:8px;align-items:end;">
+        <div class="revenue-filter">
+        <form method="get" action="/revenue" class="grid" style="grid-template-columns:1fr 1fr auto auto;gap:8px;align-items:end;">
             <input type="hidden" name="club_id" value="{{ club_id }}">
             <input type="hidden" name="init_data" value="{{ request.query_params.get('init_data','') }}">
             <label>С даты<input type="date" name="date_from" value="{{ filters.date_from if filters is defined else '' }}"></label>
             <label>По дату<input type="date" name="date_to" value="{{ filters.date_to if filters is defined else '' }}"></label>
             <button type="submit">Показать</button>
+            <a href="/revenue?club_id={{ club_id }}&init_data={{ request.query_params.get('init_data','')|urlencode }}">Сбросить</a>
         </form>
         <div class="muted-note" style="margin-top:10px;">{{ filters.date_from or 'Начало' }} — {{ filters.date_to or 'Сегодня' }}</div>
+        </div>
     </div>
 
     <!-- Список для обзвона (Кому нужно продление) -->

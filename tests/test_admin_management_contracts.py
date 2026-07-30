@@ -151,6 +151,10 @@ def test_stats_freeze_dropdown_has_no_visible_title_and_revenue_has_date_filters
     assert "date_to: str | None = Query(default=None)" in revenue
     assert "start_filter = moscow_date_boundary(date_from)" in revenue
     assert "end_filter = moscow_date_boundary(date_to) + timedelta(days=1)" in revenue
+    assert "Сбросить" in stats
+    assert "revenue-filter" in stats
+    assert '"cash_margin_today": cash_flow["today_margin"]' in revenue
+    assert "Финансовая детализация" in stats
 
 
 def test_admin_athlete_lists_use_collapsible_dropdown_blocks():
