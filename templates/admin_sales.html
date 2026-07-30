@@ -21,6 +21,7 @@
 </head>
 <body>
 <div class="wrap">
+    <div class="card"><a class="link" href="/webapp/client-cabinet?club_id={{ club_id }}">← В рабочий кабинет</a></div>
     <div class="card">
         <a class="link" href="/admin/students?club_id={{ club_id }}&init_data={{ request.query_params.get('init_data','')|urlencode }}">← Атлеты</a>
         <h2>Продажи</h2>
