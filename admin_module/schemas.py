@@ -47,6 +47,7 @@ class WebAppCreateStudentPayload(BaseModel):
     club_id: int
     name: str
     phone: str | None = None
+    phone_secondary: str | None = None
     birthday: str | None = None
 
 

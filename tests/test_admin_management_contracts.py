@@ -166,6 +166,8 @@ def test_webapp_create_student_has_keyboard_and_calendar_for_birthday():
     assert "replace(/\\D/g, '')" in form
     assert "showPicker" in form
     assert 'type = \'date\'' in form
+    assert 'id="phoneSecondary"' in form
+    assert 'phone_secondary:' in form
 
 
 def test_work_schedule_webapp_and_weekend_job_are_registered():

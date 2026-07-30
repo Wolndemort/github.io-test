@@ -29,7 +29,7 @@ from loguru import logger
 from sqlalchemy import select
 from admin_module.sqladmin import setup_admin
 from config import ADMIN_IDS, BASE_URL
-from database.db import init_db, engine, AsyncSessionLocal, Club, Student, CartOrder, VisitLog
+from database.db import init_db, engine, AsyncSessionLocal, Club, Student, CartOrder, VisitLog, get_student_parent_ids
 from handlers import start, user_option, buttons, payments, admin_option, super_admin_handlers,official_payment,\
     super_admin_payment
 from handlers.buttons import get_profile_keyboard
@@ -371,7 +371,8 @@ async def saas_daily_morning_check():
             bot = bots_dict[club.bot_token]
 
             # Если у студента еще нет привязанного Telegram ID (родитель не зашел в бота), пропускаем
-            if not student.parent_id:
+            parent_ids = await get_student_parent_ids(student.id, session)
+            if not parent_ids:
                 continue
 
             # 🎂 Фича 1: Поздравление с Днем Рождения (Сверяем типы date == date)
@@ -380,13 +381,14 @@ async def saas_daily_morning_check():
                     try:
                         birthday_key = f"notify:birthday:{student.club_id}:{student.id}:{today.year}"
                         if await _notification_once(birthday_key, ttl=370 * 86400):
-                            await bot.send_message(
-                                chat_id=student.parent_id,
+                            for parent_id in parent_ids:
+                                await bot.send_message(
+                                chat_id=parent_id,
                                 text=f"🎂 Клуб <b>{escape(club.name)}</b> поздравляет атлета <b>{escape(student.name)}</b> с Днём Рождения! 🎉\n"
                                      f"Желаем новых спортивных побед и крепкого здоровья!",
                                 parse_mode="HTML"
                             )
-                            logger.info(f"🎉 Поздравление с ДР отправлено атлету {student.name} (Родитель: {student.parent_id})")
+                                logger.info(f"🎉 Поздравление с ДР отправлено атлету {student.name} (Родитель: {parent_id})")
                     except Exception as e:
                         await _notification_forget(birthday_key)
                         logger.error(f"Не удалось отправить ДР сообщение родителю {student.parent_id}: {e}")
@@ -400,8 +402,9 @@ async def saas_daily_morning_check():
                         notice_key = f"notify:absent:{student.club_id}:{student.id}:{last_visit.date().isoformat()}:10"
                         if not await _notification_once(notice_key, ttl=45 * 86400):
                             continue
-                        await bot.send_message(
-                            chat_id=student.parent_id,
+                        for parent_id in parent_ids:
+                            await bot.send_message(
+                            chat_id=parent_id,
                             text=f"👋 Здравствуйте! Мы заметили, что атлет <b>{escape(student.name)}</b> не посещал тренировки уже {days_absent} дней. Мы соскучились! Ждём вас на занятиях. 😉",
                             parse_mode="HTML"
                         )
@@ -671,7 +674,7 @@ async def auto_close_sessions_job():
 
                     current_balance = student.balance_lessons
                     student_name = student.name
-                    parent_id = student.parent_id
+                    parent_ids = await get_student_parent_ids(student.id, db)
 
                     # Закрываем сессию визита в базе
                     student.last_visit = None
@@ -685,9 +688,10 @@ async def auto_close_sessions_job():
                         balance_text = "♾ Безлимит" if is_unlimited else f"{current_balance} зан."
 
                         # А) Уведомление родителю
-                        if parent_id:
+                        if parent_ids:
                             try:
-                                await bot.send_message(
+                                for parent_id in parent_ids:
+                                    await bot.send_message(
                                     chat_id=int(parent_id),
                                     text=f"🏁 <b>Тренировка завершена!</b>\n\n"
                                          f"Атлет <b>{student_name}</b> покинул зал.\n"
@@ -696,7 +700,7 @@ async def auto_close_sessions_job():
                                          f"📉 Списано: 1 занятие.\n"
                                          f"🔢 Остаток на балансе: <b>{balance_text}</b>",
                                     parse_mode="HTML"
-                                )
+                                    )
                             except Exception as e_msg:
                                 logger.warning(f"Не удалось отправить ТГ-уведомление родителю {parent_id}: {e_msg}")
 

@@ -514,12 +514,21 @@ async def webapp_create_student_submit(payload: WebAppCreateStudentPayload, db: 
     duplicate = next((student for student in existing if student.name.strip().casefold() == name.casefold() and student.birthday == birthday), None)
     if duplicate:
         raise HTTPException(status_code=409, detail="Такой атлет уже есть")
+    primary_phone = normalize_ru_phone(payload.phone) if payload.phone else None
+    secondary_phone = normalize_ru_phone(payload.phone_secondary) if payload.phone_secondary else None
+    if payload.phone and not primary_phone:
+        raise HTTPException(status_code=400, detail="Некорректный номер родителя")
+    if payload.phone_secondary and not secondary_phone:
+        raise HTTPException(status_code=400, detail="Некорректный номер второго родителя")
+    if primary_phone and secondary_phone and primary_phone == secondary_phone:
+        raise HTTPException(status_code=400, detail="Номера родителей должны отличаться")
     student = Student(
         club_id=club.id,
         parent_id=user_id,
         name=name,
         birthday=birthday,
-        parent_phone=normalize_ru_phone(payload.phone) if payload.phone else None,
+        parent_phone=primary_phone,
+        parent_phone_secondary=secondary_phone,
         discipline=_default_student_discipline(club.club_settings or {}),
         balance_lessons=0,
         expire_date=None,

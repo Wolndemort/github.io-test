@@ -10,7 +10,7 @@ from types import SimpleNamespace
 from loguru import logger
 from handlers.buttons import admin_keyboard, get_profile_keyboard
 from admin_module.utils import is_staff_or_owner
-from database.db import User, Student, Club
+from database.db import User, Student, StudentParent, Club
 from services.audit import audit_event
 
 router = Router()
@@ -288,10 +288,14 @@ async def accept_legal_handler(
             )
 
         # Безопасный запрос: тянем ВСЕХ студентов родителя в этом клубе
-        stmt = select(Student).where(
-            Student.parent_id == user_id,
-            Student.club_id == club.id
-        ).order_by(Student.name)
+        stmt = (select(Student)
+                .outerjoin(StudentParent, StudentParent.student_id == Student.id)
+                .where(
+                    Student.club_id == club.id,
+                    (Student.parent_id == user_id) | (StudentParent.parent_id == user_id),
+                )
+                .distinct()
+                .order_by(Student.name))
 
         result = await session.execute(stmt)
         students = result.scalars().all()

@@ -8,6 +8,17 @@ from services.schedule_utils import normalize_schedule_block
 ROOT = Path(__file__).parents[1]
 
 
+def test_expiring_subscription_notifications_use_all_parent_links():
+    source = (ROOT / "services" / "scheduler_jobs.py").read_text(encoding="utf-8")
+    start = source.index("async def check_abon_mailing")
+    block = source[start:source.index("async def send_daily_report_to_admins", start)]
+    assert "get_student_parent_ids(student.id, session)" in block
+    assert "for parent_id in parent_ids" in block
+    assert "Ошибка отправки (Student ID {student.id})" in block
+    assert "parent_ids = await get_student_parent_ids(student.id, session)" in block
+    assert "for parent_id in parent_ids" in block
+
+
 def test_scheduler_has_all_required_client_notification_flows():
     source = (ROOT / "services" / "scheduler_jobs.py").read_text(encoding="utf-8")
     assert "notify:no-subscription" in source

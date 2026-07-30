@@ -18,11 +18,13 @@ from database.db import (
     ClubStaff,
     PaymentOrder,
     Student,
+    StudentParent,
     User,
     VisitLog,
     create_db_backup,
     get_daily_stats,
     get_expire_students_grouped,
+    get_student_parent_ids,
 )
 from handlers.buttons import get_profile_keyboard
 from admin_module.utils import is_staff_or_owner
@@ -133,6 +135,10 @@ async def send_weekend_work_schedule():
             recipients = set()
             parents_res = await session.execute(select(Student.parent_id).where(Student.club_id == club.id, Student.parent_id.isnot(None)))
             recipients.update(int(pid) for pid in parents_res.scalars().all() if pid)
+            linked_res = await session.execute(
+                select(StudentParent.parent_id).join(Student, StudentParent.student_id == Student.id).where(Student.club_id == club.id)
+            )
+            recipients.update(int(pid) for pid in linked_res.scalars().all() if pid)
             if club.owner_id:
                 recipients.add(int(club.owner_id))
             if not recipients:
@@ -228,6 +234,10 @@ async def send_work_schedule_notice(mode: str):
             recipients = set()
             parents_res = await session.execute(select(Student.parent_id).where(Student.club_id == club.id, Student.parent_id.isnot(None)))
             recipients.update(int(pid) for pid in parents_res.scalars().all() if pid)
+            linked_res = await session.execute(
+                select(StudentParent.parent_id).join(Student, StudentParent.student_id == Student.id).where(Student.club_id == club.id)
+            )
+            recipients.update(int(pid) for pid in linked_res.scalars().all() if pid)
             if club.owner_id:
                 recipients.add(int(club.owner_id))
             if not recipients:
@@ -275,10 +285,9 @@ async def check_abon_mailing():
                 club = club_res.scalar_one_or_none()
                 club_settings = club.club_settings if club else {}
 
-                user_res = await session.execute(select(User).where(User.user_id == student.parent_id))
-                parent_user = user_res.scalar_one_or_none()
-                if not parent_user:
-                    logger.error("❌ Родтель с ID %s не найден в базе данных.", student.parent_id)
+                parent_ids = await get_student_parent_ids(student.id, session)
+                if not parent_ids:
+                    logger.error(f"❌ Родители для Student ID {student.id} не найдены в базе данных.")
                     continue
 
                 reminder_flags = _subscription_reminder_flags(student, reporting_periods()["now"])
@@ -306,29 +315,27 @@ async def check_abon_mailing():
                 lines.extend(["", "Не забудьте продлить его в меню! 🥊"])
                 text = "\n".join(lines)
 
-                reply_markup = get_profile_keyboard(
-                    user=parent_user,
-                    club_settings=club_settings,
-                    is_authorized=True,
-                    profile_mode="staff" if await is_staff_or_owner(session, club, parent_user.user_id) else "client",
-                )
-
                 if not await _notification_once(notification_key, ttl=7 * 86400):
                     continue
-                await current_bot.send_message(
-                    chat_id=student.parent_id,
-                    text=text,
-                    parse_mode="HTML",
-                    reply_markup=reply_markup,
-                )
-
-                logger.info("✅ [Клуб %s] Отправлено родителю %s", student.club_id, student.parent_id)
-                await asyncio.sleep(0.05)
+                for parent_id in parent_ids:
+                    parent_user = await session.scalar(select(User).where(User.user_id == parent_id))
+                    if not parent_user:
+                        logger.warning(f"⚠️ Родитель {parent_id} для Student ID {student.id} отсутствует в users")
+                        continue
+                    reply_markup = get_profile_keyboard(
+                        user=parent_user,
+                        club_settings=club_settings,
+                        is_authorized=True,
+                        profile_mode="staff" if await is_staff_or_owner(session, club, parent_user.user_id) else "client",
+                    )
+                    await current_bot.send_message(chat_id=parent_id, text=text, parse_mode="HTML", reply_markup=reply_markup)
+                    logger.info(f"✅ [Клуб {student.club_id}] Отправлено родителю {parent_id}")
+                    await asyncio.sleep(0.05)
 
             except Exception as exc:
                 if "notification_key" in locals():
                     await _notification_forget(notification_key)
-                logger.error("❌ Ошибка отправки (Student ID %s): %s", student.id, exc)
+                logger.error(f"❌ Ошибка отправки (Student ID {student.id}): {exc}")
 
 
 async def send_daily_report_to_admins():
@@ -440,17 +447,22 @@ async def saas_daily_morning_check():
         missing_birthdays = {}
         missing_subscriptions = {}
         for student in students:
-            if student.parent_id and not student.birthday:
-                key = (student.club_id, student.parent_id)
-                missing_birthdays.setdefault(key, []).append(student.name)
+            parent_ids = await get_student_parent_ids(student.id, session)
+            if not parent_ids:
+                continue
+            if not student.birthday:
+                for parent_id in parent_ids:
+                    key = (student.club_id, parent_id)
+                    missing_birthdays.setdefault(key, []).append(student.name)
             has_subscription = bool(
                 student.expire_date
                 and student.expire_date > now_datetime
                 and (student.balance_lessons or 0) > 0
             )
-            if student.parent_id and not has_subscription:
-                key = (student.club_id, student.parent_id)
-                missing_subscriptions.setdefault(key, []).append(student.name)
+            if not has_subscription:
+                for parent_id in parent_ids:
+                    key = (student.club_id, parent_id)
+                    missing_subscriptions.setdefault(key, []).append(student.name)
 
         missing_club_ids = {club_id for club_id, _ in missing_birthdays} | {club_id for club_id, _ in missing_subscriptions}
         clubs_result = await session.execute(select(Club).where(Club.id.in_(missing_club_ids))) if missing_club_ids else None
@@ -520,7 +532,8 @@ async def saas_daily_morning_check():
             bot = bots_dict[club.bot_token]
             settings = club.club_settings if isinstance(club.club_settings, dict) else {}
 
-            if not student.parent_id:
+            parent_ids = await get_student_parent_ids(student.id, session)
+            if not parent_ids:
                 continue
 
             if hasattr(student, "birthday") and student.birthday:
@@ -528,8 +541,9 @@ async def saas_daily_morning_check():
                     try:
                         birthday_key = f"notify:birthday:{student.club_id}:{student.id}:{today.year}"
                         if settings.get("features", {}).get("birthday_greetings", True) and await _notification_once(birthday_key, ttl=370 * 86400):
-                            await bot.send_message(
-                                chat_id=student.parent_id,
+                            for parent_id in parent_ids:
+                                await bot.send_message(
+                                chat_id=parent_id,
                                 text=(
                                     f"🎂 Клуб <b>{escape(club.name)}</b> поздравляет атлета <b>{escape(student.name)}</b> "
                                     f"с Днём Рождения! 🎉\n"
@@ -537,10 +551,10 @@ async def saas_daily_morning_check():
                                 ),
                                 parse_mode="HTML",
                             )
-                            logger.info("🎉 Поздравление с ДР отправлено атлету %s (Родитель: %s)", student.name, student.parent_id)
+                                logger.info(f"🎉 Поздравление с ДР отправлено атлету {student.name} (Родитель: {parent_id})")
                     except Exception as e:
                         await _notification_forget(birthday_key)
-                        logger.error("Не удалось отправить ДР сообщение родителю %s: %s", student.parent_id, e)
+                        logger.error(f"Не удалось отправить ДР сообщение атлету {student.id}: {e}")
 
             if student.last_visit and student.balance_lessons > 0 and not student.is_frozen:
                 last_visit = student.last_visit.replace(tzinfo=None)
@@ -552,8 +566,9 @@ async def saas_daily_morning_check():
                             continue
                         if not await _notification_once(notice_key, ttl=45 * 86400):
                             continue
-                        await bot.send_message(
-                            chat_id=student.parent_id,
+                        for parent_id in parent_ids:
+                            await bot.send_message(
+                            chat_id=parent_id,
                             text=(
                                 f"👋 Здравствуйте! Мы заметили, что атлет <b>{escape(student.name)}</b> "
                                 f"не посещал тренировки уже {days_absent} дней. Мы соскучились! "
@@ -561,7 +576,7 @@ async def saas_daily_morning_check():
                             ),
                             parse_mode="HTML",
                         )
-                        logger.info("📢 Уведомление о прогуле (10 дней) отправлено атлету %s", student.name)
+                            logger.info(f"📢 Уведомление о прогуле (10 дней) отправлено атлету {student.name} родителю {parent_id}")
                     except Exception as e:
                         await _notification_forget(notice_key)
                         logger.error("Не удалось отправить уведомление прогульщику: %s", e)

@@ -29,15 +29,11 @@ def get_profile_keyboard(user, club_id: int, club_settings: dict, is_authorized:
             web_app=WebAppInfo(url=f"{base_url}/webapp/staff-pass?club_id={club_id}&user_id={user.user_id}")
         ))
         builder.row(types.InlineKeyboardButton(
-            text="📱 FaceID для прохода",
-            web_app=WebAppInfo(url=f"{base_url}/webapp/staff-pass?club_id={club_id}&user_id={user.user_id}")
-        ))
-        builder.row(types.InlineKeyboardButton(
             text="👧 Кабинет атлетов",
             web_app=WebAppInfo(url=f"{base_url}/webapp/client-cabinet?club_id={club_id}")
         ))
         builder.row(types.InlineKeyboardButton(
-            text="📱 FaceID ребёнка",
+            text="📱 Проход ребёнка",
             web_app=WebAppInfo(url=f"{base_url}/webapp/biometric-pass?club_id={club_id}&user_id={user.user_id}")
         ))
         if club_settings.get("features", {}).get("qr_checkin", True):

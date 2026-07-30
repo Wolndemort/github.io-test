@@ -89,6 +89,9 @@
 const tg = window.Telegram.WebApp;
 tg.ready();
 tg.expand();
+Object.assign(days, {mon:'Понедельник', tue:'Вторник', wed:'Среда', thu:'Четверг', fri:'Пятница', sat:'Суббота', sun:'Воскресенье'});
+document.querySelectorAll('#day-picker option').forEach(option => { if (days[option.value]) option.textContent = days[option.value]; });
+document.querySelectorAll('.day-container[data-day]').forEach(day => { if (days[day.dataset.day]) day.querySelector('.day-title').textContent = days[day.dataset.day]; });
 const picker = document.getElementById('discipline-picker');
 const dayPicker = document.getElementById('day-picker');
 function filterSchedule(){document.querySelectorAll('.discipline-section').forEach(section => {section.hidden = section.id !== picker.value;section.querySelectorAll('.day-container').forEach(day => day.hidden = Boolean(dayPicker.value) && day.dataset.day !== dayPicker.value);});}

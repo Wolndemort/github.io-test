@@ -127,6 +127,8 @@ const days = {
   sun: 'Вс',
 };
 
+Object.assign(days, {mon:'Понедельник', tue:'Вторник', wed:'Среда', thu:'Четверг', fri:'Пятница', sat:'Суббота', sun:'Воскресенье'});
+document.querySelectorAll('#day option').forEach(option => { if (days[option.value]) option.textContent = days[option.value]; });
 const disciplineSelect = document.getElementById('d');
 const daySelect = document.getElementById('day');
 const list = document.getElementById('list');

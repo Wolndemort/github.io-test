@@ -25,6 +25,7 @@
         <h1>Создание атлета</h1>
         <p class="muted">Только создание. Редактирование и удаление через WebApp здесь недоступны.</p>
         <div class="form">
+            <label>Второй телефон родителя (необязательно)<input id="phoneSecondary" placeholder="79990000000"></label>
             <label>Имя атлета<input id="name" placeholder="Иван Иванов"></label>
             <label>Телефон родителя<input id="phone" placeholder="79990000000"></label>
             <label>Дата рождения
@@ -100,6 +101,7 @@ document.getElementById('saveBtn').onclick = async (e) => {
         club_id: {{ club_id }},
         name: document.getElementById('name').value,
         phone: document.getElementById('phone').value,
+        phone_secondary: document.getElementById('phoneSecondary').value,
         birthday: birthdayInput.value.trim(),
     };
     const res = await fetch('/webapp/client-cabinet/create-student', {

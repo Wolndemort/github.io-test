@@ -37,3 +37,12 @@ def test_invite_start_payload_requests_phone_without_changing_normal_start_flow(
     assert "request_contact=True" in source
     assert "invited_student.parent_phone" in source
     assert "invited_student.parent_phone_secondary" in source
+
+
+def test_start_menu_reads_legacy_and_additional_parent_links():
+    source = Path("handlers/start.py").read_text(encoding="utf-8")
+    assert "StudentParent" in source
+    assert ".outerjoin(StudentParent" in source
+    assert "Student.parent_id == user_id" in source
+    assert "StudentParent.parent_id == user_id" in source
+    assert ".distinct()" in source
