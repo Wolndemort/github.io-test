@@ -155,6 +155,11 @@ async def yookassa_webhook(request: Request, session: AsyncSession = Depends(get
 
     if order.status != "CONFIRMED":
         order.status = "CONFIRMED"
+        # Веб-заказ создаётся до оплаты с временным MANUAL:* ID, чтобы
+        # отличать его от наличной продажи. После успешного webhook нужно
+        # обязательно заменить его реальным ID ЮKassa, иначе касса покажет
+        # онлайн-платёж как оплату по реквизитам.
+        order.provider_payment_id = str(payment_id)
         payment_method = object_data.get("payment_method", {})
         payment_method_id = payment_method.get("id")
         saved_card_flag = payment_method.get("saved", False)
