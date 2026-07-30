@@ -1290,6 +1290,23 @@ async def get_revenue_stats(
             {"request": request, "empty": True, "club_name": club_name, "filters": {"date_from": date_from or "", "date_to": date_to or ""}}
         )
 
+    payment_top_query = select(PaymentOrder.student_id, func.sum(PaymentOrder.amount_kopecks)).where(
+        PaymentOrder.club_id == club_id, PaymentOrder.status == "CONFIRMED", PaymentOrder.created_at >= start_filter
+    ).group_by(PaymentOrder.student_id)
+    if end_filter:
+        payment_top_query = payment_top_query.where(PaymentOrder.created_at < end_filter)
+    student_names = {s.id: s.name for s in students}
+    top_students = [{"name": student_names.get(student_id, "Без привязанного атлета"), "amount": round((amount or 0) / 100, 2)}
+                    for student_id, amount in sorted((await session.execute(payment_top_query)).all(), key=lambda row: row[1] or 0, reverse=True)[:5]]
+
+    product_top_query = select(CartItem.title, func.sum(CartItem.quantity), func.sum(CartItem.quantity * CartItem.unit_price_kopecks)).join(
+        CartOrder, CartOrder.id == CartItem.cart_order_id
+    ).where(CartOrder.club_id == club_id, CartOrder.status == "CONFIRMED", CartOrder.created_at >= start_filter).group_by(CartItem.title)
+    if end_filter:
+        product_top_query = product_top_query.where(CartOrder.created_at < end_filter)
+    top_products = [{"name": title, "quantity": int(quantity or 0), "amount": round((amount or 0) / 100, 2)}
+                    for title, quantity, amount in sorted((await session.execute(product_top_query)).all(), key=lambda row: row[1] or 0, reverse=True)[:5]]
+
     student_metrics = calculate_student_metrics(students, now=now_local)
     total_athletes = student_metrics["total_athletes"]
     total_parents = student_metrics["total_parents"]
@@ -1319,9 +1336,6 @@ async def get_revenue_stats(
     ]
 
     # Сортируем топ-атлетов по остатку занятий (первые 5 человек)
-    sorted_students = sorted(students, key=lambda x: x.balance_lessons or 0, reverse=True)
-    top_students = [{"name": s.name, "balance": s.balance_lessons or 0} for s in sorted_students[:5]]
-
     # Считаем Retention (Удержание). Например: процент тех, у кого баланс > 0
     retention_rate = student_metrics["retention_rate"]
 
@@ -1348,6 +1362,7 @@ async def get_revenue_stats(
             "frozen_students": frozen_students,
             "inactive_students": inactive_students,
             "top_students": top_students,
+            "top_products": top_products,
 
             # Финансы (на случай, если захочешь вывести их туда же)
             "revenue_today": round(revenue_today, 2),
