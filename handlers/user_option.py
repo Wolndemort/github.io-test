@@ -116,7 +116,7 @@ async def universal_profile_handler(
     stmt = select(Student).where(
         or_(Student.parent_id == user_id, StudentParent.parent_id == user_id),
         Student.club_id == club_id
-    ).order_by(Student.name).execution_options(populate_existing=True)
+    ).distinct().order_by(Student.name).execution_options(populate_existing=True)
 
     result = await session.execute(stmt)
     students = result.scalars().all()
@@ -177,8 +177,14 @@ async def universal_profile_handler(
 
             status_text += f"\n👤 <b>{s.name}</b>: {status}\n  • {lessons_info}"
 
+    # Telegram ограничивает текст сообщения 4096 символами. Второй родитель
+    # может добавить много связанных карточек, поэтому не даём профилю
+    # падать с MESSAGE_TOO_LONG.
+    profile_body = f"{status_text}{birthday_note}"
+    if len(profile_body) > 3600:
+        profile_body = profile_body[:3600].rsplit("\n", 1)[0] + "\n\n<i>Список сокращён. Откройте подробный статус для полного списка.</i>"
     final_text = (
-        f"👤 <b>Профиль атлетов</b>\n\n{status_text}{birthday_note}\n\n"
+        f"👤 <b>Профиль атлетов</b>\n\n{profile_body}\n\n"
         "<i>Используйте кнопки ниже для действий:</i>"
     )
     current_user = SimpleNamespace(user_id=user_id, club_id=club.id)

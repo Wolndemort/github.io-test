@@ -969,7 +969,9 @@ async def webapp_buy_freeze_page(request: Request, club_id: int, student_id: int
     if not tg_user:
         raise HTTPException(status_code=403, detail="Доступ запрещен")
     student = await db.get(Student, student_id)
-    if not student or student.club_id != club_id or student.parent_id != int(tg_user.get("id", 0)):
+    parent_id = int(tg_user.get("id", 0))
+    linked = await db.scalar(select(StudentParent.student_id).where(StudentParent.student_id == student_id, StudentParent.parent_id == parent_id))
+    if not student or student.club_id != club_id or (student.parent_id != parent_id and not linked):
         raise HTTPException(status_code=403, detail="Атлет не найден")
     settings = club.club_settings or {}
     price = settings.get("limits", {}).get("freeze_price_per_day", 0)
@@ -987,7 +989,9 @@ async def webapp_buy_freeze_submit(payload: WebAppActionPayload, request: Reques
     if not tg_user:
         raise HTTPException(status_code=403, detail="Доступ запрещен")
     student = await db.get(Student, payload.student_id, with_for_update=True)
-    if not student or student.club_id != payload.club_id or student.parent_id != int(tg_user.get("id", 0)):
+    parent_id = int(tg_user.get("id", 0))
+    linked = await db.scalar(select(StudentParent.student_id).where(StudentParent.student_id == payload.student_id, StudentParent.parent_id == parent_id))
+    if not student or student.club_id != payload.club_id or (student.parent_id != parent_id and not linked):
         raise HTTPException(status_code=403, detail="Атлет не найден")
     payment_method = _normalize_payment_method(payload.payment_method)
     price_per_day = float((club.club_settings or {}).get("limits", {}).get("freeze_price_per_day", 0))
