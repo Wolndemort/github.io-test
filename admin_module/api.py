@@ -654,7 +654,7 @@ async def cash_register_page(request: Request, session: AsyncSession = Depends(g
             "online_income": online_income,
             "expenses": expenses,
             "balance": cash_income - expenses,
-            "margin": cash_income - expenses,
+            "margin": income - expenses,
             "cash_income_total": cash_income_total,
             "cash_expenses_total": cash_expenses_total,
             "cash_margin_total": cash_margin_total,

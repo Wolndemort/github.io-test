@@ -49,9 +49,9 @@ button{background:#fff;color:#111;font-weight:bold}
   <button id="add">Добавить</button>
 </div>
 <div class="card">
-  <h3>Все операции</h3>
+  <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap"><h3 style="margin:0">Все операции</h3><select id="operation-filter" style="width:auto;min-width:150px"><option value="all">Все категории</option><option value="product">Товары</option><option value="subscription">Абонементы</option><option value="freeze">Заморозки</option><option value="manual">Ручные операции</option></select></div>
   {% for row in rows %}
-  <div class="row">
+  <div class="row operation-row" data-category="{{ 'manual' if row.source == 'manual' else row.category }}">
     {% if row.source == 'manual' %}<button class="delete-op" type="button" title="Удалить операцию" aria-label="Удалить операцию" data-id="{{ row.id }}">🗑️</button>{% elif row.source == 'sale' and row.method == 'cash' and row.category == 'product' %}<button class="delete-sale" type="button" title="Удалить наличную продажу" aria-label="Удалить наличную продажу" data-sale-id="{{ row.id }}">🗑️</button>{% endif %}
     <span>{{ row.created_at|moscow_time if row.created_at else '' }} · {{ row.category_label if row.category_label is defined else row.category }} · {{ {'cash':'Наличные','sbp':'СБП','requisites':'По реквизитам','card':'Карта / онлайн'}.get(row.method, 'Ручная') }}<br><small class="muted">Кто: {{ row.actor_label or '—' }} · Кому: {{ row.recipient_label or '—' }}<br>Что и за что: {{ row.reason or row.description or '—' }} · {{ row.source }}</small></span>
     <b class="{{ row.entry_type }}">{{ '+' if row.entry_type == 'income' else '-' }}{{ '%.2f'|format(row.amount_kopecks/100) }} ₽</b>
@@ -62,6 +62,12 @@ button{background:#fff;color:#111;font-weight:bold}
 </div>
 <script>
 const tg=Telegram.WebApp;tg.ready();
+document.getElementById('operation-filter')?.addEventListener('change', (event) => {
+  const selected = event.target.value;
+  document.querySelectorAll('.operation-row').forEach(row => {
+    row.style.display = selected === 'all' || row.dataset.category === selected ? '' : 'none';
+  });
+});
 document.querySelectorAll('.delete-op').forEach(button=>button.onclick=async()=>{
   if(!confirm('Удалить эту операцию?')) return;
   const r=await fetch('/admin/cash/entries/'+button.dataset.id+'/delete',{
