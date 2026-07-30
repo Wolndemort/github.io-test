@@ -113,10 +113,12 @@ async def universal_profile_handler(
     now_naive = datetime.now(timezone.utc).replace(tzinfo=None)
 
     # Запрашиваем студентов этого родителя для текущего клуба
+    # Важно: StudentParent нельзя добавлять в WHERE без JOIN — это отдаёт
+    # всех атлетов клуба из-за декартова произведения.
     stmt = select(Student).where(
-        or_(Student.parent_id == user_id, StudentParent.parent_id == user_id),
+        Student.parent_id == user_id,
         Student.club_id == club_id
-    ).distinct().order_by(Student.name).execution_options(populate_existing=True)
+    ).order_by(Student.name).execution_options(populate_existing=True)
 
     result = await session.execute(stmt)
     students = result.scalars().all()
