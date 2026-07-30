@@ -639,7 +639,10 @@ async def cash_register_page(request: Request, session: AsyncSession = Depends(g
     expenses = sum(r["amount_kopecks"] for r in rows if r["entry_type"] == "expense")
     cash_income_total = sum(r["amount_kopecks"] for r in rows if r["entry_type"] == "income" and r.get("method") == "cash") / 100
     cash_expenses_total = sum(r["amount_kopecks"] for r in rows if r["entry_type"] == "expense") / 100
-    cash_margin_total = cash_income_total - cash_expenses_total
+    # Маржа учитывает весь подтверждённый доход, включая онлайн и СБП.
+    # Наличные остаются отдельным показателем cash_income_total.
+    total_income = income / 100
+    cash_margin_total = total_income - cash_expenses_total
     return templates.TemplateResponse(
         "cash_register.html",
         {

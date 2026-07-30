@@ -159,8 +159,9 @@ async def yookassa_webhook(request: Request, session: AsyncSession = Depends(get
         # отличать его от наличной продажи. После успешного webhook нужно
         # обязательно заменить его реальным ID ЮKassa, иначе касса покажет
         # онлайн-платёж как оплату по реквизитам.
-        order.provider_payment_id = str(payment_id)
         payment_method = object_data.get("payment_method", {})
+        payment_kind = str(payment_method.get("type", "") or "").strip().lower()
+        order.provider_payment_id = f"SBP:{payment_id}" if payment_kind == "sbp" else str(payment_id)
         payment_method_id = payment_method.get("id")
         saved_card_flag = payment_method.get("saved", False)
 

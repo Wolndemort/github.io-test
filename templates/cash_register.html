@@ -37,7 +37,7 @@ button{background:#fff;color:#111;font-weight:bold}
       <div><div class="muted">Расходы</div><h3 class="expense">{{ '%.2f'|format(expenses/100) }} ₽</h3></div>
       <div><div class="muted">Маржа</div><h3>{{ '%.2f'|format(margin/100) }} ₽</h3></div>
     </div>
-    <div style="margin-top:10px;color:#aaa">Итого поток: доходы {{ '%.2f'|format(cash_income_total) }} ₽ · расходы {{ '%.2f'|format(cash_expenses_total) }} ₽ · маржа {{ '%.2f'|format(cash_margin_total) }} ₽</div>
+    <div style="margin-top:10px;color:#aaa">Итого поток: все доходы {{ '%.2f'|format(income/100) }} ₽ · наличные {{ '%.2f'|format(cash_income_total) }} ₽ · расходы {{ '%.2f'|format(cash_expenses_total) }} ₽ · маржа {{ '%.2f'|format(cash_margin_total) }} ₽</div>
   </div>
 </div>
 <div class="card">
