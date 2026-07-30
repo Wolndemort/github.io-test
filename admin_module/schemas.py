@@ -36,6 +36,14 @@ class WebAppBuySubscriptionPayload(BaseModel):
     payment_method: str = "bank_card"
 
 
+class WebAppCashSubscriptionPayload(BaseModel):
+    init_data: str
+    club_id: int
+    student_id: int
+    sport_type: str
+    tariff_idx: int
+
+
 class WebAppBindPhonePayload(BaseModel):
     init_data: str
     club_id: int

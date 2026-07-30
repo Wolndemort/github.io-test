@@ -207,6 +207,7 @@ def admin_keyboard(club_id: int, club_settings: dict, subscription_date: datetim
 
     if is_full_access or "cash_view" in allowed:
         builder.row(types.InlineKeyboardButton(text="💵 Принять наличку", callback_data="admin_cash_list"))
+        builder.row(types.InlineKeyboardButton(text="💵 WebApp: наличный абонемент", web_app=types.WebAppInfo(url=f"https://{club_id}.speedycrm.ru/webapp/admin-cash-subscription?club_id={club_id}")))
         builder.row(types.InlineKeyboardButton(text="💰 Касса и журнал", web_app=types.WebAppInfo(url=f"https://{club_id}.speedycrm.ru/admin/cash?club_id={club_id}")))
 
     if is_full_access or allowed:

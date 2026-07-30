@@ -52,7 +52,7 @@ from sqlalchemy.orm import selectinload
 from starlette import status
 from database.db import User, Student, StudentParent, Club, ClubStaff, ClubProduct, CartOrder, CartItem, CashEntry, AuditEntry, VisitLog, get_student_parent_ids
 from database.db import purchase_student_freeze
-from admin_module.schemas import AdminStudentUpdate, AdminStudentCreate, StudentInvitePayload
+from admin_module.schemas import AdminStudentUpdate, AdminStudentCreate, StudentInvitePayload, WebAppCashSubscriptionPayload
 from database.db import get_session
 from config import fastapi_key
 from aiogram import Bot
@@ -960,6 +960,48 @@ async def admin_delete_student(
         changes=before,
     )
     return {"ok": True}
+
+
+@router.get("/webapp/admin-cash-subscription", response_class=HTMLResponse)
+async def admin_cash_subscription_page(request: Request, club_id: int = Query(...), init_data: str | None = Query(None), db: AsyncSession = Depends(get_session)):
+    club = await db.get(Club, club_id)
+    if not init_data:
+        return telegram_init_gate("/webapp/admin-cash-subscription", club_id, "Откройте продажу наличного абонемента из Telegram")
+    await verify_webapp_staff(club, init_data, db, "cash_view")
+    students = (await db.execute(select(Student).where(Student.club_id == club_id).order_by(Student.name))).scalars().all()
+    settings = club.club_settings or {}
+    disciplines = settings.get("disciplines", {})
+    student_data = [{"id": s.id, "name": s.name, "discipline": s.discipline, "expire_date": s.expire_date.isoformat() if s.expire_date else None, "balance_lessons": s.balance_lessons or 0, "is_frozen": bool(s.is_frozen)} for s in students]
+    return templates.TemplateResponse("admin_cash_subscription.html", {"request": request, "club": club, "club_id": club_id, "students": student_data, "disciplines": disciplines})
+
+
+@router.post("/webapp/admin-cash-subscription")
+async def admin_cash_subscription(payload: WebAppCashSubscriptionPayload, db: AsyncSession = Depends(get_session)):
+    club = await db.get(Club, payload.club_id)
+    tg_user = await verify_webapp_staff(club, payload.init_data, db, "cash_view")
+    student = await db.get(Student, payload.student_id, with_for_update=True)
+    if not student or student.club_id != club.id:
+        raise HTTPException(status_code=404, detail="Атлет не найден")
+    settings = club.club_settings or {}
+    discipline = (payload.sport_type or student.discipline or "").strip()
+    cfg = (settings.get("disciplines", {}) or {}).get(discipline) or {}
+    tariffs = cfg.get("tariffs", [])
+    if payload.tariff_idx < 0 or payload.tariff_idx >= len(tariffs):
+        raise HTTPException(status_code=400, detail="Тариф не найден")
+    tariff = tariffs[payload.tariff_idx]
+    count = int(tariff.get("count", 0) or 0)
+    days = int(tariff.get("days", 30) or 30)
+    price = int(tariff.get("price", 0) or 0) * 100
+    if count < 1 or days < 1 or price < 0:
+        raise HTTPException(status_code=400, detail="Некорректный тариф")
+    abon_result = await add_abon(student.id, count, db, club.id, settings, days_to_add=days, discipline=discipline)
+    if not abon_result:
+        raise HTTPException(status_code=409, detail="Не удалось применить абонемент")
+    order_id = f"CASH_WEBAPP_{uuid.uuid4().hex[:20].upper()}"
+    db.add(PaymentOrder(id=order_id, user_id=int(tg_user.get("id", 0)), student_id=student.id, club_id=club.id, discipline=discipline, amount_kopecks=price, status="CONFIRMED", type="CASH_SUBSCRIPTION", provider_payment_id=f"CASH:{order_id}", lesson_count=count, days_to_add=days))
+    await db.commit()
+    audit_event("webapp_cash_subscription_created", club_id=club.id, actor_user_id=int(tg_user.get("id", 0)), student_id=student.id, amount_kopecks=price, discipline=discipline, lesson_count=count, days_to_add=days)
+    return {"ok": True, "student": student.name, "expire_date": abon_result[0], "balance_lessons": student.balance_lessons, "order_id": order_id}
 
 
 @router.post("/admin/students")
