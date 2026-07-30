@@ -238,8 +238,11 @@ async def detailed_status_handler(
     now = datetime.now(timezone.utc)
 
     # Запрашиваем студентов этого родителя для текущего клуба
+    # QR-код доступен только атлетам, привязанным к текущему родителю.
+    # Не используем StudentParent без JOIN: это превращает запрос в декартово
+    # произведение и возвращает список всех атлетов клуба.
     stmt = select(Student).where(
-        or_(Student.parent_id == user_id, StudentParent.parent_id == user_id),
+        Student.parent_id == user_id,
         Student.club_id == club.id
     ).order_by(Student.name)
 
