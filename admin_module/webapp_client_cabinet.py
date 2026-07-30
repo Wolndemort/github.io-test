@@ -30,7 +30,7 @@ from aiogram import Bot
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from handlers.skud import trigger_dingtian_turnstile
 from services.gate_control import process_athlete_gate_pass
-from services.staff_permissions import staff_can
+from services.staff_permissions import staff_can, permissions_for_staff
 from middlewares.db_saas_midleware import SUPER_ADMIN_IDS
 
 
@@ -384,7 +384,6 @@ async def staff_open_turnstile(payload: dict, request: Request, db: AsyncSession
     if not tg_user:
         raise HTTPException(status_code=403, detail="Ошибка безопасности данных")
     user_id = int(tg_user.get("id", 0))
-    is_staff_mode = await _is_staff_webapp_user(db, club, user_id)
     is_owner = int(club.owner_id or 0) == user_id
     is_staff = bool(
         is_owner
@@ -439,6 +438,17 @@ async def get_client_cabinet_page(request: Request, club_id: int, init_data: str
         raise HTTPException(status_code=403, detail="Доступ запрещен")
     user_id = int(tg_user.get("id", 0))
     is_staff_mode = await _is_staff_webapp_user(db, club, user_id)
+    is_owner = int(getattr(club, "owner_id", 0) or 0) == user_id
+    staff_row = None if is_owner else await db.scalar(select(ClubStaff).where(
+        ClubStaff.club_id == club_id,
+        ClubStaff.telegram_id == user_id,
+        ClubStaff.is_active.is_(True),
+    ))
+    staff_permissions = (
+        {"*"}
+        if is_owner or user_id in {int(value) for value in SUPER_ADMIN_IDS}
+        else permissions_for_staff(staff_row)
+    )
     user = await _ensure_webapp_user_linked(db, user_id, club_id)
     if not user and not is_staff_mode:
         return await webapp_auth_help_page(request=request, club_id=club_id, init_data=init_data, db=db)
@@ -459,6 +469,7 @@ async def get_client_cabinet_page(request: Request, club_id: int, init_data: str
             "club_name": club.name if club else "",
             "profile_mode": "staff" if is_staff_mode else "client",
             "is_staff_mode": is_staff_mode,
+            "staff_permissions": staff_permissions,
             "logo_url": f"{_absolute_webapp_url(request, loading['logo_url'])}?v={loading.get('logo_rev', '')}" if loading.get("logo_url") else "",
             "students": students,
             "user_name": (user.full_name if user else None) or tg_user.get("first_name", ""),

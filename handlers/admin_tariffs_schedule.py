@@ -259,18 +259,27 @@ async def admin_delete_tariff(callback: types.CallbackQuery, club_settings: dict
 
 @router.callback_query(F.data.startswith("input_tar_"))
 async def admin_start_tariff_edit(callback: types.CallbackQuery, state: FSMContext, club_id: int):
-    parts = callback.data.split("_")
-    await state.update_data(edit_type=parts[2], disc_id=parts[3], tariff_idx=int(parts[4]), club_id=club_id)
-    if parts[2] == "price":
+    # Формат: input_tar_<поле>_<код дисциплины>_<индекс тарифа>.
+    # Код дисциплины может содержать символы подчёркивания, поэтому нельзя
+    # брать его через фиксированные позиции split("_").
+    raw = callback.data.removeprefix("input_tar_")
+    field_and_disc, tariff_idx_raw = raw.rsplit("_", 1)
+    edit_type, disc_id = field_and_disc.split("_", 1)
+    try:
+        tariff_idx = int(tariff_idx_raw)
+    except ValueError:
+        return await callback.answer("Некорректный тариф", show_alert=True)
+    await state.update_data(edit_type=edit_type, disc_id=disc_id, tariff_idx=tariff_idx, club_id=club_id)
+    if edit_type == "price":
         await state.set_state(AdminTariffStates.waiting_for_price)
         await callback.message.answer("💰 Введите новую <b>стоимость</b> тарифа (целое число, например 4000):", parse_mode="HTML")
-    elif parts[2] == "days":
+    elif edit_type == "days":
         await state.set_state(AdminTariffStates.waiting_for_days)
         await callback.message.answer("⏳ Введите новое <b>количество дней</b> действия абонемента:", parse_mode="HTML")
-    elif parts[2] == "count":
+    elif edit_type == "count":
         await state.set_state(AdminTariffStates.waiting_for_count)
         await callback.message.answer("🔢 <b>Введите новое количество занятий.</b>\n\n♾ Для безлимитного тарифа напишите <b>Безлимит</b>.", parse_mode="HTML")
-    elif parts[2] == "min_age":
+    elif edit_type == "min_age":
         await state.set_state(AdminTariffStates.waiting_for_min_age)
         await callback.message.answer("👶 <b>Возрастной ценз для тарифа:</b>\n\nВведите <b>минимальный возраст</b> ребенка в годах (целое число, например: <code>8</code> для бокса).\n\n<i>Введите <code>0</code>, если у этого тарифа нет ограничений по возрасту.</i>", parse_mode="HTML")
     await callback.answer()
