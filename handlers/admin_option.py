@@ -589,6 +589,19 @@ async def staff_manage(callback: types.CallbackQuery, club: Club, session: Async
     if not (is_owner or is_super_admin):
         return await callback.answer("Доступ запрещён: персоналом управляет владелец клуба.", show_alert=True)
     staff = (await session.execute(select(ClubStaff).where(ClubStaff.club_id == club.id).order_by(ClubStaff.id))).scalars().all()
+    # Сверяем старые записи с Telegram: в них могло сохраниться неверное имя.
+    names_changed = False
+    for item in staff:
+        try:
+            chat = await callback.bot.get_chat(item.telegram_id)
+            actual_name = getattr(chat, "full_name", None) or getattr(chat, "username", None)
+            if actual_name and actual_name != item.full_name:
+                item.full_name = actual_name
+                names_changed = True
+        except Exception:
+            continue
+    if names_changed:
+        await session.commit()
     text = "👔 <b>Персонал клуба</b>\n\n" + ("\n".join(f"• <code>{x.telegram_id}</code> — {x.full_name or 'без имени'} — <b>{x.role}</b> — {'✅' if x.is_active else '❌'}" for x in staff) or "Сотрудников пока нет.")
     kb = InlineKeyboardBuilder()
     for item in staff:
