@@ -12,6 +12,7 @@
   </style>
 </head>
 <body>
+{% include "_staff_back_button.html" %}
 <div class="wrap">
   <div class="card"><a href="/webapp/client-cabinet?club_id={{ club_id }}" style="color:#fff">← В рабочий кабинет</a></div>
   <div class="card"><a href="/webapp/staff-pass?club_id={{ club_id }}" style="color:#fff">← В кабинет сотрудника</a><h2>Заморозка абонементов</h2><p class="muted">Доступ только для администратора. Стандартный срок: {{ freeze_days }} дн.</p></div>

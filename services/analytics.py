@@ -92,6 +92,10 @@ def calculate_student_metrics(students_models: Iterable[Any], now: datetime | No
     sleeping_students = [
         s for s in students
         if not getattr(s, "is_frozen", 0)
+        # A current active session is represented by last_visit and must
+        # override an older historical VisitLog record.
+        and not ((_utc_naive(getattr(s, "last_visit", None)) is not None)
+                 and _utc_naive(getattr(s, "last_visit", None)) > now - timedelta(minutes=150))
         and (latest_visits.get(getattr(s, "id", None), _utc_naive(getattr(s, "last_visit", None))) is None
              or latest_visits.get(getattr(s, "id", None), _utc_naive(getattr(s, "last_visit", None))) <= now - timedelta(days=14))
     ]

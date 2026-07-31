@@ -33,6 +33,7 @@
   </style>
 </head>
 <body>
+{% include "_staff_back_button.html" %}
 <div class="wrap">
   <div class="card" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:0">
     <a class="chip" style="text-align:center;text-decoration:none" href="/admin?club_id={{ club_id }}&init_data={{ request.query_params.get('init_data','')|urlencode }}">← В панель</a>
