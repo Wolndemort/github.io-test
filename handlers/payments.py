@@ -19,6 +19,7 @@ from services.abuse_guard import rate_limit, audit_block
 from services.audit import audit_event
 from services.order_notifications import build_owner_receipt_text, format_order_items, resolve_user_label
 from services.payment_requisites import get_payment_info_text
+from services.availability import payment_availability
 
 
 router = Router()
@@ -302,6 +303,9 @@ async def process_kids_limit(
         types.InlineKeyboardButton(text="↩️ Перевод на карту (вручную)", callback_data="pay_method_sbp")
     ])
 
+    online_enabled = payment_availability(club_settings)["online"]
+    if not online_enabled:
+        inline_keyboard = [row for row in inline_keyboard if not any(button.callback_data in {"pay_one_click", "pay_method_official", "pay_method_official_force_new", "pay_method_sbp_yookassa"} for button in row)]
     kb = types.InlineKeyboardMarkup(inline_keyboard=inline_keyboard)
 
     text = (

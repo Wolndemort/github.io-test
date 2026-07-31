@@ -36,8 +36,8 @@
     <p class="muted" style="margin:8px 0 0;">Подсказка: безлимитный тариф отмечается техническим значением <b>999</b>.</p>
     <label style="display:block;margin-top:12px;">Способ оплаты
         <select id="payment_method" style="width:100%;padding:12px;margin-top:6px;">
-            <option value="bank_card">Картой</option>
-            <option value="sbp" {% if not sbp_enabled %}disabled{% endif %}>СБП{% if not sbp_enabled %} (недоступно){% endif %}</option>
+            {% if online_enabled %}<option value="bank_card">Картой</option>{% endif %}
+            {% if sbp_enabled %}<option value="sbp">СБП</option>{% endif %}
             <option value="requisites">По реквизитам</option>
         </select>
     </label>

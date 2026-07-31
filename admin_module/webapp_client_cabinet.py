@@ -26,6 +26,7 @@ from services.yookassa_client import YooKassaClient
 from services.input_normalization import normalize_ru_phone
 from services.visit_history import attach_student_names, group_completed_sessions, summarize_payment_entry
 from services.payment_requisites import get_payment_info_text, build_payment_instruction_text
+from services.availability import payment_availability, turnstile_enabled
 from aiogram import Bot
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from handlers.skud import trigger_dingtian_turnstile
@@ -215,6 +216,8 @@ async def get_staff_pass_page(request: Request, club_id: int, user_id: int | Non
     if not is_staff:
         raise HTTPException(status_code=403, detail="Доступ только для сотрудников")
     settings = (club.club_settings or {}) if club else {}
+    if not turnstile_enabled(settings):
+        raise HTTPException(status_code=404, detail="Проход по Face ID отключён администратором")
     ui = settings.get("ui", {}) if isinstance(settings.get("ui", {}), dict) else {}
     loading = ui.get("loading", {}) if isinstance(ui.get("loading", {}), dict) else {}
     return templates.TemplateResponse(
@@ -761,9 +764,9 @@ async def webapp_buy_subscription_page(request: Request, club_id: int, init_data
     students = (await db.execute(select(Student).where(Student.parent_id == user.user_id, Student.club_id == club_id).order_by(Student.name))).scalars().all()
     settings = club.club_settings or {}
     disciplines = settings.get("disciplines", {})
-    sbp_enabled = bool(settings.get("payments", {}).get("yookassa_sbp_enabled", True))
+    payment_modes = payment_availability(settings)
     payment_info = get_payment_info_text(settings)
-    return templates.TemplateResponse("webapp_buy_subscription.html", {"request": request, "club": club, "club_id": club_id, "students": students, "disciplines": disciplines, "sbp_enabled": sbp_enabled, "payment_info": payment_info})
+    return templates.TemplateResponse("webapp_buy_subscription.html", {"request": request, "club": club, "club_id": club_id, "students": students, "disciplines": disciplines, "payment_modes": payment_modes, "sbp_enabled": payment_modes["sbp"], "online_enabled": payment_modes["online"], "payment_info": payment_info})
 
 
 @router.post("/webapp/client-cabinet/buy-subscription")
@@ -796,6 +799,9 @@ async def webapp_buy_subscription_submit(payload: WebAppBuySubscriptionPayload, 
         raise HTTPException(status_code=400, detail=age_error)
     amount_kopecks = int(float(price) * 100)
     payment_method = _normalize_payment_method(payload.payment_method)
+    payment_modes = payment_availability(club.club_settings)
+    if payment_method in {"bank_card", "sbp"} and not payment_modes["online"]:
+        raise HTTPException(status_code=400, detail="Онлайн-оплата отключена администратором")
     pay_settings = (club.club_settings or {}).get("payments", {})
     shop_id = pay_settings.get("yookassa_shop_id")
     secret_key = pay_settings.get("yookassa_secret_key")
@@ -980,9 +986,9 @@ async def webapp_buy_freeze_page(request: Request, club_id: int, student_id: int
         raise HTTPException(status_code=403, detail="Атлет не найден")
     settings = club.club_settings or {}
     price = settings.get("limits", {}).get("freeze_price_per_day", 0)
-    sbp_enabled = bool(settings.get("payments", {}).get("yookassa_sbp_enabled", True))
+    payment_modes = payment_availability(settings)
     payment_info = get_payment_info_text(settings)
-    return templates.TemplateResponse("webapp_buy_freeze.html", {"request": request, "club": club, "student": student, "club_id": club_id, "price": price, "sbp_enabled": sbp_enabled, "payment_info": payment_info})
+    return templates.TemplateResponse("webapp_buy_freeze.html", {"request": request, "club": club, "student": student, "club_id": club_id, "price": price, "payment_modes": payment_modes, "sbp_enabled": payment_modes["sbp"], "online_enabled": payment_modes["online"], "payment_info": payment_info})
 
 
 @router.post("/webapp/client-cabinet/buy-freeze")
@@ -999,6 +1005,9 @@ async def webapp_buy_freeze_submit(payload: WebAppActionPayload, request: Reques
     if not student or student.club_id != payload.club_id or (student.parent_id != parent_id and not linked):
         raise HTTPException(status_code=403, detail="Атлет не найден")
     payment_method = _normalize_payment_method(payload.payment_method)
+    payment_modes = payment_availability(club.club_settings)
+    if payment_method in {"bank_card", "sbp"} and not payment_modes["online"]:
+        raise HTTPException(status_code=400, detail="Онлайн-оплата отключена администратором")
     price_per_day = float((club.club_settings or {}).get("limits", {}).get("freeze_price_per_day", 0))
     if price_per_day <= 0:
         raise HTTPException(status_code=400, detail="Покупка заморозки отключена")

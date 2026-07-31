@@ -1049,6 +1049,22 @@ docker compose logs --tail=100 gym-api
 
 ### Staff onboarding is not client onboarding
 
+### Fallback доступности оплат и прохода (31.07.2026)
+
+Единый модуль `services/availability.py` определяет доступность пользовательских способов оплаты:
+
+- онлайн-карта доступна только при `features.online_payments=true` и заполненных `yookassa_shop_id`/`yookassa_secret_key`;
+- СБП доступна только при тех же условиях и `payments.yookassa_sbp_enabled=true`;
+- оплата по реквизитам остаётся fallback всегда;
+- правило применяется в магазине, корзине, покупке абонемента, покупке заморозки и клавиатурах бота;
+- сервер дополнительно отклоняет старые запросы карты/СБП, даже если пользователь открыл устаревшую страницу.
+
+При `turnstile.enabled=false` пользовательская кнопка Face ID и страница прохода недоступны. Существующие посещения, ручная отметка и остальные операции не меняются.
+
+Контрактные тесты fallback находятся в `tests/test_payment_fallback_availability.py`.
+
+Последняя проверка: `203 passed`.
+
 - A newly hired employee is identified by `ClubStaff.telegram_id`; they do not need a client `User` record, phone binding, or a student card to open the staff WebApp cabinet.
 - The client cabinet bypass applies only to an active owner/staff identity. Ordinary clients still use the normal Telegram/phone binding flow.
 - Never create a fake student or bind a staff phone just to make the cabinet open. Staff are not parents and must not inflate parent/client statistics.

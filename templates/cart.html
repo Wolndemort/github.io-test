@@ -7,8 +7,8 @@
 <div class="paybar">
   <label style="display:block;margin-bottom:8px;">Способ оплаты
     <select id="payment_method" class="pay-method">
-      <option value="bank_card">Картой</option>
-      <option value="sbp" {% if not sbp_enabled %}disabled{% endif %}>СБП{% if not sbp_enabled %} (недоступно){% endif %}</option>
+      {% if online_enabled %}<option value="bank_card">Картой</option>{% endif %}
+      {% if sbp_enabled %}<option value="sbp">СБП</option>{% endif %}
       <option value="requisites">По реквизитам</option>
     </select>
   </label>

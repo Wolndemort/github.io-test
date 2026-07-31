@@ -41,6 +41,7 @@ from admin_module.api import (
 from services.order_notifications import resolve_user_label
 from services.schedule_utils import normalize_schedule_block
 from services.payment_requisites import get_payment_info_text
+from services.availability import payment_availability
 
 def _normalize_category(value: str | None) -> str:
     return " ".join((value or "other").strip().casefold().replace("ё", "е").split()) or "other"
@@ -73,9 +74,9 @@ async def client_shop(request: Request, club_id: int = Query(...), init_data: st
     products = (await session.execute(select(ClubProduct).where(ClubProduct.club_id == club_id, ClubProduct.is_active.is_(True), ClubProduct.stock > 0).order_by(ClubProduct.category, ClubProduct.name))).scalars().all()
     product_data = [{"id": p.id, "name": p.name, "category": p.category, "price_kopecks": p.price_kopecks, "stock": p.stock, "image_url": p.image_url, "details": p.details} for p in products]
     categories = _build_category_list(products)
-    sbp_enabled = bool((club.club_settings or {}).get("payments", {}).get("yookassa_sbp_enabled", True))
+    payment_modes = payment_availability(club.club_settings)
     payment_info = get_payment_info_text(club.club_settings or {})
-    return templates.TemplateResponse("shop.html", {"request": request, "club": club, "club_id": club_id, "products": product_data, "categories": categories, "sbp_enabled": sbp_enabled, "payment_info": payment_info})
+    return templates.TemplateResponse("shop.html", {"request": request, "club": club, "club_id": club_id, "products": product_data, "categories": categories, "payment_modes": payment_modes, "sbp_enabled": payment_modes["sbp"], "online_enabled": payment_modes["online"], "payment_info": payment_info})
 
 
 @router.get("/webapp/cart", response_class=HTMLResponse)
@@ -85,9 +86,9 @@ async def client_cart(request: Request, club_id: int = Query(...), init_data: st
         return telegram_init_gate('/webapp/cart', club_id, 'РћС‚РєСЂРѕР№С‚Рµ РєРѕСЂР·РёРЅСѓ РёР· Telegram')
     if not club or not verify_telegram_data(init_data, club.bot_token):
         raise HTTPException(403, "Р”РѕСЃС‚СѓРї Р·Р°РїСЂРµС‰С‘РЅ")
-    sbp_enabled = bool((club.club_settings or {}).get("payments", {}).get("yookassa_sbp_enabled", True))
+    payment_modes = payment_availability(club.club_settings)
     payment_info = get_payment_info_text(club.club_settings or {})
-    return templates.TemplateResponse("cart.html", {"request": request, "club": club, "club_id": club_id, "sbp_enabled": sbp_enabled, "payment_info": payment_info})
+    return templates.TemplateResponse("cart.html", {"request": request, "club": club, "club_id": club_id, "payment_modes": payment_modes, "sbp_enabled": payment_modes["sbp"], "online_enabled": payment_modes["online"], "payment_info": payment_info})
 
 @router.get("/webapp/admin-products", response_class=HTMLResponse)
 async def admin_products_page(request: Request, club_id: int = Query(...), init_data: str | None = Query(None), session: AsyncSession = Depends(get_session)):

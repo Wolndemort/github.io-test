@@ -42,7 +42,7 @@ small{color:#aaa}
 <script>
 const tg=Telegram.WebApp;tg.ready();
 const products={{ products|tojson }};
-const sbpEnabled={{ sbp_enabled|tojson }};
+const sbpEnabled={{ sbp_enabled|tojson }},onlineEnabled={{ online_enabled|tojson }};
 let currentCategory="";
 const itemsEl=document.getElementById('items');
 const esc=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -85,8 +85,9 @@ function render(){
   itemsEl.querySelectorAll('[data-sbp]').forEach(b=>b.onclick=()=>{const p=products.find(x=>x.id===Number(b.dataset.sbp)); if(!p||p.stock<=0){document.getElementById('message').textContent='Товар закончился. Выберите другой.'; return;} checkoutProduct(Number(b.dataset.sbp),'sbp')});
   itemsEl.querySelectorAll('[data-manual]').forEach(b=>b.onclick=()=>{const p=products.find(x=>x.id===Number(b.dataset.manual)); if(!p||p.stock<=0){document.getElementById('message').textContent='Товар закончился. Выберите другой.'; return;} checkoutProduct(Number(b.dataset.manual),'requisites')});
 }
+function hideUnavailablePaymentButtons(){if(!sbpEnabled)itemsEl.querySelectorAll('[data-sbp]').forEach(b=>b.remove());if(!onlineEnabled)itemsEl.querySelectorAll('[data-buy]').forEach(b=>b.remove())}
 document.getElementById('filters').onclick=e=>{const btn=e.target.closest('[data-cat]');if(!btn)return;currentCategory=normalizeCategory(btn.dataset.cat);document.querySelectorAll('.chip').forEach(x=>x.classList.toggle('active',x===btn));render()};
-render();updateCartLink();
+render();hideUnavailablePaymentButtons();updateCartLink();
 </script>
 <script src="/static/js/scroll_top.js"></script>
 </html>
