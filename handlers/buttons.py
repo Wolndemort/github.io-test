@@ -207,39 +207,13 @@ def admin_keyboard(club_id: int, club_settings: dict, subscription_date: datetim
 
     if is_full_access or "cash_view" in allowed:
         builder.row(types.InlineKeyboardButton(text="💵 Принять наличку", callback_data="admin_cash_list"))
-        builder.row(types.InlineKeyboardButton(text="💵 WebApp: наличный абонемент", web_app=types.WebAppInfo(url=f"https://{club_id}.speedycrm.ru/webapp/admin-cash-subscription?club_id={club_id}")))
-        builder.row(types.InlineKeyboardButton(text="💰 Касса и журнал", web_app=types.WebAppInfo(url=f"https://{club_id}.speedycrm.ru/admin/cash?club_id={club_id}")))
 
     if is_full_access or allowed:
-        builder.row(types.InlineKeyboardButton(
-            text="🔓 Открыть турникет",
-            web_app=types.WebAppInfo(url=f"https://{club_id}.speedycrm.ru/webapp/staff-pass?club_id={club_id}")
-        ))
         builder.row(types.InlineKeyboardButton(
             text="👔 Кабинет сотрудника",
             web_app=types.WebAppInfo(url=f"https://{club_id}.speedycrm.ru/webapp/client-cabinet?club_id={club_id}")
         ))
-    if is_full_access:
-        builder.row(types.InlineKeyboardButton(
-            text="❄️ Заморозка атлетов",
-            web_app=types.WebAppInfo(url=f"https://{club_id}.speedycrm.ru/webapp/admin-freeze?club_id={club_id}")
-        ))
-
     shop_row = []
-    if is_full_access or "cash_sale" in allowed:
-        shop_row.append(
-            types.InlineKeyboardButton(
-                text="🛒 Продать товар",
-                web_app=types.WebAppInfo(url=f"https://{club_id}.speedycrm.ru/webapp/admin-product-sale?club_id={club_id}")
-            )
-        )
-    if is_full_access or "products_view" in allowed:
-        shop_row.append(
-            types.InlineKeyboardButton(
-                text="📦 Склад товаров",
-                web_app=types.WebAppInfo(url=f"https://{club_id}.speedycrm.ru/webapp/admin-products?club_id={club_id}&v=111")
-            )
-        )
     if shop_row:
         builder.row(*shop_row)
 
@@ -279,35 +253,8 @@ def admin_keyboard(club_id: int, club_settings: dict, subscription_date: datetim
             types.InlineKeyboardButton(
                 text="📊 Таблица (WebApp)",
                 web_app=types.WebAppInfo(url=f"{base_url}/admin?club_id={club_id}")
-            ),
-            types.InlineKeyboardButton(
-                text="📹 Камеры (WebApp)",
-                web_app=types.WebAppInfo(url=f"{base_url}/webapp/live_cam?club_id={club_id}")
             )
         )
-    if is_full_access or "analytics_view" in allowed:
-        builder.row(
-            types.InlineKeyboardButton(
-                text="📈 Вся статистика клуба",
-                web_app=types.WebAppInfo(url=f"{base_url}/revenue?club_id={club_id}")
-            ),
-            types.InlineKeyboardButton(
-                text="🗓 Расписание (WebApp)",
-                web_app=types.WebAppInfo(url=f"{base_url}/webapp/admin-schedule?club_id={club_id}")
-            )
-        )
-    if is_full_access:
-        builder.row(
-            types.InlineKeyboardButton(
-                text="📜 Аудит",
-                web_app=types.WebAppInfo(url=f"{base_url}/webapp/admin-audit?club_id={club_id}")
-            )
-        )
-    if is_full_access or "athletes_view" in allowed:
-        builder.row(types.InlineKeyboardButton(
-            text="👥 Атлеты и ДР",
-            web_app=types.WebAppInfo(url=f"{base_url}/admin/students?club_id={club_id}")
-        ))
     if is_full_access or "staff_manage" in allowed:
         builder.row(types.InlineKeyboardButton(text="👔 Персонал клуба", callback_data="staff_manage"))
     if is_full_access or "athletes_view" in allowed:

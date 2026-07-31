@@ -138,6 +138,7 @@
             <a class="btn dark mono-action dark" href="/webapp/staff-pass?club_id={{ club_id }}&user_id={{ user_id }}">Открыть турникет</a>
             <a class="btn soft mono-action" href="/webapp/biometric-pass?club_id={{ club_id }}&user_id={{ user_id }}">📱 Face ID ребёнка</a>
             <div class="staff-tools-title">Рабочие разделы</div>
+            {% if '*' in staff_permissions %}<a class="btn soft mono-action" href="/webapp/live_cam?club_id={{ club_id }}">📹 Камеры</a>{% endif %}
             {% if '*' in staff_permissions or 'settings_manage' in staff_permissions %}<a class="btn soft mono-action" href="/webapp/admin-work-schedule?club_id={{ club_id }}">🕑 График работы клуба</a>{% endif %}
             <a class="btn soft mono-action" href="/webapp/staff-checkin?club_id={{ club_id }}">Отметить посещение</a>
             {% if '*' in staff_permissions or 'cash_sale' in staff_permissions %}<a class="btn soft mono-action" href="/webapp/admin-product-sale?club_id={{ club_id }}">🛍 Продажа товаров</a>{% endif %}

@@ -355,7 +355,6 @@ async def admin_turnstile_main(callback: types.CallbackQuery, club_settings: dic
     builder = InlineKeyboardBuilder()
 
     if not is_enabled:
-        builder.row(types.InlineKeyboardButton(text="🔓 Открыть турникет", web_app=types.WebAppInfo(url=f"https://{club.id}.speedycrm.ru/webapp/staff-pass?club_id={club.id}")))
         builder.row(types.InlineKeyboardButton(text="🪛 Настроить и включить", callback_data="setup_t_start"))
         builder.row(types.InlineKeyboardButton(text="🛠 Назад в настройки", callback_data="admin_settings"))
         await callback.message.edit_text(
@@ -366,7 +365,6 @@ async def admin_turnstile_main(callback: types.CallbackQuery, club_settings: dic
             parse_mode="HTML"
         )
     else:
-        builder.row(types.InlineKeyboardButton(text="🔓 Открыть турникет", web_app=types.WebAppInfo(url=f"https://{club.id}.speedycrm.ru/webapp/staff-pass?club_id={club.id}")))
         builder.row(types.InlineKeyboardButton(text="🔄 зменить настройки", callback_data="setup_t_start"))
         builder.row(types.InlineKeyboardButton(text="🛑 Выключить СКУД", callback_data="disable_t_confirm"))
         builder.row(types.InlineKeyboardButton(text="🛠 Назад в настройки", callback_data="admin_settings"))
