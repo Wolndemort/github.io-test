@@ -445,7 +445,7 @@ else location.replace(location.pathname+'?club_id=' + encodeURIComponent(new URL
         "request": request, "club_id": club_id,
         "active_sessions": active_sessions, "past_sessions": past_sessions,
         "timeout_minutes": timeout_minutes,
-        **calculate_admin_dashboard(students),
+        **calculate_admin_dashboard(students, visit_logs=visit_logs),
     })
 
 

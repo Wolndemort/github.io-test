@@ -71,7 +71,7 @@ def _has_active_pass(student: Any, now: datetime) -> bool:
     )
 
 
-def calculate_student_metrics(students_models: Iterable[Any], now: datetime | None = None) -> Dict[str, Any]:
+def calculate_student_metrics(students_models: Iterable[Any], now: datetime | None = None, visit_logs: Iterable[Any] | None = None) -> Dict[str, Any]:
     """Single source of truth for athlete/status counters across all reports."""
     students = list(students_models)
     now = _utc_naive(now) or datetime.now(timezone.utc).replace(tzinfo=None)
@@ -79,11 +79,21 @@ def calculate_student_metrics(students_models: Iterable[Any], now: datetime | No
     frozen_students = [s for s in students if bool(getattr(s, "is_frozen", 0))]
     inactive_students = [s for s in students if s not in active_students and s not in frozen_students]
     burning_students = [s for s in active_students if 0 < _balance(s) <= 3]
+    # last_visit is a cache used for the active session.  The visit log is the
+    # source of truth for historical reports (old data may have a stale/empty
+    # cache after imports or migrations).
+    latest_visits = {}
+    if visit_logs is not None:
+        for log in visit_logs:
+            at = _utc_naive(getattr(log, "visited_at", None))
+            student_id = getattr(log, "student_id", None)
+            if at is not None and student_id is not None and (student_id not in latest_visits or at > latest_visits[student_id]):
+                latest_visits[student_id] = at
     sleeping_students = [
         s for s in students
         if not getattr(s, "is_frozen", 0)
-        and (not getattr(s, "last_visit", None)
-             or _utc_naive(s.last_visit) <= now - timedelta(days=14))
+        and (latest_visits.get(getattr(s, "id", None), _utc_naive(getattr(s, "last_visit", None))) is None
+             or latest_visits.get(getattr(s, "id", None), _utc_naive(getattr(s, "last_visit", None))) <= now - timedelta(days=14))
     ]
     parent_ids = {int(s.parent_id) for s in students if getattr(s, "parent_id", None)}
     discipline_counts: dict[str, int] = {}
@@ -216,12 +226,12 @@ def _dashboard_student_row(student: Any) -> dict[str, Any]:
     }
 
 
-def calculate_admin_dashboard(students_models: List[Any]) -> Dict[str, Any]:
+def calculate_admin_dashboard(students_models: List[Any], visit_logs: Iterable[Any] | None = None) -> Dict[str, Any]:
     """Data for the admin dashboard using the same counters as revenue reports."""
     students = list(students_models)
     if not students:
         return {"empty": True, "total_athletes": 0, "total_parents": 0, "active_now_count": 0}
-    metrics = calculate_student_metrics(students)
+    metrics = calculate_student_metrics(students, visit_logs=visit_logs)
     return {
         "empty": False,
         "total_athletes": metrics["total_athletes"],

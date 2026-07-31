@@ -86,7 +86,7 @@ else location.replace(location.pathname+'?club_id=' + encodeURIComponent(new URL
         })
     active_sessions.sort(key=lambda x: x["time_passed_mins"])
     past_sessions.sort(key=lambda x: x["last_visit"], reverse=True)
-    return templates.TemplateResponse("admin.html", {"request": request, "club_id": club_id, "active_sessions": active_sessions, "past_sessions": past_sessions, "timeout_minutes": timeout_minutes, "filters": {"date_from": date_from or "", "date_to": date_to or ""}, **calculate_admin_dashboard(students)})
+    return templates.TemplateResponse("admin.html", {"request": request, "club_id": club_id, "active_sessions": active_sessions, "past_sessions": past_sessions, "timeout_minutes": timeout_minutes, "filters": {"date_from": date_from or "", "date_to": date_to or ""}, **calculate_admin_dashboard(students, visit_logs=visit_logs)})
 
 
 @router.get("/revenue", response_class=HTMLResponse)
