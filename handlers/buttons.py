@@ -215,6 +215,10 @@ def admin_keyboard(club_id: int, club_settings: dict, subscription_date: datetim
             text="🔓 Открыть турникет",
             web_app=types.WebAppInfo(url=f"https://{club_id}.speedycrm.ru/webapp/staff-pass?club_id={club_id}")
         ))
+        builder.row(types.InlineKeyboardButton(
+            text="👔 Кабинет сотрудника",
+            web_app=types.WebAppInfo(url=f"https://{club_id}.speedycrm.ru/webapp/client-cabinet?club_id={club_id}")
+        ))
     if is_full_access:
         builder.row(types.InlineKeyboardButton(
             text="❄️ Заморозка атлетов",
@@ -299,11 +303,6 @@ def admin_keyboard(club_id: int, club_settings: dict, subscription_date: datetim
                 web_app=types.WebAppInfo(url=f"{base_url}/webapp/admin-audit?club_id={club_id}")
             )
         )
-    if is_full_access or "tariffs_manage" in allowed:
-        builder.row(types.InlineKeyboardButton(
-            text="💰 Тарифы клуба (WebApp)",
-            web_app=types.WebAppInfo(url=f"{base_url}/webapp/admin-tariffs?club_id={club_id}")
-        ))
     if is_full_access or "athletes_view" in allowed:
         builder.row(types.InlineKeyboardButton(
             text="👥 Атлеты и ДР",

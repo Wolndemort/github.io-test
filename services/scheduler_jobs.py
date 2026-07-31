@@ -588,12 +588,13 @@ async def saas_daily_morning_check():
                         await _notification_forget(birthday_key)
                         logger.error(f"Не удалось отправить ДР сообщение атлету {student.id}: {e}")
 
-            if student.last_visit and student.balance_lessons > 0 and not student.is_frozen:
+            if student.last_visit and not student.is_frozen:
                 last_visit = student.last_visit.replace(tzinfo=None)
                 days_absent = max(0, (now_datetime - last_visit).days)
-                if days_absent >= 10:
+                absence_threshold = max((value for value in (5, 10, 15, 20) if days_absent >= value), default=0)
+                if absence_threshold:
                     try:
-                        notice_key = f"notify:absent:{student.club_id}:{student.id}:{last_visit.date().isoformat()}:10"
+                        notice_key = f"notify:absent:{student.club_id}:{student.id}:{last_visit.date().isoformat()}:{absence_threshold}"
                         if not settings.get("features", {}).get("absence_reminders", True):
                             continue
                         if not await _notification_once(notice_key, ttl=45 * 86400):
@@ -603,7 +604,7 @@ async def saas_daily_morning_check():
                             chat_id=parent_id,
                             text=(
                                 f"👋 Здравствуйте! Мы заметили, что атлет <b>{escape(student.name)}</b> "
-                                f"не посещал тренировки уже {days_absent} дней. Мы соскучились! "
+                                f"не посещал тренировки уже {absence_threshold} дней. Мы соскучились! "
                                 "Ждём вас на занятиях. 😉"
                             ),
                             parse_mode="HTML",

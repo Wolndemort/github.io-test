@@ -81,8 +81,9 @@ def calculate_student_metrics(students_models: Iterable[Any], now: datetime | No
     burning_students = [s for s in active_students if 0 < _balance(s) <= 3]
     sleeping_students = [
         s for s in students
-        if not getattr(s, "last_visit", None)
-        or _utc_naive(s.last_visit) <= now - timedelta(days=14)
+        if not getattr(s, "is_frozen", 0)
+        and (not getattr(s, "last_visit", None)
+             or _utc_naive(s.last_visit) <= now - timedelta(days=14))
     ]
     parent_ids = {int(s.parent_id) for s in students if getattr(s, "parent_id", None)}
     discipline_counts: dict[str, int] = {}

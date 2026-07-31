@@ -443,7 +443,7 @@ else location.replace(location.pathname+'?club_id=' + encodeURIComponent(new URL
     past_sessions.sort(key=lambda x: x["last_visit"], reverse=True)
     return templates.TemplateResponse("admin.html", {
         "request": request, "club_id": club_id,
-        "active_sessions": active_sessions, "past_sessions": past_sessions[:20],
+        "active_sessions": active_sessions, "past_sessions": past_sessions,
         "timeout_minutes": timeout_minutes,
         **calculate_admin_dashboard(students),
     })
@@ -1296,8 +1296,18 @@ async def get_revenue_stats(
     if end_filter:
         payment_top_query = payment_top_query.where(PaymentOrder.created_at < end_filter)
     student_names = {s.id: s.name for s in students}
+    cart_top_query = (select(Student.id, func.sum(CartOrder.amount_kopecks))
+                      .join(CartOrder, CartOrder.user_id == Student.parent_id)
+                      .where(CartOrder.club_id == club_id, CartOrder.status == "CONFIRMED", CartOrder.created_at >= start_filter)
+                      .group_by(Student.id))
+    if end_filter:
+        cart_top_query = cart_top_query.where(CartOrder.created_at < end_filter)
+    payment_rows = list((await session.execute(payment_top_query)).all()) + list((await session.execute(cart_top_query)).all())
+    payment_totals = {}
+    for student_id, amount in payment_rows:
+        payment_totals[student_id] = payment_totals.get(student_id, 0) + (amount or 0)
     top_students = [{"name": student_names.get(student_id, "Без привязанного атлета"), "amount": round((amount or 0) / 100, 2)}
-                    for student_id, amount in sorted((await session.execute(payment_top_query)).all(), key=lambda row: row[1] or 0, reverse=True)[:5]]
+                    for student_id, amount in sorted(payment_totals.items(), key=lambda row: row[1], reverse=True)[:10]]
 
     product_top_query = select(CartItem.title, func.sum(CartItem.quantity), func.sum(CartItem.quantity * CartItem.unit_price_kopecks)).join(
         CartOrder, CartOrder.id == CartItem.cart_order_id
@@ -1305,7 +1315,7 @@ async def get_revenue_stats(
     if end_filter:
         product_top_query = product_top_query.where(CartOrder.created_at < end_filter)
     top_products = [{"name": title, "quantity": int(quantity or 0), "amount": round((amount or 0) / 100, 2)}
-                    for title, quantity, amount in sorted((await session.execute(product_top_query)).all(), key=lambda row: row[1] or 0, reverse=True)[:5]]
+                    for title, quantity, amount in sorted((await session.execute(product_top_query)).all(), key=lambda row: row[1] or 0, reverse=True)[:10]]
 
     student_metrics = calculate_student_metrics(students, now=now_local)
     total_athletes = student_metrics["total_athletes"]

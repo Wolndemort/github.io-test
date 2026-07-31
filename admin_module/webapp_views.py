@@ -635,7 +635,7 @@ async def webapp_admin_work_schedule_page(
     club = await session.get(Club, club_id)
     if not init_data:
         return telegram_init_gate('/webapp/admin-work-schedule', club_id, 'РћС‚РєСЂРѕР№С‚Рµ РіСЂР°С„РёРє СЂР°Р±РѕС‚С‹ РёР· Telegram')
-    await verify_webapp_admin(club, init_data)
+    await verify_webapp_staff(club, init_data, session, "settings_manage")
     settings = club.club_settings if isinstance(club.club_settings, dict) else {}
     work_schedule = settings.get("work_schedule", {})
     return templates.TemplateResponse("admin_work_schedule.html", {"request": request, "club": club, "club_id": club_id, "work_schedule": work_schedule})
@@ -646,7 +646,7 @@ async def change_admin_work_schedule(payload: dict, session: AsyncSession = Depe
     club = await session.get(Club, int(payload.get("club_id", 0)))
     if not club:
         raise HTTPException(404, "РљР»СѓР± РЅРµ РЅР°Р№РґРµРЅ")
-    tg_user = await verify_webapp_admin(club, payload.get("init_data"))
+    tg_user = await verify_webapp_staff(club, payload.get("init_data"), session, "settings_manage")
     settings = dict(club.club_settings or {})
     work_schedule = dict(settings.get("work_schedule", {}))
     day = str(payload.get("day", "")).strip()

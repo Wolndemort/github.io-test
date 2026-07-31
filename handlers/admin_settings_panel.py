@@ -47,7 +47,6 @@ async def admin_settings_menu(callback: types.CallbackQuery, club_settings: dict
         builder.row(types.InlineKeyboardButton(text=f"{status} {label}", callback_data=f"toggle_feat_{key}"))
 
     builder.row(types.InlineKeyboardButton(text="🛍 Настройки магазина / YooKassa", callback_data="admin_setup_yookassa"))
-    builder.row(types.InlineKeyboardButton(text="🕑 График работы", web_app=types.WebAppInfo(url=f"https://{club_id}.speedycrm.ru/webapp/admin-work-schedule?club_id={club_id}")))
     ui = club_settings.get("ui", {})
     site_mark = "✅" if ui.get("site_enabled", False) else "❌"
     support_mark = "✅" if ui.get("support_enabled", True) else "❌"
@@ -59,7 +58,6 @@ async def admin_settings_menu(callback: types.CallbackQuery, club_settings: dict
     builder.row(types.InlineKeyboardButton(text=f"{loading_mark} Загрузочный экран", callback_data="toggle_webapp_loading"))
     builder.row(types.InlineKeyboardButton(text="🖼 Загрузить логотип WebApp", callback_data="upload_webapp_logo"))
     builder.row(types.InlineKeyboardButton(text="💰 Настройка тарифов", callback_data="admin_tariffs_sections"))
-    builder.row(types.InlineKeyboardButton(text="💰 Тарифы (WebApp)", web_app=types.WebAppInfo(url=f"https://{club_id}.speedycrm.ru/webapp/admin-tariffs?club_id={club_id}")))
     builder.row(types.InlineKeyboardButton(text="⏰ Планировщики", callback_data="admin_schedulers"))
     builder.row(types.InlineKeyboardButton(text="💳 Изменить реквизиты", callback_data="admin_edit_payments"))
     turnstile_config = club_settings.get("turnstile", {})
