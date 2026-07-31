@@ -1273,6 +1273,11 @@ async def get_revenue_stats(
         select(CashEntry).where(CashEntry.club_id == club_id)
     )).scalars().all()
     cash_flow = calculate_cash_flow_periods(cash_entries, now=now_local)
+    # Маржа должна совпадать с кассой: вся подтверждённая выручка
+    # (онлайн, СБП, наличные и корзина) минус расходы журнала.
+    cash_flow["today_margin"] = round(revenue_today - cash_flow["today_expense"], 2)
+    cash_flow["week_margin"] = round(revenue_week - cash_flow["week_expense"], 2)
+    cash_flow["month_margin"] = round(revenue_month - cash_flow["month_expense"], 2)
 
     # ==========================================
     # БЛОК 2: АТЛЕТЫ И АБОНЕМЕНТЫ (Для твоего HTML)
