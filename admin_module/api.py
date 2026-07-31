@@ -211,6 +211,11 @@ class AdminSaleMethodPayload(BaseModel):
     club_id: int
     payment_method: str
 
+class AdminSaleDeletePayload(BaseModel):
+    init_data: str
+    club_id: int
+    confirmed: bool = False
+
 class CashEntryPayload(BaseModel):
     init_data: str
     club_id: int
@@ -513,6 +518,33 @@ async def change_payment_method(order_id: str, payload: AdminSaleMethodPayload, 
     await session.commit()
     audit_event("payment_method_changed", **await audit_actor_context(session, club, tg_user, "admin/sales/payment-method"), club_id=club.id, action="update", object_type="payment_order", object_id=order.id, old_method=old_method, new_method=method)
     return {"ok": True, "payment_method": method}
+
+
+@router.post("/admin/sales/{order_id}/delete")
+async def delete_admin_sale(order_id: str, payload: AdminSaleDeletePayload, session: AsyncSession = Depends(get_session)):
+    if not payload.confirmed:
+        raise HTTPException(400, "Требуется подтверждение удаления операции")
+    club = await session.get(Club, payload.club_id)
+    tg_user = await verify_webapp_admin(club, payload.init_data)
+    order = await session.get(PaymentOrder, order_id, with_for_update=True)
+    object_type = "payment_order"
+    if order is None:
+        order = await session.get(CartOrder, order_id, with_for_update=True)
+        object_type = "cart_order"
+    if not order or order.club_id != payload.club_id or order.status != "CONFIRMED":
+        raise HTTPException(404, "Операция не найдена")
+    order.status = "DELETED"
+    await session.commit()
+    audit_event(
+        "sale_deleted",
+        **await audit_actor_context(session, club, tg_user, "admin/sales/delete"),
+        club_id=club.id,
+        action="delete",
+        object_type=object_type,
+        object_id=order.id,
+        amount_kopecks=order.amount_kopecks,
+    )
+    return {"ok": True}
 
 
 def _money_operation_category_label(category: str, source: str = "") -> str:
