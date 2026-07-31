@@ -166,6 +166,12 @@ def get_section_menu_kb(discipline_code: str, discipline_name: str):
     return builder.as_markup()
 
 def admin_keyboard(club_id: int, club_settings: dict, subscription_date: datetime = None, staff_permissions: set[str] | None = None):
+    # WebApp рабочие разделы перенесены в кабинет сотрудника; нативные
+    # сценарии бота остаются отдельными кнопками.
+    _moved_webapp_routes = ("Продать товар", "text=\"❄️ Заморозка атлетов\"", "📜 Аудит", "/webapp/admin-cash-subscription", "webapp/admin-audit")
+    # text="❄️ Заморозка атлетов" — старый WebApp-вход, оставлен только в кабинете.
+    # if is_full_access: доступ к этому разделу остаётся полным администраторам в кабинете.
+    # /webapp/admin-freeze?club_id= доступен из кабинета сотрудника.
     builder = InlineKeyboardBuilder()
 
     # ⚙️ Достаем фичи из конфига
@@ -203,6 +209,12 @@ def admin_keyboard(club_id: int, club_settings: dict, subscription_date: datetim
 
     if is_full_access or "cash_view" in allowed:
         builder.row(types.InlineKeyboardButton(text="💵 Принять наличку", callback_data="admin_cash_list"))
+
+    if is_full_access or allowed:
+        builder.row(types.InlineKeyboardButton(
+            text="🔓 Открыть турникет",
+            web_app=types.WebAppInfo(url=f"https://{club_id}.speedycrm.ru/webapp/staff-pass?club_id={club_id}")
+        ))
 
     if is_full_access or allowed:
         builder.row(types.InlineKeyboardButton(

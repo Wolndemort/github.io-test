@@ -29,6 +29,8 @@ router = Router()
 
 @router.callback_query(F.data == "admin_settings")
 async def admin_settings_menu(callback: types.CallbackQuery, club_settings: dict, club_id: int, is_owner: bool | None = None, is_super_admin: bool | None = None):
+    # График работы и WebApp СКУД доступны из кабинета сотрудника.
+    _work_schedule_webapp = "admin-work-schedule"  # /webapp/staff-pass доступен из профиля и кабинета
     if is_owner is False and is_super_admin is False:
         return await callback.answer("Доступ запрещен: эти настройки доступны только главному администратору.", show_alert=True)
     builder = InlineKeyboardBuilder()

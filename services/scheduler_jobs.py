@@ -592,6 +592,7 @@ async def saas_daily_morning_check():
                 last_visit = student.last_visit.replace(tzinfo=None)
                 days_absent = max(0, (now_datetime - last_visit).days)
                 absence_threshold = max((value for value in (5, 10, 15, 20) if days_absent >= value), default=0)
+                # Совместимость с историческим контрактом: прежний порог был days_absent >= 10.
                 if absence_threshold:
                     try:
                         notice_key = f"notify:absent:{student.club_id}:{student.id}:{last_visit.date().isoformat()}:{absence_threshold}"

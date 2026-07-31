@@ -2,6 +2,7 @@
 <div class="nav">
   <a href="/admin?club_id={{club_id}}&init_data={{ request.query_params.get('init_data','')|urlencode }}">← В панель</a>
   <a class="secondary" href="/webapp/admin-schedule?club_id={{club_id}}&init_data={{ request.query_params.get('init_data','')|urlencode }}">Расписание</a>
+  <a class="secondary" href="/webapp/client-cabinet?club_id={{club_id}}">← В рабочий кабинет</a>
   <a class="secondary" href="#" onclick="window.Telegram?.WebApp?.close(); return false;">Закрыть</a>
 </div>
 <h2>График работы — {{ club.name }}</h2>
