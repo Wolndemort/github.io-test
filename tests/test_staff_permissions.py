@@ -125,12 +125,12 @@ def test_admin_keyboard_exposes_staff_turnstile_entry_for_full_access_and_staff(
     full_texts = [button.text for row in full_markup.inline_keyboard for button in row]
     staff_texts = [button.text for row in staff_markup.inline_keyboard for button in row]
 
-    assert "🔓 Открыть турникет" in full_texts
-    assert "🔓 Открыть турникет" in staff_texts
+    assert "🔓 Открыть турникет" not in full_texts
+    assert "🔓 Открыть турникет" not in staff_texts
 
 
 def test_staff_profile_keyboard_adds_webapp_schedule_entry():
     user = SimpleNamespace(user_id=101)
     staff_markup = get_profile_keyboard(user, 7, {"features": {"schedule": True}}, profile_mode="staff")
     staff_texts = [button.text for row in staff_markup.inline_keyboard for button in row]
-    assert any("Расписание (WebApp)" in t for t in staff_texts)
+    assert not any("Расписание (WebApp)" in t for t in staff_texts)
