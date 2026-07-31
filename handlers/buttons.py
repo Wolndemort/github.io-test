@@ -37,11 +37,6 @@ def get_profile_keyboard(user, club_id: int, club_settings: dict, is_authorized:
                 text="📝 Отметить посещение",
                 callback_data="admin_manual_visit"
             ))
-        if club_settings.get("features", {}).get("schedule", True):
-            builder.row(types.InlineKeyboardButton(
-                text="📅 Расписание (WebApp)",
-                web_app=WebAppInfo(url=f"{base_url}/webapp/admin-schedule?club_id={club_id}")
-            ))
     else:
         # 1. Проход и быстрый доступ
         builder.row(types.InlineKeyboardButton(
@@ -212,13 +207,7 @@ def admin_keyboard(club_id: int, club_settings: dict, subscription_date: datetim
 
     if is_full_access or allowed:
         builder.row(types.InlineKeyboardButton(
-            text="🔓 Открыть турникет",
-            web_app=types.WebAppInfo(url=f"https://{club_id}.speedycrm.ru/webapp/staff-pass?club_id={club_id}")
-        ))
-
-    if is_full_access or allowed:
-        builder.row(types.InlineKeyboardButton(
-            text="👔 Кабинет сотрудника",
+            text="🖥 Кабинет сотрудника",
             web_app=types.WebAppInfo(url=f"https://{club_id}.speedycrm.ru/webapp/client-cabinet?club_id={club_id}")
         ))
     shop_row = []
@@ -256,13 +245,6 @@ def admin_keyboard(club_id: int, club_settings: dict, subscription_date: datetim
     # --- БЛОК 4: WebApps (Изоляция через club_id) ---
     base_url = f"https://{club_id}.speedycrm.ru"
 
-    if is_full_access or "table_view" in allowed:
-        builder.row(
-            types.InlineKeyboardButton(
-                text="📊 Таблица (WebApp)",
-                web_app=types.WebAppInfo(url=f"{base_url}/admin?club_id={club_id}")
-            )
-        )
     if is_full_access or "staff_manage" in allowed:
         builder.row(types.InlineKeyboardButton(text="👔 Персонал клуба", callback_data="staff_manage"))
     if is_full_access or "athletes_view" in allowed:
