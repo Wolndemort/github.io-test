@@ -398,6 +398,10 @@ async def send_daily_report_to_admins():
                     )
                 )
                 visit_logs = list(visit_log_res.scalars().all())
+                all_visit_log_res = await session.execute(
+                    select(VisitLog).where(VisitLog.club_id == club.id)
+                )
+                all_visit_logs = list(all_visit_log_res.scalars().all())
                 today_pay_res = await session.execute(
                     select(PaymentOrder).where(
                         PaymentOrder.club_id == club.id,
@@ -432,7 +436,9 @@ async def send_daily_report_to_admins():
                 yesterday_payments = list(yesterday_pay_res.scalars().all()) + list(yesterday_cart_res.scalars().all())
 
             biz_metrics = calculate_daily_business_report(students, today_payments, yesterday_payments, visit_logs=visit_logs)
-            admin_metrics = calculate_admin_dashboard(students)
+            # В статистике потеряшки считаются по всей истории VisitLog,
+            # поэтому автоматический отчёт должен использовать тот же источник.
+            admin_metrics = calculate_admin_dashboard(students, visit_logs=all_visit_logs)
 
             expired_count = len(admin_metrics.get("expired_students", [])) if not admin_metrics.get("empty") else 0
             sleeping_count = len(admin_metrics.get("sleeping_students", [])) if not admin_metrics.get("empty") else 0
@@ -454,7 +460,7 @@ async def send_daily_report_to_admins():
                 f"💎 Действующих абонементов: <code>{active_passes}</code>\n\n"
                 f"🚨 <b>МЕНЕДЖМЕНТ (Проверить админа):</b>\n"
                 f"❌ Закончился баланс: <code>{expired_count} чел.</code> (ждут звонка)\n"
-                f"last_visit 💤 Спящие (>14 дней): <code>{sleeping_count} чел.</code>\n"
+                f"💤 Потеряшки (нет визитов более 14 дней): <code>{sleeping_count} чел.</code>\n"
             )
 
             await bot.send_message(club.owner_id, report_text, parse_mode="HTML")

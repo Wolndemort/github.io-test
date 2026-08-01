@@ -304,7 +304,13 @@ async def show_daily_report(
                     func.coalesce(Student.is_frozen, 0) == 0,
                     or_(Student.balance_lessons <= 0, Student.expire_date.is_(None), Student.expire_date <= now),
                 )).label("expired"),
-                func.count(Student.id).filter(or_(Student.last_visit.is_(None), Student.last_visit <= sleeping_threshold)).label("sleeping"),
+                func.count(Student.id).filter(and_(
+                    func.coalesce(Student.is_frozen, 0) == 0,
+                    Student.balance_lessons > 0,
+                    Student.expire_date > now,
+                    Student.last_visit.is_not(None),
+                    Student.last_visit <= sleeping_threshold,
+                )).label("sleeping"),
                 func.count(func.distinct(Student.parent_id)).filter(Student.parent_id.is_not(None)).label("parents"),
             ).where(Student.club_id == club.id)
         )
@@ -338,7 +344,7 @@ async def show_daily_report(
             f"🚶‍♂️ Посещений: <code>{visits}</code>\n"
             f"💎 Действующих абонементов: <code>{active_passes}</code>\n"
             f"❌ Закончился баланс: <code>{stats.expired}</code>\n"
-            f"last_visit 💤 Спящие (>14 дней): <code>{stats.sleeping}</code>\n"
+            f"💤 Потеряшки (нет визитов более 14 дней): <code>{stats.sleeping}</code>\n"
             f"🥋 Главное направление: <code>{top_discipline_name}</code>\n\n"
             f"{visits_by_discipline_text}"
         )

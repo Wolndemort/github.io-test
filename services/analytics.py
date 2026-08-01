@@ -91,13 +91,16 @@ def calculate_student_metrics(students_models: Iterable[Any], now: datetime | No
                 latest_visits[student_id] = at
     sleeping_students = [
         s for s in students
-        if not getattr(s, "is_frozen", 0)
+        # "Потеряшки" — это только клиенты с действующим абонементом,
+        # которые давно не приходили. Новые/неактивные клиенты без визитов
+        # не должны автоматически попадать в этот показатель.
+        if _has_active_pass(s, now)
         # A current active session is represented by last_visit and must
         # override an older historical VisitLog record.
         and not ((_utc_naive(getattr(s, "last_visit", None)) is not None)
                  and _utc_naive(getattr(s, "last_visit", None)) > now - timedelta(minutes=150))
-        and (latest_visits.get(getattr(s, "id", None), _utc_naive(getattr(s, "last_visit", None))) is None
-             or latest_visits.get(getattr(s, "id", None), _utc_naive(getattr(s, "last_visit", None))) <= now - timedelta(days=14))
+        and latest_visits.get(getattr(s, "id", None), _utc_naive(getattr(s, "last_visit", None))) is not None
+        and latest_visits.get(getattr(s, "id", None), _utc_naive(getattr(s, "last_visit", None))) <= now - timedelta(days=14)
     ]
     parent_ids = {int(s.parent_id) for s in students if getattr(s, "parent_id", None)}
     discipline_counts: dict[str, int] = {}
