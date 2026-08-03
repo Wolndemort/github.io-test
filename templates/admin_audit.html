@@ -26,7 +26,6 @@
 </head>
 <body>
 {% include "_staff_back_button.html" %}
-  <nav class="nav"><a href="/webapp/client-cabinet?club_id={{ club_id }}">← В рабочий кабинет</a></nav>
   <div class="wrap">
   <div class="nav">
     <a href="/admin?club_id={{ club_id }}&init_data={{ request.query_params.get('init_data', '')|urlencode }}">← В панель</a>

@@ -23,7 +23,6 @@
 {% include "_staff_back_button.html" %}
 <div class="wrap">
     <div class="card">
-        <a class="link" href="/webapp/client-cabinet?club_id={{ club_id }}">← В рабочий кабинет</a>
         <a class="link" href="/admin/students?club_id={{ club_id }}&init_data={{ request.query_params.get('init_data','')|urlencode }}">← Атлеты</a>
         <h2>Продажи</h2>
         <div class="muted">Подтверждённые оплаты клуба</div>
