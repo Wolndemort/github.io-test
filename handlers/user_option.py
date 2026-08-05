@@ -90,11 +90,18 @@ async def go_to_begin(
     else:
         club_name = setting_name
 
-    await callback.message.edit_text(
-        text=f"<b>{club_name}</b>\n\nС возвращением, {user_name}! Чем я могу помочь?",
-        parse_mode="HTML",
-        reply_markup=get_main_menu_keyboard(club_settings, club.id)
-    )
+    try:
+        await callback.message.edit_text(
+            text=f"<b>{club_name}</b>\n\nС возвращением, {user_name}! Чем я могу помочь?",
+            parse_mode="HTML",
+            reply_markup=get_main_menu_keyboard(club_settings, club.id)
+        )
+    except TelegramBadRequest as error:
+        # Telegram считает повторное редактирование того же текста и markup
+        # ошибкой. Для кнопки «В начало» это нормальная ситуация: меню уже
+        # открыто, поэтому пользователю достаточно закрыть callback.
+        if "message is not modified" not in str(error).lower():
+            raise
     await callback.answer()
 
 

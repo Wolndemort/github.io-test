@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+from html import escape
 import uuid
 
 from aiogram import Router, F, types
@@ -231,22 +232,24 @@ async def admin_quick_athletes(
     if not students:
         return await callback.answer("В клубе пока нет атлетов.", show_alert=True)
 
-    lines = [f"👥 <b>Атлеты клуба: {club.name}</b>", f"Всего: <b>{len(students)}</b>\n"]
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    lines = [f"👥 <b>Атлеты клуба: {escape(club.name or '')}</b>", f"Всего: <b>{len(students)}</b>\n"]
     for number, student in enumerate(students, 1):
         balance = "безлимит" if student.balance_lessons == 999 else str(student.balance_lessons or 0)
-        expire = student.expire_date.strftime("%d.%m.%Y") if student.expire_date else "не указан"
+        expire_date = student.expire_date.replace(tzinfo=None) if student.expire_date else None
+        expire = expire_date.strftime("%d.%m.%Y") if expire_date else "не указан"
         parent = parents.get(student.parent_id, "не привязан") if student.parent_id else "не привязан"
         if student.is_frozen:
             status = "❄️ заморожен"
-        elif student.expire_date and student.expire_date > datetime.now():
+        elif expire_date and expire_date > now:
             status = "✅ активен"
         else:
             status = "⚠️ истёк"
         lines.append(
-            f"<b>{number}. {student.name}</b> — {status}\n"
-            f"   Родитель: {parent}\n"
-            f"   Дисциплина: {student.discipline or 'не указана'}\n"
-            f"   Баланс: {balance} | До: {expire}"
+            f"<b>{number}. {escape(student.name or '')}</b> — {status}\n"
+            f"   Родитель: {escape(parent or '')}\n"
+            f"   Дисциплина: {escape(student.discipline or 'не указана')}\n"
+            f"   Баланс: {escape(balance)} | До: {expire}"
         )
     text = "\n".join(lines)
     chunks = [text[i : i + 3800] for i in range(0, len(text), 3800)]
