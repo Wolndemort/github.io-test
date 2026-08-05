@@ -63,7 +63,9 @@ services:
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
       - ./certbot/conf:/etc/letsencrypt
+      - ${ALTER_LETSENCRYPT_DIR:-/etc/letsencrypt}:/etc/letsencrypt-alter:ro
       - ./certbot/www:/var/www/certbot
+      - ${ALTER_PROJECT_DIR:-/root/alter}/legal:/var/www/alter-legal:ro
     depends_on:
       - gym-api
 
