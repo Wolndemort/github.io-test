@@ -1112,5 +1112,38 @@ docker compose logs --tail=100 gym-api
 - A newly hired employee is identified by `ClubStaff.telegram_id`; they do not need a client `User` record, phone binding, or a student card to open the staff WebApp cabinet.
 - The client cabinet bypass applies only to an active owner/staff identity. Ordinary clients still use the normal Telegram/phone binding flow.
 - Never create a fake student or bind a staff phone just to make the cabinet open. Staff are not parents and must not inflate parent/client statistics.
+
 - Hiring displays the Telegram name and username when Telegram allows `get_chat`, and sends the employee a role notification.
 - Removing a staff member sends an увольнение notification. Notification delivery failures are logged and do not undo the database role change.
+
+## Project checks and backup restore
+
+Run the full local automated test suite:
+
+```bash
+python -m pytest -q
+```
+
+Run the smoke-check on the VPS:
+
+```bash
+cd /root/github.io-test
+python3 scripts/smoke_check.py
+```
+
+The smoke-check verifies `/health`, `/ready`, the client WebApp gate, and the FaceID/QR gate without Telegram initData.
+
+Run a real backup restore only into a separate test database. The script drops and recreates the database from `TEST_DB_NAME`; never set it to the production database `crm_db`.
+
+```bash
+cd /root/github.io-test
+export TEST_DB_HOST=127.0.0.1
+export TEST_DB_PORT=5432
+export TEST_DB_NAME=crm_test
+export TEST_DB_USER=postgres
+export TEST_DB_PASSWORD='test_database_password'
+
+python3 scripts/restore_check.py backups/aaaa-YYYYMMDD-HHMMSS.dump
+```
+
+Success means that the backup can be restored into PostgreSQL. The restore-check does not modify production when `TEST_DB_NAME` is set to the separate test database.
