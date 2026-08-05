@@ -609,7 +609,16 @@ chmod 600 .backup.env
 chmod +x scripts/backup-db.sh scripts/backup-db-to-s3.sh
 ```
 
-Заполните в `.backup.env` `S3_BUCKET`, `AWS_ACCESS_KEY_ID` и `AWS_SECRET_ACCESS_KEY`, затем выполните ручную проверку:
+Для production-проекта на VPS `/root/github.io-test` используется бакет Yandex Object Storage:
+
+- бакет: `gym-crm-postgres-backups-79615`;
+- prefix: `gym-crm/postgres`;
+- endpoint: `https://storage.yandexcloud.net`;
+- регион: `ru-central1`;
+- локальное хранение: 14 дней;
+- облачное хранение: 90 дней.
+
+Заполните в `.backup.env` `AWS_ACCESS_KEY_ID` и `AWS_SECRET_ACCESS_KEY` (секреты не коммитить), затем выполните ручную проверку:
 
 ```bash
 ./scripts/backup-db-to-s3.sh
@@ -619,8 +628,10 @@ ls -lh backups/
 После успешного ручного запуска добавьте на VPS единственную cron-запись, например на 04:00:
 
 ```cron
-0 4 * * * cd /root/aaaa && /bin/bash ./scripts/backup-db-to-s3.sh >> /var/log/aaaa-backup.log 2>&1
+0 4 * * * cd /root/github.io-test && /bin/bash ./scripts/backup-db-to-s3.sh >> /var/log/gym-crm-backup.log 2>&1
 ```
+
+Проверенная конфигурация создаёт PostgreSQL custom dump, проверяет его через `pg_restore --list`, загружает его в `s3://gym-crm-postgres-backups-79615/gym-crm/postgres/` и подтверждает загрузку через `head-object`. Последняя ручная проверка была выполнена успешно; cron установлен для ежедневного запуска в 04:00 по времени сервера.
 
 Скрипт не удаляет Telegram-бэкапы и не заменяет существующий scheduler приложения. Если `pg_dump` снова встретит повреждённый блок PostgreSQL, backup остановится до загрузки непроверенного архива в облако.
 

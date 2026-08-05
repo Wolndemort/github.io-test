@@ -16,7 +16,7 @@ fi
 
 S3_ENDPOINT="${S3_ENDPOINT:-https://storage.yandexcloud.net}"
 S3_REGION="${S3_REGION:-ru-central1}"
-S3_PREFIX="${S3_PREFIX:-postgres}"
+S3_PREFIX="${S3_PREFIX:-aaaa/postgres}"
 CLOUD_RETENTION_DAYS="${CLOUD_RETENTION_DAYS:-90}"
 
 cd "$PROJECT_DIR"
