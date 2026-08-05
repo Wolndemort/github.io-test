@@ -1,5 +1,7 @@
 #секреты
 .env
+.backup.env
+backups/
 certbot/conf/
 certbot/www/
 server_migrations_*/

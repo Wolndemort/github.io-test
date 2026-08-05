@@ -4,6 +4,7 @@ import copy
 import os
 import uuid
 from datetime import datetime, timezone
+from html import escape
 
 import httpx
 from io import BytesIO

@@ -43,6 +43,7 @@
     <div class="muted">Фильтруйте по категории или ищите товар по названию. Остатки спишутся после подтверждения наличной оплаты.</div>
     <div style="margin-top:12px">
       <label style="display:block;margin-bottom:6px;font-weight:700">Атлет для чека</label>
+      <input id="studentSearch" class="search" type="search" placeholder="Поиск атлета по имени" autocomplete="off" style="margin-bottom:8px">
       <select id="studentSelect" style="width:100%;box-sizing:border-box;border-radius:10px;border:1px solid #444;background:#101010;color:#fff;font-size:15px;padding:11px 12px">
         <option value="">Не выбирать</option>
         {% for student in students|default([]) %}
@@ -105,16 +106,27 @@ const historyToEl=document.getElementById('historyTo');
 const historyApplyEl=document.getElementById('historyApply');
 const historyClearEl=document.getElementById('historyClear');
 const studentSelectEl=document.getElementById('studentSelect');
+const studentSearchEl=document.getElementById('studentSearch');
 const cart=new Map();
 let currentCategory="";
 let currentSearch="";
 let historyFrom="";
 let historyTo="";
+const studentOptions=[...studentSelectEl.options].map(option=>({value:option.value,text:option.text}));
 
 const esc=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const normalizeCategory=x=>String(x??'other').trim().toLowerCase().replace(/\s+/g,' ').replace(/ё/g,'е');
 const normalizeText=x=>String(x??'').trim().toLowerCase().replace(/\s+/g,' ').replace(/ё/g,'е');
 const thumbHtml=p=>p.image_url?`<div class="thumb"><img src="${esc(p.image_url)}" alt="${esc(p.name)}"></div>`:`<div class="thumb">${esc((p.name||'🛍️').trim().charAt(0).toUpperCase()||'🛍️')}</div>`;
+
+function filterStudents(){
+  const query=normalizeText(studentSearchEl.value);
+  const selected=studentSelectEl.value;
+  studentSelectEl.innerHTML=studentOptions
+    .filter(option=>!query||normalizeText(option.text).includes(query))
+    .map(option=>`<option value="${esc(option.value)}">${esc(option.text)}</option>`).join('');
+  if([...studentSelectEl.options].some(option=>option.value===selected)) studentSelectEl.value=selected;
+}
 
 function setQty(id,value){
   const p=products.find(x=>x.id===id);
@@ -171,6 +183,7 @@ document.getElementById('filters').onclick=e=>{
   draw();
 };
 searchEl.addEventListener('input',()=>{currentSearch=normalizeText(searchEl.value);draw()});
+studentSearchEl.addEventListener('input',filterStudents);
 historyApplyEl.onclick=()=>{
   historyFrom=historyFromEl.value||"";
   historyTo=historyToEl.value||"";

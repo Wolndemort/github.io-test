@@ -591,6 +591,39 @@ Workflow находится в `.github/workflows/deploy.yml`.
 
 Если нужен следующий шаг, логично добавить отдельную команду или скрипт `restore-check` для тестового восстановления без риска для боевой базы.
 
+### Резервная копия на VPS и в Yandex Object Storage
+
+Помимо автоматической отправки бэкапа в Telegram, для production предусмотрен отдельный VPS-слой:
+
+- локальная копия в `backups/` на VPS хранится 14 дней;
+- архив создаётся в PostgreSQL custom-формате и проверяется через `pg_restore --list`;
+- после успешной проверки архив загружается в Yandex Object Storage;
+- облачные копии хранятся 90 дней по умолчанию;
+- параллельные запуски защищены lock-файлом.
+
+На VPS установите AWS CLI и подготовьте секретный файл:
+
+```bash
+cp .backup.env.example .backup.env
+chmod 600 .backup.env
+chmod +x scripts/backup-db.sh scripts/backup-db-to-s3.sh
+```
+
+Заполните в `.backup.env` `S3_BUCKET`, `AWS_ACCESS_KEY_ID` и `AWS_SECRET_ACCESS_KEY`, затем выполните ручную проверку:
+
+```bash
+./scripts/backup-db-to-s3.sh
+ls -lh backups/
+```
+
+После успешного ручного запуска добавьте на VPS единственную cron-запись, например на 04:00:
+
+```cron
+0 4 * * * cd /root/aaaa && /bin/bash ./scripts/backup-db-to-s3.sh >> /var/log/aaaa-backup.log 2>&1
+```
+
+Скрипт не удаляет Telegram-бэкапы и не заменяет существующий scheduler приложения. Если `pg_dump` снова встретит повреждённый блок PostgreSQL, backup остановится до загрузки непроверенного архива в облако.
+
 ### Restore-check для тестовой базы
 
 Для безопасной проверки копии есть отдельный скрипт:
