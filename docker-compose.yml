@@ -36,8 +36,6 @@ services:
       - REDIS_URL=redis://redis:6379/0
       - DATABASE_URL=postgresql+asyncpg://postgres:${DB_PASSWORD}@db:5432/crm_db
       - PYTHONPATH=/app
-    ports:
-      - "8000:8000"
     volumes:
       - app_logs:/app/logs
       - app_uploads:/app/static/uploads
@@ -83,8 +81,6 @@ services:
     restart: always
     networks:
       - web_network
-    ports:
-      - "1984:1984"
     volumes:
       - ./go2rtc.yaml:/config/go2rtc.yaml:ro
 
