@@ -29,7 +29,8 @@ def make_student(**overrides):
 
 @pytest.mark.asyncio
 async def test_active_subscription_adds_lessons_and_extends_expiry():
-    student = make_student()
+    active_expire = datetime.now() + timedelta(days=1)
+    student = make_student(expire_date=active_expire)
     result = await add_abon(
         student_id=1,
         lessons_count=8,
@@ -41,8 +42,10 @@ async def test_active_subscription_adds_lessons_and_extends_expiry():
     )
 
     assert student.balance_lessons == 13
-    assert student.expire_date == datetime(2026, 9, 9, 23, 59, 59)
-    assert result[0] == "09.09.2026"
+    expected_expire = active_expire.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=30)
+    expected_expire = expected_expire.replace(hour=23, minute=59, second=59, microsecond=0)
+    assert student.expire_date == expected_expire
+    assert result[0] == expected_expire.strftime("%d.%m.%Y")
 
 
 @pytest.mark.asyncio
