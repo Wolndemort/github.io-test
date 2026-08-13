@@ -191,9 +191,9 @@
         <div class="value mt-5">🟢 Активных сейчас: {{ active_now_count }}</div>
     </div>
 
-    <!-- ❌ 7. ЗАКОНЧИЛИСЬ ЗАНЯТИЯ (БАЛАНС 0) -->
+    <!-- ❌ 7. НЕАКТИВНЫЕ АБОНЕМЕНТЫ -->
     <div class="card mono-card">
-        <div class="label red-label">❌ Закончились занятия (Баланс 0)</div>
+        <div class="label red-label">❌ Неактивные абонементы</div>
         {% if expired_students %}
         <details>
             <summary>Открыть список для обзвона ({{ expired_students|length }} чел.)</summary>
@@ -204,7 +204,7 @@
                 <div class="list-item">
                     <span>{{ student.name }}</span>
                     <div>
-                        <span class="red-bold mr-5">0 зан.</span>
+                        <span class="red-bold mr-5">{{ student.status_reason }} · {% if student.balance == 999 %}безлимит{% else %}{{ student.balance }} зан.{% endif %}{% if student.expire_date %} · до {{ student.expire_date.strftime('%d.%m.%Y') }}{% endif %}</span>
                         {% if student.parent_id %}
                         <button type="button" class="tg-link" onclick="openChat(event, {{ student.parent_id }})">💬 Чат</button>
                         {% endif %}
@@ -215,7 +215,7 @@
             </details>
         </details>
         {% else %}
-        <div class="green-success-text">Отличная работа! Клиентов с 0 балансом нет.</div>
+        <div class="green-success-text">Отличная работа! Неактивных абонементов нет.</div>
         {% endif %}
     </div>
 

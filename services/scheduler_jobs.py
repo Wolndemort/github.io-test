@@ -29,7 +29,7 @@ from database.db import (
 from handlers.buttons import get_profile_keyboard
 from admin_module.utils import is_staff_or_owner
 from services.order_notifications import notify_stock_reminders
-from services.analytics import calculate_admin_dashboard, calculate_daily_business_report, reporting_periods
+from services.analytics import calculate_admin_dashboard, calculate_daily_business_report, reporting_periods, is_subscription_active
 from services.bot_registry import bots_dict
 
 
@@ -492,11 +492,7 @@ async def saas_daily_morning_check():
                 for parent_id in parent_ids:
                     key = (student.club_id, parent_id)
                     missing_birthdays.setdefault(key, []).append(student.name)
-            has_subscription = bool(
-                student.expire_date
-                and student.expire_date > now_datetime
-                and (student.balance_lessons or 0) > 0
-            )
+            has_subscription = is_subscription_active(student, now_datetime)
             if not has_subscription:
                 for parent_id in parent_ids:
                     key = (student.club_id, parent_id)

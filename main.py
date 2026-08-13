@@ -7,7 +7,7 @@ import time as time_module
 from starlette.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
-from services.analytics import calculate_daily_business_report, calculate_admin_dashboard, reporting_periods
+from services.analytics import calculate_daily_business_report, calculate_admin_dashboard, reporting_periods, is_subscription_active
 from datetime import timedelta, time, timezone
 from zoneinfo import ZoneInfo
 import logging as logging
@@ -306,11 +306,7 @@ async def saas_daily_morning_check():
             if student.parent_id and not student.birthday:
                 key = (student.club_id, student.parent_id)
                 missing_birthdays.setdefault(key, []).append(student.name)
-            has_subscription = bool(
-                student.expire_date
-                and student.expire_date > now_datetime
-                and (student.balance_lessons or 0) > 0
-            )
+            has_subscription = is_subscription_active(student, now_datetime)
             if student.parent_id and not has_subscription:
                 key = (student.club_id, student.parent_id)
                 missing_subscriptions.setdefault(key, []).append(student.name)
@@ -554,7 +550,7 @@ async def saas_recurrent_payments_job(session_factory):
                     current_expire = student.expire_date.replace(tzinfo=None) if student.expire_date else now_naive
                     base_date = current_expire if current_expire > now_naive else now_naive
 
-                    student.expire_date = base_date + timedelta(days=days_to_add)
+                    student.expire_date = (base_date + timedelta(days=days_to_add)).replace(hour=23, minute=59, second=59, microsecond=0)
 
                     # Зачисляем количество занятий, привязанных к этому тарифу подписки
                     if student.balance_lessons != 999:

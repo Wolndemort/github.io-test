@@ -32,6 +32,7 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from handlers.skud import trigger_dingtian_turnstile
 from services.gate_control import process_athlete_gate_pass
 from services.staff_permissions import staff_can, permissions_for_staff
+from services.analytics import is_subscription_active
 from middlewares.db_saas_midleware import SUPER_ADMIN_IDS
 
 
@@ -335,7 +336,7 @@ async def staff_checkin_search(club_id: int, q: str = Query(default=""), init_da
         pattern = f"%{q}%"
         stmt = stmt.where(Student.name.ilike(pattern) | Student.parent_phone.ilike(pattern))
     students = (await db.execute(stmt)).scalars().all()
-    return [{"id": s.id, "name": s.name, "phone": s.parent_phone or "", "active": bool(s.expire_date and s.expire_date > datetime.now())} for s in students]
+    return [{"id": s.id, "name": s.name, "phone": s.parent_phone or "", "active": is_subscription_active(s)} for s in students]
 
 
 @router.post("/webapp/staff-checkin")
@@ -465,7 +466,7 @@ async def get_client_cabinet_page(request: Request, club_id: int, init_data: str
             or_(Student.parent_id == user_id, StudentParent.parent_id == user_id),
         ).distinct().order_by(Student.name)
     )).scalars().all()
-    active_students = sum(1 for s in students if not s.is_frozen and s.expire_date and s.expire_date > datetime.now())
+    active_students = sum(1 for s in students if is_subscription_active(s))
     frozen_students = sum(1 for s in students if s.is_frozen)
     expired_students = sum(1 for s in students if not s.is_frozen and (not s.expire_date or s.expire_date <= datetime.now()))
     audit_event("webapp_cabinet_opened", club_id=club_id, user_id=user_id, students=len(students))
@@ -596,7 +597,7 @@ async def webapp_freeze_page(request: Request, club_id: int, student_id: int, in
         raise HTTPException(status_code=403, detail="Атлет не найден")
     freeze_days = (club.club_settings or {}).get("limits", {}).get("freeze_days_step", 7)
     now = datetime.now()
-    can_freeze = bool(student.expire_date and student.expire_date > now and getattr(student, "can_freeze", 0) > 0 and not getattr(student, "is_frozen", 0))
+    can_freeze = bool(is_subscription_active(student, now) and getattr(student, "can_freeze", 0) > 0)
     return templates.TemplateResponse("webapp_freeze.html", {"request": request, "club": club, "student": student, "club_id": club_id, "freeze_days": freeze_days, "can_freeze": can_freeze})
 
 

@@ -24,3 +24,10 @@ def test_product_details_migration_exists_and_targets_current_head():
     assert 'revision: str = "4c9d2f1a8b6e"' in source
     assert 'down_revision: Union[str, Sequence[str], None] = "i3j4k5l6m7n8"' in source
     assert 'op.add_column("club_products", sa.Column("details", sa.String(length=1000), nullable=True))' in source
+
+
+def test_subscription_expiry_migration_preserves_calendar_date_and_sets_end_of_day():
+    source = (MIGRATIONS / "q8r9s0t1u2v3_normalize_subscription_expiry_dates.py").read_text(encoding="utf-8")
+    assert 'down_revision = "p4q5r6s7t8u9"' in source
+    assert "date_trunc('day', expire_date)" in source
+    assert "23 hours 59 minutes 59 seconds" in source

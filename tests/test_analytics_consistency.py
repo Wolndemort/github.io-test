@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta
 from types import SimpleNamespace
 
-from services.analytics import calculate_admin_dashboard, calculate_daily_business_report, calculate_student_metrics
+from services.analytics import calculate_admin_dashboard, calculate_daily_business_report, calculate_student_metrics, is_subscription_active
 
 
 def make_student(index, parent_id=None, balance=8, expire_date=None, frozen=0, last_visit=None):
@@ -48,3 +48,21 @@ def test_revenue_report_accepts_direct_and_cart_payments():
     ]
     result = calculate_daily_business_report([], payments, [])
     assert result["revenue_today"] == 350
+
+
+def test_subscription_is_active_through_the_end_of_expiry_day_and_requires_lessons():
+    now = datetime(2026, 7, 10, 20, 0)
+    assert is_subscription_active(make_student(1, balance=1, expire_date=datetime(2026, 7, 10)), now)
+    assert not is_subscription_active(make_student(2, balance=0, expire_date=datetime(2026, 7, 10)), now)
+    assert not is_subscription_active(make_student(3, balance=1, expire_date=datetime(2026, 7, 9, 23, 59, 59)), now)
+
+
+def test_dashboard_marks_expired_by_date_separately_from_empty_balance():
+    now = datetime(2026, 7, 10, 20, 0)
+    dashboard = calculate_admin_dashboard([
+        make_student(1, balance=4, expire_date=datetime(2026, 7, 9)),
+        make_student(2, balance=0, expire_date=datetime(2026, 7, 20)),
+    ])
+    reasons = {row["name"]: row["status_reason"] for row in dashboard["expired_students"]}
+    assert reasons["Атлет 1"] == "закончился срок"
+    assert reasons["Атлет 2"] == "закончились занятия"

@@ -906,7 +906,7 @@ async def admin_update_student(
                 expire_date = parse_user_date_any(payload.expire_date)
                 if not expire_date:
                     raise ValueError
-                student.expire_date = datetime.combine(expire_date, datetime.min.time())
+                student.expire_date = datetime.combine(expire_date, time.max.replace(microsecond=0))
             except ValueError:
                 raise HTTPException(status_code=400, detail="Некорректная дата окончания")
     if payload.can_freeze is not None:
@@ -1143,7 +1143,7 @@ async def admin_create_student(
         tariff = tariffs[payload.tariff_idx]
         count = int(tariff.get("count", 0) or 0)
         days = int(tariff.get("days", 30) or 30)
-        expire_date = datetime.now() + timedelta(days=days)
+        expire_date = (datetime.now() + timedelta(days=days)).replace(hour=23, minute=59, second=59, microsecond=0)
 
     primary_phone = normalize_ru_phone(payload.phone) if payload.phone else None
     secondary_phone = normalize_ru_phone(payload.phone_secondary) if payload.phone_secondary else None

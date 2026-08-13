@@ -61,14 +61,21 @@ def _balance(student: Any) -> int:
     return int(getattr(student, "balance_lessons", 0) or 0)
 
 
+def subscription_expire_at_end_of_day(value: datetime | None) -> datetime | None:
+    """Treat the stored subscription date as inclusive through 23:59:59."""
+    value = _utc_naive(value)
+    return value.replace(hour=23, minute=59, second=59, microsecond=0) if value else None
+
+
+def is_subscription_active(student: Any, now: datetime | None = None) -> bool:
+    """One status rule for admin UI, check-in search and reports."""
+    now = _utc_naive(now) or datetime.now(timezone.utc).replace(tzinfo=None)
+    expire_at = subscription_expire_at_end_of_day(getattr(student, "expire_date", None))
+    return bool(not getattr(student, "is_frozen", 0) and expire_at and expire_at > now and _balance(student) > 0)
+
+
 def _has_active_pass(student: Any, now: datetime) -> bool:
-    expire_date = _utc_naive(getattr(student, "expire_date", None))
-    return bool(
-        not getattr(student, "is_frozen", 0)
-        and expire_date
-        and expire_date > now
-        and _balance(student) > 0
-    )
+    return is_subscription_active(student, now)
 
 
 def calculate_student_metrics(students_models: Iterable[Any], now: datetime | None = None, visit_logs: Iterable[Any] | None = None) -> Dict[str, Any]:
@@ -224,9 +231,21 @@ def generate_students_excel(students_models: List[Any]) -> io.BytesIO:
 
 
 def _dashboard_student_row(student: Any) -> dict[str, Any]:
+    expire_date = subscription_expire_at_end_of_day(getattr(student, "expire_date", None))
+    balance = _balance(student)
+    if balance <= 0 and not expire_date:
+        reason = "нет занятий и срока"
+    elif balance <= 0:
+        reason = "закончились занятия"
+    elif not is_subscription_active(student):
+        reason = "закончился срок"
+    else:
+        reason = "активен"
     return {
         "name": getattr(student, "name", None) or "Атлет",
-        "balance": _balance(student),
+        "balance": balance,
+        "expire_date": expire_date,
+        "status_reason": reason,
         "is_frozen": bool(getattr(student, "is_frozen", 0)),
         "parent_id": getattr(student, "parent_id", None),
         "phone": getattr(student, "parent_phone", None),
