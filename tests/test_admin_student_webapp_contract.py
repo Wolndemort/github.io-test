@@ -20,3 +20,9 @@ def test_student_delete_has_matching_api_route_and_payload():
     assert "method: 'DELETE'" in page
     assert '@router.delete("/admin/students/{student_id}")' in api
     assert "await db.delete(student)" in api
+
+
+def test_admin_student_update_uses_datetime_end_of_day_for_expiry():
+    api = (Path(__file__).parents[1] / "admin_module/api.py").read_text(encoding="utf-8")
+    assert "datetime.max.time().replace(microsecond=0)" in api
+    assert "time.max.replace" not in api
