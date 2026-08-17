@@ -1,10 +1,18 @@
 from datetime import datetime, timedelta
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
 
 from database.db import add_abon
+
+
+def test_add_abon_serializes_balance_and_expiry_updates():
+    source = (Path(__file__).parents[1] / "database" / "db.py").read_text(encoding="utf-8")
+    start = source.index("async def add_abon")
+    block = source[start:source.index("async def get_daily_stats", start)]
+    assert "session.get(Student, student_id, with_for_update=True)" in block
 
 
 def make_session(student):

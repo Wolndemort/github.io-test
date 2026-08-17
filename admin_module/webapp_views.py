@@ -240,7 +240,7 @@ async def admin_product_sale(payload: AdminProductSalePayload, session: AsyncSes
 async def delete_cash_product_sale(order_id: str, payload: CashSaleDeletePayload, session: AsyncSession = Depends(get_session)):
     if not payload.confirmed:
         raise HTTPException(400, "Требуется подтверждение удаления продажи")
-    club = await session.get(Club, payload.club_id)
+    club = await session.get(Club, payload.club_id, with_for_update=True)
     tg_user = await verify_webapp_admin(club, payload.init_data)
     order = await session.get(CartOrder, order_id)
     if not order or order.club_id != payload.club_id or order.status != "CONFIRMED":
@@ -390,7 +390,7 @@ async def webapp_admin_tariffs_page(request: Request, club_id: int = Query(...),
 
 @router.post("/webapp/admin-tariffs/change")
 async def change_admin_tariff(payload: TariffChangePayload, request: Request, session: AsyncSession = Depends(get_session)):
-    club = await session.get(Club, payload.club_id)
+    club = await session.get(Club, payload.club_id, with_for_update=True)
     if not club:
         raise HTTPException(404, "???? ?? ??????")
     tg_user = await verify_webapp_staff(club, payload.init_data, session, "tariffs_manage")
@@ -541,7 +541,7 @@ async def webapp_admin_schedule_page(
 
 @router.post("/webapp/admin-schedule/change")
 async def change_admin_schedule(payload: ScheduleChangePayload, session: AsyncSession = Depends(get_session)):
-    club = (await session.execute(select(Club).where(Club.id == payload.club_id))).scalar_one_or_none()
+    club = (await session.execute(select(Club).where(Club.id == payload.club_id).with_for_update())).scalar_one_or_none()
     tg_user = await verify_webapp_staff(club, payload.init_data, session, "schedule_edit")
     settings = dict(club.club_settings or {})
     disciplines = dict(settings.get("disciplines", {}))

@@ -418,7 +418,9 @@ async def process_student_freeze(
 ):
     try:
         # 1. Загружаем студента и проверяем изоляцию данных (SaaS Security Check)
-        student = await session.get(Student, student_id)
+        # Все каналы зачисления (webhook, WebApp, бот и cash) должны
+        # сериализовать изменение даты и баланса одного ученика.
+        student = await session.get(Student, student_id, with_for_update=True)
 
         if not student or student.club_id != club_id:
             logger.warning(f"❌ Попытка заморозки чужого студента! ID: {student_id}, Club: {club_id}")
@@ -527,7 +529,8 @@ async def add_abon(
     """
     try:
         # 1. Загружаем студента и проверяем принадлежность к клубу
-        student = await session.get(Student, student_id)
+        # Serialize date/balance updates across webhook, bot, WebApp and cash.
+        student = await session.get(Student, student_id, with_for_update=True)
 
         if not student or student.club_id != club_id:
             logger.warning(f"⚠️ [Клуб {club_id}] Попытка доступа к чужому студенту ID: {student_id}")
