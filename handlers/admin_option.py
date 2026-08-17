@@ -14,6 +14,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from database.db import get_all_users_count, get_total_athletes_count, get_active_subs_count, User, get_daily_stats, Student, \
     Club, PaymentOrder, CartOrder, VisitLog, ClubStaff, StudentParent, User, get_student_parent_ids
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from handlers.buttons import admin_keyboard
 from handlers.states import AdminManualAdd
 from handlers.states import AdminStates
@@ -405,7 +406,9 @@ async def start_add_parent(callback: types.CallbackQuery, session: AsyncSession,
 
 
 @router.callback_query(F.data.startswith("admin_parent_student_"))
-async def choose_parent_student(callback: types.CallbackQuery, state: FSMContext, session: AsyncSession, club: Club):
+async def choose_parent_student(callback: types.CallbackQuery, state: FSMContext, session: AsyncSession, club: Club, is_owner: bool, is_super_admin: bool, staff):
+    if not (is_owner or is_super_admin or (staff and "athletes_manage" in permissions_for_staff(staff))):
+        return await callback.answer("Доступ запрещён", show_alert=True)
     student_id = int(callback.data.removeprefix("admin_parent_student_"))
     student = (await session.execute(select(Student).where(Student.id == student_id, Student.club_id == club.id))).scalar_one_or_none()
     if not student:
@@ -417,26 +420,37 @@ async def choose_parent_student(callback: types.CallbackQuery, state: FSMContext
 
 
 @router.message(AdminStates.waiting_for_parent_id)
-async def save_student_parent(message: types.Message, state: FSMContext, session: AsyncSession, club: Club):
+async def save_student_parent(message: types.Message, state: FSMContext, session: AsyncSession, club: Club, is_owner: bool, is_super_admin: bool, staff):
+    if not (is_owner or is_super_admin or (staff and "athletes_manage" in permissions_for_staff(staff))):
+        await state.clear()
+        return await message.answer("Доступ запрещён")
     raw_id = (message.text or "").strip()
     if not raw_id.isdigit():
         return await message.answer("ID должен быть числом. Например: 123456789")
     parent_id = int(raw_id)
     data = await state.get_data()
     student_id = data.get("parent_student_id")
-    student = (await session.execute(select(Student).where(Student.id == student_id, Student.club_id == club.id))).scalar_one_or_none()
+    student = (await session.execute(select(Student).where(Student.id == student_id, Student.club_id == club.id).with_for_update())).scalar_one_or_none()
     if not student:
         await state.clear()
         return await message.answer("Студент не найден")
     parent = await session.get(User, parent_id)
     if not parent or parent.club_id != club.id:
         return await message.answer("Родитель с таким Telegram ID не найден в этом клубе.")
+    if student.parent_id == parent_id:
+        await state.clear()
+        return await message.answer(f"Этот родитель уже является основным для атлета {student.name}.")
     existing = await session.get(StudentParent, {"student_id": student.id, "parent_id": parent_id})
     if existing:
         await state.clear()
         return await message.answer(f"Этот родитель уже привязан к студенту {student.name}.")
     session.add(StudentParent(student_id=student.id, parent_id=parent_id, is_primary=False))
-    await session.commit()
+    try:
+        await session.commit()
+    except IntegrityError:
+        await session.rollback()
+        await state.clear()
+        return await message.answer("Этот родитель уже привязывается к атлету. Повторная привязка не создана.")
     await state.clear()
     await message.answer(f"✅ Родитель {parent_id} добавлен к студенту {student.name}.")
 
@@ -525,6 +539,8 @@ async def process_manual_checkin(
         staff,
 ):
     # 1. Защита от двойного клика в интерфейсе ТГ
+    if not (is_owner or is_super_admin or (staff and "qr_checkin" in permissions_for_staff(staff))):
+        return await callback.answer("Доступ запрещён", show_alert=True)
     if any(word in (callback.message.text or "") for word in
            ["✅ ВХОД ОТМЕЧЕН", "🔴 ДОСТУП ЗАПРЕЩЕН", "Вход отмечен вручную"]):
         return await callback.answer("Этот запрос уже обработан! ⚠️", show_alert=True)

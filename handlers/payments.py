@@ -20,6 +20,7 @@ from services.audit import audit_event
 from services.order_notifications import build_owner_receipt_text, format_order_items, resolve_user_label
 from services.payment_requisites import get_payment_info_text
 from services.availability import payment_availability
+from services.staff_permissions import permissions_for_staff
 
 
 router = Router()
@@ -1040,8 +1041,13 @@ async def show_all_students_for_cash(
         callback: types.CallbackQuery,
         session: AsyncSession,
         club: Club,
-        club_settings: dict
+        club_settings: dict,
+        is_owner: bool,
+        is_super_admin: bool,
+        staff,
 ):
+    if not (is_owner or is_super_admin or (staff and "cash_view" in permissions_for_staff(staff))):
+        return await callback.answer("Доступ запрещён", show_alert=True)
     # 1. Фильтруем студентов ТОЛЬКО этого клуба (SaaS-изоляция)
     stmt = select(Student).where(
         Student.club_id == club.id
@@ -1084,10 +1090,20 @@ async def process_cash_payment(
         state: FSMContext,
         session: AsyncSession,
         club_settings: dict,
-        club: Club
+        club: Club,
+        is_owner: bool,
+        is_super_admin: bool,
+        staff,
 ):
+    if not (is_owner or is_super_admin or (staff and "cash_view" in permissions_for_staff(staff))):
+        return await callback.answer("Доступ запрещён", show_alert=True)
     # Достаем ID студента из callback_data кнопки общего списка
     student_id = int(callback.data.split("_")[-1])
+    student = (await session.execute(
+        select(Student).where(Student.id == student_id, Student.club_id == club.id)
+    )).scalar_one_or_none()
+    if not student:
+        return await callback.answer("Атлет не найден в этом клубе.", show_alert=True)
 
     # Вытаскиваем все дисциплины, которые настроены для этого конкретного клуба
     disciplines = club_settings.get("disciplines", {})
@@ -1155,12 +1171,22 @@ async def select_sport_for_cash_callback(
         state: FSMContext,
         session: AsyncSession,
         club_settings: dict,
-        club: Club
+        club: Club,
+        is_owner: bool,
+        is_super_admin: bool,
+        staff,
 ):
+    if not (is_owner or is_super_admin or (staff and "cash_view" in permissions_for_staff(staff))):
+        return await callback.answer("Доступ запрещён", show_alert=True)
     # Безопасно разбираем входящие данные из callback.data
     parts = callback.data.split("_")
     student_id = int(parts[-2])
     sport_type = parts[-1]
+    student = (await session.execute(
+        select(Student).where(Student.id == student_id, Student.club_id == club.id)
+    )).scalar_one_or_none()
+    if not student:
+        return await callback.answer("Атлет не найден в этом клубе.", show_alert=True)
 
     # 1. Записываем выбор направления и ID в стейт для финальной оплаты
     await state.update_data(
@@ -1196,12 +1222,20 @@ async def final_cash_pay(
         state: FSMContext,
         session: AsyncSession,
         club: Club,
-        club_settings: dict
+        club_settings: dict,
+        is_owner: bool,
+        is_super_admin: bool,
+        staff,
+        redis: Redis,
 ):
+    if not (is_owner or is_super_admin or (staff and "cash_view" in permissions_for_staff(staff))):
+        return await callback.answer("Доступ запрещён", show_alert=True)
     # 1. Забираем сохраненные данные атлета и секции из стейта
     data = await state.get_data()
     student_id = data.get('cash_student_id')
     sport_type = data.get('cash_sport_type')  # Достаем код секции (boxing, bjj и т.д.)
+    if not student_id or not sport_type:
+        return await callback.answer("Эта операция уже обработана или устарела.", show_alert=True)
 
     # 2. Получаем ИНДЕКС тарифа из callback_data новой клавиатуры (0, 1, 2...)
     tariff_idx = int(callback.data.split("_")[-1])
@@ -1210,15 +1244,41 @@ async def final_cash_pay(
     disc_cfg = club_settings.get("disciplines", {}).get(sport_type, {})
     tariffs = disc_cfg.get("tariffs", [])
 
-    if tariff_idx >= len(tariffs):
+    if tariff_idx < 0 or tariff_idx >= len(tariffs):
         return await callback.answer("Ошибка: выбранный тариф не найден в настройках клуба ❌", show_alert=True)
 
     # Берем конкретный тарифный план из списка по его индексу
     selected_tariff = tariffs[tariff_idx]
+    if not disc_cfg or not disc_cfg.get("active", True):
+        return await callback.answer("Выбранная дисциплина недоступна.", show_alert=True)
+    idempotency_key = f"cash:bot:{club.id}:{callback.from_user.id}:{callback.message.message_id}:{tariff_idx}"
+    try:
+        acquired = await redis.set(idempotency_key, "1", ex=86400, nx=True)
+    except Exception:
+        logger.exception("Не удалось установить идемпотентный ключ наличной продажи %s", idempotency_key)
+        acquired = True
+    if not acquired:
+        return await callback.answer("Эта наличная оплата уже обрабатывается или проведена.", show_alert=True)
 
     # Извлекаем реальные параметры, заданные админом
     count = selected_tariff.get("count", 0)  # Сюда прилетит число занятий (8, 12) или 999 для безлимита
     days = selected_tariff.get("days", 30)  # Точный срок действия абонемента из тарифа
+    try:
+        count = int(count)
+        days = int(days)
+        price = int(float(selected_tariff.get("price", 0) or 0) * 100)
+    except (TypeError, ValueError):
+        try:
+            await redis.delete(idempotency_key)
+        except Exception:
+            logger.exception("Не удалось снять идемпотентный ключ наличной продажи %s", idempotency_key)
+        return await callback.answer("Некорректный тариф.", show_alert=True)
+    if count < 1 or days < 1 or price < 0:
+        try:
+            await redis.delete(idempotency_key)
+        except Exception:
+            logger.exception("Не удалось снять идемпотентный ключ наличной продажи %s", idempotency_key)
+        return await callback.answer("Некорректный тариф.", show_alert=True)
 
     # 4. Вызываем обновленную функцию начисления, передавая точные дни
     result = await add_abon(
@@ -1287,6 +1347,10 @@ async def final_cash_pay(
         # Полностью очищаем стейт админа после успешного платежа
         await state.clear()
     else:
+        try:
+            await redis.delete(idempotency_key)
+        except Exception:
+            logger.exception("Не удалось снять идемпотентный ключ наличной продажи %s", idempotency_key)
         await callback.answer("Ошибка при обновлении данных студента в БД ❌", show_alert=True)
 
 

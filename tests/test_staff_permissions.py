@@ -72,6 +72,18 @@ def test_staff_management_supports_owner_and_super_admin_and_delete():
     assert "ClubStaff" in source and "ClubStaff" in super_source
 
 
+def test_bot_parent_cash_and_manual_checkin_recheck_permissions_and_scope():
+    admin = Path("handlers/admin_option.py").read_text(encoding="utf-8")
+    payments = Path("handlers/payments.py").read_text(encoding="utf-8")
+    assert 'Student.club_id == club.id' in admin
+    assert 'with_for_update()' in admin
+    assert '"athletes_manage" in permissions_for_staff(staff)' in admin
+    assert '"qr_checkin" in permissions_for_staff(staff)' in admin
+    assert '"cash_view" in permissions_for_staff(staff)' in payments
+    assert 'idempotency_key = f"cash:bot:' in payments
+    assert 'tariff_idx < 0 or tariff_idx >= len(tariffs)' in payments
+
+
 def test_manager_tariff_webapp_is_present_and_uses_shared_settings():
     api = Path("admin_module/api.py").read_text(encoding="utf-8")
     page = Path("templates/admin_tariffs.html").read_text(encoding="utf-8")

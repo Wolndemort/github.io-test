@@ -36,3 +36,12 @@ def test_student_without_subscription_keeps_payment_creation_inside_tariff_guard
     guard_start = block.index("if payload.tariff_idx is not None:")
     guard = block[guard_start:block.index("await db.commit()", guard_start)]
     assert "PaymentOrder(" in guard
+
+
+def test_telegram_manual_student_creation_is_club_serialized_and_duplicate_safe():
+    source = Path("handlers/admin_students.py").read_text(encoding="utf-8")
+    start = source.index("async def _finish_manual_add")
+    end = source.index('@router.callback_query(F.data.startswith("admin_manual_tariff_")')
+    block = source[start:end]
+    assert "with_for_update()" in block
+    assert "except IntegrityError" in block

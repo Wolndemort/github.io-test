@@ -1108,7 +1108,7 @@ async def admin_create_student(
         raise HTTPException(status_code=404, detail="Клуб не найден")
     if not verify_telegram_data(payload.init_data, club.bot_token):
         raise HTTPException(status_code=403, detail="Доступ запрещён")
-    await verify_webapp_admin(club, payload.init_data)
+    await verify_webapp_staff(club, payload.init_data, db, "athletes_manage")
 
     disciplines = (club.club_settings or {}).get("disciplines", {})
     disc_cfg = disciplines.get(payload.discipline)

@@ -57,6 +57,7 @@ class WebAppCreateStudentPayload(BaseModel):
     phone: str | None = None
     phone_secondary: str | None = None
     birthday: str | None = None
+    discipline: str | None = None
 
 
 class WebAppHistoryQuery(BaseModel):

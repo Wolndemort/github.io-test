@@ -8,6 +8,7 @@ from aiogram import Router, F, types
 from aiogram.fsm.context import FSMContext
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database.db import Club, PaymentOrder, Student, User
@@ -30,8 +31,9 @@ async def start_manual_add(
     is_owner: bool,
     is_super_admin: bool,
     is_staff: bool,
+    staff=None,
 ):
-    if not (is_owner or is_super_admin):
+    if not (is_owner or is_super_admin or (is_staff and staff and "athletes_manage" in permissions_for_staff(staff))):
         return await callback.answer("Доступ только для администратора клуба.", show_alert=True)
     await state.clear()
     await state.set_state(AdminManualAdd.waiting_for_name)
@@ -119,6 +121,15 @@ async def _finish_manual_add(
     discipline: str,
     tariff_idx: int | None,
 ):
+    # Keep the duplicate check and insert in one serialized transaction for
+    # this club. This also covers rapid repeated callback clicks.
+    locked_club = (await session.execute(
+        select(Club).where(Club.id == club.id).with_for_update()
+    )).scalar_one_or_none()
+    if not locked_club:
+        await state.clear()
+        return await callback.answer("Клуб не найден.", show_alert=True)
+    club = locked_club
     data = await state.get_data()
     config = (club.club_settings or {}).get("disciplines", {}).get(discipline, {})
     tariffs = config.get("tariffs", []) or []
@@ -162,9 +173,15 @@ async def _finish_manual_add(
             can_freeze=1,
             is_frozen=0,
             discipline=discipline,
-        )
+    )
     session.add(new_student)
-    await session.flush()
+    try:
+        await session.flush()
+    except IntegrityError:
+        await session.rollback()
+        await state.clear()
+        await callback.message.answer("⚠️ Такой атлет уже есть в базе клуба. Новая запись не создана.")
+        return await callback.answer()
     if tariff_idx is not None:
         price_kopecks = int(tariff.get("price", 0) or 0) * 100
         session.add(PaymentOrder(
@@ -180,7 +197,13 @@ async def _finish_manual_add(
             lesson_count=count,
             days_to_add=int(tariff.get("days", 30) or 30),
         ))
-    await session.commit()
+    try:
+        await session.commit()
+    except IntegrityError:
+        await session.rollback()
+        await state.clear()
+        await callback.message.answer("⚠️ Такой атлет уже есть в базе клуба. Новая запись не создана.")
+        return await callback.answer()
     await state.clear()
     await callback.message.answer("✅ Атлет успешно добавлен в базу клуба.")
     await callback.answer()

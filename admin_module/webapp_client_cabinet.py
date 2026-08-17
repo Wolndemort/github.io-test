@@ -5,6 +5,7 @@ from html import escape
 from fastapi import Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
 from sqlalchemy import select, or_
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from admin_module.router_base import router, templates
@@ -542,7 +543,11 @@ async def webapp_create_student_page(request: Request, club_id: int, init_data: 
 
 @router.post("/webapp/client-cabinet/create-student")
 async def webapp_create_student_submit(payload: WebAppCreateStudentPayload, db: AsyncSession = Depends(get_session)):
-    club = await db.get(Club, payload.club_id)
+    # Serialize student creation per club. The duplicate check is otherwise
+    # vulnerable to two nearly simultaneous WebApp submissions.
+    club = (await db.execute(
+        select(Club).where(Club.id == payload.club_id).with_for_update()
+    )).scalar_one_or_none()
     if not club or not club.bot_token:
         raise HTTPException(status_code=404, detail="Клуб не найден")
     tg_user = verify_telegram_data(payload.init_data, club.bot_token)
@@ -574,6 +579,11 @@ async def webapp_create_student_submit(payload: WebAppCreateStudentPayload, db: 
         raise HTTPException(status_code=400, detail="Некорректный номер второго родителя")
     if primary_phone and secondary_phone and primary_phone == secondary_phone:
         raise HTTPException(status_code=400, detail="Номера родителей должны отличаться")
+    disciplines = (club.club_settings or {}).get("disciplines", {})
+    discipline = str(payload.discipline or _default_student_discipline(club.club_settings or {})).strip()
+    discipline_cfg = disciplines.get(discipline)
+    if disciplines and (not discipline_cfg or not discipline_cfg.get("active", True)):
+        raise HTTPException(status_code=400, detail="Выбранная дисциплина недоступна")
     student = Student(
         club_id=club.id,
         parent_id=user_id,
@@ -581,14 +591,18 @@ async def webapp_create_student_submit(payload: WebAppCreateStudentPayload, db: 
         birthday=birthday,
         parent_phone=primary_phone,
         parent_phone_secondary=secondary_phone,
-        discipline=_default_student_discipline(club.club_settings or {}),
+        discipline=discipline,
         balance_lessons=0,
         expire_date=None,
         can_freeze=1,
         is_frozen=0,
     )
     db.add(student)
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="Такой атлет уже есть")
     audit_event("webapp_student_created", club_id=club.id, user_id=user_id, student_id=student.id, student_name=student.name)
     return {"ok": True, "student": {"id": student.id, "name": student.name}}
 

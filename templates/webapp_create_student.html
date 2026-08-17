@@ -103,6 +103,7 @@ document.getElementById('saveBtn').onclick = async (e) => {
         phone: document.getElementById('phone').value,
         phone_secondary: document.getElementById('phoneSecondary').value,
         birthday: birthdayInput.value.trim(),
+        discipline: document.getElementById('discipline').value,
     };
     const res = await fetch('/webapp/client-cabinet/create-student', {
         method: 'POST',
