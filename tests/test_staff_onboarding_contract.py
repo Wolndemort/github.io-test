@@ -39,3 +39,5 @@ def test_staff_cabinet_keeps_club_summary_but_hides_full_student_cards():
     assert '"students": students' in source
     assert "summary_source" in source
     assert "{% if not is_staff_mode %}" in template
+    assert "Face ID ребёнка" not in template
+    assert "'manual_checkin' in staff_permissions" in template

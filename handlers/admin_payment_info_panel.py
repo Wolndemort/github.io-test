@@ -14,7 +14,9 @@ router = Router()
 
 
 @router.callback_query(lambda c: c.data == "admin_edit_payments")
-async def edit_payments_info(callback: types.CallbackQuery, state: FSMContext):
+async def edit_payments_info(callback: types.CallbackQuery, state: FSMContext, is_owner: bool, is_super_admin: bool):
+    if not (is_owner or is_super_admin):
+        return await callback.answer("Доступ запрещён", show_alert=True)
     await callback.message.edit_text(
         "📝 <b>Редактирование реквизитов</b>\n\n"
         "Введите новый текст.\n"
@@ -26,7 +28,9 @@ async def edit_payments_info(callback: types.CallbackQuery, state: FSMContext):
 
 
 @router.message(AdminSettings.waiting_for_payment_info)
-async def save_payment_info(message: types.Message, state: FSMContext, session: AsyncSession, club: Club, redis: Redis):
+async def save_payment_info(message: types.Message, state: FSMContext, session: AsyncSession, club: Club, redis: Redis, is_owner: bool, is_super_admin: bool):
+    if not (is_owner or is_super_admin):
+        return await message.answer("Доступ запрещён")
     new_info = message.text.strip()
     new_settings = dict(club.club_settings)
     if "ui" not in new_settings:

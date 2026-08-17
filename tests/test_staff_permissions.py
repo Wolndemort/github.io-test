@@ -91,6 +91,12 @@ def test_bot_broadcast_rechecks_permission_and_includes_linked_parents():
     assert "Student.club_id == club.id" in source
 
 
+def test_staff_cannot_mutate_owner_only_club_feature_toggles():
+    source = Path("handlers/admin_settings_panel.py").read_text(encoding="utf-8")
+    assert 'async def toggle_logic' in source
+    assert 'if not (is_owner or is_super_admin)' in source
+
+
 def test_manager_tariff_webapp_is_present_and_uses_shared_settings():
     api = Path("admin_module/api.py").read_text(encoding="utf-8")
     page = Path("templates/admin_tariffs.html").read_text(encoding="utf-8")

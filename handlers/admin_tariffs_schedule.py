@@ -115,6 +115,8 @@ async def admin_manage_section_tariffs(callback: types.CallbackQuery, club_setti
 
 @router.callback_query(F.data.startswith("adm_tar_toggle_"))
 async def admin_toggle_section_type(callback: types.CallbackQuery, club_settings: dict, session, redis: Redis, bot, club_id: int, is_owner: bool, is_super_admin: bool, staff):
+    if not (is_owner or is_super_admin or (staff and "tariffs_manage" in permissions_for_staff(staff))):
+        return await callback.answer("Доступ запрещён", show_alert=True)
     parts = callback.data.split("_")
     if len(parts) < 4:
         return await callback.answer("❌ Ошибка формата данных тумблера!", show_alert=True)
@@ -147,7 +149,7 @@ async def admin_toggle_section_type(callback: types.CallbackQuery, club_settings
         )
         await callback.answer("Тип направления изменен! ✨")
         new_callback = callback.model_copy(update={"data": f"adm_tar_sect_{disc_id}"})
-        await admin_manage_section_tariffs(new_callback, club_settings)
+        await admin_manage_section_tariffs(new_callback, club_settings, is_owner, is_super_admin, staff)
 
 
 @router.callback_query(F.data.startswith("adm_tar_edit_"))
@@ -254,11 +256,13 @@ async def admin_delete_tariff(callback: types.CallbackQuery, club_settings: dict
         audit_event("tariff_deleted", club_id=club_id, action="delete", object_type="tariff", object_id=f"{disc_id}:{tariff_idx_int}", location="bot/tariffs", actor_user_id=callback.from_user.id, actor_role="super_admin" if is_super_admin else ("owner" if is_owner else (str(getattr(staff, "role", "")).strip().casefold() if staff else "staff")), actor_name=callback.from_user.full_name, discipline=disc_id, tariff=target_tariff)
         await callback.answer("Тариф успешно удален! 👌")
     new_callback = callback.model_copy(update={"data": f"adm_tar_sect_{disc_id}"})
-    await admin_manage_section_tariffs(new_callback, club_settings)
+    await admin_manage_section_tariffs(new_callback, club_settings, is_owner, is_super_admin, staff)
 
 
 @router.callback_query(F.data.startswith("input_tar_"))
-async def admin_start_tariff_edit(callback: types.CallbackQuery, state: FSMContext, club_id: int):
+async def admin_start_tariff_edit(callback: types.CallbackQuery, state: FSMContext, club_id: int, is_owner: bool, is_super_admin: bool, staff):
+    if not (is_owner or is_super_admin or (staff and "tariffs_manage" in permissions_for_staff(staff))):
+        return await callback.answer("Доступ запрещён", show_alert=True)
     # Формат: input_tar_<поле>_<код дисциплины>_<индекс тарифа>.
     # Код дисциплины может содержать символы подчёркивания, поэтому нельзя
     # брать его через фиксированные позиции split("_").
@@ -289,7 +293,9 @@ async def admin_start_tariff_edit(callback: types.CallbackQuery, state: FSMConte
 @router.message(AdminTariffStates.waiting_for_price)
 @router.message(AdminTariffStates.waiting_for_days)
 @router.message(AdminTariffStates.waiting_for_count)
-async def admin_save_tariff_field(message: types.Message, state: FSMContext, club_settings: dict, session, redis: Redis, bot):
+async def admin_save_tariff_field(message: types.Message, state: FSMContext, club_settings: dict, session, redis: Redis, bot, is_owner: bool, is_super_admin: bool, staff):
+    if not (is_owner or is_super_admin or (staff and "tariffs_manage" in permissions_for_staff(staff))):
+        return await message.answer("Доступ запрещён")
     s_data = await state.get_data()
     disc_id, idx, field = s_data["disc_id"], s_data["tariff_idx"], s_data["edit_type"]
     raw_value = (message.text or "").strip().lower()
@@ -358,7 +364,9 @@ async def admin_add_tariff_count(message: types.Message, state: FSMContext):
 
 
 @router.message(AdminTariffStates.add_min_age)
-async def admin_add_tariff_min_age_final(message: types.Message, state: FSMContext, club_settings: dict, session, redis: Redis, bot):
+async def admin_add_tariff_min_age_final(message: types.Message, state: FSMContext, club_settings: dict, session, redis: Redis, bot, is_owner: bool, is_super_admin: bool, staff):
+    if not (is_owner or is_super_admin or (staff and "tariffs_manage" in permissions_for_staff(staff))):
+        return await message.answer("Доступ запрещён")
     if not message.text.isdigit():
         return await message.answer("❌ Возраст должен быть целым числом года! Попробуйте еще раз:")
     min_age = int(message.text)
@@ -454,16 +462,16 @@ async def admin_delete_schedule_lesson(callback: types.CallbackQuery, state: FSM
         lessons_list = club_settings["disciplines"][disc_id]["schedule"][day]
         if 0 <= lesson_idx < len(lessons_list):
             lessons_list.pop(lesson_idx)
-            await admin_schedule_choose_day(callback, state, club_settings, manual_day=day)
+            await admin_schedule_choose_day(callback, state, club_settings, manual_day=day, is_owner=is_owner, is_super_admin=is_super_admin, staff=staff)
             await save_club_settings(session, redis, bot.token, club_id, club_settings)
             audit_event("schedule_lesson_deleted", club_id=club_id, action="delete", object_type="schedule_lesson", object_id=f"{disc_id}:{day}:{lesson_idx}", location="bot/schedule", actor_user_id=callback.from_user.id, actor_role="staff", actor_name=callback.from_user.full_name, discipline=disc_id, day=day)
             logger.success(f"🗑 Изменения расписания успешно сохранены в БД (Клуб {club_id})")
         else:
             logger.warning("Занятие не найдено, возможно уже удалено.")
-            await admin_schedule_choose_day(callback, state, club_settings, manual_day=day)
+            await admin_schedule_choose_day(callback, state, club_settings, manual_day=day, is_owner=is_owner, is_super_admin=is_super_admin, staff=staff)
     except Exception as e:
         logger.error(f"Ошибка удаления расписания: {e}")
-        await admin_schedule_choose_day(callback, state, club_settings, manual_day=day)
+        await admin_schedule_choose_day(callback, state, club_settings, manual_day=day, is_owner=is_owner, is_super_admin=is_super_admin, staff=staff)
 
 
 @router.callback_query(F.data == "adm_sch_start_input_time")

@@ -31,7 +31,7 @@ router = Router()
 async def admin_settings_menu(callback: types.CallbackQuery, club_settings: dict, club_id: int, is_owner: bool | None = None, is_super_admin: bool | None = None):
     # График работы и WebApp СКУД доступны из кабинета сотрудника.
     _work_schedule_webapp = "admin-work-schedule"  # /webapp/staff-pass доступен из профиля и кабинета
-    if is_owner is False and is_super_admin is False:
+    if not (is_owner or is_super_admin):
         return await callback.answer("Доступ запрещен: эти настройки доступны только главному администратору.", show_alert=True)
     builder = InlineKeyboardBuilder()
     features = club_settings.get("features", {})
@@ -78,7 +78,7 @@ async def admin_settings_menu(callback: types.CallbackQuery, club_settings: dict
 
 @router.callback_query(F.data == "admin_schedulers")
 async def admin_schedulers_menu(callback: types.CallbackQuery, club_settings: dict, club_id: int, is_owner: bool | None = None, is_super_admin: bool | None = None):
-    if is_owner is False and is_super_admin is False:
+    if not (is_owner or is_super_admin):
         return await callback.answer("Доступ запрещён: настройки клуба доступны только главному администратору.", show_alert=True)
     builder = InlineKeyboardBuilder()
     features = club_settings.get("features", {})
@@ -102,7 +102,9 @@ async def admin_schedulers_menu(callback: types.CallbackQuery, club_settings: di
 
 
 @router.callback_query(F.data == "manage_disciplines")
-async def manage_disciplines_menu(callback: types.CallbackQuery, club_settings: dict):
+async def manage_disciplines_menu(callback: types.CallbackQuery, club_settings: dict, is_owner: bool | None = None, is_super_admin: bool | None = None):
+    if not (is_owner or is_super_admin):
+        return await callback.answer("Доступ запрещён", show_alert=True)
     disciplines = club_settings.get("disciplines", {})
     builder = InlineKeyboardBuilder()
 
@@ -128,7 +130,9 @@ async def manage_disciplines_menu(callback: types.CallbackQuery, club_settings: 
 
 
 @router.callback_query(F.data.startswith("toggle_feat_") | F.data.startswith("toggle_disc_"))
-async def toggle_logic(callback: types.CallbackQuery, club: Club, club_settings: dict, session: AsyncSession, redis: Redis):
+async def toggle_logic(callback: types.CallbackQuery, club: Club, club_settings: dict, session: AsyncSession, redis: Redis, is_owner: bool, is_super_admin: bool):
+    if not (is_owner or is_super_admin):
+        return await callback.answer("Доступ запрещён: настройки клуба доступны только владельцу.", show_alert=True)
     parts = callback.data.split("_")
     action_type = parts[1]
     target_key = "_".join(parts[2:])
@@ -169,11 +173,11 @@ async def toggle_logic(callback: types.CallbackQuery, club: Club, club_settings:
     await callback.answer("✅ Сохранено")
     if action_type == "feat":
         if target_key in scheduler_keys:
-            await admin_schedulers_menu(callback, club_settings, club.id)
+            await admin_schedulers_menu(callback, club_settings, club.id, is_owner, is_super_admin)
         else:
-            await admin_settings_menu(callback, club_settings, club.id)
+            await admin_settings_menu(callback, club_settings, club.id, is_owner, is_super_admin)
     else:
-        await manage_disciplines_menu(callback, club_settings)
+        await manage_disciplines_menu(callback, club_settings, is_owner, is_super_admin)
 
 
 @router.callback_query(F.data == "admin_public_links")
@@ -200,7 +204,7 @@ async def toggle_public_link(callback: types.CallbackQuery, club: Club, club_set
     await session.commit()
     await redis.delete(f"club_config:{callback.bot.token}")
     await callback.answer("✅ Переключено")
-    await admin_settings_menu(callback, club_settings, club.id)
+    await admin_settings_menu(callback, club_settings, club.id, is_owner, is_super_admin)
 
 
 @router.callback_query(F.data == "edit_site_url")
@@ -252,7 +256,9 @@ async def save_support_username(message: types.Message, state: FSMContext, club:
 
 
 @router.message(AdminSettingsSG.waiting_for_public_links)
-async def admin_public_links_save(message: types.Message, state: FSMContext, club: Club, club_settings: dict, session: AsyncSession, redis: Redis):
+async def admin_public_links_save(message: types.Message, state: FSMContext, club: Club, club_settings: dict, session: AsyncSession, redis: Redis, is_owner: bool, is_super_admin: bool):
+    if not (is_owner or is_super_admin):
+        return await message.answer("Доступ запрещён")
     parts = [x.strip() for x in (message.text or "").split("|")]
     if len(parts) != 4 or parts[2] not in {"0", "1"} or parts[3] not in {"0", "1"}:
         return await message.answer("Неверный формат. Нужно: сайт | @поддержка | 1/0 | 1/0")
@@ -399,7 +405,9 @@ async def admin_turnstile_main(callback: types.CallbackQuery, club_settings: dic
 
 
 @router.callback_query(F.data == "setup_t_start")
-async def setup_turnstile_url_step(callback: types.CallbackQuery, state: FSMContext):
+async def setup_turnstile_url_step(callback: types.CallbackQuery, state: FSMContext, is_owner: bool, is_super_admin: bool):
+    if not (is_owner or is_super_admin):
+        return await callback.answer("Доступ запрещён", show_alert=True)
     await state.set_state(TurnstileSetup.wait_for_url)
     builder = InlineKeyboardBuilder()
     builder.row(types.InlineKeyboardButton(text="🛠 Назад в настройки", callback_data="admin_settings"))
@@ -422,7 +430,9 @@ async def setup_turnstile_url_step(callback: types.CallbackQuery, state: FSMCont
 
 
 @router.message(TurnstileSetup.wait_for_url)
-async def process_t_url(message: types.Message, state: FSMContext):
+async def process_t_url(message: types.Message, state: FSMContext, is_owner: bool, is_super_admin: bool):
+    if not (is_owner or is_super_admin):
+        return await message.answer("Доступ запрещён")
     url_input = message.text.strip().lower()
     if not (url_input.startswith("http://") or url_input.startswith("https://")):
         url_input = f"http://{url_input}"
@@ -440,7 +450,9 @@ async def process_t_url(message: types.Message, state: FSMContext):
 
 
 @router.callback_query(TurnstileSetup.wait_for_password, F.data == "skip_t_password")
-async def skip_t_password(callback: types.CallbackQuery, state: FSMContext, session: AsyncSession, club: Club):
+async def skip_t_password(callback: types.CallbackQuery, state: FSMContext, session: AsyncSession, club: Club, is_owner: bool, is_super_admin: bool):
+    if not (is_owner or is_super_admin):
+        return await callback.answer("Доступ запрещён", show_alert=True)
     user_data = await state.get_data()
     await state.clear()
     await callback.answer()
@@ -448,7 +460,9 @@ async def skip_t_password(callback: types.CallbackQuery, state: FSMContext, sess
 
 
 @router.message(TurnstileSetup.wait_for_password)
-async def process_t_password(message: types.Message, state: FSMContext, session: AsyncSession, club: Club):
+async def process_t_password(message: types.Message, state: FSMContext, session: AsyncSession, club: Club, is_owner: bool, is_super_admin: bool):
+    if not (is_owner or is_super_admin):
+        return await message.answer("Доступ запрещён")
     password_input = message.text.strip()
     user_data = await state.get_data()
     await state.clear()
@@ -456,7 +470,9 @@ async def process_t_password(message: types.Message, state: FSMContext, session:
 
 
 @router.callback_query(F.data == "disable_t_confirm")
-async def disable_turnstile(callback: types.CallbackQuery, session: AsyncSession, club: Club):
+async def disable_turnstile(callback: types.CallbackQuery, session: AsyncSession, club: Club, is_owner: bool, is_super_admin: bool):
+    if not (is_owner or is_super_admin):
+        return await callback.answer("Доступ запрещён", show_alert=True)
     current_settings = dict(club.settings) if club.settings else {}
     if "turnstile" in current_settings:
         current_settings["turnstile"]["enabled"] = False
@@ -485,7 +501,9 @@ async def disable_turnstile(callback: types.CallbackQuery, session: AsyncSession
 
 
 @router.callback_query(F.data == "manage_club_limits")
-async def manage_club_limits_handler(callback: types.CallbackQuery, club: Club):
+async def manage_club_limits_handler(callback: types.CallbackQuery, club: Club, is_owner: bool, is_super_admin: bool):
+    if not (is_owner or is_super_admin):
+        return await callback.answer("Доступ запрещён", show_alert=True)
     club_settings = club.club_settings or {}
     limits = club_settings.get("limits", {})
     timeout = limits.get("session_timeout_minutes", 150)
@@ -512,14 +530,18 @@ async def manage_club_limits_handler(callback: types.CallbackQuery, club: Club):
 
 
 @router.callback_query(F.data == "change_limit_session")
-async def change_limit_session(callback: types.CallbackQuery, state: FSMContext):
+async def change_limit_session(callback: types.CallbackQuery, state: FSMContext, is_owner: bool, is_super_admin: bool):
+    if not (is_owner or is_super_admin):
+        return await callback.answer("Доступ запрещён", show_alert=True)
     await state.set_state(AdminSettingsSG.waiting_for_session_timeout)
     await callback.message.answer("⏱ <b>Введите новое время сессии визита в минутах</b> (например, 120 для 2 часов):", parse_mode="HTML")
     await callback.answer()
 
 
 @router.message(AdminSettingsSG.waiting_for_session_timeout)
-async def process_session_timeout(message: types.Message, state: FSMContext, session: AsyncSession, club: Club, redis: Redis):
+async def process_session_timeout(message: types.Message, state: FSMContext, session: AsyncSession, club: Club, redis: Redis, is_owner: bool, is_super_admin: bool):
+    if not (is_owner or is_super_admin):
+        return await message.answer("Доступ запрещён")
     if not message.text.isdigit():
         return await message.answer("❌ Ошибка: Введите целое число минут!")
     minutes = int(message.text)
@@ -544,14 +566,18 @@ async def process_session_timeout(message: types.Message, state: FSMContext, ses
 
 
 @router.callback_query(F.data == "change_limit_freeze")
-async def change_limit_freeze(callback: types.CallbackQuery, state: FSMContext):
+async def change_limit_freeze(callback: types.CallbackQuery, state: FSMContext, is_owner: bool, is_super_admin: bool):
+    if not (is_owner or is_super_admin):
+        return await callback.answer("Доступ запрещён", show_alert=True)
     await state.set_state(AdminSettingsSG.waiting_for_freeze_step)
     await callback.message.answer("❄️ <b>Введите новый минимальный шаг заморозки в днях</b> (например, 7):", parse_mode="HTML")
     await callback.answer()
 
 
 @router.callback_query(F.data == "configure_webapp_loading")
-async def configure_webapp_loading(callback: types.CallbackQuery, state: FSMContext, club_settings: dict):
+async def configure_webapp_loading(callback: types.CallbackQuery, state: FSMContext, club_settings: dict, is_owner: bool, is_super_admin: bool):
+    if not (is_owner or is_super_admin):
+        return await callback.answer("Доступ запрещён", show_alert=True)
     ui = club_settings.get("ui", {}) or {}
     loading = ui.get("loading", {}) or {}
     await state.set_state(AdminSettingsSG.waiting_for_loading_config)
@@ -563,7 +589,9 @@ async def configure_webapp_loading(callback: types.CallbackQuery, state: FSMCont
 
 
 @router.callback_query(F.data == "toggle_webapp_loading")
-async def toggle_webapp_loading(callback: types.CallbackQuery, club: Club, club_settings: dict, session: AsyncSession, redis: Redis):
+async def toggle_webapp_loading(callback: types.CallbackQuery, club: Club, club_settings: dict, session: AsyncSession, redis: Redis, is_owner: bool, is_super_admin: bool):
+    if not (is_owner or is_super_admin):
+        return await callback.answer("Доступ запрещён", show_alert=True)
     settings = dict(club_settings or {})
     ui = dict(settings.get("ui") or {})
     loading = dict(ui.get("loading") or {})
@@ -576,18 +604,22 @@ async def toggle_webapp_loading(callback: types.CallbackQuery, club: Club, club_
     await session.commit()
     await redis.delete(f"club_config:{callback.bot.token}")
     await callback.answer("Загрузочный экран включён" if loading["enabled"] else "Загрузочный экран выключен")
-    await admin_settings_menu(callback, settings, club.id)
+    await admin_settings_menu(callback, settings, club.id, is_owner, is_super_admin)
 
 
 @router.callback_query(F.data == "upload_webapp_logo")
-async def upload_webapp_logo(callback: types.CallbackQuery, state: FSMContext):
+async def upload_webapp_logo(callback: types.CallbackQuery, state: FSMContext, is_owner: bool, is_super_admin: bool):
+    if not (is_owner or is_super_admin):
+        return await callback.answer("Доступ запрещён", show_alert=True)
     await state.set_state(AdminSettingsSG.waiting_for_loading_logo)
     await callback.message.answer("🖼 Отправьте изображение логотипа одним сообщением.")
     await callback.answer()
 
 
 @router.message(AdminSettingsSG.waiting_for_loading_logo, F.photo)
-async def save_webapp_logo(message: types.Message, state: FSMContext, club: Club, session: AsyncSession, redis: Redis):
+async def save_webapp_logo(message: types.Message, state: FSMContext, club: Club, session: AsyncSession, redis: Redis, is_owner: bool, is_super_admin: bool):
+    if not (is_owner or is_super_admin):
+        return await message.answer("Доступ запрещён")
     if not message.photo or (message.photo[-1].file_size and message.photo[-1].file_size > 8 * 1024 * 1024):
         return await message.answer("❌ Логотип должен быть изображением не больше 8 МБ.")
     folder = Path("static/uploads/logos")
@@ -636,7 +668,9 @@ async def invalid_webapp_logo(message: types.Message):
 
 
 @router.message(AdminSettingsSG.waiting_for_loading_config)
-async def save_webapp_loading(message: types.Message, state: FSMContext, club: Club, session: AsyncSession, redis: Redis):
+async def save_webapp_loading(message: types.Message, state: FSMContext, club: Club, session: AsyncSession, redis: Redis, is_owner: bool, is_super_admin: bool):
+    if not (is_owner or is_super_admin):
+        return await message.answer("Доступ запрещён")
     try:
         value = json.loads(message.text or "")
         if not isinstance(value, dict):
@@ -673,14 +707,18 @@ async def save_webapp_loading(message: types.Message, state: FSMContext, club: C
 
 
 @router.callback_query(F.data == "change_freeze_price")
-async def change_freeze_price(callback: types.CallbackQuery, state: FSMContext):
+async def change_freeze_price(callback: types.CallbackQuery, state: FSMContext, is_owner: bool, is_super_admin: bool):
+    if not (is_owner or is_super_admin):
+        return await callback.answer("Доступ запрещён", show_alert=True)
     await state.set_state(AdminSettingsSG.waiting_for_freeze_price)
     await callback.message.answer("💳 Введите цену одного дня заморозки в рублях (0 — отключить):")
     await callback.answer()
 
 
 @router.message(AdminSettingsSG.waiting_for_freeze_price)
-async def process_freeze_price(message: types.Message, state: FSMContext, club: Club, session: AsyncSession, redis: Redis):
+async def process_freeze_price(message: types.Message, state: FSMContext, club: Club, session: AsyncSession, redis: Redis, is_owner: bool, is_super_admin: bool):
+    if not (is_owner or is_super_admin):
+        return await message.answer("Доступ запрещён")
     try:
         price = float((message.text or "").replace(",", ".").strip())
     except ValueError:
@@ -706,7 +744,9 @@ async def process_freeze_price(message: types.Message, state: FSMContext, club: 
 
 
 @router.message(AdminSettingsSG.waiting_for_freeze_step)
-async def process_freeze_step(message: types.Message, state: FSMContext, session: AsyncSession, club: Club, redis: Redis):
+async def process_freeze_step(message: types.Message, state: FSMContext, session: AsyncSession, club: Club, redis: Redis, is_owner: bool, is_super_admin: bool):
+    if not (is_owner or is_super_admin):
+        return await message.answer("Доступ запрещён")
     if not message.text.isdigit():
         return await message.answer("❌ Ошибка: Введите целое число дней!")
     days = int(message.text)
