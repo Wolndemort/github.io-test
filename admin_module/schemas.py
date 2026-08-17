@@ -42,6 +42,7 @@ class WebAppCashSubscriptionPayload(BaseModel):
     student_id: int
     sport_type: str
     tariff_idx: int
+    idempotency_key: str | None = None
 
 
 class WebAppBindPhonePayload(BaseModel):
@@ -99,6 +100,7 @@ class AdminStudentUpdate(BaseModel):
     discipline: str | None = None
     parent_phone: str | None = None
     parent_phone_secondary: str | None = None
+    comment: str | None = None
 
 
 class AdminStudentCreate(BaseModel):
@@ -110,3 +112,4 @@ class AdminStudentCreate(BaseModel):
     birthday: str | None = None
     discipline: str
     tariff_idx: int | None = None
+    comment: str | None = None

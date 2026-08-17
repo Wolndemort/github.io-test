@@ -2,6 +2,7 @@
 <html>
 <head>
     <meta charset="utf-8">
+    <title>Статистика клуба</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <link rel="stylesheet" href="{{ url_for('static', path='css/mono.css') }}?v=1.1.0">
@@ -182,6 +183,11 @@
             <a href="/revenue?club_id={{ club_id }}&init_data={{ request.query_params.get('init_data','')|urlencode }}">Сбросить</a>
         </form>
         <div class="muted-note" style="margin-top:10px;">{{ filters.date_from or 'Начало' }} — {{ filters.date_to or 'Сегодня' }}</div>
+        <div class="grid mono-grid-2" style="margin-top:12px;margin-bottom:0">
+            <div class="card mono-card"><div class="label">Итого выручка за период</div><div class="value">{{ '%.2f'|format(period_revenue|default(0)) }} ₽</div></div>
+            <div class="card mono-card"><div class="label">Расходы за период</div><div class="value">{{ '%.2f'|format(period_expenses|default(0)) }} ₽</div></div>
+            <div class="card mono-card full"><div class="label">Маржа за период</div><div class="value">{{ '%.2f'|format(period_margin|default(0)) }} ₽</div></div>
+        </div>
         </div>
     </div>
 

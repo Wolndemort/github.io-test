@@ -3,6 +3,7 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>Журнал продаж</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <script src="/static/js/admin_fullscreen.js"></script>
     <style>
@@ -21,6 +22,7 @@
 </head>
 <body>
 {% include "_staff_back_button.html" %}
+<div style="font-size:20px;font-weight:800;margin:4px 0 10px">📜 Журнал продаж</div>
 <div class="wrap">
     <div class="card">
         <a class="link" href="/admin/students?club_id={{ club_id }}&init_data={{ request.query_params.get('init_data','')|urlencode }}">← Атлеты</a>
@@ -41,7 +43,7 @@
         <a class="link" href="/admin/sales?club_id={{ club_id }}&init_data={{ request.query_params.get('init_data','')|urlencode }}">Сбросить</a>
     </form>
     <div class="card"><b>Операций: {{ operations|length }}</b>
-        {% for item in operations %}<div class="sale"><div><b>{{ item.title }}</b><br><span class="muted">{{ item.created_at|moscow_time if item.created_at else '' }} · {{ item.category }} · {{ item.method }}{% if item.discipline %} · {{ item.discipline }}{% endif %}</span><br><span class="muted">Кому: {{ item.buyer_label|safe }} · Что и за что: {{ item.title }} ({{ item.category }})</span><br><span class="muted">Заказ: {{ item.id }}</span><br><select data-method-order="{{ item.id }}"><option value="">Изменить способ оплаты</option><option value="card">Карта / онлайн</option><option value="cash">Наличные</option><option value="sbp">СБП</option><option value="requisites">По реквизитам</option></select><button type="button" data-delete-order="{{ item.id }}" style="background:#7f1d1d;color:#fff">Удалить операцию</button></div><b>{{ '%.2f'|format(item.amount / 100) }} ₽</b></div>
+        {% for item in operations %}<div class="sale"><div><b>{{ item.title }}</b><br><span class="muted">{{ item.created_at|moscow_time if item.created_at else '' }} · {{ item.category }} · {{ item.method }}{% if item.discipline %} · {{ item.discipline }}{% endif %}</span><br><span class="muted">Кому: {{ item.buyer_label|safe }} · Что и за что: {{ item.title }} ({{ item.category }})</span><br><span class="muted">Заказ: {{ item.id }}</span><br>{% if item.source == 'payment' %}<select data-method-order="{{ item.id }}"><option value="">Изменить способ оплаты</option><option value="card">Карта / онлайн</option><option value="cash">Наличные</option><option value="sbp">СБП</option><option value="requisites">По реквизитам</option></select>{% endif %}<button type="button" data-delete-order="{{ item.id }}" style="background:#7f1d1d;color:#fff">Удалить операцию</button></div><b>{{ '%.2f'|format(item.amount / 100) }} ₽</b></div>
         {% else %}<p class="muted">По выбранным фильтрам операций нет.</p>{% endfor %}
     </div>
     <div class="card" style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;text-align:center">

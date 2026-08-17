@@ -8,7 +8,12 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from admin_module.router_base import router
-from config import PROXY_URL, SUPER_YOOKASSA_AUTO_RENEW_ENABLED
+from config import (
+    PROXY_URL,
+    SUPER_YOOKASSA_AUTO_RENEW_ENABLED,
+    SUPER_YOOKASSA_SHOP_ID,
+    SUPER_YOOKASSA_SECRET_KEY,
+)
 from database.db import PaymentOrder, SaaSPaymentOrder, CartOrder, CartItem, ClubProduct, Club, Student, Subscription, add_abon, purchase_student_freeze, get_session, get_student_parent_ids
 from loguru import logger
 from services.audit import audit_event
@@ -52,15 +57,40 @@ async def yookassa_webhook(request: Request, session: AsyncSession = Depends(get
         club = (await session.execute(select(Club).where(Club.id == order.club_id).with_for_update())).scalar_one_or_none()
         if not club or amount_data.get("currency") != "RUB":
             return {"status": "ignored"}
+        if not SUPER_YOOKASSA_SHOP_ID or not SUPER_YOOKASSA_SECRET_KEY:
+            return {"status": "ignored"}
         try:
-            received_amount = int(Decimal(str(amount_data.get("value"))) * 100)
+            async with httpx.AsyncClient(
+                auth=(SUPER_YOOKASSA_SHOP_ID, SUPER_YOOKASSA_SECRET_KEY),
+                timeout=10.0,
+            ) as client:
+                verify_response = await client.get(
+                    f"https://api.yookassa.ru/v3/payments/{payment_id}"
+                )
+            if verify_response.status_code != 200:
+                return {"status": "retry"}
+            verified_saas_payment = verify_response.json()
+            if (
+                verified_saas_payment.get("status") != "succeeded"
+                or verified_saas_payment.get("metadata", {}).get("order_id") != str(order.id)
+                or verified_saas_payment.get("amount", {}).get("currency") != "RUB"
+            ):
+                return {"status": "ignored"}
+        except httpx.HTTPError:
+            logger.exception("Не удалось проверить SaaS-платеж %s через API ЮKassa", payment_id)
+            return {"status": "retry"}
+        try:
+            received_amount = int(Decimal(str(verified_saas_payment.get("amount", {}).get("value"))) * 100)
         except (InvalidOperation, TypeError, ValueError):
             return {"status": "ignored"}
         if received_amount != order.amount_kopecks:
             return {"status": "ignored"}
         order.status = "CONFIRMED"
         order.provider_payment_id = str(payment_id)
-        payment_method = object_data.get("payment_method") or {}
+        # Webhook payload is not trusted for payment method details. The
+        # payment itself was fetched and verified from YooKassa above; use
+        # that response for saved-card/recurrent metadata as well.
+        payment_method = verified_saas_payment.get("payment_method") or {}
         order.payment_method_id = payment_method.get("id")
         order.auto_renew = bool(SUPER_YOOKASSA_AUTO_RENEW_ENABLED and order.payment_method_id and payment_method.get("type") == "bank_card")
         order.paid_at = datetime.now(timezone.utc).replace(tzinfo=None)
@@ -191,7 +221,9 @@ async def yookassa_webhook(request: Request, session: AsyncSession = Depends(get
         # отличать его от наличной продажи. После успешного webhook нужно
         # обязательно заменить его реальным ID ЮKassa, иначе касса покажет
         # онлайн-платёж как оплату по реквизитам.
-        payment_method = object_data.get("payment_method", {})
+        # Use the payment method from the independently verified YooKassa
+        # response, never from the caller-controlled webhook body.
+        payment_method = verified_payment.get("payment_method") or {}
         payment_kind = str(payment_method.get("type", "") or "").strip().lower()
         order.provider_payment_id = f"SBP:{payment_id}" if payment_kind == "sbp" else str(payment_id)
         payment_method_id = payment_method.get("id")

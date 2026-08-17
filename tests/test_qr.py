@@ -161,3 +161,20 @@ async def test_parse_qr_scan_rejects_expired_qr(mock_gate_service, _mock_gen_sig
 
     mock_gate_service.assert_not_awaited()
     assert "истёк" in message.answer.await_args.args[0]
+
+
+@pytest.mark.asyncio
+@patch("handlers.user_option.process_athlete_gate_pass")
+async def test_parse_qr_scan_rejects_when_qr_feature_is_disabled(mock_gate_service):
+    session = FakeSession()
+    club = AsyncMock()
+    club.id = 1
+    redis = AsyncMock()
+    message = AsyncMock()
+    message.web_app_data.data = "student:1:2026-08-17-12:any"
+    message.answer = AsyncMock()
+
+    await parse_qr_scan(message, session, club, {"features": {"qr_checkin": False}}, redis)
+
+    mock_gate_service.assert_not_awaited()
+    assert "отключены" in message.answer.await_args.args[0]

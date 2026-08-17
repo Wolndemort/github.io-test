@@ -47,6 +47,7 @@ from fastapi.security import APIKeyHeader
 from pydantic import BaseModel
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from starlette import status
@@ -71,6 +72,7 @@ from admin_module.webapp_shared import (
 )
 from services.input_normalization import normalize_ru_phone, parse_user_date, parse_user_date_any
 from services.audit import audit_event
+from services.staff_permissions import staff_can
 import admin_module.webapp_client_cabinet  # noqa: F401
 import admin_module.turnstile_biometry  # noqa: F401 - registers SKUD WebApp routes
 import admin_module.payments_webhook  # noqa: F401
@@ -197,6 +199,7 @@ class AdminProductSalePayload(BaseModel):
     club_id: int
     items: list[dict]
     student_id: int | None = None
+    idempotency_key: str | None = None
 
 class TariffChangePayload(BaseModel):
     init_data: str
@@ -223,11 +226,16 @@ class CashEntryPayload(BaseModel):
     category: str = "other"
     amount_kopecks: int
     description: str = ""
+    idempotency_key: str | None = None
 
 class CashEntryDeletePayload(BaseModel):
     init_data: str
     club_id: int
     confirmed: bool = False
+
+class CashEntryReversePayload(BaseModel):
+    init_data: str
+    club_id: int
 
 class CashSaleDeletePayload(BaseModel):
     init_data: str
@@ -330,6 +338,8 @@ async def scanner_scan(
     club = (await session.execute(select(Club).where(Club.id == payload.club_id))).scalar_one_or_none()
     if not club:
         raise HTTPException(status_code=404, detail="Клуб не найден")
+    if not (club.club_settings or {}).get("features", {}).get("qr_checkin", True):
+        raise HTTPException(status_code=403, detail="QR-пропуски отключены в этом клубе")
     tg_user = await verify_webapp_staff(club, payload.init_data, session, "qr_checkin")
 
     raw = fix_layout(payload.qr_data).strip().split(":")
@@ -478,6 +488,10 @@ async def admin_students_page(
                 if phone and phone == link.phone:
                     linked_parent_slots[link.student_id].add(slot)
     is_admin = int(tg_user.get("id", 0)) == int(club.owner_id or 0) or int(tg_user.get("id", 0)) in SUPER_ADMIN_IDS
+    can_manage_students = is_admin
+    if not can_manage_students:
+        staff_obj = (await session.execute(select(ClubStaff).where(ClubStaff.club_id == club.id, ClubStaff.telegram_id == int(tg_user.get("id", 0)), ClubStaff.is_active.is_(True)))).scalar_one_or_none()
+        can_manage_students = staff_can(staff_obj, "athletes_manage")
     return templates.TemplateResponse("admin_students.html", {
         "request": request,
         "club_id": club_id,
@@ -487,6 +501,7 @@ async def admin_students_page(
         "now": datetime.now(),
         "linked_parent_slots": linked_parent_slots,
         "is_admin": is_admin,
+        "can_manage_students": can_manage_students,
     })
 
 
@@ -533,7 +548,19 @@ async def delete_admin_sale(order_id: str, payload: AdminSaleDeletePayload, sess
         object_type = "cart_order"
     if not order or order.club_id != payload.club_id or order.status != "CONFIRMED":
         raise HTTPException(404, "Операция не найдена")
-    order.status = "DELETED"
+    restored_items = []
+    if isinstance(order, CartOrder) and str(order.provider_payment_id or "").startswith("CASH:"):
+        cart_items = (await session.execute(select(CartItem).where(CartItem.cart_order_id == order.id))).scalars().all()
+        for item in cart_items:
+            if item.product_id:
+                product = await session.get(ClubProduct, item.product_id, with_for_update=True)
+                if product:
+                    product.stock += item.quantity or 1
+            restored_items.append({"product_id": item.product_id, "quantity": item.quantity})
+            await session.delete(item)
+        order.status = "CANCELLED"
+    else:
+        order.status = "DELETED"
     await session.commit()
     audit_event(
         "sale_deleted",
@@ -543,6 +570,7 @@ async def delete_admin_sale(order_id: str, payload: AdminSaleDeletePayload, sess
         object_type=object_type,
         object_id=order.id,
         amount_kopecks=order.amount_kopecks,
+        restored_items=restored_items,
     )
     return {"ok": True}
 
@@ -606,7 +634,7 @@ async def admin_sales_page(
         operation_method = _order_payment_method(order)
         operation_discipline = order.discipline or ""
         operations.append({"id": order.id, "created_at": order.created_at, "amount": order.amount_kopecks or 0,
-                           "method": operation_method, "category": operation_category, "discipline": operation_discipline,
+                           "method": operation_method, "category": operation_category, "discipline": operation_discipline, "source": "payment",
                            "title": _money_operation_category_label(operation_category), "status": order.status,
                            "buyer_label": await resolve_user_label(session, order.user_id, empty_label="Плательщик")})
     for order in cart_orders:
@@ -616,7 +644,7 @@ async def admin_sales_page(
             operation_discipline = payload.get("discipline", "")
             operation_method = "cash" if str(order.provider_payment_id or "").startswith("CASH:") else ("requisites" if str(order.provider_payment_id or "").startswith("MANUAL:") else ("sbp" if "SBP" in str(order.provider_payment_id or "").upper() else ("card" if order.provider_payment_id else "other")))
             operations.append({"id": order.id, "created_at": order.created_at, "amount": (item.unit_price_kopecks or 0) * (item.quantity or 1),
-                               "method": operation_method, "category": operation_category, "discipline": operation_discipline,
+                               "method": operation_method, "category": operation_category, "discipline": operation_discipline, "source": "cart",
                                "title": item.title, "status": order.status,
                                "buyer_label": await resolve_user_label(session, order.user_id, empty_label="Плательщик")})
     operations = [item for item in operations
@@ -637,7 +665,8 @@ async def cash_register_page(request: Request, session: AsyncSession = Depends(g
     if not init_data:
         return webapp_auth_gate(request, club_id)
     club = await session.get(Club, club_id)
-    await verify_webapp_staff(club, init_data, session, "cash_view")
+    tg_user = await verify_webapp_staff(club, init_data, session, "cash_view")
+    is_cash_admin = int(tg_user.get("id", 0)) == int(club.owner_id or 0) or int(tg_user.get("id", 0)) in {int(x) for x in SUPER_ADMIN_IDS}
     start = moscow_date_boundary(date_from) if date_from else None
     end = moscow_date_boundary(date_to) + timedelta(days=1) if date_to else None
     manual_query = select(CashEntry).where(CashEntry.club_id == club_id)
@@ -663,7 +692,7 @@ async def cash_register_page(request: Request, session: AsyncSession = Depends(g
         method_label = {"cash": "Наличная", "sbp": "СБП", "requisites": "По реквизитам", "card": "Онлайн"}.get(method, "")
         buyer = await resolve_user_label(session, row.user_id, empty_label="Покупатель")
         income_rows.append({"id": row.id, "created_at": row.created_at, "entry_type": "income", "category": "product", "category_label": _money_operation_category_label("product", "sale"), "amount_kopecks": row.amount_kopecks or 0, "description": f"{method_label} продажа товара: {item_titles}" if item_titles else f"{method_label} продажа товара", "reason": item_titles or "Продажа товара", "actor_label": buyer, "recipient_label": buyer, "source": "sale", "method": method})
-    rows = income_rows + [{"id": e.id, "created_at": e.created_at, "entry_type": e.entry_type, "category": e.category, "category_label": _money_operation_category_label(e.category), "amount_kopecks": e.amount_kopecks, "description": e.description, "reason": e.description or _money_operation_category_label(e.category), "actor_label": await resolve_user_label(session, e.created_by, empty_label="Сотрудник"), "recipient_label": "—", "source": "manual", "method": "cash"} for e in manual]
+    rows = income_rows + [{"id": e.id, "created_at": e.created_at, "entry_type": e.entry_type, "category": e.category, "category_label": _money_operation_category_label(e.category), "amount_kopecks": e.amount_kopecks, "description": e.description, "reason": e.description or _money_operation_category_label(e.category), "actor_label": await resolve_user_label(session, e.created_by, empty_label="Сотрудник"), "recipient_label": "—", "source": "manual", "method": "cash", "reversed_entry_id": e.reversed_entry_id} for e in manual]
     rows.sort(key=lambda x: x["created_at"] or datetime.min, reverse=True)
     income = sum(r["amount_kopecks"] for r in rows if r["entry_type"] == "income")
     cash_income = sum(r["amount_kopecks"] for r in rows if r["entry_type"] == "income" and r.get("method") == "cash")
@@ -690,6 +719,7 @@ async def cash_register_page(request: Request, session: AsyncSession = Depends(g
             "cash_income_total": cash_income_total,
             "cash_expenses_total": cash_expenses_total,
             "cash_margin_total": cash_margin_total,
+            "is_cash_admin": is_cash_admin,
             "date_from": date_from or "",
             "date_to": date_to or "",
         },
@@ -705,6 +735,7 @@ async def admin_audit_page(
     date_to: str | None = Query(default=None),
     actor_role: str | None = Query(default=None),
     event: str | None = Query(default=None),
+    page: int = Query(default=1, ge=1),
     session: AsyncSession = Depends(get_session),
 ):
     club = await session.get(Club, club_id)
@@ -722,7 +753,10 @@ async def admin_audit_page(
         query = query.where(AuditEntry.actor_role == actor_role.strip().casefold())
     if event:
         query = query.where(AuditEntry.event == event.strip())
-    entries = (await session.execute(query.order_by(AuditEntry.created_at.desc()).limit(300))).scalars().all()
+    page_size = 300
+    entries = (await session.execute(query.order_by(AuditEntry.created_at.desc()).offset((page - 1) * page_size).limit(page_size + 1))).scalars().all()
+    has_next = len(entries) > page_size
+    entries = entries[:page_size]
     rows = []
     for entry in entries:
         payload = entry.payload or {}
@@ -750,6 +784,8 @@ async def admin_audit_page(
             "club_id": club_id,
             "rows": rows,
             "filters": {"date_from": date_from or "", "date_to": date_to or "", "actor_role": actor_role or "", "event": event or ""},
+            "page": page,
+            "has_next": has_next,
         },
     )
 
@@ -758,11 +794,27 @@ async def admin_audit_page(
 async def create_cash_entry(payload: CashEntryPayload, session: AsyncSession = Depends(get_session)):
     club = await session.get(Club, payload.club_id)
     tg_user = await verify_webapp_admin(club, payload.init_data)
+    raw_key = str(payload.idempotency_key or "").strip()
+    if raw_key and (len(raw_key) > 64 or any(ch not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-" for ch in raw_key)):
+        raise HTTPException(status_code=400, detail="Некорректный ключ операции")
+    entry_key = raw_key or f"cash-entry-{uuid.uuid4().hex}"
+    existing = (await session.execute(select(CashEntry).where(CashEntry.idempotency_key == entry_key))).scalar_one_or_none()
+    if existing:
+        if existing.club_id != payload.club_id:
+            raise HTTPException(status_code=409, detail="Ключ операции уже используется")
+        return {"success": True, "id": existing.id, "idempotent": True}
     if payload.entry_type not in {"income", "expense"} or payload.amount_kopecks <= 0 or payload.amount_kopecks > 100_000_000_00:
         raise HTTPException(status_code=400, detail="Некорректный тип или сумма кассовой операции")
-    entry = CashEntry(club_id=payload.club_id, entry_type=payload.entry_type, category=payload.category.strip()[:50] or "other", amount_kopecks=payload.amount_kopecks, description=payload.description.strip()[:500], created_by=int(tg_user.get("id")))
+    entry = CashEntry(club_id=payload.club_id, entry_type=payload.entry_type, category=payload.category.strip()[:50] or "other", amount_kopecks=payload.amount_kopecks, description=payload.description.strip()[:500], idempotency_key=entry_key, created_by=int(tg_user.get("id")))
     session.add(entry)
-    await session.commit()
+    try:
+        await session.commit()
+    except IntegrityError:
+        await session.rollback()
+        existing = (await session.execute(select(CashEntry).where(CashEntry.idempotency_key == entry_key))).scalar_one_or_none()
+        if existing and existing.club_id == payload.club_id:
+            return {"success": True, "id": existing.id, "idempotent": True}
+        raise
     audit_event(
         "cash_entry_created",
         **await audit_actor_context(session, club, tg_user, "admin/cash/entries"),
@@ -779,7 +831,7 @@ async def create_cash_entry(payload: CashEntryPayload, session: AsyncSession = D
 
 
 @router.post("/admin/cash/entries/{entry_id}/reverse")
-async def reverse_cash_entry(entry_id: int, payload: CashEntryPayload, session: AsyncSession = Depends(get_session)):
+async def reverse_cash_entry(entry_id: int, payload: CashEntryReversePayload, session: AsyncSession = Depends(get_session)):
     club = await session.get(Club, payload.club_id)
     tg_user = await verify_webapp_admin(club, payload.init_data)
     entry = await session.get(CashEntry, entry_id)
@@ -813,7 +865,7 @@ async def delete_cash_entry(entry_id: int, payload: CashEntryDeletePayload, sess
         raise HTTPException(status_code=400, detail="Требуется подтверждение удаления операции")
     club = await session.get(Club, payload.club_id)
     tg_user = await verify_webapp_admin(club, payload.init_data)
-    entry = await session.get(CashEntry, entry_id)
+    entry = await session.get(CashEntry, entry_id, with_for_update=True)
     if not entry or entry.club_id != payload.club_id:
         raise HTTPException(status_code=404, detail="Кассовая операция не найдена")
     if entry.reversed_entry_id:
@@ -833,14 +885,9 @@ async def delete_cash_entry(entry_id: int, payload: CashEntryDeletePayload, sess
 
 @router.post("/webapp/admin-audit/{entry_id}/delete")
 async def delete_audit_entry(entry_id: int, payload: AuditEntryDeletePayload, session: AsyncSession = Depends(get_session)):
-    club = await session.get(Club, payload.club_id)
-    await verify_webapp_admin(club, payload.init_data)
-    entry = await session.get(AuditEntry, entry_id)
-    if not entry or entry.club_id != payload.club_id:
-        raise HTTPException(status_code=404, detail="Запись журнала не найдена")
-    await session.delete(entry)
-    await session.commit()
-    return {"success": True}
+    # Аудит является неизменяемым журналом. Endpoint оставлен для обратной
+    # совместимости со старыми клиентами, но удаление намеренно запрещено.
+    raise HTTPException(status_code=405, detail="Записи аудита нельзя удалять")
 
 
 @router.patch("/admin/students/{student_id}")
@@ -861,7 +908,7 @@ async def admin_update_student(
     if student.club_id != payload.club_id:
         raise HTTPException(status_code=403, detail="Атлет другого клуба")
     owner_club = await db.get(Club, student.club_id)
-    await verify_webapp_admin(owner_club, payload.init_data)
+    tg_user = await verify_webapp_staff(owner_club, payload.init_data, db, "athletes_manage")
     if not tg_user:
         raise HTTPException(status_code=403, detail="Доступ запрещён")
     before = {
@@ -875,6 +922,7 @@ async def admin_update_student(
         "frozen_days": student.frozen_days,
         "discipline": student.discipline,
         "parent_phone": student.parent_phone,
+        "comment": student.comment,
     }
     if payload.name is not None:
         name = payload.name.strip()
@@ -883,6 +931,8 @@ async def admin_update_student(
         if len(name) > 150:
             raise HTTPException(status_code=400, detail="Имя атлета слишком длинное")
         student.name = name
+    if payload.comment is not None:
+        student.comment = payload.comment.strip()[:1000] or None
     if payload.balance_lessons is not None:
         if payload.balance_lessons < 0 or payload.balance_lessons > 999:
             raise HTTPException(status_code=400, detail="Баланс должен быть от 0 до 999")
@@ -969,6 +1019,7 @@ async def admin_update_student(
         "frozen_days": student.frozen_days,
         "discipline": student.discipline,
         "parent_phone": student.parent_phone,
+        "comment": student.comment,
     }
     audit_event(
         "student_updated",
@@ -995,7 +1046,7 @@ async def admin_delete_student(
         raise HTTPException(status_code=404, detail="Клуб не найден")
     if not verify_telegram_data(payload.init_data, club.bot_token):
         raise HTTPException(status_code=403, detail="Доступ запрещён")
-    await verify_webapp_admin(club, payload.init_data)
+    await verify_webapp_staff(club, payload.init_data, db, "athletes_manage")
     student = await db.get(Student, student_id, with_for_update=True)
     if not student or student.club_id != payload.club_id:
         raise HTTPException(status_code=404, detail="Атлет не найден")
@@ -1004,6 +1055,7 @@ async def admin_delete_student(
         "discipline": student.discipline,
         "parent_phone": student.parent_phone,
         "parent_phone_secondary": student.parent_phone_secondary,
+        "comment": student.comment,
         "parent_phone_secondary": student.parent_phone_secondary,
     }
     await db.delete(student)
@@ -1037,6 +1089,17 @@ async def admin_cash_subscription_page(request: Request, club_id: int = Query(..
 async def admin_cash_subscription(payload: WebAppCashSubscriptionPayload, db: AsyncSession = Depends(get_session)):
     club = await db.get(Club, payload.club_id)
     tg_user = await verify_webapp_staff(club, payload.init_data, db, "cash_view")
+    raw_key = str(payload.idempotency_key or "").strip()
+    if raw_key and (len(raw_key) > 36 or any(ch not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-" for ch in raw_key)):
+        raise HTTPException(status_code=400, detail="Некорректный ключ операции")
+    sale_key = raw_key or uuid.uuid4().hex
+    order_id = f"CASH_WEBAPP_{sale_key}"
+    existing_order = await db.get(PaymentOrder, order_id, with_for_update=True)
+    if existing_order:
+        if existing_order.club_id != club.id:
+            raise HTTPException(status_code=409, detail="Ключ операции уже используется")
+        existing_student = await db.get(Student, existing_order.student_id) if existing_order.student_id else None
+        return {"ok": True, "student": existing_student.name if existing_student else "", "expire_date": existing_student.expire_date.strftime("%Y-%m-%d") if existing_student and existing_student.expire_date else "", "balance_lessons": existing_student.balance_lessons if existing_student else 0, "order_id": existing_order.id, "idempotent": True}
     student = await db.get(Student, payload.student_id, with_for_update=True)
     if not student or student.club_id != club.id:
         raise HTTPException(status_code=404, detail="Атлет не найден")
@@ -1050,14 +1113,24 @@ async def admin_cash_subscription(payload: WebAppCashSubscriptionPayload, db: As
     count = int(tariff.get("count", 0) or 0)
     days = int(tariff.get("days", 30) or 30)
     price = int(tariff.get("price", 0) or 0) * 100
-    if count < 1 or days < 1 or price < 0:
+    if count < 1 or days < 1 or price <= 0:
         raise HTTPException(status_code=400, detail="Некорректный тариф")
+    age_error = _tariff_age_error(student, tariff, cfg.get("name", discipline))
+    if age_error:
+        raise HTTPException(status_code=400, detail=age_error)
     abon_result = await add_abon(student.id, count, db, club.id, settings, days_to_add=days, discipline=discipline)
     if not abon_result:
         raise HTTPException(status_code=409, detail="Не удалось применить абонемент")
-    order_id = f"CASH_WEBAPP_{uuid.uuid4().hex[:20].upper()}"
     db.add(PaymentOrder(id=order_id, user_id=int(tg_user.get("id", 0)), student_id=student.id, club_id=club.id, discipline=discipline, amount_kopecks=price, status="CONFIRMED", type="CASH_SUBSCRIPTION", provider_payment_id=f"CASH:{order_id}", lesson_count=count, days_to_add=days))
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        existing_order = await db.get(PaymentOrder, order_id)
+        if existing_order and existing_order.club_id == club.id:
+            existing_student = await db.get(Student, existing_order.student_id) if existing_order.student_id else None
+            return {"ok": True, "student": existing_student.name if existing_student else "", "expire_date": existing_student.expire_date.strftime("%Y-%m-%d") if existing_student and existing_student.expire_date else "", "balance_lessons": existing_student.balance_lessons if existing_student else 0, "order_id": existing_order.id, "idempotent": True}
+        raise
     audit_event("webapp_cash_subscription_created", club_id=club.id, actor_user_id=int(tg_user.get("id", 0)), student_id=student.id, amount_kopecks=price, discipline=discipline, lesson_count=count, days_to_add=days)
 
     # The bot flow sends the cash receipt after activation. Keep the WebApp flow
@@ -1163,6 +1236,7 @@ async def admin_create_student(
         can_freeze=1,
         is_frozen=0,
         discipline=payload.discipline.strip()[:50] or None,
+        comment=payload.comment.strip()[:1000] if payload.comment else None,
     )
     db.add(new_student)
     await db.flush()
@@ -1215,6 +1289,7 @@ async def admin_create_student(
             "discipline": new_student.discipline or "",
             "parent_phone": new_student.parent_phone or "",
             "parent_phone_secondary": new_student.parent_phone_secondary or "",
+            "comment": new_student.comment or "",
         },
         "meta": {
             "count": count,

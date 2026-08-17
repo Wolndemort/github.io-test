@@ -3,6 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Продажа товаров</title>
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <style>
     body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#090909;color:#f7f7f7;margin:0;padding:14px 14px 110px}
@@ -33,6 +34,7 @@
 </head>
 <body>
 {% include "_staff_back_button.html" %}
+<div style="font-size:18px;font-weight:800;margin:4px 0 10px">🛍 Продажа товаров</div>
 <div class="wrap">
   <div class="card" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:0">
     <a class="chip" style="text-align:center;text-decoration:none" href="/admin?club_id={{ club_id }}&init_data={{ request.query_params.get('init_data','')|urlencode }}">← В панель</a>
@@ -113,6 +115,7 @@ let currentSearch="";
 let historyFrom="";
 let historyTo="";
 const studentOptions=[...studentSelectEl.options].map(option=>({value:option.value,text:option.text}));
+let saleIdempotencyKey=null;
 
 const esc=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const normalizeCategory=x=>String(x??'other').trim().toLowerCase().replace(/\s+/g,' ').replace(/ё/g,'е');
@@ -200,12 +203,14 @@ historyClearEl.onclick=()=>{
 document.getElementById('pay').onclick=async()=>{
   const b=document.getElementById('pay');
   b.disabled=true;
+  saleIdempotencyKey=saleIdempotencyKey||((window.crypto&&crypto.randomUUID)?crypto.randomUUID():`${Date.now()}-${Math.random().toString(36).slice(2)}`);
   const r=await fetch('/webapp/admin-product-sale',{
     method:'POST',
     headers:{'Content-Type':'application/json'},
     body:JSON.stringify({
       init_data:tg.initData,
       club_id:{{club_id}},
+      idempotency_key:saleIdempotencyKey,
       student_id:studentSelectEl.value ? Number(studentSelectEl.value) : null,
       items:[...cart].map(([product_id,quantity])=>({product_id,quantity}))
     })

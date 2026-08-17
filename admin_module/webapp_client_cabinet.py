@@ -790,7 +790,12 @@ async def webapp_buy_subscription_page(request: Request, club_id: int, init_data
     user = await _ensure_webapp_user_linked(db, int(tg_user.get("id", 0)), club_id)
     if not user:
         return await webapp_auth_help_page(request=request, club_id=club_id, init_data=init_data, db=db)
-    students = (await db.execute(select(Student).where(Student.parent_id == user.user_id, Student.club_id == club_id).order_by(Student.name))).scalars().all()
+    students = (await db.execute(
+        select(Student).outerjoin(StudentParent, StudentParent.student_id == Student.id).where(
+            Student.club_id == club_id,
+            or_(Student.parent_id == user.user_id, StudentParent.parent_id == user.user_id),
+        ).distinct().order_by(Student.name)
+    )).scalars().all()
     settings = club.club_settings or {}
     disciplines = settings.get("disciplines", {})
     payment_modes = payment_availability(settings)
@@ -811,7 +816,11 @@ async def webapp_buy_subscription_submit(payload: WebAppBuySubscriptionPayload, 
     if not user:
         raise HTTPException(status_code=403, detail="Пользователь не привязан к клубу")
     student = await db.get(Student, payload.student_id, with_for_update=True)
-    if not student or student.club_id != payload.club_id or student.parent_id != user_id:
+    linked_parent = await db.scalar(select(StudentParent.student_id).where(
+        StudentParent.student_id == payload.student_id,
+        StudentParent.parent_id == user_id,
+    ))
+    if not student or student.club_id != payload.club_id or (student.parent_id != user_id and not linked_parent):
         raise HTTPException(status_code=403, detail="Атлет не найден")
     discipline_cfg = (club.club_settings or {}).get("disciplines", {}).get(payload.sport_type)
     if not discipline_cfg:

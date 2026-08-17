@@ -790,6 +790,9 @@ async def _handle_qr_scan_data(
     club_settings: dict,
     redis: Redis | None = None,
 ):
+    if not club_settings.get("features", {}).get("qr_checkin", True):
+        return await message.answer("❌ QR-пропуски временно отключены в этом клубе.", show_alert=True)
+
     raw_data = fix_layout(raw_data)
     parts = raw_data.strip().split(':')
     if len(parts) != 4 or parts[0] != 'student':
@@ -898,9 +901,19 @@ async def handle_gen_qr(
 ):
     student_id = int(callback.data.split("_")[-1])
 
-    # 1. Тянем имя атлета из БД (чтобы написать в подписи)
-    student = await session.get(Student, student_id)
-    if not student or student.club_id != club.id:
+    # Callback можно подделать вручную, поэтому одной проверки club_id
+    # недостаточно: QR разрешён только родителю этого атлета.
+    student = (await session.execute(
+        select(Student).outerjoin(
+            StudentParent, StudentParent.student_id == Student.id
+        ).where(
+            Student.id == student_id,
+            Student.club_id == club.id,
+            or_(Student.parent_id == callback.from_user.id,
+                StudentParent.parent_id == callback.from_user.id),
+        ).distinct()
+    )).scalar_one_or_none()
+    if not student:
         return await callback.answer("❌ Ошибка: атлет не найден!", show_alert=True)
 
     # 2. Генерация данных (твоя логика с HMAC)

@@ -8,7 +8,7 @@
   <style>
     .wrap{max-width:1100px!important}.grid{grid-template-columns:repeat(4,minmax(0,1fr))!important}
     .date-field{display:block}.date-field input{letter-spacing:.04em}.date-field input::placeholder{color:#999}
-    .student.card{padding:20px;border-radius:22px;gap:14px}.student.card>label:first-child{font-size:14px;font-weight:700}.student.card input,.student.card select{min-height:44px}.student.card .grid{display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:14px}.student.card .grid>label{display:flex;flex-direction:column;gap:6px;min-width:0}.student.card .grid>label input,.student.card .grid>label select{width:100%;min-width:0}.student.card .grid>button{align-self:end;width:100%;margin:0!important}.student.card>div:last-of-type{margin-top:4px}.student.card button{min-height:42px}
+    .student.card{padding:20px;border-radius:22px;gap:14px}.student.card>label:first-child{font-size:14px;font-weight:700}.student.card input,.student.card select,.student.card textarea{min-height:44px}.student.card textarea{width:100%;min-width:0;box-sizing:border-box;resize:vertical;font:inherit}.student.card .grid{display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:14px}.student.card .grid>label{display:flex;flex-direction:column;gap:6px;min-width:0}.student.card .grid>label input,.student.card .grid>label select,.student.card .grid>label textarea{width:100%;min-width:0}.student.card .grid>button{align-self:end;width:100%;margin:0!important}.student.card>div:last-of-type{margin-top:4px}.student.card button{min-height:42px}
     .filter-checks{display:grid!important;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px 14px;margin-top:12px}.filter-checks label{display:grid!important;grid-template-columns:22px minmax(0,1fr);align-items:center;gap:7px;min-width:0;line-height:1.25}.filter-checks input{width:20px!important;height:20px;min-height:20px!important;margin:0}.student.card>label:first-child{display:flex;flex-direction:column;gap:7px}.student.card>.muted{display:block;margin:0 0 2px;padding:7px 10px;border-radius:9px;background:#101010}.student.card>.muted::first-letter{color:#fff}
     .student-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.student-actions button{flex:0 1 auto}.invite-parent{background:#e4f8ec!important;color:#123!important}.invite-status{display:inline-flex;align-items:center;padding:10px 12px;border-radius:12px;background:#dff8e9;color:#14532d;font-weight:700;font-size:13px}
     #list{display:grid;gap:14px}.wrap>.card:first-of-type>.muted,.wrap>.card:first-of-type>p{display:none}.wrap>.card:first-of-type{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 16px}.wrap>.card:first-of-type h2{margin:0;min-width:0}.wrap>.card:first-of-type>a{display:inline-block;width:auto;flex:0 0 auto;padding:10px 14px}
@@ -72,7 +72,7 @@
   </style>
 </head>
 <body class="mono-theme"><div class="wrap"><button id="fullscreen" type="button" style="float:right;width:auto">⛶</button>
-  <div class="card"><div class="muted">Клуб</div><h2>{{ club_name }}</h2><p>Управление атлетами клуба. Пользовательские и системные настройки недоступны.</p><a class="mono-action" href="/webapp/client-cabinet?club_id={{ club_id }}">← В рабочий кабинет</a></div>
+  <div class="card"><div class="muted">Раздел</div><h2>👥 Атлеты · {{ club_name }}</h2><p>Управление атлетами клуба. Пользовательские и системные настройки недоступны.</p><a class="mono-action" href="/webapp/client-cabinet?club_id={{ club_id }}">← В рабочий кабинет</a></div>
   <div class="card"><label>Поиск<input id="search" placeholder="Имя атлета"></label><details class="filter-panel"><summary>Фильтры</summary><div class="filter-checks"><label><input class="student-filter" data-filter="missing" id="missing" type="checkbox"> Без даты рождения</label><label><input class="student-filter" data-filter="active" type="checkbox"> С активным абонементом</label><label><input class="student-filter" data-filter="noSubscription" type="checkbox"> Без абонемента</label><label><input class="student-filter" data-filter="frozen" type="checkbox"> Замороженные</label><label><input class="student-filter" data-filter="noParent" type="checkbox"> Без родителя</label><label class="age-filter"><input class="student-filter age-filter" data-age-min="0" data-age-max="6" type="checkbox"> 0–6 лет</label><label class="age-filter"><input class="student-filter age-filter" data-age-min="7" data-age-max="12" type="checkbox"> 7–12 лет</label><label class="age-filter"><input class="student-filter age-filter" data-age-min="13" data-age-max="17" type="checkbox"> 13–17 лет</label><label class="age-filter"><input class="student-filter age-filter" data-age-min="18" type="checkbox"> 18+ лет</label>{% for code,info in club_settings.get('disciplines', {}).items() %}<label><input class="student-filter discipline-filter" data-discipline="{{ code }}" type="checkbox"> {{ info.name if info.name else code }}</label>{% endfor %}</div></details><a class="mono-action" href="/admin/sales?club_id={{ club_id }}&init_data={{ request.query_params.get('init_data','')|urlencode }}">📈 Продажи</a></div>
   <div id="list">
   {% for s in students %}
@@ -84,6 +84,7 @@
         <label>До даты<input name="expire_date" type="text" inputmode="numeric" maxlength="10" placeholder="ДД.ММ.ГГГГ" value="{{ s.expire_date.strftime('%d.%m.%Y') if s.expire_date else '' }}"></label>
         <label>Бесплатных заморозок<input name="can_freeze" type="number" min="0" max="99" value="{{ s.can_freeze if s.can_freeze else '' }}" placeholder="0"></label>
         <label>Дисциплина<input name="discipline" value="{{ s.discipline or '' }}"></label>
+        <label>Комментарий<textarea name="comment" maxlength="1000" rows="3" placeholder="Внутренняя заметка">{{ s.comment or '' }}</textarea></label>
         <label>Статус<select name="is_frozen"><option value="0" {% if not s.is_frozen %}selected{% endif %}>Активен</option><option value="1" {% if s.is_frozen %}selected{% endif %}>Заморожен</option></select></label>
         <label>Дней заморозки<input name="frozen_days" type="number" min="1" max="365" value="{{ s.frozen_days or '' }}"></label>
       </div><div style="display:flex;gap:8px;flex-wrap:wrap"><button type="submit">Сохранить</button><button type="button" class="danger-delete">Удалить</button></div><span class="muted msg"></span>
@@ -102,6 +103,7 @@
       <label>Дата рождения<div class="date-field"><input id="newBirthday" type="text" inputmode="numeric" maxlength="10" placeholder="ДД.ММ.ГГГГ"></div></label>
       <label>Дисциплина<select id="newDiscipline"></select></label>
     </div>
+    <label style="display:block;margin-top:10px">Комментарий<textarea id="newComment" maxlength="1000" rows="3" placeholder="Внутренняя заметка"></textarea></label>
     <label>Тариф<select id="newTariff"></select></label>
     <label style="display:block;margin-top:10px"><input id="noSubscription" type="checkbox"> Без абонемента</label>
     <div class="actions"><button id="cancelCreate" type="button">Отмена</button><button id="saveCreate" type="button">Создать</button></div>
@@ -112,6 +114,7 @@ if (tg) { tg.ready(); tg.expand(); }
 const initData = tg?.initData || new URLSearchParams(window.location.search).get('init_data') || '';
 const clubId = {{ club_id }};
 const isAdmin = {{ 'true' if is_admin else 'false' }};
+const canManageStudents = {{ 'true' if can_manage_students else 'false' }};
 const disciplines = {{ club_settings.get('disciplines', {})|tojson }};
 const modal = document.getElementById('modal');
 const fab = document.getElementById('fab');
@@ -262,6 +265,7 @@ function bindEdit(form) {
       parent_phone: f.get('parent_phone'),
       parent_phone_secondary: f.get('parent_phone_secondary'),
       discipline: f.get('discipline')
+      ,comment: f.get('comment')
     };
     const msg = form.querySelector('.msg');
     try {
@@ -288,7 +292,7 @@ function bindEdit(form) {
 
 function studentCardHtml(s) {
   return `
-    <form class="student card" data-name="${esc((s.name || '').toLowerCase())}" data-birthday="${esc(s.birthday || '')}" data-parent="${s.parent_id ? '1' : '0'}" data-missing="${s.birthday ? '0' : '1'}" data-active="${s.expire_date ? '1' : '0'}" data-nosub="${s.expire_date ? '0' : '1'}" data-frozen="${s.is_frozen ? '1' : '0'}" data-discipline="${esc(s.discipline || '')}" data-id="${s.id}">
+    <form class="student card" data-name="${esc((s.name || '').toLowerCase())}" data-birthday="${esc(s.birthday || '')}" data-parent="${s.parent_id ? '1' : '0'}" data-secondary-phone="${esc(s.parent_phone_secondary || '')}" data-missing="${s.birthday ? '0' : '1'}" data-active="${s.expire_date ? '1' : '0'}" data-nosub="${s.expire_date ? '0' : '1'}" data-frozen="${s.is_frozen ? '1' : '0'}" data-discipline="${esc(s.discipline || '')}" data-id="${s.id}">
       <label>Имя атлета<input name="name" value="${esc(s.name || '')}" maxlength="150"></label><span class="muted">ID ${s.id} · баланс: ${s.balance_lessons || 0} · ${esc(s.discipline || 'без дисциплины')}</span>
       <div class="grid"><label>Телефон родителя<input name="parent_phone" value="${esc(s.parent_phone || '')}" placeholder="79990000000"></label>${s.parent_id ? `<button type="button" class="mono-action" style="display:inline-block;margin-top:6px;text-decoration:none" onclick="openChat(event, ${s.parent_id})">💬 Чат</button>` : ''}
         <label>Дата рождения ${s.birthday ? '' : '<span class="missing">не указана</span>'}<div class="date-field"><input name="birthday" type="text" inputmode="numeric" maxlength="10" placeholder="ДД.ММ.ГГГГ" value="${esc(formatDMY(s.birthday))}"></div></label>
@@ -296,9 +300,10 @@ function studentCardHtml(s) {
         <label>До даты<input name="expire_date" type="text" inputmode="numeric" maxlength="10" placeholder="ДД.ММ.ГГГГ" value="${esc(s.expire_date || '')}"></label>
       <label>Бесплатных заморозок<input name="can_freeze" type="number" min="0" max="99" value="${s.can_freeze ? s.can_freeze : ''}" placeholder="0"></label>
         <label>Дисциплина<input name="discipline" value="${esc(s.discipline || '')}"></label>
+        <label>Комментарий<textarea name="comment" maxlength="1000" rows="3" placeholder="Внутренняя заметка">${esc(s.comment || '')}</textarea></label>
         <label>Статус<select name="is_frozen"><option value="0" ${s.is_frozen ? '' : 'selected'}>Активен</option><option value="1" ${s.is_frozen ? 'selected' : ''}>Заморожен</option></select></label>
         <label>Дней заморозки<input name="frozen_days" type="number" min="1" max="365" value="${esc(s.frozen_days || '')}"></label>
-      </div><div style="display:flex;gap:8px;flex-wrap:wrap"><button type="submit">Сохранить</button><button type="button" class="danger-delete">Удалить</button></div><span class="muted msg"></span>
+      </div><div style="display:flex;gap:8px;flex-wrap:wrap">${canManageStudents ? '<button type="submit">Сохранить</button><button type="button" class="danger-delete">Удалить</button>' : ''}</div><span class="muted msg"></span>
     </form>`;
 }
 
@@ -369,7 +374,8 @@ async function createStudent() {
     phone_secondary: document.getElementById('newPhoneSecondary').value.trim() || null,
     birthday: document.getElementById('newBirthday').value || null,
     discipline: discSel.value,
-    tariff_idx: noSub.checked ? null : Number(tariffSel.value)
+    tariff_idx: noSub.checked ? null : Number(tariffSel.value),
+    comment: document.getElementById('newComment').value.trim() || null
   };
   saveButton.disabled = true;
   try {
@@ -391,6 +397,7 @@ async function createStudent() {
     document.getElementById('newPhone').value = '';
     document.getElementById('newPhoneSecondary').value = '';
     document.getElementById('newBirthday').value = '';
+    document.getElementById('newComment').value = '';
     noSub.checked = false;
     fillTariffs();
     filter();
@@ -406,6 +413,10 @@ async function createStudent() {
 document.getElementById('search').addEventListener('input', filter);
 document.querySelectorAll('.student-filter').forEach(x => x.addEventListener('change', filter));
 document.querySelectorAll('.student').forEach(bindEdit);
+if (!canManageStudents) {
+  document.querySelectorAll('.student input, .student select, .student textarea').forEach(control => { control.disabled = true; });
+  document.getElementById('fab').style.display = 'none';
+}
 fab.onclick = openModal;
 document.getElementById('cancelCreate').onclick = closeModal;
 discSel.onchange = fillTariffs;

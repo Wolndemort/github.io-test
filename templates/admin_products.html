@@ -2,6 +2,7 @@
 <html lang="ru">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Склад и товары</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 {% include "_staff_back_button.html" %}
 <style>
@@ -32,6 +33,7 @@
   .floating-top{position:fixed;right:16px;bottom:82px;z-index:40;width:48px;height:48px;border-radius:50%;border:0;background:#111;color:#fff;font-size:20px;box-shadow:0 10px 24px rgba(0,0,0,.22)}
   @media(max-width:640px){.product{grid-template-columns:1fr}}
 </style>
+<div style="font-size:20px;font-weight:800;margin:4px 0 10px">📦 Склад и товары</div>
 <div class="topbar">
   <a class="navlink" href="/admin?club_id={{ club_id }}&init_data={{ request.query_params.get('init_data','')|urlencode }}">← В панель</a>
   <a class="navlink secondary" href="#" onclick="window.Telegram?.WebApp?.close(); return false;">Закрыть</a>
@@ -39,15 +41,15 @@
 <h2>Товары клуба</h2>
 <div class="card">
   <div class="filters">
-    <div id="categoryTools" class="meta"></div>
+    <div id="categoryTools" class="meta">{% if not can_manage_products %}<span class="pill">Только просмотр</span>{% endif %}</div>
     <select id="categoryFilter"><option value="">Все категории</option></select>
   </div>
 </div>
-<div class="card quickbar">
+<div class="card quickbar"{% if not can_manage_products %} style="display:none"{% endif %}>
   <button id="createBtn" type="button">Создать товар</button>
   <button id="topBtn" type="button">Наверх</button>
 </div>
-<div class="card" id="productForm">
+<div class="card" id="productForm"{% if not can_manage_products %} style="display:none"{% endif %}>
   <h3 id="caption">Новый товар</h3>
   <div class="form-grid">
     <input id="n" placeholder="Название">
@@ -69,7 +71,7 @@
 <script>
 const tg=window.Telegram?.WebApp;
 tg?.ready();
-const cid={{club_id}},items={{products|tojson}};
+const cid={{club_id}},items={{products|tojson}},canManage={{can_manage_products|tojson}};
 const initData=tg?.initData||new URLSearchParams(window.location.search).get('init_data')||'';
 let edit=null,imageValue=null;
 const esc=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -122,17 +124,17 @@ function draw(){
             <span class="pill ${x.is_active?'ok':'off'}">${x.is_active?'активен':'выключен'}</span>
           </div>
           ${x.details ? `<details class="product-details"><summary>Состав / описание</summary><div class="product-info">${esc(x.details)}</div></details>` : ''}
-          <div class="actions">
+          {% if can_manage_products %}<div class="actions">
             <button data-edit="${x.id}">Изменить</button>
             <button data-del="${x.id}">Удалить</button>
-          </div>
+          </div>{% endif %}
         </div>
       </div>
     </div>
   `).join('')||'Товаров нет';
   list.querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>editItem(Number(b.dataset.edit)));
   list.querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>del(Number(b.dataset.del)));
-  categoryTools.innerHTML=categories.map(x=>`<button class="category-delete" type="button" data-category="${esc(x)}">Удалить «${esc(x)}»</button>`).join('');
+  categoryTools.innerHTML=canManage?categories.map(x=>`<button class="category-delete" type="button" data-category="${esc(x)}">Удалить «${esc(x)}»</button>`).join(''):categoryTools.innerHTML;
   categoryTools.querySelectorAll('.category-delete').forEach(b=>b.onclick=()=>deleteCategory(b.dataset.category));
 }
 

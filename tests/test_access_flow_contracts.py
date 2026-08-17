@@ -49,6 +49,14 @@ def test_qr_scanner_page_does_not_require_init_data_gate():
     assert "TemplateResponse(\n        \"scanner.html\"" in source
 
 
+def test_qr_scanner_enforces_club_feature_flag_and_generation_is_parent_scoped():
+    api = (ROOT / "admin_module/api.py").read_text(encoding="utf-8")
+    user = (ROOT / "handlers/user_option.py").read_text(encoding="utf-8")
+    assert 'qr_checkin", True' in api
+    assert "StudentParent.parent_id == callback.from_user.id" in user
+    assert "Student.parent_id == callback.from_user.id" in user
+
+
 def test_face_id_is_enforced_server_side_for_webapp_turnstile():
     source = (ROOT / "admin_module/turnstile_biometry.py").read_text(encoding="utf-8")
     assert "payload.biometric_token" in source
@@ -64,3 +72,19 @@ def test_face_id_activation_handles_android_clients_without_init_callback():
     assert "Face ID activation failed" in page
     assert "biometric_enable_requested" in endpoint
     assert "biometric_enabled" in endpoint
+
+
+def test_payment_webhook_uses_verified_payment_method_data():
+    source = (ROOT / "admin_module/payments_webhook.py").read_text(encoding="utf-8")
+    assert 'payment_method = verified_saas_payment.get("payment_method") or {}' in source
+    assert 'payment_method = verified_payment.get("payment_method") or {}' in source
+    assert 'payment_method = object_data.get("payment_method")' not in source
+
+
+def test_client_subscription_flow_supports_secondary_parent_links():
+    source = (ROOT / "admin_module/webapp_client_cabinet.py").read_text(encoding="utf-8")
+    start = source.index('@router.get("/webapp/client-cabinet/buy-subscription"')
+    end = source.index('@router.get("/webapp/client-cabinet/auth"', start)
+    block = source[start:end]
+    assert "StudentParent.parent_id == user.user_id" in block
+    assert "StudentParent.parent_id == user_id" in block

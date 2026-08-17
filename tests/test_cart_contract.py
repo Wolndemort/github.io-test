@@ -99,6 +99,93 @@ def test_admin_product_sale_page_shows_today_history_and_clear_confirmation_text
     assert "created_at\": order.created_at.isoformat()" in api or "created_at': order.created_at.isoformat()" in api
 
 
+def test_cash_sales_and_manual_cash_entries_are_idempotent_and_restore_stock_on_delete():
+    webapp = Path("admin_module/webapp_views.py").read_text(encoding="utf-8")
+    api = Path("admin_module/api.py").read_text(encoding="utf-8")
+    db = Path("database/db.py").read_text(encoding="utf-8")
+    migration = Path("migrations/versions/f6a7b8c9d0e1_add_cash_entry_idempotency.py").read_text(encoding="utf-8")
+    assert "idempotency_key" in webapp
+    assert "IntegrityError" in webapp
+    assert "idempotency_key" in api
+    assert "IntegrityError" in api
+    assert "product.stock += item.quantity" in api
+    assert "idempotency_key" in db
+    assert "cash_entries" in migration and "ix_cash_entries_idempotency_key" in migration
+
+
+def test_products_view_does_not_render_management_controls_for_read_only_staff():
+    page = Path("templates/admin_products.html").read_text(encoding="utf-8")
+    views = Path("admin_module/webapp_views.py").read_text(encoding="utf-8")
+    assert "can_manage_products" in page
+    assert "products_manage" in views
+
+
+def test_cash_register_exposes_safe_reversal_flow_for_manual_entries():
+    api = Path("admin_module/api.py").read_text(encoding="utf-8")
+    page = Path("templates/cash_register.html").read_text(encoding="utf-8")
+    assert "class CashEntryReversePayload" in api
+    assert "with_for_update=True" in api[api.index("async def reverse_cash_entry"):]
+    assert "reversed_entry_id" in api
+    assert "reverse-op" in page
+    assert "/admin/cash/entries/" in page and "/reverse" in page
+    assert "Сторнировано" in page
+
+
+def test_athletes_panel_has_internal_comment_and_cabinet_return_with_role_split():
+    page = Path("templates/admin_students.html").read_text(encoding="utf-8")
+    api = Path("admin_module/api.py").read_text(encoding="utf-8")
+    schemas = Path("admin_module/schemas.py").read_text(encoding="utf-8")
+    model = Path("database/db.py").read_text(encoding="utf-8")
+    migration = Path("migrations/versions/g7b8c9d0e1f2_add_student_comment.py").read_text(encoding="utf-8")
+    assert "В рабочий кабинет" in page
+    assert "👥 Атлеты" in page
+    assert 'name="comment"' in page and "newComment" in page
+    assert 'data-secondary-phone="${esc(s.parent_phone_secondary || \'\')}"' in page
+    assert "canManageStudents" in page
+    assert 'comment: str | None = None' in schemas
+    assert "student.comment" in api
+    assert "athletes_manage" in api
+    assert "comment" in model and "students" in migration
+
+
+def test_cash_subscription_schedule_and_tariff_webapps_have_safety_guards():
+    api = Path("admin_module/api.py").read_text(encoding="utf-8")
+    views = Path("admin_module/webapp_views.py").read_text(encoding="utf-8")
+    cash = Path("templates/admin_cash_subscription.html").read_text(encoding="utf-8")
+    tariffs = Path("templates/admin_tariffs.html").read_text(encoding="utf-8")
+    schedule = Path("templates/admin_schedule.html").read_text(encoding="utf-8")
+    assert "idempotency_key" in api and "CASH_WEBAPP_" in api
+    assert "_tariff_age_error" in api
+    assert "Нельзя удалить тариф" in views
+    assert "Некорректный день недели" in views
+    assert "Время должно быть в формате" in views
+    assert "<title>Тарифы и дисциплины</title>" in tariffs
+    assert "<title>Расписание</title>" in schedule
+    assert "В рабочий кабинет" in cash and "Продажа наличного абонемента" in cash
+
+
+def test_statistics_and_audit_have_period_totals_and_immutable_pagination():
+    stats = Path("templates/stats.html").read_text(encoding="utf-8")
+    pages = Path("admin_module/admin_pages.py").read_text(encoding="utf-8")
+    audit = Path("admin_module/api.py").read_text(encoding="utf-8")
+    audit_page = Path("templates/admin_audit.html").read_text(encoding="utf-8")
+    assert "period_revenue" in pages and "period_expenses" in pages and "period_margin" in pages
+    assert "Итого выручка за период" in stats
+    assert "page_size = 300" in audit and "has_next" in audit
+    assert "Записи аудита нельзя удалять" in audit
+    assert "delete-audit" not in audit_page
+    assert "Далее" in audit_page
+
+
+def test_statistics_top_payments_are_based_on_confirmed_payment_amounts_not_balance():
+    pages = Path("admin_module/admin_pages.py").read_text(encoding="utf-8")
+    stats = Path("templates/stats.html").read_text(encoding="utf-8")
+    assert "PaymentOrder.student_id" in pages
+    assert "payment_totals" in pages
+    assert '"amount": round(amount / 100, 2)' in pages
+    assert "student.amount" in stats
+
+
 def test_cart_webhook_has_idempotent_confirmed_guard():
     source = Path("admin_module/payments_webhook.py").read_text(encoding="utf-8")
     assert 'str(order_id).startswith("CART_")' in source

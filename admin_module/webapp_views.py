@@ -13,6 +13,7 @@ from aiogram import Bot
 from fastapi import Depends, File, HTTPException, Query, Request, UploadFile
 from fastapi.responses import HTMLResponse, StreamingResponse
 from sqlalchemy import select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from loguru import logger
 
@@ -29,7 +30,7 @@ from admin_module.api import (
 from admin_module.utils import verify_webapp_staff
 from admin_module.webapp_shared import get_club_id_from_host, telegram_init_gate, webapp_auth_gate, verify_webapp_admin
 from admin_module.webapp_verify import verify_telegram_data
-from database.db import Club, ClubProduct, Student, User, get_session, get_student_parent_ids
+from database.db import Club, ClubProduct, ClubStaff, PaymentOrder, Student, User, get_session, get_student_parent_ids
 from database.db import CartItem, CartOrder
 from services.audit import audit_event
 from admin_module.api import audit_actor_context
@@ -43,6 +44,8 @@ from services.order_notifications import resolve_user_label
 from services.schedule_utils import normalize_schedule_block
 from services.payment_requisites import get_payment_info_text
 from services.availability import payment_availability
+from services.staff_permissions import staff_can
+from middlewares.db_saas_midleware import SUPER_ADMIN_IDS
 
 def _normalize_category(value: str | None) -> str:
     return " ".join((value or "other").strip().casefold().replace("ё", "е").split()) or "other"
@@ -95,10 +98,15 @@ async def client_cart(request: Request, club_id: int = Query(...), init_data: st
 async def admin_products_page(request: Request, club_id: int = Query(...), init_data: str | None = Query(None), session: AsyncSession = Depends(get_session)):
     club = await session.get(Club, club_id)
     if not init_data: return telegram_init_gate('/webapp/admin-products', club_id, 'РћС‚РєСЂРѕР№С‚Рµ РєР°С‚Р°Р»РѕРі РёР· Telegram')
-    await verify_webapp_staff(club, init_data, session, "products_view")
+    tg_user = await verify_webapp_staff(club, init_data, session, "products_view")
+    user_id = int(tg_user.get("id", 0))
+    can_manage_products = user_id == int(club.owner_id or 0) or user_id in {int(x) for x in SUPER_ADMIN_IDS}
+    if not can_manage_products:
+        staff_obj = (await session.execute(select(ClubStaff).where(ClubStaff.club_id == club.id, ClubStaff.telegram_id == user_id, ClubStaff.is_active.is_(True)))).scalar_one_or_none()
+        can_manage_products = staff_can(staff_obj, "products_manage")
     products = (await session.execute(select(ClubProduct).where(ClubProduct.club_id == club_id).order_by(ClubProduct.id.desc()))).scalars().all()
     product_data = [{"id": p.id, "name": p.name, "category": p.category, "price_kopecks": p.price_kopecks, "stock": p.stock, "is_active": p.is_active, "image_url": p.image_url, "details": p.details} for p in products]
-    return templates.TemplateResponse("admin_products.html", {"request": request, "club": club, "club_id": club_id, "products": product_data})
+    return templates.TemplateResponse("admin_products.html", {"request": request, "club": club, "club_id": club_id, "products": product_data, "can_manage_products": can_manage_products})
 
 @router.get("/webapp/admin-product-sale", response_class=HTMLResponse)
 async def admin_product_sale_page(request: Request, club_id: int = Query(...), init_data: str | None = Query(None), session: AsyncSession = Depends(get_session)):
@@ -129,6 +137,16 @@ async def admin_product_sale_page(request: Request, club_id: int = Query(...), i
 async def admin_product_sale(payload: AdminProductSalePayload, session: AsyncSession = Depends(get_session)):
     club = await session.get(Club, payload.club_id)
     tg_user = await verify_webapp_staff(club, payload.init_data, session, "cash_sale")
+    raw_key = str(payload.idempotency_key or "").strip()
+    if raw_key and (len(raw_key) > 36 or any(ch not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-" for ch in raw_key)):
+        raise HTTPException(400, "Некорректный ключ операции")
+    sale_key = raw_key or uuid.uuid4().hex
+    order_id = f"CASH_PRODUCT_{sale_key}"
+    existing = await session.get(CartOrder, order_id, with_for_update=True)
+    if existing:
+        if existing.club_id != payload.club_id:
+            raise HTTPException(409, "Ключ операции уже используется")
+        return {"ok": True, "order_id": existing.id, "total_kopecks": existing.amount_kopecks, "idempotent": True}
     if not payload.items:
         raise HTTPException(400, "РљРѕСЂР·РёРЅР° РїСѓСЃС‚Р°")
     ids = [int(item.get("product_id")) for item in payload.items]
@@ -152,14 +170,19 @@ async def admin_product_sale(payload: AdminProductSalePayload, session: AsyncSes
             raise HTTPException(400, "Selected athlete is unavailable")
         selected_parent_ids = await get_student_parent_ids(selected_student.id, session)
         selected_parent_id = selected_parent_ids[0] if selected_parent_ids else None
-    order_id = f"CASH_PRODUCT_{uuid.uuid4().hex[:12].upper()}"
     buyer_user_id = selected_parent_id or int(tg_user.get("id"))
     order = CartOrder(id=order_id, club_id=payload.club_id, user_id=buyer_user_id, amount_kopecks=total, status="CONFIRMED", provider_payment_id=f"CASH:{order_id}")
     session.add(order)
-    await session.flush()
     for product, quantity in normalized:
         session.add(CartItem(cart_order_id=order_id, product_id=product.id, item_type="product", title=product.name, quantity=quantity, unit_price_kopecks=product.price_kopecks, payload={"category": product.category, "payment_method": "cash"}))
-    await session.commit()
+    try:
+        await session.commit()
+    except IntegrityError:
+        await session.rollback()
+        existing = await session.get(CartOrder, order_id)
+        if existing and existing.club_id == payload.club_id:
+            return {"ok": True, "order_id": existing.id, "total_kopecks": existing.amount_kopecks, "idempotent": True}
+        raise
     audit_event(
         "product_sale_cash_created",
         **await audit_actor_context(session, club, tg_user, "webapp/admin-product-sale"),
@@ -497,13 +520,20 @@ async def change_admin_tariff(payload: TariffChangePayload, request: Request, se
         if payload.index is None or payload.index < 0 or payload.index >= len(tariffs):
             raise HTTPException(400, "????? ?? ??????")
         if payload.action == "delete":
+            target = tariffs[payload.index]
+            target_count = int(target.get("count", 0) or 0)
+            target_days = int(target.get("days", 30) or 30)
+            active_students = (await session.execute(select(Student).where(Student.club_id == club.id, Student.discipline == payload.discipline, Student.balance_lessons == target_count, Student.expire_date > datetime.utcnow()))).scalars().all()
+            purchased_students = (await session.execute(select(Student).join(PaymentOrder, PaymentOrder.student_id == Student.id).where(Student.club_id == club.id, Student.discipline == payload.discipline, Student.expire_date > datetime.utcnow(), PaymentOrder.club_id == club.id, PaymentOrder.discipline == payload.discipline, PaymentOrder.lesson_count == target_count, PaymentOrder.days_to_add == target_days, PaymentOrder.status.in_(("CONFIRMED", "SUCCEEDED", "PAID"))).distinct())).scalars().all()
+            if {student.id for student in active_students} | {student.id for student in purchased_students}:
+                raise HTTPException(409, "Нельзя удалить тариф, который используется действующими атлетами")
             tariffs.pop(payload.index)
         else:
             tariff = payload.tariff or {}
             tariffs[payload.index] = {"price": _as_float(tariff.get("price", 0)), "days": max(1, _as_int(tariff.get("days", 30), 30)), "count": 999 if block.get("type") == "unlimited" else max(0, _as_int(tariff.get("count", 0), 0)), "min_age": max(0, _as_int(tariff.get("min_age", 0), 0))}
     else:
         raise HTTPException(400, "??????????? ????????")
-    if any(_as_float(t.get("price", 0)) <= 0 or _as_int(t.get("days", 0)) <= 0 or _as_int(t.get("count", 0)) < 0 for t in tariffs):
+    if any(_as_float(t.get("price", 0)) <= 0 or _as_int(t.get("days", 0)) <= 0 or _as_int(t.get("count", 0)) < 0 or _as_int(t.get("min_age", 0)) < 0 or _as_int(t.get("min_age", 0)) > 100 for t in tariffs):
         raise HTTPException(400, "????, ???? ? ?????????? ?????? ???? ??????????????")
     block["tariffs"] = tariffs
     disciplines[payload.discipline] = block
@@ -546,6 +576,10 @@ async def change_admin_schedule(payload: ScheduleChangePayload, session: AsyncSe
     settings = dict(club.club_settings or {})
     disciplines = dict(settings.get("disciplines", {}))
     block = dict(disciplines.get(payload.discipline, {}))
+    if not block:
+        raise HTTPException(404, "Дисциплина не найдена")
+    if payload.day not in {"mon", "tue", "wed", "thu", "fri", "sat", "sun"}:
+        raise HTTPException(400, "Некорректный день недели")
     schedule = normalize_schedule_block(block.get("schedule", {}))
     lessons = list(schedule.get(payload.day, []))
     if payload.action == "delete":
@@ -603,6 +637,9 @@ async def change_admin_schedule(payload: ScheduleChangePayload, session: AsyncSe
             "coach": str(lesson.get("coach", lesson.get("info", "")))[:100],
             "max_slots": max(0, min(999, parsed_max_slots)),
         }
+        hour_minute = str(item["time"]).split(":")
+        if len(hour_minute) != 2 or not all(part.isdigit() for part in hour_minute) or not (0 <= int(hour_minute[0]) <= 23 and 0 <= int(hour_minute[1]) <= 59):
+            raise HTTPException(400, "Время должно быть в формате ЧЧ:ММ")
         if payload.action == "add": lessons.append(item)
         elif payload.index is not None and 0 <= payload.index < len(lessons): lessons[payload.index] = item
         else: raise HTTPException(400, "Р—Р°РЅСЏС‚РёРµ РЅРµ РЅР°Р№РґРµРЅРѕ")

@@ -2,6 +2,7 @@
 <html lang="ru">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Касса и журнал</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 {% include "_staff_back_button.html" %}
 <style>
@@ -17,6 +18,7 @@ button{background:#fff;color:#111;font-weight:bold}
 .income{color:#75e6a5}.expense{color:#ff8888}.muted{color:#aaa}.delete-op{padding:1px 4px;margin:0 0 0 8px;border:1px solid #754040;background:#241313;color:#ffaaaa;font-size:10px;line-height:1.1;font-weight:400}
 @media(max-width:650px){.grid{grid-template-columns:1fr 1fr}}
 </style>
+<div style="font-size:20px;font-weight:800;margin:4px 0 10px">💰 Касса и финансовый журнал</div>
 <div class="nav">
   <a href="/admin?club_id={{club_id}}&init_data={{ request.query_params.get('init_data','')|urlencode }}">← В панель</a>
   <a class="secondary" href="#" onclick="window.Telegram?.WebApp?.close(); return false;">Закрыть</a>
@@ -39,21 +41,21 @@ button{background:#fff;color:#111;font-weight:bold}
     </div>
     <div style="margin-top:10px;color:#aaa">Итого поток: все доходы {{ '%.2f'|format(income/100) }} ₽ · наличные {{ '%.2f'|format(cash_income_total) }} ₽ · расходы {{ '%.2f'|format(cash_expenses_total) }} ₽ · маржа {{ '%.2f'|format(cash_margin_total) }} ₽</div>
   </div>
-</div>
-<div class="card">
+  </div>
+{% if is_cash_admin %}<div class="card">
   <h3>Добавить ручную операцию</h3>
   <select id="type"><option value="expense">Расход</option><option value="income">Прочий доход</option></select>
   <input id="category" placeholder="Категория">
   <input id="amount" type="number" min="0.01" step="0.01" placeholder="Сумма ₽">
   <input id="description" placeholder="На что потрачено">
   <button id="add">Добавить</button>
-</div>
+ </div>{% endif %}
 <div class="card">
   <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap"><h3 style="margin:0">Все операции</h3><select id="operation-filter" style="width:auto;min-width:150px"><option value="all">Все категории</option><option value="product">Товары</option><option value="subscription">Абонементы</option><option value="freeze">Заморозки</option><option value="manual">Ручные операции</option></select></div>
   {% for row in rows %}
   <div class="row operation-row" data-category="{{ 'manual' if row.source == 'manual' else row.category }}">
-    {% if row.source == 'manual' %}<button class="delete-op" type="button" title="Удалить операцию" aria-label="Удалить операцию" data-id="{{ row.id }}">🗑️</button>{% elif row.source == 'sale' and row.method == 'cash' and row.category == 'product' %}<button class="delete-sale" type="button" title="Удалить наличную продажу" aria-label="Удалить наличную продажу" data-sale-id="{{ row.id }}">🗑️</button>{% endif %}
-    <span>{{ row.created_at|moscow_time if row.created_at else '' }} · {{ row.category_label if row.category_label is defined else row.category }} · {{ {'cash':'Наличные','sbp':'СБП','requisites':'По реквизитам','card':'Карта / онлайн'}.get(row.method, 'Ручная') }}<br><small class="muted">Кто: {{ row.actor_label or '—' }} · Кому: {{ row.recipient_label or '—' }}<br>Что и за что: {{ row.reason or row.description or '—' }} · {{ row.source }}</small></span>
+    {% if is_cash_admin and row.source == 'manual' and not row.reversed_entry_id %}<button class="reverse-op" type="button" title="Сторнировать операцию" aria-label="Сторнировать операцию" data-id="{{ row.id }}">↩️</button><button class="delete-op" type="button" title="Удалить операцию" aria-label="Удалить операцию" data-id="{{ row.id }}">🗑️</button>{% elif is_cash_admin and row.source == 'sale' and row.method == 'cash' and row.category == 'product' %}<button class="delete-sale" type="button" title="Удалить наличную продажу" aria-label="Удалить наличную продажу" data-sale-id="{{ row.id }}">🗑️</button>{% endif %}
+    <span>{{ row.created_at|moscow_time if row.created_at else '' }} · {{ row.category_label if row.category_label is defined else row.category }} · {{ {'cash':'Наличные','sbp':'СБП','requisites':'По реквизитам','card':'Карта / онлайн'}.get(row.method, 'Ручная') }}{% if row.reversed_entry_id %} · <b class="muted">Сторнировано</b>{% endif %}<br><small class="muted">Кто: {{ row.actor_label or '—' }} · Кому: {{ row.recipient_label or '—' }}<br>Что и за что: {{ row.reason or row.description or '—' }} · {{ row.source }}</small></span>
     <b class="{{ row.entry_type }}">{{ '+' if row.entry_type == 'income' else '-' }}{{ '%.2f'|format(row.amount_kopecks/100) }} ₽</b>
   </div>
   {% else %}
@@ -78,12 +80,27 @@ document.querySelectorAll('.delete-op').forEach(button=>button.onclick=async()=>
   if(!r.ok)return alert(d.detail||'Не удалось удалить операцию');
   location.reload();
 });
+document.querySelectorAll('.reverse-op').forEach(button=>button.onclick=async()=>{
+  if(!confirm('Сторнировать эту операцию? Исходная запись останется в журнале, будет создана обратная операция.')) return;
+  button.disabled=true;
+  const r=await fetch('/admin/cash/entries/'+button.dataset.id+'/reverse',{
+    method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({init_data:tg.initData,club_id:{{club_id}}})
+  });
+  const d=await r.json().catch(()=>({}));
+  if(!r.ok){button.disabled=false;return alert(d.detail||'Не удалось сторнировать операцию');}
+  location.reload();
+});
 document.querySelectorAll('.delete-sale').forEach(button=>button.onclick=async()=>{
   if(!confirm('Удалить эту наличную продажу? Товар вернётся на остаток.')) return;
   const r=await fetch('/admin/cash/sales/'+encodeURIComponent(button.dataset.saleId)+'/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({init_data:tg.initData,club_id:{{club_id}},confirmed:true})});
   const d=await r.json(); if(!r.ok)return alert(d.detail||'Не удалось удалить продажу'); location.reload();
 });
-add.onclick=async()=>{
+let cashEntryIdempotencyKey=null;
+const addButton=document.getElementById('add');
+if(addButton) addButton.onclick=async()=>{
+  addButton.disabled=true;
+  cashEntryIdempotencyKey=cashEntryIdempotencyKey||((window.crypto&&crypto.randomUUID)?crypto.randomUUID():`${Date.now()}-${Math.random().toString(36).slice(2)}`);
   const r=await fetch('/admin/cash/entries',{
     method:'POST',
     headers:{'Content-Type':'application/json'},
@@ -93,10 +110,12 @@ add.onclick=async()=>{
       entry_type:type.value,
       category:category.value,
       amount_kopecks:Math.round(Number(amount.value)*100),
-      description:description.value
+      description:description.value,
+      idempotency_key:cashEntryIdempotencyKey
     })
   }),d=await r.json();
-  if(!r.ok)return alert(d.detail||'Ошибка');
+  if(!r.ok){addButton.disabled=false;return alert(d.detail||'Ошибка');}
+  cashEntryIdempotencyKey=null;
   location.reload();
 }
 </script>
