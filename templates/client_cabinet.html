@@ -91,6 +91,7 @@
         </div>
     </div>
 
+    {% if not is_staff_mode %}
     <div class="card mono-card">
         <div class="section-title mono-kicker"><div class="name">Профили атлетов</div><span>детализация</span></div>
         {% if students %}
@@ -130,6 +131,7 @@
         {% endif %}
     </div>
 
+    {% endif %}
     <div class="card mono-card quick-actions">
         <div class="actions">
             <a class="btn dark mono-action dark primary-action" href="/webapp/biometric-pass?club_id={{ club_id }}&user_id={{ user_id }}">📱 Открыть проход</a>

@@ -465,12 +465,14 @@ async def get_client_cabinet_page(request: Request, club_id: int, init_data: str
     if not user and not is_staff_mode:
         return await webapp_auth_help_page(request=request, club_id=club_id, init_data=init_data, db=db)
     settings = (club.club_settings or {}) if club else {}
+    summary_students = []
     if is_staff_mode:
         # Командная шапка должна показывать весь клуб, а не только записи,
         # где staff случайно указан родителем.
-        students = (await db.execute(
+        summary_students = (await db.execute(
             select(Student).where(Student.club_id == club_id).order_by(Student.name)
         )).scalars().all()
+        students = []
     else:
         students = (await db.execute(
             select(Student).outerjoin(StudentParent, StudentParent.student_id == Student.id).where(
@@ -478,10 +480,11 @@ async def get_client_cabinet_page(request: Request, club_id: int, init_data: str
                 or_(Student.parent_id == user_id, StudentParent.parent_id == user_id),
             ).distinct().order_by(Student.name)
         )).scalars().all()
-    active_students = sum(1 for s in students if is_subscription_active(s))
-    frozen_students = sum(1 for s in students if s.is_frozen)
-    expired_students = sum(1 for s in students if not s.is_frozen and (not s.expire_date or s.expire_date <= datetime.now()))
-    audit_event("webapp_cabinet_opened", club_id=club_id, user_id=user_id, students=len(students))
+    summary_source = summary_students if is_staff_mode else students
+    active_students = sum(1 for s in summary_source if is_subscription_active(s))
+    frozen_students = sum(1 for s in summary_source if s.is_frozen)
+    expired_students = sum(1 for s in summary_source if not s.is_frozen and (not s.expire_date or s.expire_date <= datetime.now()))
+    audit_event("webapp_cabinet_opened", club_id=club_id, user_id=user_id, students=len(summary_source))
     loading = _webapp_loading_config(club)
     return templates.TemplateResponse(
         "client_cabinet.html",
@@ -499,11 +502,11 @@ async def get_client_cabinet_page(request: Request, club_id: int, init_data: str
             "user_name": (user.full_name if user else None) or tg_user.get("first_name", ""),
             "now": datetime.now(),
             "summary": {
-                "total": len(students),
+                "total": len(summary_source),
                 "active": active_students,
                 "frozen": frozen_students,
                 "expired": expired_students,
-                "free_freeze_available": any((s.can_freeze or 0) > 0 for s in students),
+                "free_freeze_available": any((s.can_freeze or 0) > 0 for s in summary_source),
             },
             "loading": {
                 "enabled": loading["enabled"],

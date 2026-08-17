@@ -30,3 +30,12 @@ def test_staff_is_separate_from_student_parent_statistics():
     analytics = (ROOT / "services/analytics.py").read_text(encoding="utf-8")
     assert "class ClubStaff" in source
     assert "Student.parent_id" not in analytics
+
+
+def test_staff_cabinet_keeps_club_summary_but_hides_full_student_cards():
+    source = (ROOT / "admin_module/webapp_client_cabinet.py").read_text(encoding="utf-8")
+    template = (ROOT / "templates/client_cabinet.html").read_text(encoding="utf-8")
+    assert "summary_students" in source
+    assert '"students": students' in source
+    assert "summary_source" in source
+    assert "{% if not is_staff_mode %}" in template
