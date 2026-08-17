@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from admin_module.router_base import router
 from config import PROXY_URL
-from database.db import PaymentOrder, CartOrder, CartItem, ClubProduct, Club, Student, Subscription, add_abon, purchase_student_freeze, get_session
+from database.db import PaymentOrder, SaaSPaymentOrder, CartOrder, CartItem, ClubProduct, Club, Student, Subscription, add_abon, purchase_student_freeze, get_session
 from loguru import logger
 from services.audit import audit_event
 from services.yookassa_client import YooKassaClient
@@ -40,6 +40,38 @@ async def yookassa_webhook(request: Request, session: AsyncSession = Depends(get
     payment_id = object_data.get("id")
     if not payment_id:
         return {"status": "ignored"}
+
+    if str(order_id).startswith("SAAS_"):
+        order = (await session.execute(
+            select(SaaSPaymentOrder).where(SaaSPaymentOrder.id == str(order_id)).with_for_update()
+        )).scalar_one_or_none()
+        if not order or order.status == "CONFIRMED":
+            return {"status": "ok" if order else "ignored"}
+        if str(object_data.get("metadata", {}).get("order_id")) != str(order.id):
+            return {"status": "ignored"}
+        club = (await session.execute(select(Club).where(Club.id == order.club_id).with_for_update())).scalar_one_or_none()
+        if not club or amount_data.get("currency") != "RUB":
+            return {"status": "ignored"}
+        try:
+            received_amount = int(Decimal(str(amount_data.get("value"))) * 100)
+        except (InvalidOperation, TypeError, ValueError):
+            return {"status": "ignored"}
+        if received_amount != order.amount_kopecks:
+            return {"status": "ignored"}
+        order.status = "CONFIRMED"
+        order.provider_payment_id = str(payment_id)
+        payment_method = object_data.get("payment_method") or {}
+        order.payment_method_id = payment_method.get("id")
+        order.auto_renew = bool(order.payment_method_id and payment_method.get("type") == "bank_card")
+        order.paid_at = datetime.now(timezone.utc).replace(tzinfo=None)
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        base = club.subscription_expire_at if club.subscription_expire_at and club.subscription_expire_at > now else now
+        club.subscription_expire_at = base + timedelta(days=order.days)
+        if order.auto_renew:
+            club.saas_rebill_id = order.payment_method_id
+            club.saas_auto_renew = True
+        await session.commit()
+        return {"status": "ok"}
 
     if str(order_id).startswith("CART_"):
         cart = (await session.execute(select(CartOrder).where(CartOrder.id == order_id).with_for_update())).scalar_one_or_none()

@@ -99,6 +99,25 @@ class Club(Base):
     users: Mapped[List['User']] = relationship(back_populates='club')
     owner_id: Mapped[Optional[int]] = mapped_column(BigInteger, index=True)
     subscription_expire_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    saas_rebill_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    saas_auto_renew: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0", nullable=False)
+
+
+class SaaSPaymentOrder(Base):
+    """Payments for the platform license itself, isolated from club sales."""
+    __tablename__ = "saas_payment_orders"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    club_id: Mapped[int] = mapped_column(ForeignKey("clubs.id"), index=True)
+    owner_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    amount_kopecks: Mapped[int] = mapped_column(Integer)
+    days: Mapped[int] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(20), default="NEW", index=True)
+    provider_payment_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True, unique=True, index=True)
+    payment_method_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    auto_renew: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, server_default="now()")
+    paid_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
 
 class ClubStaff(Base):

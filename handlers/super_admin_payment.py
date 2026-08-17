@@ -1,18 +1,20 @@
 import os
+import uuid
 import logging
-from database.db import Club
+from database.db import Club, SaaSPaymentOrder, AsyncSessionLocal
 from datetime import datetime, timedelta
 from aiogram import Router, F, types
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from redis.asyncio import Redis
+from config import SUPER_YOOKASSA_SHOP_ID, SUPER_YOOKASSA_SECRET_KEY, SUPER_YOOKASSA_SBP_ENABLED, SUPER_YOOKASSA_AUTO_RENEW_ENABLED, PROXY_URL
+from services.yookassa_client import YooKassaClient
 
 logger = logging.getLogger(__name__)
 router = Router()
 
 # Забираем токен ЮKassa из переменных окружения (.env)
-YOOKASSA_PROVIDER_TOKEN = os.getenv("YOOKASSA_PROVIDER_TOKEN", "ТВОЙ_ТОКЕН_ЮКАССЫ_ИЗ_BOTFATHER")
 SUBSCRIPTION_PRICES = {30: 150000, 365: 1500000}
 
 
@@ -28,6 +30,10 @@ async def show_pay_menu(callback: types.CallbackQuery):
     builder.row(types.InlineKeyboardButton(
         text="🌙 1 месяц (30 дн.) — 1 500 ₽", callback_data="buy_sub_30")
     )
+    if SUPER_YOOKASSA_SBP_ENABLED:
+        builder.row(types.InlineKeyboardButton(
+            text="↔️ Оплатить 30 дней через СБП", callback_data="buy_sub_sbp_30")
+        )
     builder.row(types.InlineKeyboardButton(
         text="☀️ 1 год (365 дн.) — 15 000 ₽", callback_data="buy_sub_365")
     )
@@ -50,33 +56,51 @@ async def show_pay_menu(callback: types.CallbackQuery):
 # БЛОК 2: ГЕНЕРАЦИЯ И ОТПРАВКА ИНВОЙСА ЮKASSA
 # =========================================================================
 @router.callback_query(F.data.startswith("buy_sub_"))
-async def send_subscription_invoice(callback: types.CallbackQuery, club: "Club"):
+async def send_subscription_invoice(callback: types.CallbackQuery, club: "Club", session: AsyncSession):
     await callback.answer()
+    parts = callback.data.split("_")
     try:
-        days = int(callback.data.split("_")[-1])
+        days = int(parts[-1])
     except (ValueError, IndexError):
         return await callback.answer("Некорректный тариф.", show_alert=True)
     if days not in SUBSCRIPTION_PRICES:
         return await callback.answer("Такой тариф недоступен.", show_alert=True)
     if callback.from_user.id != club.owner_id:
         return await callback.answer("Оплатить подписку может только владелец клуба.", show_alert=True)
-    if not YOOKASSA_PROVIDER_TOKEN or YOOKASSA_PROVIDER_TOKEN.startswith("ТВОЙ_"):
-        return await callback.answer("Платежный провайдер еще не настроен.", show_alert=True)
+    if not SUPER_YOOKASSA_SHOP_ID or not SUPER_YOOKASSA_SECRET_KEY:
+        return await callback.answer("Официальная оплата SaaS ещё не настроена.", show_alert=True)
 
     # Математика цен в копейках для ЮKassa (1 рубль = 100 копеек)
     price_amount = SUBSCRIPTION_PRICES[days]
 
-    # Зашиваем ID клуба и количество дней
-    invoice_payload = f"sub_yookassa:{club.id}:{days}"
-
-    await callback.message.answer_invoice(
-        title=f"Подписка CRM: {days} дней",
-        description=f"Продление лицензии и доступа к СКУД для клуба «{club.name}»",
-        prices=[types.LabeledPrice(label="Рубли", amount=price_amount)],
-        provider_token=YOOKASSA_PROVIDER_TOKEN,  # Твой токен ЮKassa
-        payload=invoice_payload,
-        currency="RUB",  # Переключили на рубли
-        start_parameter="club_pay"
+    order_id = f"SAAS_{uuid.uuid4().hex[:24].upper()}"
+    order = SaaSPaymentOrder(id=order_id, club_id=club.id, owner_id=club.owner_id, amount_kopecks=price_amount, days=days)
+    session.add(order)
+    await session.commit()
+    payment_method_type = "sbp" if "sbp" in parts else "bank_card"
+    result = await YooKassaClient(
+        shop_id=SUPER_YOOKASSA_SHOP_ID,
+        secret_key=SUPER_YOOKASSA_SECRET_KEY,
+        proxy_url=PROXY_URL,
+    ).init_payment(
+        order_id=order_id,
+        amount_kopecks=price_amount,
+        user_id=callback.from_user.id,
+        bot_username=(await callback.bot.get_me()).username or "",
+        payment_method_type=payment_method_type,
+    )
+    if not result.get("Success"):
+        order.status = "FAILED"
+        await session.commit()
+        return await callback.answer("Не удалось создать платёж. Попробуйте позже.", show_alert=True)
+    order.provider_payment_id = result.get("PaymentId")
+    await session.commit()
+    await callback.message.answer(
+        f"Оплата лицензии клуба «{club.name}» на {days} дней: {price_amount / 100:.0f} ₽.",
+        reply_markup=types.InlineKeyboardMarkup(inline_keyboard=[
+            [types.InlineKeyboardButton(text="💳 Перейти к официальной оплате", url=result["PaymentURL"])],
+            [types.InlineKeyboardButton(text="↩️ Назад", callback_data="admin")],
+        ]),
     )
 
 
