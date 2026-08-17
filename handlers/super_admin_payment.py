@@ -119,7 +119,9 @@ async def on_successful_payment(message: types.Message, session: AsyncSession, r
 
     # Пробиваем кэш SQLAlchemy сессии
     session.expire_all()
-    club_res = await session.execute(select(Club).where(Club.id == target_club_id))
+    # Успешные Telegram-платежи могут прийти параллельно. Блокируем клуб до
+    # расчёта новой даты, иначе два продления могут перезаписать друг друга.
+    club_res = await session.execute(select(Club).where(Club.id == target_club_id).with_for_update())
     club = club_res.scalar_one_or_none()
 
     if not club:

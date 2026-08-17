@@ -14,4 +14,5 @@ def test_freeze_notification_events_are_covered():
     assert "Досрочная разморозка при посещении" in bot
     assert "async def expire_student_freezes" in scheduler
     assert "id=\"expire_student_freezes\"" in main
+    assert ".with_for_update(skip_locked=True)" in scheduler
     assert "Заморозка завершена" in scheduler

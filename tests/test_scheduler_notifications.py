@@ -17,6 +17,7 @@ def test_expiring_subscription_notifications_use_all_parent_links():
     assert "Ошибка отправки (Student ID {student.id})" in block
     assert "parent_ids = await get_student_parent_ids(student.id, session)" in block
     assert "for parent_id in parent_ids" in block
+    assert "club_id=student.club_id" in block
 
 
 def test_scheduler_has_all_required_client_notification_flows():

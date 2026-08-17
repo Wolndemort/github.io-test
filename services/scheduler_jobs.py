@@ -38,7 +38,12 @@ async def expire_student_freezes():
     now = reporting_periods()["now"].replace(tzinfo=None)
     async with AsyncSessionLocal() as session:
         students = (await session.execute(
-            select(Student).where(Student.is_frozen == 1, Student.frozen_at.is_not(None))
+            # Несколько экземпляров bot могут одновременно выполнять один
+            # scheduler job. Блокируем строки на время изменения, чтобы один
+            # и тот же freeze не завершился и не отправил уведомления дважды.
+            select(Student)
+            .where(Student.is_frozen == 1, Student.frozen_at.is_not(None))
+            .with_for_update(skip_locked=True)
         )).scalars().all()
         for student in students:
             frozen_at = student.frozen_at.replace(tzinfo=None)
@@ -356,6 +361,7 @@ async def check_abon_mailing():
                         continue
                     reply_markup = get_profile_keyboard(
                         user=parent_user,
+                        club_id=student.club_id,
                         club_settings=club_settings,
                         is_authorized=True,
                         profile_mode="staff" if await is_staff_or_owner(session, club, parent_user.user_id) else "client",
