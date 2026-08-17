@@ -8,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from admin_module.router_base import router
-from config import PROXY_URL
+from config import PROXY_URL, SUPER_YOOKASSA_AUTO_RENEW_ENABLED
 from database.db import PaymentOrder, SaaSPaymentOrder, CartOrder, CartItem, ClubProduct, Club, Student, Subscription, add_abon, purchase_student_freeze, get_session
 from loguru import logger
 from services.audit import audit_event
@@ -62,7 +62,7 @@ async def yookassa_webhook(request: Request, session: AsyncSession = Depends(get
         order.provider_payment_id = str(payment_id)
         payment_method = object_data.get("payment_method") or {}
         order.payment_method_id = payment_method.get("id")
-        order.auto_renew = bool(order.payment_method_id and payment_method.get("type") == "bank_card")
+        order.auto_renew = bool(SUPER_YOOKASSA_AUTO_RENEW_ENABLED and order.payment_method_id and payment_method.get("type") == "bank_card")
         order.paid_at = datetime.now(timezone.utc).replace(tzinfo=None)
         now = datetime.now(timezone.utc).replace(tzinfo=None)
         base = club.subscription_expire_at if club.subscription_expire_at and club.subscription_expire_at > now else now
