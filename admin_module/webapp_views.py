@@ -173,6 +173,7 @@ async def admin_product_sale(payload: AdminProductSalePayload, session: AsyncSes
     buyer_user_id = selected_parent_id or int(tg_user.get("id"))
     order = CartOrder(id=order_id, club_id=payload.club_id, user_id=buyer_user_id, amount_kopecks=total, status="CONFIRMED", provider_payment_id=f"CASH:{order_id}")
     session.add(order)
+    await session.flush()
     for product, quantity in normalized:
         session.add(CartItem(cart_order_id=order_id, product_id=product.id, item_type="product", title=product.name, quantity=quantity, unit_price_kopecks=product.price_kopecks, payload={"category": product.category, "payment_method": "cash"}))
     try:
