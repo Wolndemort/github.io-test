@@ -89,6 +89,7 @@
 const tg = window.Telegram.WebApp;
 tg.ready();
 tg.expand();
+const days = {};
 Object.assign(days, {mon:'Понедельник', tue:'Вторник', wed:'Среда', thu:'Четверг', fri:'Пятница', sat:'Суббота', sun:'Воскресенье'});
 document.querySelectorAll('#day-picker option').forEach(option => { if (days[option.value]) option.textContent = days[option.value]; });
 document.querySelectorAll('.day-container[data-day]').forEach(day => { if (days[day.dataset.day]) day.querySelector('.day-title').textContent = days[day.dataset.day]; });

@@ -1284,7 +1284,7 @@ async def show_discipline_schedule(
     disciplines = club_settings.get("disciplines", {})
     discipline_cfg = disciplines.get(discipline_code)
 
-    if not discipline_cfg:
+    if not discipline_cfg or not discipline_cfg.get("active", True):
         return await callback.answer("Упс! Данные этой секции не найдены 🛠", show_alert=True)
 
     name = discipline_cfg.get("name", discipline_code.upper())

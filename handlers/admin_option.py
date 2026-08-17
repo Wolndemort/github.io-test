@@ -184,8 +184,10 @@ async def start_broadcast(
         callback: types.CallbackQuery,
         state: FSMContext,
         is_owner: bool,  # <--- Исправил под мидлварь
-        is_super_admin: bool  # <--- Исправил под мидлварь
+        is_super_admin: bool,
+        staff=None
 ):
+    is_owner = is_owner or bool(staff and "broadcast" in permissions_for_staff(staff))
     # Проверка прав (SaaS стиль)
     if not (is_owner or is_super_admin):
         return await callback.answer("❌ У вас нет прав администратора.", show_alert=True)
@@ -207,11 +209,18 @@ async def start_broadcast(
 
 
 @router.message(AdminStates.waiting_for_broadcast_text)
-async def process_broadcast(message: types.Message, state: FSMContext, session: AsyncSession, club: Club):
+async def process_broadcast(message: types.Message, state: FSMContext, session: AsyncSession, club: Club, is_owner: bool, is_super_admin: bool, staff=None):
+    if not (is_owner or is_super_admin or (staff and "broadcast" in permissions_for_staff(staff))):
+        await state.clear()
+        return await message.answer("Доступ запрещён")
     # 1. Берем юзеров ТОЛЬКО этого клуба
     stmt = select(User.user_id).where(User.club_id == club.id)
     result = await session.execute(stmt)
-    user_ids = result.scalars().all()
+    user_ids = {int(user_id) for user_id in result.scalars().all() if user_id}
+    linked = await session.execute(
+        select(StudentParent.parent_id).join(Student, StudentParent.student_id == Student.id).where(Student.club_id == club.id)
+    )
+    user_ids.update(int(user_id) for user_id in linked.scalars().all() if user_id)
 
     # 2. Рассылаем (через copy_message, чтобы сохранить медиа)
     count = 0

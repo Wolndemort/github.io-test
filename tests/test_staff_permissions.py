@@ -84,6 +84,13 @@ def test_bot_parent_cash_and_manual_checkin_recheck_permissions_and_scope():
     assert 'tariff_idx < 0 or tariff_idx >= len(tariffs)' in payments
 
 
+def test_bot_broadcast_rechecks_permission_and_includes_linked_parents():
+    source = Path("handlers/admin_option.py").read_text(encoding="utf-8")
+    assert '"broadcast" in permissions_for_staff(staff)' in source
+    assert "StudentParent.parent_id" in source
+    assert "Student.club_id == club.id" in source
+
+
 def test_manager_tariff_webapp_is_present_and_uses_shared_settings():
     api = Path("admin_module/api.py").read_text(encoding="utf-8")
     page = Path("templates/admin_tariffs.html").read_text(encoding="utf-8")

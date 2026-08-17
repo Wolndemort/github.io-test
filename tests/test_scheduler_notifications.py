@@ -70,6 +70,23 @@ def test_work_schedule_scheduler_reads_config_and_formats_by_day_mode():
     assert "sat" in source and "sun" in source and "mon" in source
 
 
+def test_scheduled_reports_and_work_schedule_notifications_are_duplicate_safe():
+    source = (ROOT / "services" / "scheduler_jobs.py").read_text(encoding="utf-8")
+    assert "notify:daily-report:" in source
+    assert "notify:work-schedule:" in source
+    assert "if notification_key:" in source
+
+
+def test_user_schedule_webapp_has_day_keys_and_client_auth():
+    pages = (ROOT / "admin_module" / "admin_pages.py").read_text(encoding="utf-8")
+    template = (ROOT / "templates" / "schedule.html").read_text(encoding="utf-8")
+    user_bot = (ROOT / "handlers" / "user_option.py").read_text(encoding="utf-8")
+    assert "verify_telegram_data(init_data, club.bot_token)" in pages
+    assert '"key": day_key' in pages
+    assert "const days = {};" in template
+    assert 'not discipline_cfg.get("active", True)' in user_bot
+
+
 def test_schedule_normalizer_keeps_all_lessons_and_legacy_shapes():
     raw = {
         "mon": {"time": "10:00", "coach": "A", "max_slots": 10, "taken_slots": 2},
@@ -102,6 +119,9 @@ async def test_work_schedule_notice_uses_work_schedule_config_for_each_day(monke
     from services import scheduler_jobs
 
     sent = []
+
+    async def _always_true(*args, **kwargs):
+        return True
 
     class FakeBot:
         async def send_message(self, chat_id, text, parse_mode=None):
@@ -160,6 +180,7 @@ async def test_work_schedule_notice_uses_work_schedule_config_for_each_day(monke
 
     monkeypatch.setattr(scheduler_jobs, "AsyncSessionLocal", lambda: FakeCM())
     monkeypatch.setattr(scheduler_jobs, "bots_dict", {"token-1": FakeBot()})
+    monkeypatch.setattr(scheduler_jobs, "_notification_once", lambda *args, **kwargs: _always_true())
 
     await scheduler_jobs.send_work_schedule_notice("sat")
     await scheduler_jobs.send_work_schedule_notice("sun")

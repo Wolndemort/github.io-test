@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from admin_module.router_base import router, templates
 from admin_module.utils import get_club_id_from_host, verify_webapp_admin, webapp_auth_gate
+from admin_module.webapp_verify import verify_telegram_data
 from database.db import CartOrder, CashEntry, Club, PaymentOrder, Student, User, VisitLog, get_session
 from services.analytics import calculate_admin_dashboard, calculate_cash_flow_periods, calculate_revenue_periods, calculate_student_metrics, generate_students_excel, reporting_periods, moscow_date_boundary
 
@@ -172,7 +173,8 @@ const tg=window.Telegram.WebApp; tg.ready();
 if (!tg.initData) document.body.innerText='Откройте приложение из Telegram';
 else location.replace(location.pathname+'?club_id=' + encodeURIComponent(new URLSearchParams(location.search).get('club_id') || '') + '&init_data=' + encodeURIComponent(tg.initData));
 </script>""", status_code=401)
-    await verify_webapp_admin(club, init_data)
+    if not verify_telegram_data(init_data, club.bot_token):
+        raise HTTPException(status_code=403, detail="Недействительные данные Telegram")
     settings = club.club_settings if isinstance(club.club_settings, dict) else {}
     disciplines_data = settings.get("disciplines", {})
     day_names = {"mon": "Понедельник", "tue": "Вторник", "wed": "Среда", "thu": "Четверг", "fri": "Пятница", "sat": "Суббота", "sun": "Воскресенье"}
@@ -180,6 +182,7 @@ else location.replace(location.pathname+'?club_id=' + encodeURIComponent(new URL
     if isinstance(disciplines_data, dict):
         for _, disc_content in disciplines_data.items():
             if not isinstance(disc_content, dict): continue
+            if not disc_content.get("active", True): continue
             parsed_days = []
             for day_key, day_title in day_names.items():
                 lessons = disc_content.get("schedule", {}).get(day_key, [])
@@ -190,7 +193,7 @@ else location.replace(location.pathname+'?club_id=' + encodeURIComponent(new URL
                     max_slots = int(lesson.get("max_slots") or lesson.get("slots") or lesson.get("limit") or 50)
                     taken_slots = int(lesson.get("taken_slots") or 0)
                     parsed_lessons.append({"time": str(lesson.get("time", "00:00")), "coach": str(lesson.get("coach", "Инструктор")), "max_slots": max_slots, "free_slots": max(0, max_slots - taken_slots)})
-                if parsed_lessons: parsed_days.append({"title": day_title, "lessons": parsed_lessons})
+                if parsed_lessons: parsed_days.append({"key": day_key, "title": day_title, "lessons": parsed_lessons})
             parsed_disciplines.append({"name": disc_content.get("name", "Спортивная секция"), "days": parsed_days})
     ui = settings.get("ui", {}) if isinstance(settings.get("ui", {}), dict) else {}
     loading = ui.get("loading", {}) if isinstance(ui.get("loading", {}), dict) else {}

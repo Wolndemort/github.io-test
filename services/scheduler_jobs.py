@@ -297,10 +297,14 @@ async def send_work_schedule_notice(mode: str):
                 f"{intro}\n\nГрафик занятий можете посмотреть во вкладке «Расписание».",
             )
             for chat_id in recipients:
+                notification_key = f"notify:work-schedule:{club.id}:{mode}:{now.date().isoformat()}:{chat_id}"
+                if not await _notification_once(notification_key, ttl=8 * 86400):
+                    continue
                 try:
                     await bot.send_message(chat_id=chat_id, text=text, parse_mode="HTML")
                     await asyncio.sleep(0.03)
                 except Exception as exc:
+                    await _notification_forget(notification_key)
                     logger.warning("Не удалось отправить график работы club=%s chat=%s: %s", club.id, chat_id, exc)
 
 
@@ -312,6 +316,7 @@ async def check_abon_mailing():
         logger.info("🚀 SaaS Рассылка: Найдено %s атлетов с истекающими абонементами.", len(data))
 
         for student, token in data:
+            notification_key = None
             try:
                 current_bot = bots_dict.get(token)
                 if not current_bot:
@@ -371,7 +376,7 @@ async def check_abon_mailing():
                     await asyncio.sleep(0.05)
 
             except Exception as exc:
-                if "notification_key" in locals():
+                if notification_key:
                     await _notification_forget(notification_key)
                 logger.error(f"❌ Ошибка отправки (Student ID {student.id}): {exc}")
 
@@ -388,9 +393,13 @@ async def send_daily_report_to_admins():
         clubs = result.scalars().all()
 
     for club in clubs:
+        notification_key = None
         try:
             bot = bots_dict.get(club.bot_token)
             if not bot or not club.owner_id:
+                continue
+            notification_key = f"notify:daily-report:{club.id}:{periods['local_now'].date().isoformat()}"
+            if not await _notification_once(notification_key, ttl=48 * 3600):
                 continue
 
             async with AsyncSessionLocal() as session:
@@ -474,6 +483,8 @@ async def send_daily_report_to_admins():
             await asyncio.sleep(0.05)
 
         except Exception as exc:
+            if notification_key:
+                await _notification_forget(notification_key)
             logger.error("❌ Ошибка отправки вечернего отчета клубу %s: %s", club.id, exc)
 
 
