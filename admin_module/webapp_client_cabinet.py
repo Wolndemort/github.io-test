@@ -270,6 +270,8 @@ async def admin_freeze_submit(payload: AdminFreezePayload, db: AsyncSession = De
         try:
             bot = Bot(club.bot_token)
             text = f"❄️ <b>Абонемент заморожен администратором</b>\n\nАтлет: <b>{escape(student.name)}</b>\nСрок: <b>{days} дн.</b>\nНовая дата окончания: <b>{student.expire_date.strftime('%d.%m.%Y')}</b>"
+            if club.owner_id and club.owner_id != int(tg_user["id"]):
+                await bot.send_message(club.owner_id, text, parse_mode="HTML")
             for parent_id in await get_student_parent_ids(student.id, db):
                 if parent_id != int(tg_user["id"]):
                     await bot.send_message(parent_id, text, parse_mode="HTML")
@@ -295,6 +297,8 @@ async def admin_freeze_submit(payload: AdminFreezePayload, db: AsyncSession = De
         try:
             bot = Bot(club.bot_token)
             text = f"✅ <b>Абонемент разморожен администратором</b>\n\nАтлет: <b>{escape(student.name)}</b>\nВозвращено дней: <b>{returned_days}</b>\nДата окончания: <b>{student.expire_date.strftime('%d.%m.%Y') if student.expire_date else '—'}</b>"
+            if club.owner_id and club.owner_id != int(tg_user["id"]):
+                await bot.send_message(club.owner_id, text, parse_mode="HTML")
             for parent_id in await get_student_parent_ids(student.id, db):
                 if parent_id != int(tg_user["id"]):
                     await bot.send_message(parent_id, text, parse_mode="HTML")

@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from admin_module.router_base import router
 from config import PROXY_URL, SUPER_YOOKASSA_AUTO_RENEW_ENABLED
-from database.db import PaymentOrder, SaaSPaymentOrder, CartOrder, CartItem, ClubProduct, Club, Student, Subscription, add_abon, purchase_student_freeze, get_session
+from database.db import PaymentOrder, SaaSPaymentOrder, CartOrder, CartItem, ClubProduct, Club, Student, Subscription, add_abon, purchase_student_freeze, get_session, get_student_parent_ids
 from loguru import logger
 from services.audit import audit_event
 from services.yookassa_client import YooKassaClient
@@ -240,6 +240,14 @@ async def yookassa_webhook(request: Request, session: AsyncSession = Depends(get
                     ),
                     parse_mode="HTML",
                 )
+                if is_freeze and order.student_id:
+                    parent_text = (
+                        f"❄️ <b>Заморозка оплачена</b>\n\n"
+                        f"Атлет: <b>{escape(frozen_student.name if frozen_student else str(order.student_id))}</b>\n"
+                        f"Срок заморозки: <b>{order.days_to_add} дн.</b>"
+                    )
+                    for parent_id in await get_student_parent_ids(order.student_id, session):
+                        await bot.send_message(parent_id, parent_text, parse_mode="HTML")
                 await bot.session.close()
             except Exception:
                 logger.exception("Не удалось уведомить владельца о платной заморозке %s", order.id)
