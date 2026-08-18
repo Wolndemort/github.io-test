@@ -220,7 +220,7 @@ def calculate_projected_renewal_revenue(
     selected = next(iter(selected_by_discipline.values()), None)
     prices = {item[3] for item in selected_by_discipline.values()}
     source = "самый продаваемый подтверждённый тариф по каждому направлению" if sales and selected_by_discipline else "нет настроенного тарифа для направления"
-    tariffs_by_discipline = {discipline: {"name": item[2].get("name") or f"{item[2].get('days')} дн.", "price": round(item[3] / 100, 2)} for discipline, item in selected_by_discipline.items()}
+    tariffs_by_discipline = {discipline: {"name": item[2].get("name") or (f"{int(item[2].get('count', 0))} посещений" if int(item[2].get("count", 0) or 0) != 999 else "Безлимит"), "price": round(item[3] / 100, 2), "count": int(item[2].get("count", 0) or 0)} for discipline, item in selected_by_discipline.items()}
     tariff_label = ", ".join(f"{discipline}: {data['name']} ({data['price']:.2f} ₽)" for discipline, data in tariffs_by_discipline.items()) or "Нет настроенного тарифа"
     return {"count": len(candidates), "projected_revenue": round(projected_kopecks / 100, 2), "students": candidates, "tariff_name": tariff_label, "tariff_discipline": selected[0] if selected else None, "price": round(sum(prices) / len(prices) / 100, 2) if prices else 0, "price_source": source, "tariffs_by_discipline": tariffs_by_discipline}
 

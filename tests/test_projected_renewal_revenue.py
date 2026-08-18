@@ -90,5 +90,5 @@ def test_discipline_tariff_is_selected_by_sales_count_not_highest_price():
     payments += [SimpleNamespace(status="CONFIRMED", discipline="bjj", lesson_count=12, days_to_add=30, amount_kopecks=700000)] * 19
     payments += [SimpleNamespace(status="CONFIRMED", discipline="bjj", lesson_count=999, days_to_add=30, amount_kopecks=1000000)] * 3
     result = calculate_projected_renewal_revenue([student], payments=payments, club_settings=settings, now=now, date_to="2026-09-01")
-    assert result["tariffs_by_discipline"]["bjj"] == {"name": "8 посещений", "price": 5000.0}
+    assert result["tariffs_by_discipline"]["bjj"] == {"name": "8 посещений", "price": 5000.0, "count": 8}
     assert result["projected_revenue"] == 5000

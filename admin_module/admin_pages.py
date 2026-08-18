@@ -174,6 +174,10 @@ async def get_forecast_page(request: Request, session: AsyncSession = Depends(ge
         bucket = "Уже закончился" if days_to_expiry < 0 else ("До 7 дней" if days_to_expiry <= 7 else "До 30 дней")
         rows.append({"name": student.name, "parent_id": student.parent_id, "expire_date": student.expire_date, "last_visit": last, "discipline": student.discipline or "—", "priority": "Высокий" if last and (now - last).days <= 7 else "Средний", "bucket": bucket})
     rows.sort(key=lambda row: (row["priority"] != "Высокий", row["expire_date"] or now))
+    discipline_counts = {}
+    for row in rows:
+        discipline_counts[row["discipline"]] = discipline_counts.get(row["discipline"], 0) + 1
+    forecast["discipline_counts"] = discipline_counts
     return templates.TemplateResponse("forecast.html", {"request": request, "club_id": club_id, "club_name": club.name if club else "Клуб", "filters": {"date_from": start, "date_to": finish}, "forecast": forecast, "rows": rows})
 
 
