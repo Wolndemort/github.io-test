@@ -1104,9 +1104,13 @@ async def admin_cash_subscription_page(request: Request, club_id: int = Query(..
     settings = club.club_settings or {}
     disciplines = settings.get("disciplines", {})
     now = datetime.utcnow()
-    student_data = [{"id": s.id, "name": s.name, "discipline": s.discipline, "expire_date": s.expire_date.isoformat() if s.expire_date else None, "balance_lessons": s.balance_lessons or 0, "is_frozen": bool(s.is_frozen), "status_ok": bool(s.expire_date and s.expire_date > now and not s.is_frozen and (s.balance_lessons or 0) > 0), "status_label": "Активен" if s.expire_date and s.expire_date > now and not s.is_frozen and (s.balance_lessons or 0) > 0 else "Завершён"} for s in students]
+    student_data = []
+    for s in students:
+        assigned = await active_discounts(db, club_id, s.parent_id, "subscriptions", student_id=s.id)
+        student_data.append({"id": s.id, "name": s.name, "discipline": s.discipline, "expire_date": s.expire_date.isoformat() if s.expire_date else None, "balance_lessons": s.balance_lessons or 0, "is_frozen": bool(s.is_frozen), "status_ok": bool(s.expire_date and s.expire_date > now and not s.is_frozen and (s.balance_lessons or 0) > 0), "status_label": "Активен" if s.expire_date and s.expire_date > now and not s.is_frozen and (s.balance_lessons or 0) > 0 else "Завершён", "auto_discount_ids": [d.id for d in assigned]})
     discounts = (await db.execute(select(Discount).where(Discount.club_id == club_id, Discount.is_active.is_(True)).order_by(Discount.name))).scalars().all()
-    return templates.TemplateResponse("admin_cash_subscription.html", {"request": request, "club": club, "club_id": club_id, "students": student_data, "disciplines": disciplines, "discounts": discounts})
+    discount_data = [{"id": d.id, "name": d.name, "kind": d.kind, "value": d.value} for d in discounts]
+    return templates.TemplateResponse("admin_cash_subscription.html", {"request": request, "club": club, "club_id": club_id, "students": student_data, "disciplines": disciplines, "discounts": discounts, "discount_data": discount_data})
 
 
 @router.post("/webapp/admin-cash-subscription")
@@ -1139,6 +1143,8 @@ async def admin_cash_subscription(payload: WebAppCashSubscriptionPayload, db: As
     price = int(tariff.get("price", 0) or 0) * 100
     original_price = price
     selected_discount_ids = list(dict.fromkeys(payload.discount_ids or ([payload.discount_id] if payload.discount_id else [])))
+    automatic = await active_discounts(db, club.id, student.parent_id, "subscriptions", student_id=student.id)
+    selected_discount_ids = list(dict.fromkeys([d.id for d in automatic] + selected_discount_ids))
     manual_discounts = list((await db.scalars(select(Discount).where(Discount.club_id == club.id, Discount.id.in_(selected_discount_ids), Discount.is_active.is_(True), Discount.scope.in_(["subscriptions", "all"])).order_by(Discount.priority, Discount.id))).all()) if selected_discount_ids else []
     if selected_discount_ids and len(manual_discounts) != len(selected_discount_ids):
         raise HTTPException(status_code=400, detail="Некорректная скидка для абонемента")
@@ -1657,7 +1663,7 @@ async def cart_checkout(payload: CartCheckoutPayload, request: Request, session:
         if kind == "product":
             p=by_id.get(int(raw.get("product_id"))); qty=int(raw.get("quantity", 1))
             if not p or qty < 1 or qty > 99 or p.stock < qty: raise HTTPException(400, "Товар недоступен или закончился")
-            line_original = p.price_kopecks * qty; line_discounts = await active_discounts(session, club.id, int(tg_user["id"]), "products", ids=[int(x) for x in raw.get("discount_ids", [])])
+            line_original = p.price_kopecks * qty; raw_discount_ids = [int(x) for x in raw.get("discount_ids", [])]; line_discounts = await active_discounts(session, club.id, int(tg_user["id"]), "products", ids=raw_discount_ids or None)
             line_total, line_applied = apply_discounts(line_original, line_discounts); original_total += line_original; total += line_total; applied_discounts.extend(line_applied)
             normalized.append(("product", p, qty))
         elif kind in {"subscription", "freeze"}:
@@ -1675,13 +1681,13 @@ async def cart_checkout(payload: CartCheckoutPayload, request: Request, session:
                 if age_error:
                     raise HTTPException(400, age_error)
                 price = int(float(t.get("price", 0)) * 100)
-                line_original = price * qty; line_discounts = await active_discounts(session, club.id, int(tg_user["id"]), "subscriptions", student.id, [int(x) for x in raw.get("discount_ids", [])])
+                line_original = price * qty; raw_discount_ids = [int(x) for x in raw.get("discount_ids", [])]; line_discounts = await active_discounts(session, club.id, int(tg_user["id"]), "subscriptions", student.id, raw_discount_ids or None)
                 line_total, line_applied = apply_discounts(line_original, line_discounts); original_total += line_original; total += line_total; applied_discounts.extend(line_applied)
                 normalized.append(("subscription", t, {"student_id": student.id, "discipline": raw.get("sport_type"), "price": price, "quantity": qty}))
             else:
                 days = int(raw.get("days", 0)); price = int(float(settings.get("limits", {}).get("freeze_price_per_day", 0)) * days * 100)
                 if days <= 0 or price <= 0: raise HTTPException(400, "Заморозка недоступна")
-                line_original = price * qty; line_discounts = await active_discounts(session, club.id, int(tg_user["id"]), "subscriptions", student.id, [int(x) for x in raw.get("discount_ids", [])])
+                line_original = price * qty; raw_discount_ids = [int(x) for x in raw.get("discount_ids", [])]; line_discounts = await active_discounts(session, club.id, int(tg_user["id"]), "subscriptions", student.id, raw_discount_ids or None)
                 line_total, line_applied = apply_discounts(line_original, line_discounts); original_total += line_original; total += line_total; applied_discounts.extend(line_applied)
                 normalized.append(("freeze", None, {"student_id": student.id, "days": days, "price": price, "quantity": qty}))
     order_id = f"CART_{uuid.uuid4().hex[:12].upper()}"
