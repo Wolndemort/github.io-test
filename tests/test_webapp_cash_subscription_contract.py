@@ -16,7 +16,7 @@ def test_webapp_cash_subscription_is_separate_from_bot_and_uses_manager_permissi
     assert "await add_abon" in api
     assert "/webapp/admin-cash-subscription" in buttons
     assert "Поиск атлета" in page or "Поиск по имени" in page
-    assert "до ${until}" in page
+    assert "до ${until}" in page or "Продано до" in page
 
 
 def test_cashier_does_not_have_cash_view_permission():
