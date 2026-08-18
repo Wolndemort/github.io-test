@@ -214,7 +214,7 @@ def calculate_projected_renewal_revenue(
         matching = []
         for key, count in sales.items():
             if key[0] == discipline:
-                matching.extend([item for item in options if item[2].get("count", 0) in (key[1], 999) and int(item[2].get("days", 0) or 0) == key[2]] * count)
+                matching.extend([item for item in options if int(item[2].get("count", 0) or 0) == key[1] and int(item[2].get("days", 0) or 0) == key[2]] * count)
         selected_by_discipline[discipline] = max(matching, key=lambda item: matching.count(item)) if matching else options[0]
     projected_kopecks = sum(selected_by_discipline.get(getattr(student, "discipline", None) or "boxing", (None, 0, {}, 0))[3] for student in candidates)
     selected = next(iter(selected_by_discipline.values()), None)
