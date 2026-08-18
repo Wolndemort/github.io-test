@@ -1175,13 +1175,12 @@ async def admin_cash_subscription(payload: WebAppCashSubscriptionPayload, db: As
     # The bot flow sends the cash receipt after activation. Keep the WebApp flow
     # consistent: the cashier is not the customer, so notify the athlete's
     # parents instead of sending the receipt back to the staff member.
+    parent_ids = await get_student_parent_ids(student.id, db)
+    bot = Bot(club.bot_token)
     try:
-        parent_ids = await get_student_parent_ids(student.id, db)
-        if parent_ids:
-            bot = Bot(club.bot_token)
-            tariff_label = f"Безлимит ({days} дн.)" if count == 999 else f"{count} зан. ({days} дн.)"
-            parent_label = await resolve_user_label(db, parent_ids[0], empty_label="Плательщик")
-            receipt = build_owner_receipt_text(
+        tariff_label = f"Безлимит ({days} дн.)" if count == 999 else f"{count} зан. ({days} дн.)"
+        parent_label = await resolve_user_label(db, parent_ids[0], empty_label="Плательщик") if parent_ids else "Администратор клуба"
+        receipt = build_owner_receipt_text(
                 title="Оплата наличными подтверждена",
                 order_id=order_id,
                 buyer_label=parent_label,
@@ -1196,16 +1195,22 @@ async def admin_cash_subscription(payload: WebAppCashSubscriptionPayload, db: As
                     "Способ оплаты: <b>Наличные</b>",
                 ],
             )
-            for parent_id in parent_ids:
-                try:
-                    await bot.send_message(chat_id=parent_id, text=receipt, parse_mode="HTML")
-                except Exception:
-                    logger.exception("Не удалось отправить чек родителю %s по наличному абонементу %s", parent_id, order_id)
+        )
+        for parent_id in parent_ids:
+            try:
+                await bot.send_message(chat_id=parent_id, text=receipt, parse_mode="HTML")
+            except Exception:
+                logger.exception("Не удалось отправить чек родителю %s по наличному абонементу %s", parent_id, order_id)
     except Exception:
         logger.exception("Не удалось сформировать чек по наличному абонементу %s", order_id)
-    if club.owner_id and int(club.owner_id) not in {int(parent_id) for parent_id in parent_ids}:
-        await bot.send_message(chat_id=int(club.owner_id), text=receipt, parse_mode="HTML")
-    await bot.session.close()
+    else:
+        if club.owner_id and int(club.owner_id) not in {int(parent_id) for parent_id in parent_ids}:
+            try:
+                await bot.send_message(chat_id=int(club.owner_id), text=receipt, parse_mode="HTML")
+            except Exception:
+                logger.exception("Не удалось отправить чек владельцу по наличному абонементу %s", order_id)
+    finally:
+        await bot.session.close()
     return {"ok": True, "student": student.name, "expire_date": abon_result[0], "balance_lessons": student.balance_lessons, "order_id": order_id}
 
 
