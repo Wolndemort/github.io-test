@@ -21,5 +21,5 @@ def test_webapp_cash_subscription_is_separate_from_bot_and_uses_manager_permissi
 
 def test_cashier_does_not_have_cash_view_permission():
     permissions = (ROOT / "services/staff_permissions.py").read_text(encoding="utf-8")
-    assert '"cashier": {"cash_sale", "products_view", "products_manage"}' in permissions
+    assert '"cashier": {"cash_sale", "products_view", "products_manage", "forecast_view"}' in permissions
     assert '"manager": {"cash_sale", "products_view", "products_manage", "cash_view"' in permissions
