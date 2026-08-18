@@ -1,5 +1,5 @@
 import io
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from fastapi import Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, StreamingResponse
@@ -7,10 +7,10 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from admin_module.router_base import router, templates
-from admin_module.utils import get_club_id_from_host, verify_webapp_admin, webapp_auth_gate
+from admin_module.utils import get_club_id_from_host, verify_webapp_admin, verify_webapp_staff, webapp_auth_gate
 from admin_module.webapp_verify import verify_telegram_data
 from database.db import CartOrder, CashEntry, Club, PaymentOrder, Student, User, VisitLog, get_session
-from services.analytics import calculate_admin_dashboard, calculate_cash_flow_periods, calculate_revenue_periods, calculate_student_metrics, generate_students_excel, reporting_periods, moscow_date_boundary
+from services.analytics import calculate_admin_dashboard, calculate_cash_flow_periods, calculate_projected_renewal_revenue, calculate_revenue_periods, calculate_student_metrics, generate_students_excel, reporting_periods, moscow_date_boundary
 
 
 @router.get("/admin", response_class=HTMLResponse)
@@ -140,6 +140,41 @@ async def get_revenue_stats(request: Request, session: AsyncSession = Depends(ge
             payment_totals[student_id] = payment_totals.get(student_id, 0) + int(amount or 0)
     top_students = [{"name": student_names[student_id].name, "amount": round(amount / 100, 2), "parent_id": getattr(student_names[student_id], "parent_id", None)} for student_id, amount in sorted(payment_totals.items(), key=lambda item: item[1], reverse=True)[:5]]
     return templates.TemplateResponse("stats.html", {"request": request, "empty": False, "club_id": club_id, "club_name": club_name, "filters": {"date_from": date_from or "", "date_to": date_to or ""}, "total_athletes": total_athletes, "total_parents": total_parents, "retention_rate": metrics["retention_rate"], "active_passes": active_passes, "frozen_passes": frozen_passes, "burning_passes": burning_passes, "inactive_passes": inactive_passes, "total_lessons_left": total_lessons_left, "disciplines_stats": disciplines_stats, "churned_students": churned_students, "top_students": top_students, "revenue_today": round(revenue_today, 2), "revenue_week": round(revenue_week, 2), "revenue_month": round(revenue_month, 2), "period_revenue": round(period_revenue, 2), "period_expenses": round(period_expenses, 2), "period_margin": round(period_margin, 2), "expenses_today": cash_flow["today_expense"], "expenses_week": cash_flow["week_expense"], "expenses_month": cash_flow["month_expense"], "cash_income_today": cash_flow["today_income"], "cash_income_week": cash_flow["week_income"], "cash_income_month": cash_flow["month_income"], "cash_margin_today": cash_flow["today_margin"], "cash_margin_week": cash_flow["week_margin"], "cash_margin_month": cash_flow["month_margin"], "payment_types": {"FIRST": 0, "RECURRENT": 0}})
+
+
+@router.get("/forecast", response_class=HTMLResponse)
+async def get_forecast_page(request: Request, session: AsyncSession = Depends(get_session), init_data: str | None = Query(default=None), date_from: str | None = Query(default=None), date_to: str | None = Query(default=None)):
+    club_id = get_club_id_from_host(request)
+    club = (await session.execute(select(Club).where(Club.id == club_id))).scalar_one_or_none()
+    if not init_data:
+        return webapp_auth_gate(request, club_id)
+    await verify_webapp_staff(club, init_data, session, "forecast_view")
+    now = reporting_periods()["now"]
+    local_today = reporting_periods()["local_now"].date()
+    start = date_from or local_today.isoformat()
+    finish = date_to or (local_today + timedelta(days=30)).isoformat()
+    try:
+        start_date = date.fromisoformat(start); finish_date = date.fromisoformat(finish)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Даты должны быть в формате YYYY-MM-DD") from exc
+    if finish_date < start_date or finish_date - start_date > timedelta(days=366):
+        raise HTTPException(status_code=400, detail="Период должен быть от 0 до 366 дней")
+    students = list((await session.execute(select(Student).where(Student.club_id == club_id))).scalars().all())
+    visits = list((await session.execute(select(VisitLog).where(VisitLog.club_id == club_id))).scalars().all())
+    payments = list((await session.execute(select(PaymentOrder).where(PaymentOrder.club_id == club_id, PaymentOrder.status == "CONFIRMED"))).scalars().all())
+    forecast = calculate_projected_renewal_revenue(students, visits, payments, club.club_settings if club else {}, start, finish, now)
+    visit_map = {}
+    for visit in visits:
+        if visit.student_id not in visit_map or visit.visited_at > visit_map[visit.student_id]: visit_map[visit.student_id] = visit.visited_at
+    rows = []
+    for student in forecast["students"]:
+        last = visit_map.get(student.id, student.last_visit)
+        expiry = student.expire_date.date() if student.expire_date else None
+        days_to_expiry = (expiry - local_today).days if expiry else 9999
+        bucket = "Уже закончился" if days_to_expiry < 0 else ("До 7 дней" if days_to_expiry <= 7 else "До 30 дней")
+        rows.append({"name": student.name, "parent_id": student.parent_id, "expire_date": student.expire_date, "last_visit": last, "discipline": student.discipline or "—", "priority": "Высокий" if last and (now - last).days <= 7 else "Средний", "bucket": bucket})
+    rows.sort(key=lambda row: (row["priority"] != "Высокий", row["expire_date"] or now))
+    return templates.TemplateResponse("forecast.html", {"request": request, "club_id": club_id, "club_name": club.name if club else "Клуб", "filters": {"date_from": start, "date_to": finish}, "forecast": forecast, "rows": rows})
 
 
 @router.get("/stats/export/excel")

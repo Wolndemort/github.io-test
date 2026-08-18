@@ -160,6 +160,71 @@ def calculate_revenue_periods(payments: Iterable[Any], now: datetime | None = No
     return {key: round(value / 100, 2) for key, value in totals.items()}
 
 
+def calculate_projected_renewal_revenue(
+    students_models: Iterable[Any],
+    visit_logs: Iterable[Any] | None = None,
+    payments: Iterable[Any] | None = None,
+    club_settings: dict | None = None,
+    date_from: date | str | None = None,
+    date_to: date | str | None = None,
+    now: datetime | None = None,
+    visit_window_days: int = 14,
+) -> dict[str, Any]:
+    """Estimate renewals for recently visiting athletes.
+
+    The reporting window is [date_from, date_to]; expired passes are included
+    as well as passes expiring by date_to. Price is the most frequently sold
+    configured tariff, with a transparent fallback to the most popular
+    configured tariff when sales do not contain tariff metadata.
+    """
+    current = _utc_naive(now) or datetime.now(timezone.utc).replace(tzinfo=None)
+    start = date.fromisoformat(date_from) if isinstance(date_from, str) else date_from
+    finish = date.fromisoformat(date_to) if isinstance(date_to, str) else date_to
+    start = start or current.date()
+    finish = finish or start
+    if finish < start:
+        raise ValueError("date_to must not be earlier than date_from")
+    end_dt = datetime.combine(finish, datetime.max.time())
+    latest = {}
+    for log in visit_logs or []:
+        at = _utc_naive(getattr(log, "visited_at", None)); sid = getattr(log, "student_id", None)
+        if sid is not None and at and (sid not in latest or at > latest[sid]): latest[sid] = at
+    candidates = []
+    for student in students_models:
+        expiry = _utc_naive(getattr(student, "expire_date", None))
+        last = latest.get(getattr(student, "id", None), _utc_naive(getattr(student, "last_visit", None)))
+        if expiry and expiry <= end_dt and last and current - timedelta(days=visit_window_days) <= last <= current:
+            candidates.append(student)
+
+    settings = club_settings or {}
+    configured = []
+    for discipline, block in (settings.get("disciplines", {}) or {}).items():
+        for idx, tariff in enumerate((block or {}).get("tariffs", []) or []):
+            price = int(float(tariff.get("price", 0) or 0) * 100)
+            if price > 0: configured.append((discipline, idx, tariff, price))
+    sales = {}
+    for payment in payments or []:
+        if str(getattr(payment, "status", "CONFIRMED")) != "CONFIRMED": continue
+        key = (getattr(payment, "discipline", None), int(getattr(payment, "lesson_count", 0) or 0), int(getattr(payment, "days_to_add", 0) or 0), int(getattr(payment, "amount_kopecks", 0) or 0))
+        sales[key] = sales.get(key, 0) + 1
+    selected_by_discipline = {}
+    for discipline in {getattr(student, "discipline", None) or "boxing" for student in candidates}:
+        options = [item for item in configured if item[0] == discipline]
+        if not options: continue
+        matching = []
+        for key, count in sales.items():
+            if key[0] == discipline:
+                matching.extend([item for item in options if item[2].get("count", 0) in (key[1], 999) and int(item[2].get("days", 0) or 0) == key[2]] * count)
+        selected_by_discipline[discipline] = max(matching, key=lambda item: matching.count(item)) if matching else options[0]
+    projected_kopecks = sum(selected_by_discipline.get(getattr(student, "discipline", None) or "boxing", (None, 0, {}, 0))[3] for student in candidates)
+    selected = next(iter(selected_by_discipline.values()), None)
+    prices = {item[3] for item in selected_by_discipline.values()}
+    source = "самый продаваемый подтверждённый тариф по каждому направлению" if sales and selected_by_discipline else "нет настроенного тарифа для направления"
+    tariffs_by_discipline = {discipline: {"name": item[2].get("name") or f"{item[2].get('days')} дн.", "price": round(item[3] / 100, 2)} for discipline, item in selected_by_discipline.items()}
+    tariff_label = ", ".join(f"{discipline}: {data['name']} ({data['price']:.2f} ₽)" for discipline, data in tariffs_by_discipline.items()) or "Нет настроенного тарифа"
+    return {"count": len(candidates), "projected_revenue": round(projected_kopecks / 100, 2), "students": candidates, "tariff_name": tariff_label, "tariff_discipline": selected[0] if selected else None, "price": round(sum(prices) / len(prices) / 100, 2) if prices else 0, "price_source": source, "tariffs_by_discipline": tariffs_by_discipline}
+
+
 def calculate_cash_flow_periods(entries: Iterable[Any], now: datetime | None = None) -> dict[str, float]:
     """Calculate cash flow from cash entries only.
 

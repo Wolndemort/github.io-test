@@ -46,6 +46,7 @@
     <div class="mono-hero" style="margin-bottom:12px;">
         <div class="mono-eyebrow">Analytics</div>
         <h1 class="mono-title" style="margin-bottom:6px;">Статистика клуба</h1>
+        <a class="mono-action" href="/forecast?club_id={{ club_id }}&init_data={{ request.query_params.get('init_data','')|urlencode }}">🔮 Прогноз</a>
     </div>
 
     {% if empty %}

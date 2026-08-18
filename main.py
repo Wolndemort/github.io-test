@@ -39,6 +39,7 @@ from services.saas_billing import process_saas_auto_renewals
 from middlewares.db_saas_midleware import ClubMiddleware
 from middlewares.main_middleware import DbSessionMiddleware
 from admin_module.api import router
+from admin_module.admin_pages import router as admin_pages_router
 from redis.asyncio import Redis
 from aiogram.fsm.storage.redis import RedisStorage
 
@@ -156,6 +157,7 @@ app.add_middleware(SessionMiddleware, secret_key=os.getenv("SECRET_KEY", ""), ht
 app.add_middleware(ProxyHeadersMiddleware, trusted_hosts=["*"])
 app.mount("/static", StaticFiles(directory="static"), name="static")
 app.include_router(router)
+app.include_router(admin_pages_router)
 setup_admin(app, engine)
 
 dp = Dispatcher(storage=storage)
