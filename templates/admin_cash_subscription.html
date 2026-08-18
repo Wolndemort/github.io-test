@@ -32,7 +32,7 @@
 </main>
 <script>
 const tg=window.Telegram?.WebApp||{initData:''};if(tg.ready)tg.ready();
-const init=tg.initData,students={{ students|tojson }},disciplines={{ disciplines|tojson }},discountData={{ discount_data|tojson }};
+const init=tg.initData||new URLSearchParams(window.location.search).get('init_data')||'',students={{ students|tojson }},disciplines={{ disciplines|tojson }},discountData={{ discount_data|tojson }};
 const search=document.getElementById('search'),list=document.getElementById('students'),sale=document.getElementById('sale'),selectedEl=document.getElementById('selected'),discipline=document.getElementById('discipline'),tariff=document.getElementById('tariff'),discount=document.getElementById('discount'),summary=document.getElementById('summary'),submit=document.getElementById('submit');
 let selected=null;
 function render(){const q=search.value.trim().toLowerCase();list.innerHTML=students.filter(s=>String(s.name||'').toLowerCase().includes(q)).map(s=>{const b=document.createElement('button');b.className='student';b.type='button';b.setAttribute('onclick','pick('+s.id+')');b.innerHTML='<b>'+(s.status_ok?'✓':'✕')+' '+String(s.name||'')+'</b><br><span class="muted">'+String(s.status_label||'')+' · '+String(s.discipline||'Без дисциплины')+(s.expire_date?' · до '+s.expire_date.slice(0,10):'')+'</span>';return b.outerHTML}).join('')||'<div class="muted" style="margin-top:12px">Атлеты не найдены</div>'}

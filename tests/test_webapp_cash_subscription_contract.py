@@ -23,3 +23,8 @@ def test_cashier_does_not_have_cash_view_permission():
     permissions = (ROOT / "services/staff_permissions.py").read_text(encoding="utf-8")
     assert '"cashier": {"cash_sale", "products_view", "products_manage", "forecast_view"}' in permissions
     assert '"manager": {"cash_sale", "products_view", "products_manage", "cash_view"' in permissions
+
+
+def test_cash_subscription_keeps_telegram_auth_when_opened_in_browser():
+    page = (ROOT / "templates/admin_cash_subscription.html").read_text(encoding="utf-8")
+    assert "tg.initData||new URLSearchParams(window.location.search).get('init_data')||''" in page
