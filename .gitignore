@@ -34,6 +34,7 @@ env/
 
 # личные заметки и оценки
 PERSONAL_PRICE_ESTIMATE.md
+WEB_MIGRATION_HANDOFF.md
 
 # Python bytecode and local caches (never commit)
 __pycache__/
