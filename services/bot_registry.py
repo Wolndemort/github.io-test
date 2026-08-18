@@ -32,7 +32,7 @@ async def register_existing_bots(clubs: Iterable, base_url: str) -> None:
         try:
             await register_bot(club.bot_token, webhook_url)
         except Exception as exc:
-            logger.error("❌ Ошибка токена для клуба '%s': %s", getattr(club, "name", "?"), exc)
+            logger.error("❌ Ошибка токена для клуба '{}': {}", getattr(club, "name", "?"), exc)
 
 
 async def close_all_bots() -> None:
@@ -41,4 +41,3 @@ async def close_all_bots() -> None:
             await bot.session.close()
         except Exception as exc:
             logger.warning("Не удалось закрыть сессию бота: %s", exc)
-
