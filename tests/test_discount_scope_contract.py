@@ -13,3 +13,8 @@ def test_cash_and_online_freeze_apply_freeze_discounts():
     assert 'active_discounts(db, club.id, parent_id, "freeze"' in cabinet
     assert 'apply_discounts(int(round(price_per_day * days * 100))' in cabinet
     assert 'active_discounts(db, club_id, parent_id, "freeze"' in cabinet
+
+
+def test_discount_assignment_query_handles_missing_parent_id():
+    source = Path("services/discounts.py").read_text(encoding="utf-8")
+    assert "or_(*assignees) if assignees else false()" in source

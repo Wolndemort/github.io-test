@@ -1,24 +1,26 @@
 from datetime import date
-from sqlalchemy import select
+from sqlalchemy import false, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from database.db import Discount, DiscountAssignment
 
 async def active_discount(session: AsyncSession, club_id: int, user_id: int | None, scope: str, student_id: int | None = None):
     today = date.today()
+    assignees = [x for x in ((DiscountAssignment.user_id == user_id) if user_id is not None else None, (DiscountAssignment.student_id == student_id) if student_id is not None else None) if x is not None]
     return await session.scalar(select(Discount).join(DiscountAssignment, DiscountAssignment.discount_id == Discount.id).where(
         Discount.club_id == club_id, DiscountAssignment.club_id == club_id,
         Discount.is_active.is_(True),
-        ((DiscountAssignment.user_id == user_id) if user_id is not None else False) | ((DiscountAssignment.student_id == student_id) if student_id is not None else False),
+        or_(*assignees) if assignees else false(),
         Discount.scope.in_([scope, "all"]),
         (Discount.starts_at.is_(None) | (Discount.starts_at <= today)),
         (Discount.ends_at.is_(None) | (Discount.ends_at >= today)),
     ).order_by(Discount.id.desc()).limit(1))
 
 async def active_discounts(session: AsyncSession, club_id: int, user_id: int | None, scope: str, student_id: int | None = None, ids: list[int] | None = None):
+    assignees = [x for x in ((DiscountAssignment.user_id == user_id) if user_id is not None else None, (DiscountAssignment.student_id == student_id) if student_id is not None else None) if x is not None]
     query = select(Discount).join(DiscountAssignment, DiscountAssignment.discount_id == Discount.id).where(
         Discount.club_id == club_id, DiscountAssignment.club_id == club_id, Discount.is_active.is_(True),
         Discount.scope.in_([scope, "all"]),
-        ((DiscountAssignment.user_id == user_id) if user_id is not None else False) | ((DiscountAssignment.student_id == student_id) if student_id is not None else False),
+        or_(*assignees) if assignees else false(),
         (Discount.starts_at.is_(None) | (Discount.starts_at <= date.today())),
         (Discount.ends_at.is_(None) | (Discount.ends_at >= date.today())),
     )
