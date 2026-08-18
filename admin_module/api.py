@@ -1173,6 +1173,9 @@ async def admin_cash_subscription(payload: WebAppCashSubscriptionPayload, db: As
                     logger.exception("Не удалось отправить чек родителю %s по наличному абонементу %s", parent_id, order_id)
     except Exception:
         logger.exception("Не удалось сформировать чек по наличному абонементу %s", order_id)
+    if club.owner_id and int(club.owner_id) not in {int(parent_id) for parent_id in parent_ids}:
+        await bot.send_message(chat_id=int(club.owner_id), text=receipt, parse_mode="HTML")
+    await bot.session.close()
     return {"ok": True, "student": student.name, "expire_date": abon_result[0], "balance_lessons": student.balance_lessons, "order_id": order_id}
 
 
