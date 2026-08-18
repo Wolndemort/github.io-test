@@ -490,6 +490,13 @@ async def search_discount_clients(request: Request, club_id: int = Query(...), q
         students = (await session.execute(select(Student).where(Student.parent_id == user.user_id, Student.club_id == club_id).order_by(Student.name))).scalars().all()
         assignments = (await session.execute(select(DiscountAssignment.discount_id).where(DiscountAssignment.user_id == user.user_id, DiscountAssignment.club_id == club_id))).scalars().all()
         result.append({"user_id": user.user_id, "name": user.full_name or str(user.user_id), "phone": next((s.parent_phone for s in students if s.parent_phone), None), "students": [s.name for s in students], "discount_ids": assignments})
+    orphan_query = select(Student).outerjoin(User, User.user_id == Student.parent_id).where(Student.club_id == club_id, User.user_id.is_(None)).order_by(Student.name).limit(50)
+    if needle:
+        orphan_query = orphan_query.where(or_(Student.name.ilike(f"%{needle}%"), Student.parent_phone.ilike(f"%{needle}%"), Student.parent_phone_secondary.ilike(f"%{needle}%")))
+    orphan_students = (await session.execute(orphan_query)).scalars().all()
+    for student in orphan_students:
+        assignments = (await session.execute(select(DiscountAssignment.discount_id).where(DiscountAssignment.student_id == student.id, DiscountAssignment.club_id == club_id))).scalars().all()
+        result.append({"student_id": student.id, "name": student.name, "phone": student.parent_phone or student.parent_phone_secondary, "students": [student.name], "discount_ids": assignments, "orphan_student": True})
     return {"clients": result}
 
 

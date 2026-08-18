@@ -60,6 +60,12 @@ def test_students_without_profiles_can_own_discount_assignments():
     assert "allow discounts for students without a profile" in migration
     assert "student_id: int | None = None" in service
 
+def test_discount_client_search_includes_orphan_students():
+    views = (ROOT / "admin_module/webapp_views.py").read_text(encoding="utf-8")
+    assert "orphan_query" in views
+    assert "User.user_id.is_(None)" in views
+    assert "orphan_student" in views
+
 def test_discount_is_visible_in_web_countdown_and_telegram_profile():
     web = (ROOT / "templates/client_cabinet.html").read_text(encoding="utf-8")
     cabinet = (ROOT / "admin_module/webapp_client_cabinet.py").read_text(encoding="utf-8")
