@@ -52,7 +52,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from starlette import status
-from database.db import User, Student, StudentParent, Club, ClubStaff, ClubProduct, CartOrder, CartItem, CashEntry, AuditEntry, VisitLog, get_student_parent_ids
+from database.db import User, Student, StudentParent, Club, ClubStaff, ClubProduct, Discount, CartOrder, CartItem, CashEntry, AuditEntry, VisitLog, get_student_parent_ids
 from database.db import purchase_student_freeze
 from admin_module.schemas import AdminStudentUpdate, AdminStudentCreate, StudentInvitePayload, WebAppCashSubscriptionPayload
 from database.db import get_session
@@ -1092,7 +1092,8 @@ async def admin_cash_subscription_page(request: Request, club_id: int = Query(..
     settings = club.club_settings or {}
     disciplines = settings.get("disciplines", {})
     student_data = [{"id": s.id, "name": s.name, "discipline": s.discipline, "expire_date": s.expire_date.isoformat() if s.expire_date else None, "balance_lessons": s.balance_lessons or 0, "is_frozen": bool(s.is_frozen)} for s in students]
-    return templates.TemplateResponse("admin_cash_subscription.html", {"request": request, "club": club, "club_id": club_id, "students": student_data, "disciplines": disciplines})
+    discounts = (await db.execute(select(Discount).where(Discount.club_id == club_id, Discount.is_active.is_(True)).order_by(Discount.name))).scalars().all()
+    return templates.TemplateResponse("admin_cash_subscription.html", {"request": request, "club": club, "club_id": club_id, "students": student_data, "disciplines": disciplines, "discounts": discounts})
 
 
 @router.post("/webapp/admin-cash-subscription")
@@ -1123,6 +1124,11 @@ async def admin_cash_subscription(payload: WebAppCashSubscriptionPayload, db: As
     count = int(tariff.get("count", 0) or 0)
     days = int(tariff.get("days", 30) or 30)
     price = int(tariff.get("price", 0) or 0) * 100
+    original_price = price
+    manual_discount = await db.get(Discount, payload.discount_id) if payload.discount_id else None
+    if manual_discount and (manual_discount.club_id != club.id or manual_discount.scope not in {"subscriptions", "all"} or not manual_discount.is_active):
+        raise HTTPException(status_code=400, detail="Некорректная скидка для абонемента")
+    price, discount_amount = apply_discount(price, manual_discount)
     if count < 1 or days < 1 or price <= 0:
         raise HTTPException(status_code=400, detail="Некорректный тариф")
     age_error = _tariff_age_error(student, tariff, cfg.get("name", discipline))
@@ -1131,7 +1137,7 @@ async def admin_cash_subscription(payload: WebAppCashSubscriptionPayload, db: As
     abon_result = await add_abon(student.id, count, db, club.id, settings, days_to_add=days, discipline=discipline)
     if not abon_result:
         raise HTTPException(status_code=409, detail="Не удалось применить абонемент")
-    db.add(PaymentOrder(id=order_id, user_id=int(tg_user.get("id", 0)), student_id=student.id, club_id=club.id, discipline=discipline, amount_kopecks=price, status="CONFIRMED", type="CASH_SUBSCRIPTION", provider_payment_id=f"CASH:{order_id}", lesson_count=count, days_to_add=days))
+    db.add(PaymentOrder(id=order_id, user_id=int(tg_user.get("id", 0)), student_id=student.id, club_id=club.id, discipline=discipline, amount_kopecks=price, original_amount_kopecks=original_price, discount_id=manual_discount.id if manual_discount else None, discount_name=manual_discount.name if manual_discount else None, discount_kind=manual_discount.kind if manual_discount else None, discount_value=manual_discount.value if manual_discount else None, discount_amount_kopecks=discount_amount or None, status="CONFIRMED", type="CASH_SUBSCRIPTION", provider_payment_id=f"CASH:{order_id}", lesson_count=count, days_to_add=days))
     try:
         await db.commit()
     except IntegrityError:

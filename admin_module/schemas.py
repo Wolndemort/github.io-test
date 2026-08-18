@@ -43,6 +43,7 @@ class WebAppCashSubscriptionPayload(BaseModel):
     sport_type: str
     tariff_idx: int
     idempotency_key: str | None = None
+    discount_id: int | None = None
 
 
 class WebAppBindPhonePayload(BaseModel):
