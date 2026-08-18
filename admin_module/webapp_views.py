@@ -486,7 +486,7 @@ async def search_discount_clients(request: Request, club_id: int = Query(...), q
     club = await session.get(Club, club_id)
     await verify_webapp_staff(club, init_data, session, "cash_sale")
     needle = q.strip()
-    query = select(User).where(User.club_id == club_id).order_by(User.full_name, User.user_id).limit(50)
+    query = select(User).join(Student, Student.parent_id == User.user_id).where(Student.club_id == club_id).distinct().order_by(User.full_name, User.user_id).limit(50)
     if needle:
         query = query.where(or_(User.full_name.ilike(f"%{needle}%"), User.user_id.cast(String).ilike(f"%{needle}%")))
     users = (await session.execute(query)).scalars().all()

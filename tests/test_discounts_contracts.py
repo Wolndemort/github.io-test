@@ -65,6 +65,7 @@ def test_discount_client_search_includes_orphan_students():
     assert "orphan_query" in views
     assert "User.user_id.is_(None)" in views
     assert "orphan_student" in views
+    assert "join(Student, Student.parent_id == User.user_id)" in views
 
 def test_discount_stacking_has_priority_and_non_negative_total():
     service = (ROOT / "services/discounts.py").read_text(encoding="utf-8")
