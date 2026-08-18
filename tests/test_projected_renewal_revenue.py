@@ -76,3 +76,19 @@ def test_timezone_aware_visit_is_normalized():
     visit = SimpleNamespace(student_id=1, visited_at=datetime(2026, 8, 17, 15, tzinfo=timezone.utc))
     result = calculate_projected_renewal_revenue([student], [visit], now=now, date_to="2026-09-01")
     assert result["count"] == 1
+
+
+def test_discipline_tariff_is_selected_by_sales_count_not_highest_price():
+    now = datetime(2026, 8, 18, 12)
+    student = SimpleNamespace(id=1, discipline="bjj", expire_date=datetime(2026, 9, 1), last_visit=now - timedelta(days=1))
+    settings = {"disciplines": {"bjj": {"tariffs": [
+        {"name": "8 посещений", "count": 8, "days": 30, "price": 5000},
+        {"name": "12 посещений", "count": 12, "days": 30, "price": 7000},
+        {"name": "Безлимит", "count": 999, "days": 30, "price": 10000},
+    ]}}}
+    payments = [SimpleNamespace(status="CONFIRMED", discipline="bjj", lesson_count=8, days_to_add=30, amount_kopecks=500000)] * 20
+    payments += [SimpleNamespace(status="CONFIRMED", discipline="bjj", lesson_count=12, days_to_add=30, amount_kopecks=700000)] * 19
+    payments += [SimpleNamespace(status="CONFIRMED", discipline="bjj", lesson_count=999, days_to_add=30, amount_kopecks=1000000)] * 3
+    result = calculate_projected_renewal_revenue([student], payments=payments, club_settings=settings, now=now, date_to="2026-09-01")
+    assert result["tariffs_by_discipline"]["bjj"] == {"name": "8 посещений", "price": 5000.0}
+    assert result["projected_revenue"] == 5000
