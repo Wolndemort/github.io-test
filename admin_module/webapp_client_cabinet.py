@@ -803,7 +803,8 @@ async def webapp_buy_subscription_page(request: Request, club_id: int, init_data
     disciplines = settings.get("disciplines", {})
     payment_modes = payment_availability(settings)
     payment_info = get_payment_info_text(settings)
-    return templates.TemplateResponse("webapp_buy_subscription.html", {"request": request, "club": club, "club_id": club_id, "students": students, "disciplines": disciplines, "payment_modes": payment_modes, "sbp_enabled": payment_modes["sbp"], "online_enabled": payment_modes["online"], "payment_info": payment_info})
+    discounts_by_student = {s.id: [{"kind": d.kind, "value": d.value, "name": d.name} for d in await active_discounts(db, club_id, user.user_id, "subscriptions", student_id=s.id)] for s in students}
+    return templates.TemplateResponse("webapp_buy_subscription.html", {"request": request, "club": club, "club_id": club_id, "students": students, "disciplines": disciplines, "discounts_by_student": discounts_by_student, "payment_modes": payment_modes, "sbp_enabled": payment_modes["sbp"], "online_enabled": payment_modes["online"], "payment_info": payment_info})
 
 
 @router.post("/webapp/client-cabinet/buy-subscription")

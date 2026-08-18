@@ -42,6 +42,7 @@
         </select>
     </label>
     <p class="muted" style="margin:8px 0 0;">Реквизиты берутся из настроек клуба и совпадают с ботом: <b>{{ payment_info }}</b></p>
+    <p id="pricePreview" class="muted" style="font-weight:700;margin:8px 0 0;"></p>
     <div class="mono-divider"></div>
     <div class="mono-grid-2">
         <button id="create" class="mono-action" style="width:100%;">В корзину</button>
@@ -61,6 +62,7 @@
 {% block scripts %}
 <script>
 const disciplines = {{ disciplines | tojson }};
+const discountsByStudent = {{ discounts_by_student | tojson }};
 const sportSelect = document.getElementById('sport');
 const tariffSelect = document.getElementById('tariff');
 const studentSelect = document.getElementById('student');
@@ -84,8 +86,11 @@ function renderTariffs() {
     opt.textContent = (t.count === 999 ? `Безлимит ${t.days} дн.` : `${t.count} зан. / ${t.days} дн.`) + ` — ${t.price} ₽`;
     tariffSelect.appendChild(opt);
   });
+  renderPricePreview();
 }
+function renderPricePreview(){const t=(disciplines[sportSelect.value]?.tariffs||[])[Number(tariffSelect.value)||0];if(!t)return;let amount=Number(t.price)*100;const ds=discountsByStudent[studentSelect.value]||[];for(const d of ds)amount=d.kind==='percent'?Math.round(amount*(100-Number(d.value))/100):Math.max(0,amount-Number(d.value));const el=document.getElementById('pricePreview');if(el)el.textContent='К оплате: '+(amount/100).toFixed(2)+' ₽'+(ds.length?' · автоматическая скидка применена':'')}
 sportSelect.addEventListener('change', renderTariffs);
+tariffSelect.addEventListener('change', renderPricePreview);studentSelect.addEventListener('change', renderPricePreview);
 renderTariffs();
 document.getElementById('create').addEventListener('click', async () => {
   const button = document.getElementById('create');
