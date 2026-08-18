@@ -13,6 +13,7 @@ from config import ADMIN_IDS
 from database.db import (
     AsyncSessionLocal,
     CartOrder,
+    CashEntry,
     Club,
     ClubProduct,
     ClubStaff,
@@ -476,6 +477,8 @@ async def send_daily_report_to_admins():
                     )
                 )
                 yesterday_payments = list(yesterday_pay_res.scalars().all()) + list(yesterday_cart_res.scalars().all())
+                cash_entries_res = await session.execute(select(CashEntry).where(CashEntry.club_id == club.id, CashEntry.entry_type == "expense", CashEntry.created_at >= start_of_today))
+                today_cash_expenses = list(cash_entries_res.scalars().all())
 
             biz_metrics = calculate_daily_business_report(students, today_payments, yesterday_payments, visit_logs=visit_logs)
             # В статистике потеряшки считаются по всей истории VisitLog,
@@ -492,6 +495,7 @@ async def send_daily_report_to_admins():
                 f"📊 <b>ГЛУБОКИЙ БИЗНЕС-ОТЧЕТ: {club.name}</b>\n"
                 f"📅 Дата: <code>{now.strftime('%d.%m.%Y')}</code>\n\n"
                 f"💰 <b>Касса сегодня:</b> <code>{biz_metrics['revenue_today']} ₽</code>\n"
+                f"📉 <b>Расходы кассы:</b> <code>{sum((e.amount_kopecks or 0) for e in today_cash_expenses) / 100:.2f} ₽</code> · Деплой: <code>{sum((e.amount_kopecks or 0) for e in today_cash_expenses if str(e.category or '').strip().casefold() in {'deploy', 'деплой'}) / 100:.2f} ₽</code>\n"
                 f"⚖️ <b>Динамика ко вчера:</b> <code>{biz_metrics['revenue_diff_text']}</code>\n"
                 f"🥋 <b>Всего атлетов в базе:</b> <code>{biz_metrics['total_athletes']}</code>\n"
                 f"👥 <b>Родителей с привязкой:</b> <code>{biz_metrics['total_parents']}</code>\n\n"

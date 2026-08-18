@@ -1,4 +1,5 @@
 import io
+from collections import Counter
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, Iterable, List
 from zoneinfo import ZoneInfo
@@ -165,7 +166,7 @@ def calculate_cash_flow_periods(entries: Iterable[Any], now: datetime | None = N
     Income is positive cash movement, expense is outgoing cash.
     """
     periods = reporting_periods(now)
-    totals = {"today_income": 0, "today_expense": 0, "week_income": 0, "week_expense": 0, "month_income": 0, "month_expense": 0, "all_income": 0, "all_expense": 0}
+    totals = {"today_income": 0, "today_expense": 0, "week_income": 0, "week_expense": 0, "month_income": 0, "month_expense": 0, "all_income": 0, "all_expense": 0, "today_deploy_expense": 0, "week_deploy_expense": 0, "month_deploy_expense": 0, "all_deploy_expense": 0}
     for entry in entries:
         amount = _payment_kopecks(entry)
         created_at = _utc_naive(getattr(entry, "created_at", None))
@@ -176,14 +177,22 @@ def calculate_cash_flow_periods(entries: Iterable[Any], now: datetime | None = N
             totals["all_income"] += amount
         else:
             totals["all_expense"] += amount
+            if str(getattr(entry, "category", "") or "").strip().casefold() in {"deploy", "деплой"}:
+                totals["all_deploy_expense"] += amount
         if created_at is None:
             continue
         if created_at >= periods["month"]:
             totals[f"month_{kind}"] += amount
+            if kind == "expense" and str(getattr(entry, "category", "") or "").strip().casefold() in {"deploy", "деплой"}:
+                totals["month_deploy_expense"] += amount
         if created_at >= periods["week"]:
             totals[f"week_{kind}"] += amount
+            if kind == "expense" and str(getattr(entry, "category", "") or "").strip().casefold() in {"deploy", "деплой"}:
+                totals["week_deploy_expense"] += amount
         if created_at >= periods["today"]:
             totals[f"today_{kind}"] += amount
+            if kind == "expense" and str(getattr(entry, "category", "") or "").strip().casefold() in {"deploy", "деплой"}:
+                totals["today_deploy_expense"] += amount
     result = {key: round(value / 100, 2) for key, value in totals.items()}
     result["today_margin"] = round(result["today_income"] - result["today_expense"], 2)
     result["week_margin"] = round(result["week_income"] - result["week_expense"], 2)
@@ -296,7 +305,8 @@ def calculate_daily_business_report(students_models: List[Any], today_payments: 
             visit = _utc_naive(getattr(student, "last_visit", None))
             if visit and visit.replace(tzinfo=timezone.utc).astimezone(MOSCOW_TZ).date() == today_local_date:
                 visit_hours.append(visit.replace(tzinfo=timezone.utc).astimezone(MOSCOW_TZ).hour)
-    peak_hours = ", ".join(f"{hour}:00" for hour in sorted(set(visit_hours))[:2]) if visit_hours else "Нет чекинов сегодня"
+    hour_counts = Counter(visit_hours)
+    peak_hours = ", ".join(f"{hour}:00 ({count})" for hour, count in hour_counts.most_common(2)) if visit_hours else "Нет чекинов сегодня"
     return {
         "revenue_today": int(today_revenue),
         "revenue_diff_text": f"{sign}{int(revenue_diff)} ₽ ({revenue_percent}%)",
