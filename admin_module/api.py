@@ -217,6 +217,7 @@ class DiscountChangePayload(BaseModel):
     index: int | None = None
     discount: dict | None = None
     user_id: int | None = None
+    student_id: int | None = None
 
 class AdminSaleMethodPayload(BaseModel):
     init_data: str
@@ -1650,14 +1651,14 @@ async def cart_checkout(payload: CartCheckoutPayload, request: Request, session:
                 if age_error:
                     raise HTTPException(400, age_error)
                 price = int(float(t.get("price", 0)) * 100)
-                line_original = price * qty; line_discount = await active_discount(session, club.id, int(tg_user["id"]), "subscriptions")
+                line_original = price * qty; line_discount = await active_discount(session, club.id, int(tg_user["id"]), "subscriptions", student.id)
                 line_total, line_discount_amount = apply_discount(line_original, line_discount); original_total += line_original; total += line_total
                 if line_discount: applied_discounts.append((line_discount, line_discount_amount))
                 normalized.append(("subscription", t, {"student_id": student.id, "discipline": raw.get("sport_type"), "price": price, "quantity": qty}))
             else:
                 days = int(raw.get("days", 0)); price = int(float(settings.get("limits", {}).get("freeze_price_per_day", 0)) * days * 100)
                 if days <= 0 or price <= 0: raise HTTPException(400, "Заморозка недоступна")
-                line_original = price * qty; line_discount = await active_discount(session, club.id, int(tg_user["id"]), "subscriptions")
+                line_original = price * qty; line_discount = await active_discount(session, club.id, int(tg_user["id"]), "subscriptions", student.id)
                 line_total, line_discount_amount = apply_discount(line_original, line_discount); original_total += line_original; total += line_total
                 if line_discount: applied_discounts.append((line_discount, line_discount_amount))
                 normalized.append(("freeze", None, {"student_id": student.id, "days": days, "price": price, "quantity": qty}))

@@ -936,7 +936,7 @@ async def admin_confirm_payment(
         {},
     )
     original_amount_kopecks = int(round(float(selected_tariff.get("price", 0) or 0) * 100))
-    discount = await active_discount(session, club.id, callback.from_user.id, "subscriptions")
+    discount = await active_discount(session, club.id, callback.from_user.id, "subscriptions", student_id)
     amount_kopecks, discount_amount_kopecks = apply_discount(original_amount_kopecks, discount)
 
     # 4. ЛОГИКА ЗАЧИСЛЕНИЯ абонемента в СУБД (Передаем дисциплину!)

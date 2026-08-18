@@ -453,11 +453,13 @@ async def change_admin_discount(payload: DiscountChangePayload, session: AsyncSe
         session.add(Discount(club_id=club.id, name=str(raw.get("name", "")).strip()[:120] or "Без названия", kind=kind, value=int(round(value * 100)) if kind == "fixed" else int(round(value)), scope=scope, comment=str(raw.get("comment", "")).strip()[:500], starts_at=parse_day("starts_at"), ends_at=parse_day("ends_at")))
     elif payload.action in {"assign", "unassign"}:
         discount = await session.get(Discount, payload.index)
-        if not discount or discount.club_id != club.id or not payload.user_id:
+        if not discount or discount.club_id != club.id or (not payload.user_id and not payload.student_id) or (payload.user_id and payload.student_id):
             raise HTTPException(400, "Скидка или клиент не найдены")
-        assignment = await session.scalar(select(DiscountAssignment).where(DiscountAssignment.discount_id == discount.id, DiscountAssignment.user_id == payload.user_id))
+        assignment_query = select(DiscountAssignment).where(DiscountAssignment.discount_id == discount.id)
+        assignment_query = assignment_query.where(DiscountAssignment.user_id == payload.user_id) if payload.user_id else assignment_query.where(DiscountAssignment.student_id == payload.student_id)
+        assignment = await session.scalar(assignment_query)
         if payload.action == "assign" and not assignment:
-            session.add(DiscountAssignment(club_id=club.id, discount_id=discount.id, user_id=payload.user_id))
+            session.add(DiscountAssignment(club_id=club.id, discount_id=discount.id, user_id=payload.user_id, student_id=payload.student_id))
         elif payload.action == "unassign" and assignment:
             await session.delete(assignment)
     else:

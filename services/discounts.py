@@ -3,11 +3,12 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from database.db import Discount, DiscountAssignment
 
-async def active_discount(session: AsyncSession, club_id: int, user_id: int, scope: str):
+async def active_discount(session: AsyncSession, club_id: int, user_id: int | None, scope: str, student_id: int | None = None):
     today = date.today()
     return await session.scalar(select(Discount).join(DiscountAssignment, DiscountAssignment.discount_id == Discount.id).where(
         Discount.club_id == club_id, DiscountAssignment.club_id == club_id,
-        DiscountAssignment.user_id == user_id, Discount.is_active.is_(True),
+        Discount.is_active.is_(True),
+        ((DiscountAssignment.user_id == user_id) if user_id is not None else False) | ((DiscountAssignment.student_id == student_id) if student_id is not None else False),
         Discount.scope.in_([scope, "all"]),
         (Discount.starts_at.is_(None) | (Discount.starts_at <= today)),
         (Discount.ends_at.is_(None) | (Discount.ends_at >= today)),

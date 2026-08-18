@@ -47,9 +47,18 @@ def test_cart_recalculates_each_line_by_its_discount_scope():
     api = (ROOT / "admin_module/api.py").read_text(encoding="utf-8")
     db = (ROOT / "database/db.py").read_text(encoding="utf-8")
     assert 'active_discount(session, club.id, int(tg_user["id"]), "products")' in api
-    assert 'active_discount(session, club.id, int(tg_user["id"]), "subscriptions")' in api
+    assert 'active_discount(session, club.id, int(tg_user["id"]), "subscriptions", student.id)' in api
     assert "original_amount_kopecks" in db
     assert "discount_amount_kopecks" in db
+
+def test_students_without_profiles_can_own_discount_assignments():
+    db = (ROOT / "database/db.py").read_text(encoding="utf-8")
+    migration = (ROOT / "migrations/versions/x6y7z8a9b0c1_add_student_discount_assignments.py").read_text(encoding="utf-8")
+    service = (ROOT / "services/discounts.py").read_text(encoding="utf-8")
+    assert "user_id: Mapped[Optional[int]]" in db
+    assert "student_id: Mapped[Optional[int]]" in db
+    assert "allow discounts for students without a profile" in migration
+    assert "student_id: int | None = None" in service
 
 def test_discount_is_visible_in_web_countdown_and_telegram_profile():
     web = (ROOT / "templates/client_cabinet.html").read_text(encoding="utf-8")
