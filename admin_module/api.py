@@ -1103,7 +1103,8 @@ async def admin_cash_subscription_page(request: Request, club_id: int = Query(..
     students = (await db.execute(select(Student).where(Student.club_id == club_id).order_by(Student.name))).scalars().all()
     settings = club.club_settings or {}
     disciplines = settings.get("disciplines", {})
-    student_data = [{"id": s.id, "name": s.name, "discipline": s.discipline, "expire_date": s.expire_date.isoformat() if s.expire_date else None, "balance_lessons": s.balance_lessons or 0, "is_frozen": bool(s.is_frozen)} for s in students]
+    now = datetime.utcnow()
+    student_data = [{"id": s.id, "name": s.name, "discipline": s.discipline, "expire_date": s.expire_date.isoformat() if s.expire_date else None, "balance_lessons": s.balance_lessons or 0, "is_frozen": bool(s.is_frozen), "status_ok": bool(s.expire_date and s.expire_date > now and not s.is_frozen and (s.balance_lessons or 0) > 0), "status_label": "Активен" if s.expire_date and s.expire_date > now and not s.is_frozen and (s.balance_lessons or 0) > 0 else "Завершён"} for s in students]
     discounts = (await db.execute(select(Discount).where(Discount.club_id == club_id, Discount.is_active.is_(True)).order_by(Discount.name))).scalars().all()
     return templates.TemplateResponse("admin_cash_subscription.html", {"request": request, "club": club, "club_id": club_id, "students": student_data, "disciplines": disciplines, "discounts": discounts})
 
