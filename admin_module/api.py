@@ -1687,7 +1687,7 @@ async def cart_checkout(payload: CartCheckoutPayload, request: Request, session:
             else:
                 days = int(raw.get("days", 0)); price = int(float(settings.get("limits", {}).get("freeze_price_per_day", 0)) * days * 100)
                 if days <= 0 or price <= 0: raise HTTPException(400, "Заморозка недоступна")
-                line_original = price * qty; raw_discount_ids = [int(x) for x in raw.get("discount_ids", [])]; line_discounts = await active_discounts(session, club.id, int(tg_user["id"]), "subscriptions", student.id, raw_discount_ids or None)
+                line_original = price * qty; raw_discount_ids = [int(x) for x in raw.get("discount_ids", [])]; line_discounts = await active_discounts(session, club.id, int(tg_user["id"]), "freeze", student.id, raw_discount_ids or None)
                 line_total, line_applied = apply_discounts(line_original, line_discounts); original_total += line_original; total += line_total; applied_discounts.extend(line_applied)
                 normalized.append(("freeze", None, {"student_id": student.id, "days": days, "price": price, "quantity": qty}))
     order_id = f"CART_{uuid.uuid4().hex[:12].upper()}"

@@ -34,7 +34,7 @@ from handlers.skud import trigger_dingtian_turnstile
 from services.gate_control import process_athlete_gate_pass
 from services.staff_permissions import staff_can, permissions_for_staff
 from services.analytics import is_subscription_active
-from services.discounts import active_discount, apply_discount
+from services.discounts import active_discount, active_discounts, apply_discount, apply_discounts
 from middlewares.db_saas_midleware import SUPER_ADMIN_IDS
 
 
@@ -942,6 +942,11 @@ async def webapp_buy_subscription_submit(payload: WebAppBuySubscriptionPayload, 
     payment_data = await YooKassaClient(shop_id=shop_id, secret_key=secret_key, proxy_url=PROXY_URL).init_payment(
         order_id=order_id,
         amount_kopecks=amount_kopecks,
+        discount_id=discount.id if discount else None,
+        discount_name=discount.name if discount else None,
+        discount_kind=discount.kind if discount else None,
+        discount_value=discount.value if discount else None,
+        discount_amount_kopecks=(int(round(price_per_day * days * 100)) - amount_kopecks) or None,
         user_id=user_id,
         bot_username=club.bot_token,
         payment_method_type=payment_method,
@@ -1029,9 +1034,11 @@ async def webapp_buy_freeze_page(request: Request, club_id: int, student_id: int
         raise HTTPException(status_code=403, detail="Атлет не найден")
     settings = club.club_settings or {}
     price = settings.get("limits", {}).get("freeze_price_per_day", 0)
+    freeze_discounts = await active_discounts(db, club_id, parent_id, "freeze", student_id=student.id)
+    preview_price, _ = apply_discounts(int(float(price) * 100), freeze_discounts)
     payment_modes = payment_availability(settings)
     payment_info = get_payment_info_text(settings)
-    return templates.TemplateResponse("webapp_buy_freeze.html", {"request": request, "club": club, "student": student, "club_id": club_id, "price": price, "payment_modes": payment_modes, "sbp_enabled": payment_modes["sbp"], "online_enabled": payment_modes["online"], "payment_info": payment_info})
+    return templates.TemplateResponse("webapp_buy_freeze.html", {"request": request, "club": club, "student": student, "club_id": club_id, "price": price, "preview_price": preview_price / 100, "freeze_discount_name": freeze_discounts[0].name if freeze_discounts else None, "payment_modes": payment_modes, "sbp_enabled": payment_modes["sbp"], "online_enabled": payment_modes["online"], "payment_info": payment_info})
 
 
 @router.post("/webapp/client-cabinet/buy-freeze")
@@ -1056,7 +1063,9 @@ async def webapp_buy_freeze_submit(payload: WebAppActionPayload, request: Reques
         raise HTTPException(status_code=400, detail="Покупка заморозки отключена")
     if not 1 <= days <= 365:
         raise HTTPException(status_code=400, detail="Неверное количество дней")
-    amount_kopecks = int(round(price_per_day * days * 100))
+    automatic_freeze_discounts = await active_discounts(db, club.id, parent_id, "freeze", student_id=student.id)
+    amount_kopecks, applied_freeze_discounts = apply_discounts(int(round(price_per_day * days * 100)), automatic_freeze_discounts)
+    discount = applied_freeze_discounts[0][0] if applied_freeze_discounts else None
     shop_id = getattr(club, "yookassa_shop_id", None) or (club.club_settings or {}).get("payments", {}).get("yookassa_shop_id")
     secret_key = getattr(club, "yookassa_secret_key", None) or (club.club_settings or {}).get("payments", {}).get("yookassa_secret_key")
     redis = request.app.state.redis_client
