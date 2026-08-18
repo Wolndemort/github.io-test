@@ -410,7 +410,7 @@ else location.replace(location.pathname+'?club_id=' + encodeURIComponent(new URL
     club_res = await session.execute(select(Club).where(Club.id == club_id))
     club = club_res.scalar_one_or_none()
 
-    await verify_webapp_admin(club, init_data)
+    await verify_webapp_staff(club, init_data, session, "analytics_view")
 
     club_settings = club.club_settings or {} if club else {}
     limits_settings = club_settings.get("limits", {})
@@ -619,7 +619,7 @@ async def admin_sales_page(
     if not init_data:
         return webapp_auth_gate(request, club_id)
     club = await session.get(Club, club_id)
-    await verify_webapp_admin(club, init_data)
+    await verify_webapp_staff(club, init_data, session, "analytics_view")
 
     start = moscow_date_boundary(date_from) if date_from else None
     end = moscow_date_boundary(date_to) + timedelta(days=1) if date_to else None
@@ -1380,7 +1380,7 @@ async def get_revenue_stats(
     # При обычном HTTP-запросе init_data будет строкой/None. Query-объект
     # встречается только при прямом вызове функции из legacy-тестов.
     if isinstance(init_data, str) or init_data is None:
-        await verify_webapp_admin(club, init_data)
+        await verify_webapp_staff(club, init_data, session, "analytics_view")
     if club:
         settings = club.club_settings if isinstance(club.club_settings, dict) else {}
         club_name = settings.get("ui", {}).get("club_name") or club.name
