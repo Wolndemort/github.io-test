@@ -1194,7 +1194,6 @@ async def admin_cash_subscription(payload: WebAppCashSubscriptionPayload, db: As
                     f"Абонемент действует до: <b>{escape(str(abon_result[0]))}</b>",
                     "Способ оплаты: <b>Наличные</b>",
                 ],
-            )
         )
         for parent_id in parent_ids:
             try:
