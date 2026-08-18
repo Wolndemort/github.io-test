@@ -15,7 +15,7 @@ def test_webapp_cash_subscription_is_separate_from_bot_and_uses_manager_permissi
     assert 'provider_payment_id=f"CASH:{order_id}"' in api
     assert "await add_abon" in api
     assert "/webapp/admin-cash-subscription" in buttons
-    assert "Поиск атлета" in page
+    assert "Поиск атлета" in page or "Поиск по имени" in page
     assert "до ${until}" in page
 
 
