@@ -424,7 +424,25 @@ async def webapp_admin_discounts_page(request: Request, club_id: int = Query(...
         return telegram_init_gate('/webapp/admin-discounts', club_id, 'Откройте скидки из Telegram')
     await verify_webapp_staff(club, init_data, session, "cash_sale")
     discounts = (await session.execute(select(Discount).where(Discount.club_id == club_id).order_by(Discount.created_at.desc()))).scalars().all() if club else []
-    return templates.TemplateResponse("admin_discounts.html", {"request": request, "club": club, "club_id": club_id, "discounts": discounts})
+    assignments = (await session.execute(
+        select(DiscountAssignment, Discount, User, Student)
+        .join(Discount, Discount.id == DiscountAssignment.discount_id)
+        .outerjoin(User, User.user_id == DiscountAssignment.user_id)
+        .outerjoin(Student, Student.id == DiscountAssignment.student_id)
+        .where(DiscountAssignment.club_id == club_id)
+        .order_by(Discount.name, User.full_name, Student.name)
+    )).all()
+    assigned_discounts = [{
+        "id": assignment.id,
+        "discount_id": discount.id,
+        "discount_name": discount.name,
+        "name": (user.full_name if user else None) or (student.name if student else "Клиент"),
+        "user_id": assignment.user_id,
+        "student_id": assignment.student_id,
+        "kind": discount.kind,
+        "value": discount.value,
+    } for assignment, discount, user, student in assignments]
+    return templates.TemplateResponse("admin_discounts.html", {"request": request, "club": club, "club_id": club_id, "discounts": discounts, "assigned_discounts": assigned_discounts})
 
 @router.post("/webapp/admin-discounts/change")
 async def change_admin_discount(payload: DiscountChangePayload, session: AsyncSession = Depends(get_session)):
