@@ -22,7 +22,7 @@
 <main class="shell">
   <a class="back" href="/webapp/client-cabinet?club_id={{ club_id }}">← В рабочий кабинет</a>
   <section class="hero"><div class="muted">Касса · абонементы</div><h1>Продажа наличного абонемента</h1><div class="muted">Выберите атлета, дисциплину, тариф и применяемые скидки.</div></section>
-  <section class="card"><div class="label">Атлет</div><input id="search" class="search" placeholder="Поиск атлета"><div id="students"></div></section>
+  <section class="card"><div class="label">Атлет</div><input id="search" class="search" placeholder="Поиск атлета"><div id="students">{% for student in students %}<button type="button" class="student server-student" data-student-id="{{ student.id }}" onclick="pick({{ student.id }})"><b>{{ student.name }}</b><br><span class="muted">{{ student.discipline or '' }}</span></button>{% endfor %}{% if not students %}<div class="muted" style="margin-top:12px">Атлеты не найдены</div>{% endif %}</div></section>
   <section id="sale" class="card" hidden><div id="selected" class="selected"></div><div class="form-grid">
     <label class="label">Дисциплина<select id="discipline" class="select"></select></label>
     <label class="label">Тариф<select id="tariff" class="select"></select></label>
@@ -31,7 +31,7 @@
   </div></section>
 </main>
 <script>
-const tg=window.Telegram.WebApp;tg.ready();
+const tg=window.Telegram?.WebApp||{initData:''};if(tg.ready)tg.ready();
 const init=tg.initData,students={{ students|tojson }},disciplines={{ disciplines|tojson }};
 const search=document.getElementById('search'),list=document.getElementById('students'),sale=document.getElementById('sale'),selectedEl=document.getElementById('selected'),discipline=document.getElementById('discipline'),tariff=document.getElementById('tariff'),discount=document.getElementById('discount'),summary=document.getElementById('summary'),submit=document.getElementById('submit');
 let selected=null;
