@@ -151,7 +151,9 @@ async def get_forecast_page(request: Request, session: AsyncSession = Depends(ge
     await verify_webapp_staff(club, init_data, session, "forecast_view")
     now = reporting_periods()["now"]
     local_today = reporting_periods()["local_now"].date()
-    start = date_from or local_today.isoformat()
+    # По умолчанию показываем контекст: 30 дней факта и 30 дней прогноза.
+    # Пользователь может выбрать любой период, вплоть до разрешённых 366 дней.
+    start = date_from or (local_today - timedelta(days=30)).isoformat()
     finish = date_to or (local_today + timedelta(days=30)).isoformat()
     try:
         start_date = date.fromisoformat(start); finish_date = date.fromisoformat(finish)
