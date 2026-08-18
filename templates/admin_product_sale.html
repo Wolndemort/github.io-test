@@ -88,6 +88,7 @@
   <div class="paybar">
     <div class="card" style="margin:0">
       <div id="selected" class="selected"></div>
+      <label>Скидки (можно несколько)<select id="discount" multiple>{% for d in discounts %}<option value="{{d.id}}">{{d.name}}</option>{% endfor %}</select></label>
       <b id="total">Итого: 0 ₽</b>
       <button id="pay" class="pay" disabled>Подтвердить оплату наличными</button>
     </div>
@@ -213,6 +214,7 @@ document.getElementById('pay').onclick=async()=>{
       idempotency_key:saleIdempotencyKey,
       student_id:studentSelectEl.value ? Number(studentSelectEl.value) : null,
       items:[...cart].map(([product_id,quantity])=>({product_id,quantity}))
+      ,discount_ids:[...document.getElementById('discount').selectedOptions].map(o=>Number(o.value))
     })
   });
   const d=await r.json();

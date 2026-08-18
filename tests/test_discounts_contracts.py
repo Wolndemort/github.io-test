@@ -46,8 +46,8 @@ def test_discount_application_is_scoped_and_order_keeps_snapshot_fields():
 def test_cart_recalculates_each_line_by_its_discount_scope():
     api = (ROOT / "admin_module/api.py").read_text(encoding="utf-8")
     db = (ROOT / "database/db.py").read_text(encoding="utf-8")
-    assert 'active_discount(session, club.id, int(tg_user["id"]), "products")' in api
-    assert 'active_discount(session, club.id, int(tg_user["id"]), "subscriptions", student.id)' in api
+    assert 'active_discounts(session, club.id, int(tg_user["id"]), "products"' in api
+    assert 'active_discounts(session, club.id, int(tg_user["id"]), "subscriptions", student.id' in api
     assert "original_amount_kopecks" in db
     assert "discount_amount_kopecks" in db
 
@@ -65,6 +65,29 @@ def test_discount_client_search_includes_orphan_students():
     assert "orphan_query" in views
     assert "User.user_id.is_(None)" in views
     assert "orphan_student" in views
+
+def test_discount_stacking_has_priority_and_non_negative_total():
+    service = (ROOT / "services/discounts.py").read_text(encoding="utf-8")
+    db = (ROOT / "database/db.py").read_text(encoding="utf-8")
+    migration = (ROOT / "migrations/versions/y7z8a9b0c1d2_add_discount_priority.py").read_text(encoding="utf-8")
+    assert "active_discounts" in service
+    assert "apply_discounts" in service
+    assert "max(0, current)" in service
+    assert "priority" in db and "priority" in migration
+
+def test_manual_product_sale_accepts_multiple_product_discounts():
+    api = (ROOT / "admin_module/api.py").read_text(encoding="utf-8")
+    views = (ROOT / "admin_module/webapp_views.py").read_text(encoding="utf-8")
+    page = (ROOT / "templates/admin_product_sale.html").read_text(encoding="utf-8")
+    assert "discount_ids: list[int]" in api
+    assert 'active_discounts(session, club.id, buyer_user_id, "products"' in views
+    assert "selectedOptions" in page
+
+def test_cart_items_accept_discount_ids_for_manual_or_automatic_stacking():
+    api = (ROOT / "admin_module/api.py").read_text(encoding="utf-8")
+    assert 'raw.get("discount_ids", [])' in api
+    assert "active_discounts" in api
+    assert "apply_discounts" in api
 
 def test_discount_is_visible_in_web_countdown_and_telegram_profile():
     web = (ROOT / "templates/client_cabinet.html").read_text(encoding="utf-8")

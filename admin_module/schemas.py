@@ -44,6 +44,7 @@ class WebAppCashSubscriptionPayload(BaseModel):
     tariff_idx: int
     idempotency_key: str | None = None
     discount_id: int | None = None
+    discount_ids: list[int] = []
 
 
 class WebAppBindPhonePayload(BaseModel):

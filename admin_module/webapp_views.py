@@ -44,6 +44,7 @@ from admin_module.api import (
 from services.order_notifications import resolve_user_label
 from services.schedule_utils import normalize_schedule_block
 from services.payment_requisites import get_payment_info_text
+from services.discounts import active_discounts, apply_discounts
 from services.availability import payment_availability
 from services.staff_permissions import staff_can
 from middlewares.db_saas_midleware import SUPER_ADMIN_IDS
@@ -132,7 +133,8 @@ async def admin_product_sale_page(request: Request, club_id: int = Query(...), i
             "items": [{"title": item.title, "quantity": item.quantity} for item in item_rows],
             "payment_method": "Наличные" if str(order.provider_payment_id or "").startswith("CASH:") else "Онлайн",
         })
-    return templates.TemplateResponse("admin_product_sale.html", {"request": request, "club_id": club_id, "products": product_data, "categories": categories, "students": student_data, "recent_sales": recent_sales, "today": today.date().isoformat()})
+    discounts = (await session.execute(select(Discount).where(Discount.club_id == club_id, Discount.is_active.is_(True), Discount.scope.in_(["products", "all"])).order_by(Discount.priority, Discount.name))).scalars().all()
+    return templates.TemplateResponse("admin_product_sale.html", {"request": request, "club_id": club_id, "products": product_data, "categories": categories, "students": student_data, "recent_sales": recent_sales, "discounts": discounts, "today": today.date().isoformat()})
 
 @router.post("/webapp/admin-product-sale")
 async def admin_product_sale(payload: AdminProductSalePayload, session: AsyncSession = Depends(get_session)):
@@ -153,13 +155,14 @@ async def admin_product_sale(payload: AdminProductSalePayload, session: AsyncSes
     ids = [int(item.get("product_id")) for item in payload.items]
     products = (await session.execute(select(ClubProduct).where(ClubProduct.club_id == payload.club_id, ClubProduct.id.in_(ids), ClubProduct.is_active.is_(True)).with_for_update())).scalars().all()
     by_id = {p.id: p for p in products}
-    normalized, total = [], 0
+    normalized, total, original_total = [], 0, 0
     for raw in payload.items:
         product = by_id.get(int(raw.get("product_id", 0)))
         quantity = int(raw.get("quantity", 0))
         if not product or quantity < 1 or quantity > 99 or product.stock < quantity:
             raise HTTPException(400, "РўРѕРІР°СЂ РЅРµРґРѕСЃС‚СѓРїРµРЅ РёР»Рё Р·Р°РєРѕРЅС‡РёР»СЃСЏ")
         product.stock -= quantity
+        original_total += product.price_kopecks * quantity
         total += product.price_kopecks * quantity
         normalized.append((product, quantity))
     selected_student = None
@@ -172,7 +175,9 @@ async def admin_product_sale(payload: AdminProductSalePayload, session: AsyncSes
         selected_parent_ids = await get_student_parent_ids(selected_student.id, session)
         selected_parent_id = selected_parent_ids[0] if selected_parent_ids else None
     buyer_user_id = selected_parent_id or int(tg_user.get("id"))
-    order = CartOrder(id=order_id, club_id=payload.club_id, user_id=buyer_user_id, amount_kopecks=total, status="CONFIRMED", provider_payment_id=f"CASH:{order_id}")
+    discounts = await active_discounts(session, club.id, buyer_user_id, "products", selected_student.id if selected_student else None, payload.discount_ids)
+    total, applied = apply_discounts(total, discounts)
+    order = CartOrder(id=order_id, club_id=payload.club_id, user_id=buyer_user_id, amount_kopecks=total, original_amount_kopecks=original_total, discount_id=applied[0][0].id if applied else None, discount_name=", ".join(d.name for d, _ in applied) if applied else None, discount_amount_kopecks=original_total-total or None, status="CONFIRMED", provider_payment_id=f"CASH:{order_id}")
     session.add(order)
     await session.flush()
     for product, quantity in normalized:

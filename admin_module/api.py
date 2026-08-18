@@ -27,7 +27,7 @@ from services.order_notifications import (
     resolve_user_label,
 )
 from services.payment_requisites import get_payment_info_text, build_payment_instruction_text
-from services.discounts import active_discount, apply_discount
+from services.discounts import active_discount, active_discounts, apply_discount, apply_discounts
 import hmac
 import os
 import time
@@ -201,6 +201,7 @@ class AdminProductSalePayload(BaseModel):
     items: list[dict]
     student_id: int | None = None
     idempotency_key: str | None = None
+    discount_ids: list[int] = []
 
 class TariffChangePayload(BaseModel):
     init_data: str
@@ -1125,10 +1126,13 @@ async def admin_cash_subscription(payload: WebAppCashSubscriptionPayload, db: As
     days = int(tariff.get("days", 30) or 30)
     price = int(tariff.get("price", 0) or 0) * 100
     original_price = price
-    manual_discount = await db.get(Discount, payload.discount_id) if payload.discount_id else None
-    if manual_discount and (manual_discount.club_id != club.id or manual_discount.scope not in {"subscriptions", "all"} or not manual_discount.is_active):
+    selected_discount_ids = list(dict.fromkeys(payload.discount_ids or ([payload.discount_id] if payload.discount_id else [])))
+    manual_discounts = list((await db.scalars(select(Discount).where(Discount.club_id == club.id, Discount.id.in_(selected_discount_ids), Discount.is_active.is_(True), Discount.scope.in_(["subscriptions", "all"])).order_by(Discount.priority, Discount.id))).all()) if selected_discount_ids else []
+    if selected_discount_ids and len(manual_discounts) != len(selected_discount_ids):
         raise HTTPException(status_code=400, detail="Некорректная скидка для абонемента")
-    price, discount_amount = apply_discount(price, manual_discount)
+    price, applied_discounts = apply_discounts(price, manual_discounts)
+    manual_discount = applied_discounts[0][0] if applied_discounts else None
+    discount_amount = original_price - price
     if count < 1 or days < 1 or price <= 0:
         raise HTTPException(status_code=400, detail="Некорректный тариф")
     age_error = _tariff_age_error(student, tariff, cfg.get("name", discipline))
@@ -1638,9 +1642,8 @@ async def cart_checkout(payload: CartCheckoutPayload, request: Request, session:
         if kind == "product":
             p=by_id.get(int(raw.get("product_id"))); qty=int(raw.get("quantity", 1))
             if not p or qty < 1 or qty > 99 or p.stock < qty: raise HTTPException(400, "Товар недоступен или закончился")
-            line_original = p.price_kopecks * qty; line_discount = await active_discount(session, club.id, int(tg_user["id"]), "products")
-            line_total, line_discount_amount = apply_discount(line_original, line_discount); original_total += line_original; total += line_total
-            if line_discount: applied_discounts.append((line_discount, line_discount_amount))
+            line_original = p.price_kopecks * qty; line_discounts = await active_discounts(session, club.id, int(tg_user["id"]), "products", ids=[int(x) for x in raw.get("discount_ids", [])])
+            line_total, line_applied = apply_discounts(line_original, line_discounts); original_total += line_original; total += line_total; applied_discounts.extend(line_applied)
             normalized.append(("product", p, qty))
         elif kind in {"subscription", "freeze"}:
             student = await session.get(Student, int(raw.get("student_id")), with_for_update=True)
@@ -1657,16 +1660,14 @@ async def cart_checkout(payload: CartCheckoutPayload, request: Request, session:
                 if age_error:
                     raise HTTPException(400, age_error)
                 price = int(float(t.get("price", 0)) * 100)
-                line_original = price * qty; line_discount = await active_discount(session, club.id, int(tg_user["id"]), "subscriptions", student.id)
-                line_total, line_discount_amount = apply_discount(line_original, line_discount); original_total += line_original; total += line_total
-                if line_discount: applied_discounts.append((line_discount, line_discount_amount))
+                line_original = price * qty; line_discounts = await active_discounts(session, club.id, int(tg_user["id"]), "subscriptions", student.id, [int(x) for x in raw.get("discount_ids", [])])
+                line_total, line_applied = apply_discounts(line_original, line_discounts); original_total += line_original; total += line_total; applied_discounts.extend(line_applied)
                 normalized.append(("subscription", t, {"student_id": student.id, "discipline": raw.get("sport_type"), "price": price, "quantity": qty}))
             else:
                 days = int(raw.get("days", 0)); price = int(float(settings.get("limits", {}).get("freeze_price_per_day", 0)) * days * 100)
                 if days <= 0 or price <= 0: raise HTTPException(400, "Заморозка недоступна")
-                line_original = price * qty; line_discount = await active_discount(session, club.id, int(tg_user["id"]), "subscriptions", student.id)
-                line_total, line_discount_amount = apply_discount(line_original, line_discount); original_total += line_original; total += line_total
-                if line_discount: applied_discounts.append((line_discount, line_discount_amount))
+                line_original = price * qty; line_discounts = await active_discounts(session, club.id, int(tg_user["id"]), "subscriptions", student.id, [int(x) for x in raw.get("discount_ids", [])])
+                line_total, line_applied = apply_discounts(line_original, line_discounts); original_total += line_original; total += line_total; applied_discounts.extend(line_applied)
                 normalized.append(("freeze", None, {"student_id": student.id, "days": days, "price": price, "quantity": qty}))
     order_id = f"CART_{uuid.uuid4().hex[:12].upper()}"
     primary_discount = applied_discounts[0][0] if applied_discounts else None

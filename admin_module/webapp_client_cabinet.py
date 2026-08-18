@@ -839,7 +839,7 @@ async def webapp_buy_subscription_submit(payload: WebAppBuySubscriptionPayload, 
     if age_error:
         raise HTTPException(status_code=400, detail=age_error)
     original_amount_kopecks = int(float(price) * 100)
-    discount = await active_discount(db, club.id, user_id, "subscriptions")
+    discount = await active_discount(db, club.id, user_id, "subscriptions", student.id)
     amount_kopecks, discount_amount_kopecks = apply_discount(original_amount_kopecks, discount)
     payment_method = _normalize_payment_method(payload.payment_method)
     payment_modes = payment_availability(club.club_settings)

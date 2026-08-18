@@ -52,6 +52,7 @@ class Discount(Base):
     name: Mapped[str] = mapped_column(String(120))
     kind: Mapped[str] = mapped_column(String(10))
     value: Mapped[float] = mapped_column(Integer)
+    priority: Mapped[int] = mapped_column(Integer, default=100, server_default="100")
     scope: Mapped[str] = mapped_column(String(20), default="subscriptions")
     comment: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     starts_at: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
