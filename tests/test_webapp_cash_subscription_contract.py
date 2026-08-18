@@ -28,3 +28,11 @@ def test_cashier_does_not_have_cash_view_permission():
 def test_cash_subscription_keeps_telegram_auth_when_opened_in_browser():
     page = (ROOT / "templates/admin_cash_subscription.html").read_text(encoding="utf-8")
     assert "tg.initData||new URLSearchParams(window.location.search).get('init_data')||''" in page
+
+
+def test_cash_subscription_builds_order_before_extending_subscription():
+    api = (ROOT / "admin_module/api.py").read_text(encoding="utf-8")
+    order_pos = api.index("payment_order = PaymentOrder(")
+    abon_pos = api.index("abon_result = await add_abon(")
+    assert order_pos < abon_pos
+    assert "db.add(payment_order)" in api
