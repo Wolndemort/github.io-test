@@ -649,12 +649,23 @@ async def admin_sales_page(
                            "title": _money_operation_category_label(operation_category), "status": order.status,
                            "buyer_label": await resolve_user_label(session, order.user_id, empty_label="Плательщик")})
     for order in cart_orders:
-        for item in items_by_order.get(order.id, []):
+        order_items = items_by_order.get(order.id, [])
+        raw_total = sum((item.unit_price_kopecks or 0) * (item.quantity or 1) for item in order_items)
+        allocated = 0
+        for item_index, item in enumerate(order_items):
             payload = item.payload or {}
             operation_category = item.item_type
             operation_discipline = payload.get("discipline", "")
             operation_method = "cash" if str(order.provider_payment_id or "").startswith("CASH:") else ("requisites" if str(order.provider_payment_id or "").startswith("MANUAL:") else ("sbp" if "SBP" in str(order.provider_payment_id or "").upper() else ("card" if order.provider_payment_id else "other")))
-            operations.append({"id": order.id, "created_at": order.created_at, "amount": (item.unit_price_kopecks or 0) * (item.quantity or 1),
+            raw_amount = (item.unit_price_kopecks or 0) * (item.quantity or 1)
+            if item_index == len(order_items) - 1:
+                operation_amount = int(order.amount_kopecks or 0) - allocated
+            elif raw_total > 0:
+                operation_amount = int((int(order.amount_kopecks or 0) * raw_amount) / raw_total)
+            else:
+                operation_amount = 0
+            allocated += operation_amount
+            operations.append({"id": order.id, "created_at": order.created_at, "amount": operation_amount,
                                "method": operation_method, "category": operation_category, "discipline": operation_discipline, "source": "cart",
                                "title": item.title, "status": order.status,
                                "buyer_label": await resolve_user_label(session, order.user_id, empty_label="Плательщик")})
@@ -707,7 +718,7 @@ async def cash_register_page(request: Request, session: AsyncSession = Depends(g
     rows.sort(key=lambda x: x["created_at"] or datetime.min, reverse=True)
     income = sum(r["amount_kopecks"] for r in rows if r["entry_type"] == "income")
     cash_income = sum(r["amount_kopecks"] for r in rows if r["entry_type"] == "income" and r.get("method") == "cash")
-    online_income = sum(r["amount_kopecks"] for r in rows if r["entry_type"] == "income" and r.get("method") == "card")
+    online_income = sum(r["amount_kopecks"] for r in rows if r["entry_type"] == "income" and r.get("method") in {"card", "sbp", "requisites"})
     expenses = sum(r["amount_kopecks"] for r in rows if r["entry_type"] == "expense")
     cash_income_total = sum(r["amount_kopecks"] for r in rows if r["entry_type"] == "income" and r.get("method") == "cash") / 100
     cash_expenses_total = sum(r["amount_kopecks"] for r in rows if r["entry_type"] == "expense") / 100
