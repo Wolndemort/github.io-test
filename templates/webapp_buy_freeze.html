@@ -21,6 +21,7 @@
         <button id="pay" class="mono-action" style="width:100%;">В корзину</button>
         <button id="buyNow" class="mono-action dark" style="width:100%;">Купить сейчас</button>
     </div>
+    <p id="freezeDiscountPreview" class="muted" style="font-weight:700"></p>
     <p id="msg"></p>
 </div>
 <div class="mono-sticky-bottom">
@@ -44,6 +45,8 @@ document.getElementById('pay')?.addEventListener('click', async () => {
   button.disabled = false;
   document.getElementById('msg').innerText = 'Заморозка добавлена в корзину. Можно продолжать покупки.';
 });
+function updateFreezePreview(){const days=Number(document.getElementById('days')?.value||0);const base=Number({{ price }})*days;const preview=Number({{ preview_price|default(price) }})*days;const el=document.getElementById('freezeDiscountPreview');if(el)el.textContent='Итого: '+preview.toFixed(2)+' ₽'+({% if freeze_discount_name %}' · автоматическая скидка: {{ freeze_discount_name }}'{% else %}''{% endif %})}
+document.getElementById('days')?.addEventListener('input',updateFreezePreview);updateFreezePreview();
 document.getElementById('buyNow')?.addEventListener('click', async () => {
   const button = document.getElementById('buyNow');
   button.disabled = true;
