@@ -19,6 +19,7 @@ def test_staff_roles_have_separate_least_privilege_permissions():
         "tariffs_manage",
         "qr_checkin",
         "manual_checkin",
+        "forecast_view",
     }
     for role in ROLE_PERMISSIONS:
         assert "athletes_view" not in ROLE_PERMISSIONS[role]
