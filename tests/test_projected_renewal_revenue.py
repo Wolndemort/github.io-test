@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta
 from types import SimpleNamespace
 
-from services.analytics import calculate_projected_renewal_revenue
+from services.analytics import build_expiry_series, build_revenue_series, build_visit_series, calculate_projected_renewal_revenue
 
 
 def test_projected_revenue_uses_recent_expired_and_due_students_and_popular_tariff():
@@ -92,3 +92,29 @@ def test_discipline_tariff_is_selected_by_sales_count_not_highest_price():
     result = calculate_projected_renewal_revenue([student], payments=payments, club_settings=settings, now=now, date_to="2026-09-01")
     assert result["tariffs_by_discipline"]["bjj"] == {"name": "8 посещений", "price": 5000.0, "count": 8}
     assert result["projected_revenue"] == 5000
+
+
+def test_expiry_series_has_zero_days_and_reports_all_peak_days():
+    rows = [
+        {"expire_date": datetime(2026, 9, 2)},
+        {"expire_date": datetime(2026, 9, 2)},
+        {"expire_date": datetime(2026, 9, 4)},
+    ]
+    result = build_expiry_series(rows, "2026-09-01", "2026-09-05")
+    assert [point["count"] for point in result["series"]] == [0, 2, 0, 1, 0]
+    assert result["peak_count"] == 2
+    assert result["peak_days"] == ["2026-09-02"]
+
+
+def test_visit_series_counts_peak_days_and_zero_days():
+    visits = [SimpleNamespace(visited_at=datetime(2026, 9, 2, 10)), SimpleNamespace(visited_at=datetime(2026, 9, 2, 11)), SimpleNamespace(visited_at=datetime(2026, 9, 4, 10))]
+    result = build_visit_series(visits, "2026-09-01", "2026-09-05")
+    assert [point["count"] for point in result["series"]] == [0, 2, 0, 1, 0]
+    assert result["peak_days"] == ["2026-09-02"]
+
+
+def test_revenue_series_marks_future_as_weekday_estimate():
+    payments = [SimpleNamespace(status="CONFIRMED", amount_kopecks=10000, created_at=datetime(2026, 8, 17, 10))]
+    result = build_revenue_series(payments, [], [], "2026-08-17", "2026-08-24", today=datetime(2026, 8, 18).date())
+    assert result["series"][0]["kind"] == "Факт"
+    assert result["series"][-1]["kind"] == "Прогноз"

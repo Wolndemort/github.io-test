@@ -225,6 +225,67 @@ def calculate_projected_renewal_revenue(
     return {"count": len(candidates), "projected_revenue": round(projected_kopecks / 100, 2), "students": candidates, "tariff_name": tariff_label, "tariff_discipline": selected[0] if selected else None, "price": round(sum(prices) / len(prices) / 100, 2) if prices else 0, "price_source": source, "tariffs_by_discipline": tariffs_by_discipline}
 
 
+def build_expiry_series(rows: Iterable[dict[str, Any]], start: date | str, finish: date | str) -> dict[str, Any]:
+    """Build a daily expiry series and peak days for the selected window."""
+    start = date.fromisoformat(start) if isinstance(start, str) else start
+    finish = date.fromisoformat(finish) if isinstance(finish, str) else finish
+    if finish < start:
+        raise ValueError("finish must not be earlier than start")
+    counts = {}
+    for row in rows:
+        value = getattr(row.get("expire_date"), "date", lambda: row.get("expire_date"))()
+        if value and start <= value <= finish:
+            counts[value.isoformat()] = counts.get(value.isoformat(), 0) + 1
+    series = [{"date": (start + timedelta(days=offset)).isoformat(), "count": counts.get((start + timedelta(days=offset)).isoformat(), 0)} for offset in range((finish - start).days + 1)]
+    peak = max((point["count"] for point in series), default=0)
+    return {"series": series, "peak_count": peak, "peak_days": [point["date"] for point in series if peak and point["count"] == peak]}
+
+
+def build_visit_series(visits: Iterable[Any], start: date | str, finish: date | str) -> dict[str, Any]:
+    """Build a daily visit series and peak days for the selected window."""
+    start = date.fromisoformat(start) if isinstance(start, str) else start
+    finish = date.fromisoformat(finish) if isinstance(finish, str) else finish
+    if finish < start:
+        raise ValueError("finish must not be earlier than start")
+    counts = {}
+    for visit in visits:
+        value = _utc_naive(getattr(visit, "visited_at", None))
+        if value:
+            day = value.date()
+            if start <= day <= finish:
+                counts[day.isoformat()] = counts.get(day.isoformat(), 0) + 1
+    series = [{"date": (start + timedelta(days=offset)).isoformat(), "count": counts.get((start + timedelta(days=offset)).isoformat(), 0)} for offset in range((finish - start).days + 1)]
+    peak = max((point["count"] for point in series), default=0)
+    return {"series": series, "peak_count": peak, "peak_days": [point["date"] for point in series if peak and point["count"] == peak]}
+
+
+def build_revenue_series(payments: Iterable[Any], cart_orders: Iterable[Any], cash_entries: Iterable[Any], start: date | str, finish: date | str, today: date | None = None) -> dict[str, Any]:
+    """Daily actual revenue plus weekday-based estimates for future dates."""
+    start = date.fromisoformat(start) if isinstance(start, str) else start
+    finish = date.fromisoformat(finish) if isinstance(finish, str) else finish
+    today = today or datetime.now(MOSCOW_TZ).date()
+    actual = {}
+    def add(value, at):
+        at = _utc_naive(at)
+        if at and start <= at.date() <= finish: actual[at.date()] = actual.get(at.date(), 0) + int(value or 0)
+    for row in payments:
+        if str(getattr(row, "status", "CONFIRMED")) == "CONFIRMED": add(getattr(row, "amount_kopecks", 0), getattr(row, "created_at", None))
+    for row in cart_orders:
+        if str(getattr(row, "status", "CONFIRMED")) == "CONFIRMED": add(getattr(row, "amount_kopecks", 0), getattr(row, "created_at", None))
+    for row in cash_entries:
+        if str(getattr(row, "entry_type", "")).lower() == "income": add(getattr(row, "amount_kopecks", 0), getattr(row, "created_at", None))
+    weekday_totals = {}; weekday_counts = {}
+    for day, amount in actual.items():
+        if day <= today: weekday_totals[day.weekday()] = weekday_totals.get(day.weekday(), 0) + amount; weekday_counts[day.weekday()] = weekday_counts.get(day.weekday(), 0) + 1
+    series = []
+    for offset in range((finish - start).days + 1):
+        day = start + timedelta(days=offset); is_future = day > today
+        amount = actual.get(day, 0) if not is_future else (weekday_totals.get(day.weekday(), 0) / weekday_counts[day.weekday()] if weekday_counts.get(day.weekday()) else 0)
+        series.append({"date": day.isoformat(), "amount": round(amount / 100, 2), "kind": "Прогноз" if is_future else "Факт"})
+    peak = max(series, key=lambda item: item["amount"], default={"amount": 0, "date": None})
+    return {"series": series, "peak_amount": peak["amount"], "peak_day": peak["date"]}
+
+
 def calculate_cash_flow_periods(entries: Iterable[Any], now: datetime | None = None) -> dict[str, float]:
     """Calculate cash flow from cash entries only.
 

@@ -10,7 +10,7 @@ from admin_module.router_base import router, templates
 from admin_module.utils import get_club_id_from_host, verify_webapp_admin, verify_webapp_staff, webapp_auth_gate
 from admin_module.webapp_verify import verify_telegram_data
 from database.db import CartOrder, CashEntry, Club, PaymentOrder, Student, User, VisitLog, get_session
-from services.analytics import calculate_admin_dashboard, calculate_cash_flow_periods, calculate_projected_renewal_revenue, calculate_revenue_periods, calculate_student_metrics, generate_students_excel, reporting_periods, moscow_date_boundary
+from services.analytics import build_expiry_series, build_revenue_series, build_visit_series, calculate_admin_dashboard, calculate_cash_flow_periods, calculate_projected_renewal_revenue, calculate_revenue_periods, calculate_student_metrics, generate_students_excel, reporting_periods, moscow_date_boundary
 
 
 @router.get("/admin", response_class=HTMLResponse)
@@ -162,6 +162,8 @@ async def get_forecast_page(request: Request, session: AsyncSession = Depends(ge
     students = list((await session.execute(select(Student).where(Student.club_id == club_id))).scalars().all())
     visits = list((await session.execute(select(VisitLog).where(VisitLog.club_id == club_id))).scalars().all())
     payments = list((await session.execute(select(PaymentOrder).where(PaymentOrder.club_id == club_id, PaymentOrder.status == "CONFIRMED"))).scalars().all())
+    cart_orders = list((await session.execute(select(CartOrder).where(CartOrder.club_id == club_id, CartOrder.status == "CONFIRMED"))).scalars().all())
+    cash_entries = list((await session.execute(select(CashEntry).where(CashEntry.club_id == club_id))).scalars().all())
     forecast = calculate_projected_renewal_revenue(students, visits, payments, club.club_settings if club else {}, start, finish, now)
     visit_map = {}
     for visit in visits:
@@ -178,6 +180,18 @@ async def get_forecast_page(request: Request, session: AsyncSession = Depends(ge
     for row in rows:
         discipline_counts[row["discipline"]] = discipline_counts.get(row["discipline"], 0) + 1
     forecast["discipline_counts"] = discipline_counts
+    expiry_chart = build_expiry_series(rows, start_date, finish_date)
+    forecast["expiry_series"] = expiry_chart["series"]
+    forecast["peak_expiry_count"] = expiry_chart["peak_count"]
+    forecast["peak_expiry_days"] = expiry_chart["peak_days"]
+    revenue_chart = build_revenue_series(payments, cart_orders, cash_entries, start_date, finish_date, reporting_periods()["local_now"].date())
+    forecast["revenue_series"] = revenue_chart["series"]
+    forecast["peak_revenue_amount"] = revenue_chart["peak_amount"]
+    forecast["peak_revenue_day"] = revenue_chart["peak_day"]
+    visit_chart = build_visit_series(visits, start_date, finish_date)
+    forecast["visit_series"] = visit_chart["series"]
+    forecast["peak_visit_count"] = visit_chart["peak_count"]
+    forecast["peak_visit_days"] = visit_chart["peak_days"]
     return templates.TemplateResponse("forecast.html", {"request": request, "club_id": club_id, "club_name": club.name if club else "Клуб", "filters": {"date_from": start, "date_to": finish}, "forecast": forecast, "rows": rows})
 
 
