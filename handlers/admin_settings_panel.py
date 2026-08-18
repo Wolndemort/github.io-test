@@ -28,10 +28,10 @@ router = Router()
 
 
 @router.callback_query(F.data == "admin_settings")
-async def admin_settings_menu(callback: types.CallbackQuery, club_settings: dict, club_id: int, is_owner: bool | None = None, is_super_admin: bool | None = None):
+async def admin_settings_menu(callback: types.CallbackQuery, club_settings: dict, club_id: int, is_owner: bool | None = None, is_super_admin: bool | None = None, staff=None):
     # График работы и WebApp СКУД доступны из кабинета сотрудника.
     _work_schedule_webapp = "admin-work-schedule"  # /webapp/staff-pass доступен из профиля и кабинета
-    if not (is_owner or is_super_admin):
+    if not (is_owner or is_super_admin or (staff and "cash_sale" in getattr(staff, "permissions", {}))):
         return await callback.answer("Доступ запрещен: эти настройки доступны только главному администратору.", show_alert=True)
     builder = InlineKeyboardBuilder()
     features = club_settings.get("features", {})
@@ -60,6 +60,7 @@ async def admin_settings_menu(callback: types.CallbackQuery, club_settings: dict
     builder.row(types.InlineKeyboardButton(text=f"{loading_mark} Загрузочный экран", callback_data="toggle_webapp_loading"))
     builder.row(types.InlineKeyboardButton(text="🖼 Загрузить логотип WebApp", callback_data="upload_webapp_logo"))
     builder.row(types.InlineKeyboardButton(text="💰 Настройка тарифов", callback_data="admin_tariffs_sections"))
+    builder.row(types.InlineKeyboardButton(text="🏷️ Скидки клуба", callback_data="admin_discounts"))
     builder.row(types.InlineKeyboardButton(text="⏰ Планировщики", callback_data="admin_schedulers"))
     builder.row(types.InlineKeyboardButton(text="💳 Изменить реквизиты", callback_data="admin_edit_payments"))
     turnstile_config = club_settings.get("turnstile", {})
@@ -73,6 +74,60 @@ async def admin_settings_menu(callback: types.CallbackQuery, club_settings: dict
         reply_markup=builder.as_markup(),
         parse_mode="HTML"
     )
+
+@router.callback_query(F.data == "admin_discounts")
+async def admin_discounts_menu(callback: types.CallbackQuery, club_settings: dict, is_owner: bool | None = None, is_super_admin: bool | None = None, staff=None):
+    if not (is_owner or is_super_admin or (staff and "cash_sale" in getattr(staff, "permissions", {}))):
+        return await callback.answer("Доступ только администратору или кассиру", show_alert=True)
+    discounts = club_settings.get("discounts", []) or []
+    builder = InlineKeyboardBuilder()
+    builder.row(types.InlineKeyboardButton(text="➕ Создать скидку", callback_data="admin_discount_add"))
+    for i, discount in enumerate(discounts):
+        suffix = "%" if discount.get("kind") == "percent" else " ₽"
+        builder.row(types.InlineKeyboardButton(text=f"🗑 {discount.get('name', 'Без названия')} · {discount.get('value', 0)}{suffix}", callback_data=f"admin_discount_delete_{i}"))
+    builder.row(types.InlineKeyboardButton(text="⬅️ Назад", callback_data="admin_settings"))
+    await callback.message.edit_text("🏷️ <b>Скидки клуба</b>\n\nСкидки сохраняются в общих настройках и видны в веб-кабинете.\nДля создания отправьте данные одной строкой:\n<code>название | процент/сумма | значение | начало | конец | комментарий</code>", reply_markup=builder.as_markup(), parse_mode="HTML")
+    await callback.answer()
+
+@router.callback_query(F.data == "admin_discount_add")
+async def admin_discount_add(callback: types.CallbackQuery, state: FSMContext, is_owner: bool, is_super_admin: bool, staff=None):
+    if not (is_owner or is_super_admin or (staff and "cash_sale" in getattr(staff, "permissions", {}))):
+        return await callback.answer("Доступ запрещён", show_alert=True)
+    await state.set_state(AdminSettingsSG.waiting_for_discount)
+    await callback.message.answer("Введите: название | процент/сумма | значение | начало (ГГГГ-ММ-ДД) | конец | комментарий")
+    await callback.answer()
+
+@router.message(AdminSettingsSG.waiting_for_discount)
+async def save_admin_discount(message: types.Message, state: FSMContext, club: Club, club_settings: dict, session: AsyncSession, redis: Redis, is_owner: bool, is_super_admin: bool, staff=None):
+    if not (is_owner or is_super_admin or (staff and "cash_sale" in getattr(staff, "permissions", {}))):
+        return await message.answer("Доступ запрещён")
+    parts = [x.strip() for x in (message.text or "").split("|", 5)]
+    if len(parts) < 5:
+        return await message.answer("Нужно 5–6 полей через |. Попробуйте ещё раз.")
+    kind = "fixed" if parts[1].lower() in {"сумма", "fixed"} else "percent"
+    try:
+        value = float(parts[2].replace(",", "."))
+    except ValueError:
+        return await message.answer("Значение скидки должно быть числом.")
+    if value <= 0 or (kind == "percent" and value > 100):
+        return await message.answer("Процент должен быть от 0 до 100, сумма — больше нуля.")
+    settings = dict(club_settings or {})
+    discounts = list(settings.get("discounts", []) or [])
+    discounts.append({"name": parts[0][:120], "kind": kind, "value": round(value, 2), "starts_at": parts[3][:10], "ends_at": parts[4][:10], "comment": parts[5][:500] if len(parts) > 5 else ""})
+    settings["discounts"] = discounts
+    db_club = await session.merge(club); db_club.club_settings = settings; flag_modified(db_club, "club_settings")
+    await session.commit(); await redis.delete(f"club_config:{message.bot.token}"); await state.clear()
+    await message.answer("✅ Скидка создана и синхронизирована с веб-кабинетом.")
+
+@router.callback_query(F.data.startswith("admin_discount_delete_"))
+async def delete_admin_discount(callback: types.CallbackQuery, club: Club, club_settings: dict, session: AsyncSession, redis: Redis, is_owner: bool, is_super_admin: bool, staff=None):
+    if not (is_owner or is_super_admin or (staff and "cash_sale" in getattr(staff, "permissions", {}))):
+        return await callback.answer("Доступ запрещён", show_alert=True)
+    index = int(callback.data.rsplit("_", 1)[1]); settings = dict(club_settings or {}); discounts = list(settings.get("discounts", []) or [])
+    if 0 <= index < len(discounts): discounts.pop(index)
+    settings["discounts"] = discounts; db_club = await session.merge(club); db_club.club_settings = settings; flag_modified(db_club, "club_settings")
+    await session.commit(); await redis.delete(f"club_config:{callback.bot.token}"); await callback.answer("✅ Удалено")
+    await admin_discounts_menu(callback, settings, is_owner, is_super_admin, staff)
 
 
 

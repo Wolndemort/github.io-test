@@ -20,6 +20,8 @@ from database.db import (
     Student,
     StudentParent,
     User,
+    Discount,
+    DiscountAssignment,
     VisitLog,
     create_db_backup,
     get_daily_stats,
@@ -31,6 +33,31 @@ from admin_module.utils import is_staff_or_owner
 from services.order_notifications import notify_stock_reminders
 from services.analytics import calculate_admin_dashboard, calculate_daily_business_report, reporting_periods, is_subscription_active
 from services.bot_registry import bots_dict
+
+async def send_discount_reminders():
+    """Monthly active-discount reminders and one-time expiry notices."""
+    today = reporting_periods()["local_now"].date()
+    async with AsyncSessionLocal() as session:
+        rows = (await session.execute(select(Discount, DiscountAssignment, Club, User).join(DiscountAssignment, DiscountAssignment.discount_id == Discount.id).join(Club, Club.id == Discount.club_id).join(User, User.user_id == DiscountAssignment.user_id).where(Discount.is_active.is_(True)))).all()
+        for discount, assignment, club, user in rows:
+            if discount.starts_at and discount.starts_at > today or discount.ends_at and discount.ends_at < today:
+                continue
+            bot = bots_dict.get(club.bot_token)
+            if not bot:
+                continue
+            value = f"{discount.value}%" if discount.kind == "percent" else f"{discount.value / 100:g} ₽"
+            if discount.ends_at and (discount.ends_at - today).days <= 1:
+                key = f"notify:discount-expiry:{club.id}:{assignment.user_id}:{discount.id}:{discount.ends_at}"
+                text = f"⏳ <b>Скидка заканчивается</b>\n\n{escape(discount.name)} — {value}.\nДействует до: <code>{discount.ends_at.strftime('%d.%m.%Y')}</code>."
+            else:
+                key = f"notify:discount-monthly:{club.id}:{assignment.user_id}:{discount.id}:{today.year}-{today.month}"
+                text = f"🏷️ <b>Ваша скидка активна</b>\n\n{escape(discount.name)} — <b>{value}</b>.\nДействует до: <code>{discount.ends_at.strftime('%d.%m.%Y') if discount.ends_at else 'без срока'}</code>."
+            if not await _notification_once(key, ttl=35 * 86400):
+                continue
+            try:
+                await bot.send_message(user.user_id, text, parse_mode="HTML")
+            except Exception:
+                await _notification_forget(key)
 
 
 async def expire_student_freezes():

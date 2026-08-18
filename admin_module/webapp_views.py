@@ -3,7 +3,7 @@
 import copy
 import os
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from html import escape
 
 import httpx
@@ -12,7 +12,7 @@ from PIL import Image, ImageOps, UnidentifiedImageError
 from aiogram import Bot
 from fastapi import Depends, File, HTTPException, Query, Request, UploadFile
 from fastapi.responses import HTMLResponse, StreamingResponse
-from sqlalchemy import select, update
+from sqlalchemy import String, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from loguru import logger
@@ -26,11 +26,12 @@ from admin_module.api import (
     ProductCategoryChangePayload,
     ScheduleChangePayload,
     TariffChangePayload,
+    DiscountChangePayload,
 )
 from admin_module.utils import verify_webapp_staff
 from admin_module.webapp_shared import get_club_id_from_host, telegram_init_gate, webapp_auth_gate, verify_webapp_admin
 from admin_module.webapp_verify import verify_telegram_data
-from database.db import Club, ClubProduct, ClubStaff, PaymentOrder, Student, User, get_session, get_student_parent_ids
+from database.db import Club, ClubProduct, ClubStaff, Discount, DiscountAssignment, PaymentOrder, Student, User, get_session, get_student_parent_ids
 from database.db import CartItem, CartOrder
 from services.audit import audit_event
 from admin_module.api import audit_actor_context
@@ -410,6 +411,84 @@ async def webapp_admin_tariffs_page(request: Request, club_id: int = Query(...),
         return telegram_init_gate('/webapp/admin-tariffs', club_id, 'РћС‚РєСЂРѕР№С‚Рµ С‚Р°СЂРёС„С‹ РёР· Telegram')
     await verify_webapp_staff(club, init_data, session, "tariffs_manage")
     return templates.TemplateResponse("admin_tariffs.html", {"request": request, "club": club, "club_id": club_id, "disciplines": (club.club_settings or {}).get("disciplines", {})})
+
+@router.get("/webapp/admin-discounts", response_class=HTMLResponse)
+async def webapp_admin_discounts_page(request: Request, club_id: int = Query(...), init_data: str | None = Query(default=None), session: AsyncSession = Depends(get_session)):
+    club = await session.get(Club, club_id)
+    if not init_data:
+        return telegram_init_gate('/webapp/admin-discounts', club_id, 'Откройте скидки из Telegram')
+    await verify_webapp_staff(club, init_data, session, "cash_sale")
+    discounts = (await session.execute(select(Discount).where(Discount.club_id == club_id).order_by(Discount.created_at.desc()))).scalars().all() if club else []
+    return templates.TemplateResponse("admin_discounts.html", {"request": request, "club": club, "club_id": club_id, "discounts": discounts})
+
+@router.post("/webapp/admin-discounts/change")
+async def change_admin_discount(payload: DiscountChangePayload, session: AsyncSession = Depends(get_session)):
+    club = await session.get(Club, payload.club_id, with_for_update=True)
+    if not club:
+        raise HTTPException(404, "Клуб не найден")
+    await verify_webapp_staff(club, payload.init_data, session, "cash_sale")
+    if payload.action == "delete":
+        discount = await session.get(Discount, payload.index) if payload.index else None
+        if not discount or discount.club_id != club.id:
+            raise HTTPException(400, "Скидка не найдена")
+        assigned = await session.scalar(select(DiscountAssignment.id).where(DiscountAssignment.discount_id == discount.id).limit(1))
+        if assigned:
+            raise HTTPException(409, "Нельзя удалить скидку: она привязана к клиентам")
+        await session.delete(discount)
+    elif payload.action == "add":
+        raw = payload.discount or {}
+        kind = "fixed" if str(raw.get("kind", "percent")).lower() == "fixed" else "percent"
+        try:
+            value = float(raw.get("value", 0))
+        except (TypeError, ValueError):
+            raise HTTPException(400, "Некорректное значение скидки")
+        if value <= 0 or (kind == "percent" and value > 100):
+            raise HTTPException(400, "Скидка должна быть больше нуля, процент — не больше 100")
+        scope = str(raw.get("scope", "subscriptions"))
+        if scope not in {"subscriptions", "products", "all"}:
+            raise HTTPException(400, "Некорректная область применения")
+        def parse_day(key):
+            text = str(raw.get(key, "")).strip()
+            return date.fromisoformat(text) if text else None
+        session.add(Discount(club_id=club.id, name=str(raw.get("name", "")).strip()[:120] or "Без названия", kind=kind, value=int(round(value * 100)) if kind == "fixed" else int(round(value)), scope=scope, comment=str(raw.get("comment", "")).strip()[:500], starts_at=parse_day("starts_at"), ends_at=parse_day("ends_at")))
+    elif payload.action in {"assign", "unassign"}:
+        discount = await session.get(Discount, payload.index)
+        if not discount or discount.club_id != club.id or not payload.user_id:
+            raise HTTPException(400, "Скидка или клиент не найдены")
+        assignment = await session.scalar(select(DiscountAssignment).where(DiscountAssignment.discount_id == discount.id, DiscountAssignment.user_id == payload.user_id))
+        if payload.action == "assign" and not assignment:
+            session.add(DiscountAssignment(club_id=club.id, discount_id=discount.id, user_id=payload.user_id))
+        elif payload.action == "unassign" and assignment:
+            await session.delete(assignment)
+    else:
+        raise HTTPException(400, "Неизвестное действие")
+    await session.commit()
+    if payload.action in {"assign", "unassign"} and payload.user_id and club.bot_token:
+        try:
+            discount_label = discount.name if 'discount' in locals() and discount else "скидка"
+            bot = Bot(club.bot_token)
+            verb = "привязана к вашему профилю" if payload.action == "assign" else "отвязана от вашего профиля"
+            await bot.send_message(payload.user_id, f"🏷️ Скидка «{escape(discount_label)}» {verb}.", parse_mode="HTML")
+            await bot.session.close()
+        except Exception:
+            logger.warning("Не удалось отправить уведомление о скидке user=%s", payload.user_id)
+    return {"ok": True}
+
+@router.get("/webapp/admin-discounts/clients")
+async def search_discount_clients(request: Request, club_id: int = Query(...), q: str = Query(default=""), init_data: str | None = Query(default=None), session: AsyncSession = Depends(get_session)):
+    club = await session.get(Club, club_id)
+    await verify_webapp_staff(club, init_data, session, "cash_sale")
+    needle = q.strip()
+    query = select(User).where(User.club_id == club_id).order_by(User.full_name, User.user_id).limit(50)
+    if needle:
+        query = query.where(or_(User.full_name.ilike(f"%{needle}%"), User.user_id.cast(String).ilike(f"%{needle}%")))
+    users = (await session.execute(query)).scalars().all()
+    result = []
+    for user in users:
+        students = (await session.execute(select(Student).where(Student.parent_id == user.user_id, Student.club_id == club_id).order_by(Student.name))).scalars().all()
+        assignments = (await session.execute(select(DiscountAssignment.discount_id).where(DiscountAssignment.user_id == user.user_id, DiscountAssignment.club_id == club_id))).scalars().all()
+        result.append({"user_id": user.user_id, "name": user.full_name or str(user.user_id), "phone": next((s.parent_phone for s in students if s.parent_phone), None), "students": [s.name for s in students], "discount_ids": assignments})
+    return {"clients": result}
 
 
 @router.post("/webapp/admin-tariffs/change")

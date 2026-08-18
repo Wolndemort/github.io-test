@@ -27,6 +27,7 @@ from services.order_notifications import (
     resolve_user_label,
 )
 from services.payment_requisites import get_payment_info_text, build_payment_instruction_text
+from services.discounts import active_discount, apply_discount
 import hmac
 import os
 import time
@@ -208,6 +209,14 @@ class TariffChangePayload(BaseModel):
     action: str
     index: int | None = None
     tariff: dict | None = None
+
+class DiscountChangePayload(BaseModel):
+    init_data: str
+    club_id: int
+    action: str
+    index: int | None = None
+    discount: dict | None = None
+    user_id: int | None = None
 
 class AdminSaleMethodPayload(BaseModel):
     init_data: str
@@ -1613,13 +1622,16 @@ async def cart_checkout(payload: CartCheckoutPayload, request: Request, session:
         await session.commit()
     product_ids = [int(x["product_id"]) for x in payload.items if x.get("item_type", "product") == "product"]
     products = (await session.execute(select(ClubProduct).where(ClubProduct.club_id == club.id, ClubProduct.id.in_(product_ids), ClubProduct.is_active.is_(True)).with_for_update())).scalars().all() if product_ids else []
-    by_id = {p.id: p for p in products}; normalized=[]; total=0
+    by_id = {p.id: p for p in products}; normalized=[]; total=0; original_total=0; applied_discounts=[]
     for raw in payload.items:
         kind = raw.get("item_type", "product")
         if kind == "product":
             p=by_id.get(int(raw.get("product_id"))); qty=int(raw.get("quantity", 1))
             if not p or qty < 1 or qty > 99 or p.stock < qty: raise HTTPException(400, "Товар недоступен или закончился")
-            total += p.price_kopecks * qty; normalized.append(("product", p, qty))
+            line_original = p.price_kopecks * qty; line_discount = await active_discount(session, club.id, int(tg_user["id"]), "products")
+            line_total, line_discount_amount = apply_discount(line_original, line_discount); original_total += line_original; total += line_total
+            if line_discount: applied_discounts.append((line_discount, line_discount_amount))
+            normalized.append(("product", p, qty))
         elif kind in {"subscription", "freeze"}:
             student = await session.get(Student, int(raw.get("student_id")), with_for_update=True)
             if not student or student.club_id != club.id or student.parent_id != int(tg_user["id"]): raise HTTPException(403, "Атлет недоступен")
@@ -1635,13 +1647,20 @@ async def cart_checkout(payload: CartCheckoutPayload, request: Request, session:
                 if age_error:
                     raise HTTPException(400, age_error)
                 price = int(float(t.get("price", 0)) * 100)
-                total += price * qty; normalized.append(("subscription", t, {"student_id": student.id, "discipline": raw.get("sport_type"), "price": price, "quantity": qty}))
+                line_original = price * qty; line_discount = await active_discount(session, club.id, int(tg_user["id"]), "subscriptions")
+                line_total, line_discount_amount = apply_discount(line_original, line_discount); original_total += line_original; total += line_total
+                if line_discount: applied_discounts.append((line_discount, line_discount_amount))
+                normalized.append(("subscription", t, {"student_id": student.id, "discipline": raw.get("sport_type"), "price": price, "quantity": qty}))
             else:
                 days = int(raw.get("days", 0)); price = int(float(settings.get("limits", {}).get("freeze_price_per_day", 0)) * days * 100)
                 if days <= 0 or price <= 0: raise HTTPException(400, "Заморозка недоступна")
-                total += price * qty; normalized.append(("freeze", None, {"student_id": student.id, "days": days, "price": price, "quantity": qty}))
+                line_original = price * qty; line_discount = await active_discount(session, club.id, int(tg_user["id"]), "subscriptions")
+                line_total, line_discount_amount = apply_discount(line_original, line_discount); original_total += line_original; total += line_total
+                if line_discount: applied_discounts.append((line_discount, line_discount_amount))
+                normalized.append(("freeze", None, {"student_id": student.id, "days": days, "price": price, "quantity": qty}))
     order_id = f"CART_{uuid.uuid4().hex[:12].upper()}"
-    order = CartOrder(id=order_id, club_id=club.id, user_id=int(tg_user["id"]), amount_kopecks=total, status="NEW", provider_payment_id=f"MANUAL:{order_id}")
+    primary_discount = applied_discounts[0][0] if applied_discounts else None
+    order = CartOrder(id=order_id, club_id=club.id, user_id=int(tg_user["id"]), amount_kopecks=total, original_amount_kopecks=original_total, discount_id=primary_discount.id if primary_discount else None, discount_name=primary_discount.name if primary_discount else None, discount_amount_kopecks=original_total-total or None, status="NEW", provider_payment_id=f"MANUAL:{order_id}")
     session.add(order)
     # CartItem ссылается на CartOrder внешним ключом; фиксируем родительскую
     # строку до добавления позиций, поскольку ORM-связь не используется.

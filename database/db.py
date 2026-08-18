@@ -45,6 +45,29 @@ class User(Base):
         """Readable label for SQLAdmin relationship/AJAX selectors."""
         return self.full_name or str(self.user_id)
 
+class Discount(Base):
+    __tablename__ = "discounts"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    club_id: Mapped[int] = mapped_column(ForeignKey("clubs.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(120))
+    kind: Mapped[str] = mapped_column(String(10))
+    value: Mapped[float] = mapped_column(Integer)
+    scope: Mapped[str] = mapped_column(String(20), default="subscriptions")
+    comment: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    starts_at: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    ends_at: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="1")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, server_default="now()")
+
+class DiscountAssignment(Base):
+    __tablename__ = "discount_assignments"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    club_id: Mapped[int] = mapped_column(ForeignKey("clubs.id", ondelete="CASCADE"), index=True)
+    discount_id: Mapped[int] = mapped_column(ForeignKey("discounts.id", ondelete="RESTRICT"), index=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.user_id", ondelete="CASCADE"), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, server_default="now()")
+    __table_args__ = (UniqueConstraint("club_id", "discount_id", "user_id", name="uq_discount_assignment"),)
+
 
 class Student(Base):
     __tablename__ = 'students'
@@ -227,6 +250,16 @@ class CartOrder(Base):
     club_id: Mapped[int] = mapped_column(ForeignKey("clubs.id"), index=True)
     user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.user_id", ondelete="SET NULL"), nullable=True, index=True)
     amount_kopecks: Mapped[int] = mapped_column(Integer)
+    original_amount_kopecks: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    discount_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    discount_name: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    discount_amount_kopecks: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    original_amount_kopecks: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    discount_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    discount_name: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    discount_kind: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)
+    discount_value: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    discount_amount_kopecks: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     status: Mapped[str] = mapped_column(String(20), default="NEW", index=True)
     provider_payment_id: Mapped[Optional[str]] = mapped_column(String(100), unique=True, nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
@@ -550,6 +583,7 @@ async def add_abon(
             days_to_add = club_settings.get("limits", {}).get("subscription_days", 30)
 
         current_expire = student.expire_date
+        was_frozen = bool(student.is_frozen)
 
         # Если абонемент еще активен — плюсуем к дате окончания. Если просрочен — отсчет от сегодняшней полночи.
         if current_expire and current_expire > now:
@@ -572,7 +606,7 @@ async def add_abon(
         if lessons_count == 999:
             student.balance_lessons = 999
         else:
-            if is_lessons_tariff and not (current_expire and current_expire > now):
+            if is_lessons_tariff and not was_frozen and not (current_expire and current_expire > now):
                 student.balance_lessons = lessons_count
             else:
                 current_balance = student.balance_lessons or 0

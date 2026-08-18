@@ -34,6 +34,7 @@ from handlers.skud import trigger_dingtian_turnstile
 from services.gate_control import process_athlete_gate_pass
 from services.staff_permissions import staff_can, permissions_for_staff
 from services.analytics import is_subscription_active
+from services.discounts import active_discount, apply_discount
 from middlewares.db_saas_midleware import SUPER_ADMIN_IDS
 
 
@@ -465,6 +466,7 @@ async def get_client_cabinet_page(request: Request, club_id: int, init_data: str
     if not user and not is_staff_mode:
         return await webapp_auth_help_page(request=request, club_id=club_id, init_data=init_data, db=db)
     settings = (club.club_settings or {}) if club else {}
+    profile_discount = await active_discount(db, club_id, user_id, "subscriptions") if user and not is_staff_mode else None
     summary_students = []
     if is_staff_mode:
         # Командная шапка должна показывать весь клуб, а не только записи,
@@ -500,6 +502,7 @@ async def get_client_cabinet_page(request: Request, club_id: int, init_data: str
             "logo_url": f"{_absolute_webapp_url(request, loading['logo_url'])}?v={loading.get('logo_rev', '')}" if loading.get("logo_url") else "",
             "students": students,
             "user_name": (user.full_name if user else None) or tg_user.get("first_name", ""),
+            "profile_discount": profile_discount,
             "now": datetime.now(),
             "summary": {
                 "total": len(summary_source),
@@ -835,7 +838,9 @@ async def webapp_buy_subscription_submit(payload: WebAppBuySubscriptionPayload, 
     age_error = _tariff_age_error(student, selected_tariff, discipline_cfg.get("name", payload.sport_type))
     if age_error:
         raise HTTPException(status_code=400, detail=age_error)
-    amount_kopecks = int(float(price) * 100)
+    original_amount_kopecks = int(float(price) * 100)
+    discount = await active_discount(db, club.id, user_id, "subscriptions")
+    amount_kopecks, discount_amount_kopecks = apply_discount(original_amount_kopecks, discount)
     payment_method = _normalize_payment_method(payload.payment_method)
     payment_modes = payment_availability(club.club_settings)
     if payment_method in {"bank_card", "sbp"} and not payment_modes["online"]:
@@ -866,7 +871,7 @@ async def webapp_buy_subscription_submit(payload: WebAppBuySubscriptionPayload, 
         active_pending.status = "FAILED"
         await db.commit()
     order_id = f"WEB_{uuid.uuid4().hex[:12].upper()}"
-    order = PaymentOrder(id=order_id, user_id=user_id, student_id=student.id, club_id=club.id, amount_kopecks=amount_kopecks, lesson_count=count, days_to_add=days, discipline=payload.sport_type, status="NEW", type="FIRST", provider_payment_id=f"MANUAL:{order_id}")
+    order = PaymentOrder(id=order_id, user_id=user_id, student_id=student.id, club_id=club.id, amount_kopecks=amount_kopecks, original_amount_kopecks=original_amount_kopecks, discount_id=discount.id if discount else None, discount_name=discount.name if discount else None, discount_kind=discount.kind if discount else None, discount_value=discount.value if discount else None, discount_amount_kopecks=discount_amount_kopecks or None, lesson_count=count, days_to_add=days, discipline=payload.sport_type, status="NEW", type="FIRST", provider_payment_id=f"MANUAL:{order_id}")
     db.add(order)
     await db.commit()
     if payment_method == "requisites":

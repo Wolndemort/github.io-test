@@ -82,6 +82,7 @@ class YooKassaSetupStates(StatesGroup):
 
 
 class AdminSettingsSG(StatesGroup):
+    waiting_for_discount = State()
     waiting_for_public_links = State()
     waiting_for_site_url = State()
     waiting_for_support_username = State()

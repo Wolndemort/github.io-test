@@ -21,6 +21,7 @@ from services.order_notifications import build_owner_receipt_text, format_order_
 from services.payment_requisites import get_payment_info_text
 from services.availability import payment_availability
 from services.staff_permissions import permissions_for_staff
+from services.discounts import active_discount, apply_discount
 
 
 router = Router()
@@ -934,7 +935,9 @@ async def admin_confirm_payment(
          and int(tariff.get("days", 30) or 30) == days_to_add),
         {},
     )
-    amount_kopecks = int(round(float(selected_tariff.get("price", 0) or 0) * 100))
+    original_amount_kopecks = int(round(float(selected_tariff.get("price", 0) or 0) * 100))
+    discount = await active_discount(session, club.id, callback.from_user.id, "subscriptions")
+    amount_kopecks, discount_amount_kopecks = apply_discount(original_amount_kopecks, discount)
 
     # 4. ЛОГИКА ЗАЧИСЛЕНИЯ абонемента в СУБД (Передаем дисциплину!)
     # Чтобы логика add_abon не ломалась, мы передаем target_discipline внутрь.
@@ -953,6 +956,12 @@ async def admin_confirm_payment(
             student_id=student_id,
             club_id=club.id,
             amount_kopecks=amount_kopecks,
+            original_amount_kopecks=original_amount_kopecks,
+            discount_id=discount.id if discount else None,
+            discount_name=discount.name if discount else None,
+            discount_kind=discount.kind if discount else None,
+            discount_value=discount.value if discount else None,
+            discount_amount_kopecks=discount_amount_kopecks or None,
             lesson_count=count,
             days_to_add=days_to_add,
             status="CONFIRMED",

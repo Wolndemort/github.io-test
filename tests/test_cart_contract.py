@@ -54,7 +54,8 @@ def test_service_quantities_are_processed_by_checkout_and_webhook():
     api = Path("admin_module/api.py").read_text(encoding="utf-8")
     webhook = Path("admin_module/payments_webhook.py").read_text(encoding="utf-8")
     assert "qty = int(raw.get(\"quantity\", 1))" in api
-    assert "total += price * qty" in api
+    assert "line_original = price * qty" in api
+    assert "apply_discount" in api
     assert "quantity=info[\"quantity\"]" in api
     assert "range(max(1, int(item.quantity or 1)))" in webhook
 

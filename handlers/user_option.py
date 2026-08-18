@@ -16,6 +16,7 @@ from config import secret_key
 from sqlalchemy import select, or_
 from sqlalchemy import func
 from handlers.buttons import get_main_menu_keyboard, get_profile_keyboard, get_section_menu_kb
+from services.discounts import active_discount
 from admin_module.utils import is_staff_or_owner
 from services.schedule_utils import normalize_schedule_block
 from services.visit_history import attach_student_names, group_completed_sessions, summarize_payment_entry, moscow_str
@@ -131,6 +132,7 @@ async def universal_profile_handler(
     students = result.scalars().all()
 
     is_auth = bool(students)
+    profile_discount = await active_discount(session, club.id, user_id, "subscriptions")
     missing_birthdays = sum(1 for s in students if not s.birthday)
     audit_event(
         "bot_profile_opened",
@@ -162,6 +164,11 @@ async def universal_profile_handler(
             else ""
         )
         status_text = f"🏰 Клуб: <b>{club.name}</b>\n🔍 <b>Ваши профили:</b>\n"
+        if profile_discount:
+            discount_value = f"{profile_discount.value}%" if profile_discount.kind == "percent" else f"{profile_discount.value / 100:g} ₽"
+            status_text += f"\n🏷️ <b>Ваша скидка:</b> {profile_discount.name} — <b>{discount_value}</b>"
+            if profile_discount.ends_at:
+                status_text += f" до <code>{profile_discount.ends_at.strftime('%d.%m.%Y')}</code>"
         for s in students:
             is_frozen_val = int(getattr(s, 'is_frozen', 0) or 0)
 

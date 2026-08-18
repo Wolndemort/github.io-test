@@ -92,6 +92,7 @@
     </div>
 
     {% if not is_staff_mode %}
+    {% if profile_discount %}<div class="card mono-card" style="border-color:#b59b45;background:#fffbe8;color:#171717;"><b>🏷️ Ваша скидка: {{ profile_discount.name }}</b><div>{{ (profile_discount.value / 100) if profile_discount.kind == 'fixed' else profile_discount.value }}{% if profile_discount.kind == 'percent' %}%{% else %} ₽{% endif %} · {{ profile_discount.scope }}</div>{% if profile_discount.ends_at %}<div>Действует до <span class="discount-countdown" data-until="{{ profile_discount.ends_at.isoformat() }}T23:59:59">—</span></div>{% endif %}</div>{% endif %}
     <div class="card mono-card">
         <div class="section-title mono-kicker"><div class="name">Профили атлетов</div><span>детализация</span></div>
         {% if students %}
@@ -149,7 +150,7 @@
             {% if '*' in staff_permissions or 'cash_view' in staff_permissions %}<a class="btn soft mono-action" href="/admin/cash?club_id={{ club_id }}">💰 Касса и журнал</a><a class="btn soft mono-action" href="/webapp/admin-cash-subscription?club_id={{ club_id }}">💵 Продажа наличного абонемента</a>{% endif %}
             {% if '*' in staff_permissions or 'athletes_view' in staff_permissions %}<a class="btn soft mono-action" href="/admin/students?club_id={{ club_id }}">👥 Атлеты</a>{% endif %}
             {% if '*' in staff_permissions or 'schedule_view' in staff_permissions %}<a class="btn soft mono-action" href="/webapp/admin-schedule?club_id={{ club_id }}">🗓 Расписание</a>{% endif %}
-            {% if '*' in staff_permissions or 'tariffs_manage' in staff_permissions %}<a class="btn soft mono-action" href="/webapp/admin-tariffs?club_id={{ club_id }}">💳 Тарифы</a>{% endif %}
+            {% if '*' in staff_permissions or 'tariffs_manage' in staff_permissions %}<a class="btn soft mono-action" href="/webapp/admin-tariffs?club_id={{ club_id }}">💳 Тарифы</a>{% endif %}{% if '*' in staff_permissions or 'cash_sale' in staff_permissions %}<a class="btn soft mono-action" href="/webapp/admin-discounts?club_id={{ club_id }}">🏷️ Скидки</a>{% endif %}
             {% if '*' in staff_permissions %}<a class="btn soft mono-action" href="/admin?club_id={{ club_id }}">🧮 Таблица WebApp</a><a class="btn soft mono-action" href="/webapp/admin-freeze?club_id={{ club_id }}">❄️ Заморозка абонементов</a><a class="btn soft mono-action" href="/revenue?club_id={{ club_id }}">📊 Статистика</a><a class="btn soft mono-action" href="/admin/sales?club_id={{ club_id }}">🧾 Журнал операций</a><a class="btn soft mono-action" href="/webapp/admin-audit?club_id={{ club_id }}">🔎 Аудит</a>{% endif %}
             {% endif %}
             {% if not is_staff_mode %}
@@ -205,5 +206,6 @@
     }, {{ loading.duration_ms }});
     {% endif %}
 </script>
+<script>document.querySelectorAll('.discount-countdown').forEach(el=>{const until=new Date(el.dataset.until).getTime();const tick=()=>{const left=Math.max(0,until-Date.now());const d=Math.floor(left/86400000),h=Math.floor(left%86400000/3600000),m=Math.floor(left%3600000/60000),s=Math.floor(left%60000/1000);el.textContent=`${d} дн. ${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`};tick();setInterval(tick,1000)});</script>
 </body>
 </html>
