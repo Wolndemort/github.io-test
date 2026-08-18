@@ -506,7 +506,16 @@ async def search_discount_clients(request: Request, club_id: int = Query(...), q
     needle = q.strip()
     query = select(User).join(Student, Student.parent_id == User.user_id).where(Student.club_id == club_id).distinct().order_by(User.full_name, User.user_id).limit(50)
     if needle:
-        query = query.where(or_(User.full_name.ilike(f"%{needle}%"), User.user_id.cast(String).ilike(f"%{needle}%")))
+        # Search by both the parent and the athlete.  The assignment UI is
+        # labelled as an athlete search, but linked athletes used to be
+        # filtered only by their parent's name/Telegram id.
+        query = query.where(or_(
+            User.full_name.ilike(f"%{needle}%"),
+            User.user_id.cast(String).ilike(f"%{needle}%"),
+            Student.name.ilike(f"%{needle}%"),
+            Student.parent_phone.ilike(f"%{needle}%"),
+            Student.parent_phone_secondary.ilike(f"%{needle}%"),
+        ))
     users = (await session.execute(query)).scalars().all()
     result = []
     for user in users:
