@@ -15,8 +15,9 @@
 </section>
 <script>
 const tg=window.Telegram?.WebApp; tg?.ready(); tg?.expand();
+const statusEl=document.getElementById('status');
 async function send(path){const body={init_data:tg?.initData||''};document.querySelectorAll('[data-field]').forEach(x=>body[x.dataset.field]=x.value);const r=await fetch(path+'?club_id={{ club_id }}',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const d=await r.json();if(!r.ok)throw new Error(d.detail||'Не удалось сохранить');return d}
-async function saveLegal(){try{await send('/webapp/admin-legal/save');status.textContent='Сохранено';}catch(e){status.textContent=e.message}}
-async function deleteLegal(){if(!confirm('Удалить все юридические реквизиты этого клуба?'))return;try{await send('/webapp/admin-legal/delete');document.querySelectorAll('[data-field]').forEach(x=>x.value='');status.textContent='Реквизиты удалены, используются значения по умолчанию.'}catch(e){status.textContent=e.message}}
+async function saveLegal(){try{await send('/webapp/admin-legal/save');statusEl.textContent='Сохранено';}catch(e){statusEl.textContent=e.message}}
+async function deleteLegal(){if(!confirm('Удалить все юридические реквизиты этого клуба?'))return;try{await send('/webapp/admin-legal/delete');document.querySelectorAll('[data-field]').forEach(x=>x.value='');statusEl.textContent='Реквизиты удалены, используются значения по умолчанию.'}catch(e){statusEl.textContent=e.message}}
 </script>
 {% endblock %}
