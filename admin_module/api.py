@@ -1796,9 +1796,10 @@ class BiometricCheckIn(BaseModel):
 
 # Используй существующий router из твоего api.py
 
-import admin_module.webapp_views  # noqa: F401
-
-video_stream = admin_module.webapp_views.video_stream
+async def video_stream(*args, **kwargs):
+    """Compatibility wrapper; the implementation lives in webapp_views."""
+    from admin_module.webapp_views import video_stream as implementation
+    return await implementation(*args, **kwargs)
 
 # Contract markers kept for tests and backward compatibility while the
 # WebApp/page endpoints live in admin_module.webapp_views.
