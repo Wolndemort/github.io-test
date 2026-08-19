@@ -246,6 +246,12 @@
         <div class="muted">
           Чёрная линия — факт, серая — прогноз. Наведите на любую точку.
         </div>
+        <form class="filters chart-filters" method="get">
+          <input type="hidden" name="club_id" value="{{ club_id }}" /><input type="hidden" name="init_data" value="{{ request.query_params.get('init_data','') }}" />
+          <label>С даты<input type="date" name="revenue_from" value="{{ request.query_params.get('revenue_from', filters.date_from) }}" /></label>
+          <label>По дату<input type="date" name="revenue_to" value="{{ request.query_params.get('revenue_to', filters.date_to) }}" /></label>
+          <button class="btn dark">Обновить выручку</button>
+        </form>
         <div class="chartbox"><canvas id="revenueChart"></canvas></div>
       </section>
       <section class="card">
@@ -253,6 +259,12 @@
         <div class="muted">
           Фактическое количество посещений по каждому дню. Наведите на точку.
         </div>
+        <form class="filters chart-filters" method="get">
+          <input type="hidden" name="club_id" value="{{ club_id }}" /><input type="hidden" name="init_data" value="{{ request.query_params.get('init_data','') }}" />
+          <label>С даты<input type="date" name="visits_from" value="{{ request.query_params.get('visits_from', filters.date_from) }}" /></label>
+          <label>По дату<input type="date" name="visits_to" value="{{ request.query_params.get('visits_to', filters.date_to) }}" /></label>
+          <button class="btn dark">Обновить посещения</button>
+        </form>
         <div class="chartbox"><canvas id="visitChart"></canvas></div>
       </section>
       <section class="card queue-card">

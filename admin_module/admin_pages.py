@@ -143,7 +143,7 @@ async def get_revenue_stats(request: Request, session: AsyncSession = Depends(ge
 
 
 @router.get("/forecast", response_class=HTMLResponse)
-async def get_forecast_page(request: Request, session: AsyncSession = Depends(get_session), init_data: str | None = Query(default=None), date_from: str | None = Query(default=None), date_to: str | None = Query(default=None)):
+async def get_forecast_page(request: Request, session: AsyncSession = Depends(get_session), init_data: str | None = Query(default=None), date_from: str | None = Query(default=None), date_to: str | None = Query(default=None), revenue_from: str | None = Query(default=None), revenue_to: str | None = Query(default=None), visits_from: str | None = Query(default=None), visits_to: str | None = Query(default=None)):
     club_id = get_club_id_from_host(request)
     club = (await session.execute(select(Club).where(Club.id == club_id))).scalar_one_or_none()
     if not init_data:
@@ -161,6 +161,12 @@ async def get_forecast_page(request: Request, session: AsyncSession = Depends(ge
         raise HTTPException(status_code=400, detail="Даты должны быть в формате YYYY-MM-DD") from exc
     if finish_date < start_date or finish_date - start_date > timedelta(days=366):
         raise HTTPException(status_code=400, detail="Период должен быть от 0 до 366 дней")
+    revenue_start = revenue_from or start
+    revenue_finish = revenue_to or finish
+    visits_start = visits_from or start
+    visits_finish = visits_to or finish
+    revenue_start_date = date.fromisoformat(revenue_start); revenue_finish_date = date.fromisoformat(revenue_finish)
+    visits_start_date = date.fromisoformat(visits_start); visits_finish_date = date.fromisoformat(visits_finish)
     students = list((await session.execute(select(Student).where(Student.club_id == club_id))).scalars().all())
     visits = list((await session.execute(select(VisitLog).where(VisitLog.club_id == club_id))).scalars().all())
     payments = list((await session.execute(select(PaymentOrder).where(PaymentOrder.club_id == club_id, PaymentOrder.status == "CONFIRMED"))).scalars().all())
@@ -186,11 +192,11 @@ async def get_forecast_page(request: Request, session: AsyncSession = Depends(ge
     forecast["expiry_series"] = expiry_chart["series"]
     forecast["peak_expiry_count"] = expiry_chart["peak_count"]
     forecast["peak_expiry_days"] = expiry_chart["peak_days"]
-    revenue_chart = build_revenue_series(payments, cart_orders, cash_entries, start_date, finish_date, reporting_periods()["local_now"].date())
+    revenue_chart = build_revenue_series(payments, cart_orders, cash_entries, revenue_start_date, revenue_finish_date, reporting_periods()["local_now"].date())
     forecast["revenue_series"] = revenue_chart["series"]
     forecast["peak_revenue_amount"] = revenue_chart["peak_amount"]
     forecast["peak_revenue_day"] = revenue_chart["peak_day"]
-    visit_chart = build_visit_series(visits, start_date, finish_date)
+    visit_chart = build_visit_series(visits, visits_start_date, visits_finish_date)
     forecast["visit_series"] = visit_chart["series"]
     forecast["peak_visit_count"] = visit_chart["peak_count"]
     forecast["peak_visit_days"] = visit_chart["peak_days"]
