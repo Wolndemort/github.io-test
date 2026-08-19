@@ -28,12 +28,13 @@ from admin_module.api import (
     TariffChangePayload,
     DiscountChangePayload,
 )
-from admin_module.utils import verify_webapp_staff
+from admin_module.utils import verify_webapp_admin, verify_webapp_staff
 from admin_module.webapp_shared import get_club_id_from_host, telegram_init_gate, webapp_auth_gate, verify_webapp_admin
 from admin_module.webapp_verify import verify_telegram_data
 from database.db import Club, ClubProduct, ClubStaff, Discount, DiscountAssignment, PaymentOrder, Student, User, get_session, get_student_parent_ids
 from database.db import CartItem, CartOrder
 from services.audit import audit_event
+from services.legal_documents import legal_context
 from admin_module.api import audit_actor_context
 from admin_module.api import (
     build_owner_receipt_text,
@@ -947,15 +948,58 @@ async def webapp_schedule_page(
 
 
 @router.get("/privacy", response_class=HTMLResponse)
-async def get_privacy_page(request: Request):
+async def get_privacy_page(request: Request, session: AsyncSession = Depends(get_session)):
     """РЎС‚СЂР°РЅРёС†Р° РїРѕР»РёС‚РёРєРё РєРѕРЅС„РёРґРµРЅС†РёР°Р»СЊРЅРѕСЃС‚Рё РґР»СЏ WebApp"""
-    return templates.TemplateResponse("privacy.html", {"request": request})
+    club_id = get_club_id_from_host(request)
+    club = (await session.execute(select(Club).where(Club.id == club_id))).scalar_one_or_none() if club_id else None
+    return templates.TemplateResponse("privacy.html", {"request": request, **legal_context(club)})
 
 
 @router.get("/oferta", response_class=HTMLResponse)
-async def get_oferta_page(request: Request):
+async def get_oferta_page(request: Request, session: AsyncSession = Depends(get_session)):
     """РЎС‚СЂР°РЅРёС†Р° РїСѓР±Р»РёС‡РЅРѕР№ РѕС„РµСЂС‚С‹ РґР»СЏ WebApp"""
-    return templates.TemplateResponse("oferta.html", {"request": request})
+    club_id = get_club_id_from_host(request)
+    club = (await session.execute(select(Club).where(Club.id == club_id))).scalar_one_or_none() if club_id else None
+    return templates.TemplateResponse("oferta.html", {"request": request, **legal_context(club)})
+
+
+@router.get("/webapp/admin-legal", response_class=HTMLResponse)
+async def admin_legal_page(request: Request, club_id: int = Query(...), init_data: str | None = Query(default=None), session: AsyncSession = Depends(get_session)):
+    club = await session.get(Club, club_id)
+    if not init_data:
+        return telegram_init_gate('/webapp/admin-legal', club_id, 'Откройте юридические документы из Telegram')
+    await verify_webapp_admin(club, init_data)
+    settings = club.club_settings if isinstance(club.club_settings, dict) else {}
+    legal = settings.get("legal", {}) if isinstance(settings.get("legal", {}), dict) else {}
+    return templates.TemplateResponse("admin_legal.html", {"request": request, "club": club, "club_id": club_id, "legal": legal})
+
+
+@router.post("/webapp/admin-legal/save")
+async def save_admin_legal(request: Request, club_id: int = Query(...), session: AsyncSession = Depends(get_session)):
+    payload = await request.json()
+    club = await session.get(Club, club_id)
+    tg_user = await verify_webapp_admin(club, payload.get("init_data"))
+    settings = dict(club.club_settings or {})
+    fields = ("provider_name", "provider_type", "inn", "ogrn", "legal_address", "club_address", "email", "phone", "document_version", "updated_at", "privacy_operator", "platform_name")
+    legal = {field: str(payload.get(field, "") or "").strip()[:500] for field in fields}
+    settings["legal"] = legal
+    club.club_settings = settings
+    await session.commit()
+    audit_event("legal_documents_updated", club_id=club.id, actor_user_id=int(tg_user.get("id", 0)), action="update", object_type="legal_documents", location="webapp/admin-legal")
+    return {"ok": True, "legal": legal}
+
+
+@router.post("/webapp/admin-legal/delete")
+async def delete_admin_legal(request: Request, club_id: int = Query(...), session: AsyncSession = Depends(get_session)):
+    payload = await request.json()
+    club = await session.get(Club, club_id)
+    tg_user = await verify_webapp_admin(club, payload.get("init_data"))
+    settings = dict(club.club_settings or {})
+    settings.pop("legal", None)
+    club.club_settings = settings
+    await session.commit()
+    audit_event("legal_documents_deleted", club_id=club.id, actor_user_id=int(tg_user.get("id", 0)), action="delete", object_type="legal_documents", location="webapp/admin-legal")
+    return {"ok": True}
 
 
 @router.get("/webapp/live_cam", response_class=HTMLResponse)

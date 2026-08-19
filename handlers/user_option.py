@@ -201,6 +201,9 @@ async def universal_profile_handler(
         profile_body = profile_body[:3600].rsplit("\n", 1)[0] + "\n\n<i>Список сокращён. Откройте подробный статус для полного списка.</i>"
     final_text = (
         f"👤 <b>Профиль атлетов</b>\n\n{profile_body}\n\n"
+        "🍎 <b>Если вы используете iPhone и Safari показывает предупреждение о подмене сайтов</b> "
+        "или не открывается кабинет/проход по Face ID, отключите в настройках Safari параметр "
+        "«Предупреждение о подмене веб-сайтов», затем попробуйте открыть профиль ещё раз.\n\n"
         "<i>Используйте кнопки ниже для действий:</i>"
     )
     current_user = SimpleNamespace(user_id=user_id, club_id=club.id)

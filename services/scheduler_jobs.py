@@ -495,7 +495,7 @@ async def send_daily_report_to_admins():
                 f"📊 <b>ГЛУБОКИЙ БИЗНЕС-ОТЧЕТ: {club.name}</b>\n"
                 f"📅 Дата: <code>{now.strftime('%d.%m.%Y')}</code>\n\n"
                 f"💰 <b>Касса сегодня:</b> <code>{biz_metrics['revenue_today']} ₽</code>\n"
-                f"📉 <b>Расходы кассы:</b> <code>{sum((e.amount_kopecks or 0) for e in today_cash_expenses) / 100:.2f} ₽</code> · Деплой: <code>{sum((e.amount_kopecks or 0) for e in today_cash_expenses if str(e.category or '').strip().casefold() in {'deploy', 'деплой'}) / 100:.2f} ₽</code>\n"
+                f"📉 <b>Расходы кассы:</b> <code>{sum((e.amount_kopecks or 0) for e in today_cash_expenses) / 100:.2f} ₽</code>\n"
                 f"⚖️ <b>Динамика ко вчера:</b> <code>{biz_metrics['revenue_diff_text']}</code>\n"
                 f"🥋 <b>Всего атлетов в базе:</b> <code>{biz_metrics['total_athletes']}</code>\n"
                 f"👥 <b>Родителей с привязкой:</b> <code>{biz_metrics['total_parents']}</code>\n\n"

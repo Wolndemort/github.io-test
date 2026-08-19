@@ -1,0 +1,22 @@
+{% extends "webapp_base.html" %}
+{% block title %}Юридические документы{% endblock %}
+{% block header %}Юридические документы{% endblock %}
+{% block subheader %}Реквизиты клуба для политики конфиденциальности и оферты.{% endblock %}
+{% block content %}
+<section class="mono-card" style="padding:16px">
+  <div id="status" class="muted" style="margin-bottom:12px">Заполните реквизиты исполнителя услуг.</div>
+  <div style="display:grid;gap:10px">
+    {% for field, label in [("provider_name", "Полное наименование"), ("provider_type", "Форма: ИП/ООО"), ("inn", "ИНН"), ("ogrn", "ОГРН/ОГРНИП"), ("legal_address", "Юридический адрес"), ("club_address", "Адрес клуба"), ("email", "Email"), ("phone", "Телефон"), ("document_version", "Версия документа"), ("updated_at", "Дата редакции"), ("privacy_operator", "Оператор персональных данных"), ("platform_name", "Название платформы")] %}
+    <label style="display:grid;gap:4px;font-size:12px;color:#777">{{ label }}<input data-field="{{ field }}" value="{{ legal.get(field, '')|e }}" style="padding:10px;border:1px solid #444;border-radius:8px"></label>
+    {% endfor %}
+    <button class="mono-action" type="button" onclick="saveLegal()">Сохранить</button>
+    <button class="mono-action" type="button" onclick="deleteLegal()" style="color:#a33">Удалить все реквизиты</button>
+  </div>
+</section>
+<script>
+const tg=window.Telegram?.WebApp; tg?.ready(); tg?.expand();
+async function send(path){const body={init_data:tg?.initData||''};document.querySelectorAll('[data-field]').forEach(x=>body[x.dataset.field]=x.value);const r=await fetch(path+'?club_id={{ club_id }}',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const d=await r.json();if(!r.ok)throw new Error(d.detail||'Не удалось сохранить');return d}
+async function saveLegal(){try{await send('/webapp/admin-legal/save');status.textContent='Сохранено';}catch(e){status.textContent=e.message}}
+async function deleteLegal(){if(!confirm('Удалить все юридические реквизиты этого клуба?'))return;try{await send('/webapp/admin-legal/delete');document.querySelectorAll('[data-field]').forEach(x=>x.value='');status.textContent='Реквизиты удалены, используются значения по умолчанию.'}catch(e){status.textContent=e.message}}
+</script>
+{% endblock %}

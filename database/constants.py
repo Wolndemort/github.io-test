@@ -29,6 +29,20 @@ DEFAULT_CLUB_SETTINGS = {
             "message": "Загружаем приложение…"
         }
     },
+    "legal": {
+        "provider_name": "",
+        "provider_type": "ИП/ООО",
+        "inn": "",
+        "ogrn": "",
+        "legal_address": "",
+        "club_address": "",
+        "email": "",
+        "phone": "",
+        "document_version": "1.0",
+        "updated_at": "",
+        "privacy_operator": "",
+        "platform_name": "ALTER"
+    },
 
     # 3. ДИСЦИПЛИНЫ (Ключевой блок для хендлеров оплаты)
     "disciplines": {

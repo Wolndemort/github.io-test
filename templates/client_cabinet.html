@@ -135,6 +135,7 @@
     {% endif %}
     <div class="card mono-card quick-actions">
         <div class="actions">
+            {% if '*' in staff_permissions %}<a class="btn soft mono-action" href="/webapp/admin-legal?club_id={{ club_id }}">📄 Юридические документы</a>{% endif %}
             {% if not is_staff_mode %}
             <a class="btn dark mono-action dark primary-action" href="/webapp/biometric-pass?club_id={{ club_id }}&user_id={{ user_id }}">📱 Открыть проход</a>
             <a class="btn dark mono-action dark primary-action" href="/webapp/shop?club_id={{ club_id }}">🛒 Магазин</a>

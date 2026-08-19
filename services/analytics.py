@@ -208,6 +208,7 @@ def calculate_projected_renewal_revenue(
         key = (getattr(payment, "discipline", None), int(getattr(payment, "lesson_count", 0) or 0), int(getattr(payment, "days_to_add", 0) or 0), int(getattr(payment, "amount_kopecks", 0) or 0))
         sales[key] = sales.get(key, 0) + 1
     selected_by_discipline = {}
+    selected_sales_count = {}
     for discipline in {getattr(student, "discipline", None) or "boxing" for student in candidates}:
         options = [item for item in configured if item[0] == discipline]
         if not options: continue
@@ -215,12 +216,14 @@ def calculate_projected_renewal_revenue(
         for key, count in sales.items():
             if key[0] == discipline:
                 matching.extend([item for item in options if int(item[2].get("count", 0) or 0) == key[1] and int(item[2].get("days", 0) or 0) == key[2]] * count)
-        selected_by_discipline[discipline] = max(matching, key=lambda item: matching.count(item)) if matching else options[0]
+        selected = max(matching, key=lambda item: matching.count(item)) if matching else options[0]
+        selected_by_discipline[discipline] = selected
+        selected_sales_count[discipline] = sum(count for key, count in sales.items() if key[0] == discipline and key[1] == int(selected[2].get("count", 0) or 0) and key[2] == int(selected[2].get("days", 0) or 0) and key[3] == selected[3])
     projected_kopecks = sum(selected_by_discipline.get(getattr(student, "discipline", None) or "boxing", (None, 0, {}, 0))[3] for student in candidates)
     selected = next(iter(selected_by_discipline.values()), None)
     prices = {item[3] for item in selected_by_discipline.values()}
     source = "самый продаваемый подтверждённый тариф по каждому направлению" if sales and selected_by_discipline else "нет настроенного тарифа для направления"
-    tariffs_by_discipline = {discipline: {"name": item[2].get("name") or (f"{int(item[2].get('count', 0))} посещений" if int(item[2].get("count", 0) or 0) != 999 else "Безлимит"), "price": round(item[3] / 100, 2), "count": int(item[2].get("count", 0) or 0)} for discipline, item in selected_by_discipline.items()}
+    tariffs_by_discipline = {discipline: {"name": item[2].get("name") or (f"{int(item[2].get('count', 0))} посещений" if int(item[2].get("count", 0) or 0) != 999 else "Безлимит"), "price": round(item[3] / 100, 2), "count": int(item[2].get("count", 0) or 0), "sales_count": selected_sales_count.get(discipline, 0)} for discipline, item in selected_by_discipline.items()}
     tariff_label = ", ".join(f"{discipline}: {data['name']} ({data['price']:.2f} ₽)" for discipline, data in tariffs_by_discipline.items()) or "Нет настроенного тарифа"
     return {"count": len(candidates), "projected_revenue": round(projected_kopecks / 100, 2), "students": candidates, "tariff_name": tariff_label, "tariff_discipline": selected[0] if selected else None, "price": round(sum(prices) / len(prices) / 100, 2) if prices else 0, "price_source": source, "tariffs_by_discipline": tariffs_by_discipline}
 

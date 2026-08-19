@@ -126,7 +126,6 @@
         <div class="card mono-card">
             <div class="label">Расходы сегодня</div>
             <div class="value">{{ '%.2f'|format(expenses_today|default(0)) }} ₽</div>
-            <div class="muted-note">Деплой: {{ '%.2f'|format(deploy_expenses_today|default(0)) }} ₽</div>
         </div>
         <div class="card mono-card">
             <div class="label">Маржа сегодня</div>
@@ -139,7 +138,6 @@
         <div class="card mono-card">
             <div class="label">Расходы за неделю</div>
             <div class="value">{{ '%.2f'|format(expenses_week|default(0)) }} ₽</div>
-            <div class="muted-note">Деплой: {{ '%.2f'|format(deploy_expenses_week|default(0)) }} ₽</div>
         </div>
         <div class="card mono-card">
             <div class="label">Маржа за неделю</div>
@@ -148,7 +146,7 @@
         <div class="card mono-card full">
             <div class="label">Выручка за месяц</div>
             <div class="value">{{ '%.2f'|format(revenue_month|default(0)) }} ₽</div>
-            <div class="muted-note">Расходы: {{ '%.2f'|format(expenses_month|default(0)) }} ₽ · Деплой: {{ '%.2f'|format(deploy_expenses_month|default(0)) }} ₽ · Маржа: {{ '%.2f'|format(cash_margin_month|default(0)) }} ₽</div>
+            <div class="muted-note">Расходы: {{ '%.2f'|format(expenses_month|default(0)) }} ₽ · Маржа: {{ '%.2f'|format(cash_margin_month|default(0)) }} ₽</div>
             <details class="athlete-dropdown">
                 <summary>Финансовая детализация</summary>
                 <div class="scroll-box">

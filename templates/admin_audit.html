@@ -29,6 +29,7 @@
 {% include "_staff_back_button.html" %}
   <div class="wrap">
   <div class="nav">
+    <a href="/webapp/admin-legal?club_id={{ club_id }}&init_data={{ request.query_params.get('init_data', '')|urlencode }}">📄 Юридические документы</a>
     <a href="/admin?club_id={{ club_id }}&init_data={{ request.query_params.get('init_data', '')|urlencode }}">← В панель</a>
     <button class="secondary" type="button" id="closeWebApp">Закрыть</button>
   </div>

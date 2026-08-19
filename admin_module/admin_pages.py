@@ -11,6 +11,7 @@ from admin_module.utils import get_club_id_from_host, verify_webapp_admin, verif
 from admin_module.webapp_verify import verify_telegram_data
 from database.db import CartOrder, CashEntry, Club, PaymentOrder, Student, User, VisitLog, get_session
 from services.analytics import build_expiry_series, build_revenue_series, build_visit_series, calculate_admin_dashboard, calculate_cash_flow_periods, calculate_projected_renewal_revenue, calculate_revenue_periods, calculate_student_metrics, generate_students_excel, reporting_periods, moscow_date_boundary
+from services.legal_documents import legal_context
 
 
 @router.get("/admin", response_class=HTMLResponse)
@@ -210,13 +211,17 @@ async def export_students_to_excel(request: Request, session: AsyncSession = Dep
 
 
 @router.get("/privacy", response_class=HTMLResponse)
-async def get_privacy_page(request: Request):
-    return templates.TemplateResponse("privacy.html", {"request": request})
+async def get_privacy_page(request: Request, session: AsyncSession = Depends(get_session)):
+    club_id = get_club_id_from_host(request)
+    club = (await session.execute(select(Club).where(Club.id == club_id))).scalar_one_or_none() if club_id else None
+    return templates.TemplateResponse("privacy.html", {"request": request, **legal_context(club)})
 
 
 @router.get("/oferta", response_class=HTMLResponse)
-async def get_oferta_page(request: Request):
-    return templates.TemplateResponse("oferta.html", {"request": request})
+async def get_oferta_page(request: Request, session: AsyncSession = Depends(get_session)):
+    club_id = get_club_id_from_host(request)
+    club = (await session.execute(select(Club).where(Club.id == club_id))).scalar_one_or_none() if club_id else None
+    return templates.TemplateResponse("oferta.html", {"request": request, **legal_context(club)})
 
 
 @router.get("/webapp/schedule", response_class=HTMLResponse)
