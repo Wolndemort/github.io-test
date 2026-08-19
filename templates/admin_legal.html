@@ -6,9 +6,10 @@
 <section class="mono-card" style="padding:16px">
   <div id="status" class="muted" style="margin-bottom:12px">Заполните реквизиты исполнителя услуг.</div>
   <div style="display:grid;gap:10px">
-    {% for field, label in [("provider_name", "Полное наименование"), ("provider_type", "Форма: ИП/ООО"), ("inn", "ИНН"), ("ogrn", "ОГРН/ОГРНИП"), ("legal_address", "Юридический адрес"), ("club_address", "Адрес клуба"), ("email", "Email"), ("phone", "Телефон"), ("document_version", "Версия документа"), ("updated_at", "Дата редакции"), ("privacy_operator", "Оператор персональных данных"), ("platform_name", "Название платформы")] %}
-    <label style="display:grid;gap:4px;font-size:12px;color:#777">{{ label }}<input data-field="{{ field }}" value="{{ legal.get(field, '')|e }}" style="padding:10px;border:1px solid #444;border-radius:8px"></label>
+    {% for field, label in [("provider_name", "Полное наименование"), ("provider_type", "Форма: ИП/ООО/самозанятый"), ("inn", "ИНН"), ("ogrn", "ОГРН/ОГРНИП"), ("legal_address", "Юридический адрес"), ("club_address", "Адрес клуба"), ("email", "Email"), ("phone", "Телефон"), ("document_version", "Версия документа"), ("updated_at", "Дата редакции"), ("privacy_operator", "Оператор персональных данных"), ("platform_name", "Название платформы")] %}
+    <label style="display:grid;gap:4px;font-size:12px;color:#777">{{ label }}<input data-field="{{ field }}" list="{{ 'providerTypes' if field == 'provider_type' else '' }}" value="{{ legal.get(field, '')|e }}" style="padding:10px;border:1px solid #444;border-radius:8px"></label>
     {% endfor %}
+    <datalist id="providerTypes"><option value="ИП"><option value="ООО"><option value="Самозанятый"><option value="Физическое лицо"></datalist>
     <button class="mono-action" type="button" onclick="saveLegal()">Сохранить</button>
     <button class="mono-action" type="button" onclick="deleteLegal()" style="color:#a33">Удалить все реквизиты</button>
   </div>
