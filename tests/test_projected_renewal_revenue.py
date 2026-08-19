@@ -113,6 +113,15 @@ def test_visit_series_counts_peak_days_and_zero_days():
     assert result["peak_days"] == ["2026-09-02"]
 
 
+def test_visit_series_excludes_repeat_checkins_from_active_session():
+    visits = [
+        SimpleNamespace(visited_at=datetime(2026, 9, 2, 10), source="gate"),
+        SimpleNamespace(visited_at=datetime(2026, 9, 2, 11), source="repeat"),
+    ]
+    result = build_visit_series(visits, "2026-09-02", "2026-09-02")
+    assert result["series"] == [{"date": "2026-09-02", "count": 1}]
+
+
 def test_revenue_series_marks_future_as_weekday_estimate():
     payments = [SimpleNamespace(status="CONFIRMED", amount_kopecks=10000, created_at=datetime(2026, 8, 17, 10))]
     result = build_revenue_series(payments, [], [], "2026-08-17", "2026-08-24", today=datetime(2026, 8, 18).date())

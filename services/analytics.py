@@ -252,6 +252,10 @@ def build_visit_series(visits: Iterable[Any], start: date | str, finish: date | 
         raise ValueError("finish must not be earlier than start")
     counts = {}
     for visit in visits:
+        # Повторный проход внутри активной сессии не является новым
+        # посещением: он лишь фиксирует факт повторного открытия прохода.
+        if str(getattr(visit, "source", "") or "").strip().lower() == "repeat":
+            continue
         value = _utc_naive(getattr(visit, "visited_at", None))
         if value:
             day = value.date()
