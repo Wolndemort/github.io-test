@@ -15,8 +15,8 @@ def normalize_email(value: str) -> str:
     return value.strip().lower()
 
 
-def _key(email: str, club_id: int) -> str:
-    return f"web_native_otp:{club_id}:{normalize_email(email)}"
+def _key(email: str, club_id: int, purpose: str = "login") -> str:
+    return f"web_native_otp:{purpose}:{club_id}:{normalize_email(email)}"
 
 
 def _hash(code: str) -> str:
@@ -24,15 +24,15 @@ def _hash(code: str) -> str:
     return hashlib.sha256(f"{secret}:{code}".encode()).hexdigest()
 
 
-async def issue_otp(redis: Redis, email: str, club_id: int) -> str:
+async def issue_otp(redis: Redis, email: str, club_id: int, purpose: str = "login") -> str:
     code = f"{secrets.randbelow(1_000_000):06d}"
-    await redis.hset(_key(email, club_id), mapping={"hash": _hash(code), "attempts": 0})
-    await redis.expire(_key(email, club_id), OTP_TTL)
+    await redis.hset(_key(email, club_id, purpose), mapping={"hash": _hash(code), "attempts": 0})
+    await redis.expire(_key(email, club_id, purpose), OTP_TTL)
     return code
 
 
-async def consume_otp(redis: Redis, email: str, club_id: int, code: str) -> bool:
-    key = _key(email, club_id)
+async def consume_otp(redis: Redis, email: str, club_id: int, code: str, purpose: str = "login") -> bool:
+    key = _key(email, club_id, purpose)
     data = await redis.hgetall(key)
     if not data:
         return False

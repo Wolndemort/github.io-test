@@ -16,6 +16,7 @@ from .context import AuthContext
 from .web_session import (
     create_web_session,
     get_web_session,
+    require_csrf,
     require_web_context,
     revoke_web_session,
     set_csrf_cookie,
@@ -25,6 +26,10 @@ from .web_session import (
 from .native_auth import consume_otp, deliver_email_otp, issue_otp, normalize_email
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
+
+
+async def web_context(request: Request) -> AuthContext | None:
+    return await get_web_session(request.app.state.redis_client, request)
 
 
 class TelegramExchangePayload(BaseModel):
@@ -43,6 +48,42 @@ class NativeOtpVerify(NativeOtpRequest):
 
 def native_auth_enabled() -> bool:
     return os.getenv("WEB_NATIVE_AUTH_ENABLED", "0") == "1"
+
+
+def native_email_binding_enabled() -> bool:
+    return os.getenv("WEB_NATIVE_EMAIL_BINDING_ENABLED", "0") == "1"
+
+
+@router.post("/native/email/request")
+async def native_email_bind_request(payload: NativeOtpRequest, request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):
+    if not native_email_binding_enabled():
+        raise HTTPException(status_code=404, detail={"code": "feature_disabled"})
+    actor = require_web_context(context)
+    await require_csrf(request.app.state.redis_client, request)
+    email = normalize_email(payload.email)
+    if payload.club_id != actor.club_id or not email or "@" not in email:
+        raise HTTPException(status_code=400, detail={"code": "invalid_email"})
+    code = await issue_otp(request.app.state.redis_client, email, actor.club_id, purpose="bind")
+    await deliver_email_otp(email, code)
+    return {"ok": True, "message": "Verification code sent."}
+
+
+@router.post("/native/email/verify")
+async def native_email_bind_verify(payload: NativeOtpVerify, request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):
+    if not native_email_binding_enabled():
+        raise HTTPException(status_code=404, detail={"code": "feature_disabled"})
+    actor = require_web_context(context)
+    await require_csrf(request.app.state.redis_client, request)
+    email = normalize_email(payload.email)
+    if payload.club_id != actor.club_id or not await consume_otp(request.app.state.redis_client, email, actor.club_id, payload.code, purpose="bind"):
+        raise HTTPException(status_code=401, detail={"code": "invalid_code"})
+    user = await session.scalar(select(User).where(User.user_id == actor.user_id))
+    if not user:
+        user = User(user_id=actor.user_id, club_id=actor.club_id)
+        session.add(user)
+    user.email = email
+    await session.commit()
+    return {"ok": True, "email": email}
 
 
 @router.post("/native/request")
@@ -98,10 +139,6 @@ else{{tg.ready();fetch("/auth/telegram/exchange",{{method:"POST",headers:{{"Cont
 @router.get("/login")
 async def auth_login():
     return {"ok": True, "method": "telegram_exchange", "exchange_endpoint": "/auth/telegram/exchange", "message": "Откройте Web через Telegram и выполните одноразовый exchange"}
-
-
-async def web_context(request: Request) -> AuthContext | None:
-    return await get_web_session(request.app.state.redis_client, request)
 
 
 @router.post("/telegram/exchange")
