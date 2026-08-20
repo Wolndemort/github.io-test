@@ -1637,3 +1637,9 @@ Verification for Stage 50:
 - Запущен staging smoke перед hardware test; `/health` вернул HTTP `0` из-за недоступности `staging.speedycrm.ru:18443`.
 - `/ready`/authenticated relay call не выполнялись; физический импульс турникета не отправлялся.
 - Локальные gate-control/turnstile tests остаются пройденными; hardware smoke повторить после восстановления isolated staging.
+## 2026-08-20 — staging rebuilt and route smoke restored
+
+- Восстановлен только staging nginx и локальный SSH tunnel `127.0.0.1:18000`; live/ALTER не использовались.
+- Текущий commit пересобран в `/root/speedycrm-staging`; `/health=200`, `/ready=200`, `/auth/login=200`, `/auth/me=401`.
+- Старые 32 protected routes и новые scheduler/turnstile/menu/client-pass routes корректно gated без сессии.
+- Физический relay pulse не выполнялся до подтверждения, что конфигурация указывает на отдельное тестовое устройство.
