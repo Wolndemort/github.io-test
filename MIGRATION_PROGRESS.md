@@ -885,5 +885,7 @@ Verification for Stage 50:
 - При настройке staging bot PostgreSQL diagnostic раскрыл token из-за попытки записать один token сразу в две уникальные club-записи. Token немедленно удалён с сервера; staging DB подтверждён с `0` bot tokens. Требуется отозвать этот token через BotFather и создать новый. Helper исправлен: новый token будет назначаться только первой staging club-записи.
 - Новый staging bot token принят без вывода в логи, записан только в одну staging club-запись (`1` non-null token), API перезапущен только в staging. `/health` и `/ready` — 200, `bots_active: 1`, DB/Redis ok. Live и ALTER не затронуты.
 - Следующий production-readiness блок: получить реальный `init_data` от staging bot/test account. Для полноценного Telegram WebApp browser smoke потребуется безопасный HTTPS staging entry или ручная передача одноразового init_data без публикации token.
+- Добавлен локальный `scripts/staging_exchange.ps1`: принимает одноразовый `init_data` только через локальный prompt, вызывает staging через tunnel и не сохраняет значение. Club ID staging: `1`.
+- Для SSH-only staging выставлен `COOKIE_SECURE=0` только в `docker-compose.staging.yml`: tunnel локально использует HTTP, а production cookie policy не изменялась. Staging API перезапущен, `/ready` 200, `bots_active: 1`.
 - Restricted pages enforce `analytics_view`/`qr_checkin`; no settings mutation was exposed.
 - Added settings page tests; remaining: continue the next 3–4 migration blocks.

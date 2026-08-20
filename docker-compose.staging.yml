@@ -40,6 +40,7 @@ services:
       MONITOR_HEALTH_URL: ""
       MONITOR_PROJECT_DIR: /root/speedycrm-staging
       SENTRY_ENVIRONMENT: staging
+      COOKIE_SECURE: "0"
     depends_on:
       db:
         condition: service_healthy

@@ -67,3 +67,9 @@ When the separate token is present in `/root/speedycrm-staging/.staging-secrets`
 ```bash
 bash /root/speedycrm-staging/scripts/configure_staging_bot.sh
 ```
+
+For a local one-time exchange through the SSH tunnel, use `scripts/staging_exchange.ps1`. Paste `init_data` only into the local prompt; do not send it in chat or commit it:
+
+```powershell
+.\scripts\staging_exchange.ps1 -ClubId 1
+```
