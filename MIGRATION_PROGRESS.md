@@ -1750,3 +1750,10 @@ Verification for Stage 50:
 
 - Пакет saved payment method revoke развернут только в staging вместе с broadcast; containers пересозданы через staging compose.
 - Реальный payment mutation не выполнялся; нужен authenticated browser smoke с тестовой сохранённой картой.
+
+## 2026-08-20 — receipts and invitations package
+
+- Добавлена Web receipt delivery для подтверждённых заказов текущего клиента через Telegram bot и Web invitation generation для owner/staff с parent phone/slot validation.
+- Оба контура имеют AuthContext, club/user scope, CSRF, idempotency и audit; реальное сообщение/приглашение в smoke не отправлялось.
+- Refund provider API в текущем `YooKassaClient` отсутствует; возврат не имитируется сменой статуса. Нужна отдельная согласованная YooKassa refund integration/policy.
+- После пакета: `483 passed`.

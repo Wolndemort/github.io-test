@@ -701,6 +701,46 @@ async def delete_client_payment_method(subscription_id: int, request: Request, c
     audit_event("web_payment_method_deleted", club_id=actor.club_id, actor_user_id=actor.user_id, action="delete", object_type="subscription_card", object_id=subscription_id, location="web/client/payment-methods")
     return {"ok": True, "club_id": actor.club_id, "subscription_id": subscription_id}
 
+@router.post("/receipts/{order_id}/deliver")
+async def deliver_web_receipt(order_id: str, request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):
+    actor = require_web_context(context); await require_csrf(request.app.state.redis_client, request)
+    order = await session.scalar(select(PaymentOrder).where(PaymentOrder.id == order_id, PaymentOrder.club_id == actor.club_id, PaymentOrder.user_id == actor.user_id, PaymentOrder.status == "CONFIRMED"))
+    if not order: raise HTTPException(status_code=404, detail={"code": "receipt_not_found"})
+    club = await session.scalar(select(Club).where(Club.id == actor.club_id))
+    if not club or not club.bot_token or club.bot_token not in bots_dict: raise HTTPException(status_code=503, detail={"code": "club_bot_unavailable"})
+    key = str((await request.json()).get("idempotency_key") or "").strip()
+    if not key or len(key) > 100: raise HTTPException(status_code=400, detail={"code": "invalid_idempotency_key"})
+    if not await request.app.state.redis_client.set(f"web:receipt:{actor.club_id}:{order_id}:{key}", "1", ex=900, nx=True): return {"ok": True, "idempotent_replay": True}
+    student = await session.get(Student, order.student_id) if order.student_id else None
+    text = f"Оплата подтверждена\nЗаказ: {order.id}\nСумма: {order.amount_kopecks / 100:.2f} ₽\nУченик: {student.name if student else '—'}"
+    await bots_dict[club.bot_token].send_message(chat_id=actor.user_id, text=text)
+    audit_event("web_receipt_delivered", club_id=actor.club_id, actor_user_id=actor.user_id, action="deliver", object_type="payment_order", object_id=order.id, location="web/client/receipts")
+    return {"ok": True, "order_id": order.id}
+
+@router.post("/invitations/{student_id}")
+async def create_web_invitation(student_id: int, request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):
+    actor = require_web_context(context)
+    if actor.actor_type == "staff" and "student_manage" not in actor.permissions: raise HTTPException(status_code=403, detail={"code": "permission_denied"})
+    if actor.actor_type not in {"owner", "staff"}: raise HTTPException(status_code=403, detail={"code": "staff_access_required"})
+    await require_csrf(request.app.state.redis_client, request); payload = await request.json(); slot = int(payload.get("parent_slot") or 1)
+    if slot not in {1, 2}: raise HTTPException(status_code=400, detail={"code": "invalid_parent_slot"})
+    student = await session.scalar(select(Student).where(Student.id == student_id, Student.club_id == actor.club_id))
+    club = await session.scalar(select(Club).where(Club.id == actor.club_id))
+    phone = (student.parent_phone if slot == 1 else student.parent_phone_secondary) if student else None
+    if not student: raise HTTPException(status_code=404, detail={"code": "student_not_found"})
+    if not phone: raise HTTPException(status_code=409, detail={"code": "parent_phone_required"})
+    linked = await session.scalar(select(StudentParent).where(StudentParent.student_id == student.id, StudentParent.phone == phone))
+    if linked: return {"ok": True, "status": "linked", "student_id": student.id}
+    if not club or not club.bot_token or club.bot_token not in bots_dict: raise HTTPException(status_code=503, detail={"code": "club_bot_unavailable"})
+    bot_info = await bots_dict[club.bot_token].get_me(); username = str(bot_info.username or "").lstrip("@")
+    if not username: raise HTTPException(status_code=503, detail={"code": "bot_username_unavailable"})
+    key = str(payload.get("idempotency_key") or "").strip()
+    if not key or len(key) > 100: raise HTTPException(status_code=400, detail={"code": "invalid_idempotency_key"})
+    if not await request.app.state.redis_client.set(f"web:invite:{actor.club_id}:{student.id}:{slot}:{key}", "1", ex=900, nx=True): return {"ok": True, "idempotent_replay": True}
+    url = f"https://t.me/{username}?start=invite_{student.id}_{slot}"
+    audit_event("web_student_invite_created", club_id=actor.club_id, actor_user_id=actor.user_id, action="invite", object_type="student", object_id=student.id, location="web/staff/invitations", parent_slot=slot, parent_phone_tail=str(phone)[-4:])
+    return {"ok": True, "status": "invited", "student_id": student.id, "url": url}
+
 @client_router.post("/freeze/purchase")
 async def purchase_freeze_web(request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):
     actor = require_web_context(context)

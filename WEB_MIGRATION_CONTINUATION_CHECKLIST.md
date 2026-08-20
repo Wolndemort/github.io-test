@@ -67,6 +67,9 @@
 - [ ] Any remaining legacy operations: refunds, payment method changes, receipt delivery, audit search/delete policy, invitations.
 - [x] Add client Web saved payment method list and safe revoke using subscription row lock/club scope/audit.
 - [ ] Add refunds, receipt delivery and Web invitations.
+- [x] Add receipt delivery endpoint for confirmed current-user orders.
+- [x] Add owner/staff invitation endpoint with phone/slot validation and bot link generation.
+- [ ] Add provider-backed refunds only after refund policy and YooKassa API integration are approved.
 - [x] Client phone binding UI wired to the existing rate-limited Web endpoint; email binding UI already present.
 - [x] Client QR pass UI/API with authenticated parent/club scope and Telegram-compatible hourly HMAC payload.
 
