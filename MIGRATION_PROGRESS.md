@@ -5,6 +5,8 @@
 - Исправлены secondary forms в Products/Discounts panels: stock adjust, archive и discount update теперь имеют собственный submit handler, CSRF/idempotency и error state.
 - Node syntax check и полный suite: `489 passed`.
 
+- Staging UI rebuilt after the multi-form handler fix; cash/check-in forms were separately verified as explicitly bound handlers.
+
 ## 2026-08-20 — client profile package staged
 
 - Client purchases/profile/scope audit package deployed only to `/root/speedycrm-staging`; isolated API/DB/Redis/nginx containers rebuilt.

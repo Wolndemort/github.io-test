@@ -77,6 +77,7 @@
 - [x] Deploy client profile package to isolated staging.
 - [x] Audit client freeze display and derive frozen_until from stored frozen_at/frozen_days.
 - [x] Audit multi-form admin panels; secondary Products/Discounts buttons now submit through their backend contracts.
+- [x] Verify cash and check-in secondary forms have explicit handlers (reversal/cancel).
 - [x] Deploy settings state fix to isolated staging.
 - [ ] Any remaining legacy operations: refunds, payment method changes, receipt delivery, audit search/delete policy, invitations.
 - [x] Add client Web saved payment method list and safe revoke using subscription row lock/club scope/audit.

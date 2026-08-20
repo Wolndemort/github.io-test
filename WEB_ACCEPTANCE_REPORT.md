@@ -74,6 +74,7 @@ Scheduler flags and Turnstile configuration now have Web controls; real relay pu
 - Client profile package is deployed to isolated staging; authenticated visual mutation smoke remains in the full audit queue.
 - Client freeze display now exposes derived frozen_until; suite: `489 passed`.
 - Admin Products/Discounts secondary mutation buttons now have submit handlers; suite: `489 passed`.
+- Cash and check-in secondary forms are explicitly bound for reversal/cancel operations.
 - Settings state fix is deployed to isolated staging; authenticated button-by-button settings smoke remains part of the ongoing audit.
 - Hardware result is limited to the explicitly approved staging/work-area relay test; production/master were not involved.
 - Manual authenticated owner/client Email OTP/API smoke: previously passed and recorded in `MIGRATION_PROGRESS.md` (including owner session, `auth_source=email`, club scope and logout).
