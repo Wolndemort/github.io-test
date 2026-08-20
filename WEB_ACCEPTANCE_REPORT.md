@@ -45,8 +45,10 @@ Scheduler flags and Turnstile configuration now have Web controls; real relay pu
 
 - Local: full pytest suite and `git diff --check` are mandatory before closing the next checkpoint.
 - Staging unauthenticated smoke: `/health=200`, `/ready=200`, `/auth/login=200`, `/auth/me=401`; all protected route checks returned `401` without a session.
+- Latest staging hardware attempt: blocked before request because `staging.speedycrm.ru:18443` was unavailable (`/health` HTTP 0 / connection failure); no relay command or staging mutation was sent.
 - Staging flags/data: no production flags enabled and no test data created by the smoke.
 - Real staging payment: not executed; requires approved provider test account/credentials.
+- Real turnstile pulse: not executed; staging endpoint was unavailable during the latest attempt, so no hardware side effect occurred.
 - Manual authenticated owner/client Email OTP/API smoke: previously passed and recorded in `MIGRATION_PROGRESS.md` (including owner session, `auth_source=email`, club scope and logout).
 - Manual visual browser re-check: pending for every client page, QR pass, freeze, purchases and each mutation button because earlier pages could render empty.
 

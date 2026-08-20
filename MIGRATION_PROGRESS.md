@@ -1632,3 +1632,8 @@ Verification for Stage 50:
 - Full suite after scheduler/turnstile controls: `483 passed`; `git diff --check` чист.
 - Scheduler flags correspond to legacy Telegram scheduler menu and remain owner/settings permission guarded.
 - Turnstile Web controls redact password and never accept secrets from read-only responses; real relay pulse requires staging hardware smoke.
+## 2026-08-20 — staging turnstile smoke attempt
+
+- Запущен staging smoke перед hardware test; `/health` вернул HTTP `0` из-за недоступности `staging.speedycrm.ru:18443`.
+- `/ready`/authenticated relay call не выполнялись; физический импульс турникета не отправлялся.
+- Локальные gate-control/turnstile tests остаются пройденными; hardware smoke повторить после восстановления isolated staging.
