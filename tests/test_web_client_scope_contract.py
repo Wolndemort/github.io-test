@@ -16,3 +16,8 @@ def test_client_payment_intent_is_order_and_club_scoped():
 def test_client_reads_use_primary_or_linked_parent_scope():
     assert "async def client_scoped_students" in SOURCE
     assert "or_(Student.parent_id == actor.user_id, StudentParent.parent_id == actor.user_id)" in SOURCE
+
+
+def test_client_purchases_merge_cart_and_confirmed_payment_orders():
+    assert 'PaymentOrder.club_id == actor.club_id, PaymentOrder.user_id == actor.user_id, PaymentOrder.status == "CONFIRMED"' in SOURCE
+    assert '"source": "cart"' in SOURCE and '"source": "payment"' in SOURCE

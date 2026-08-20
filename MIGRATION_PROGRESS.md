@@ -1798,6 +1798,12 @@ Verification for Stage 50:
 
 - Unified client read scope deployed only to `/root/speedycrm-staging`; API/DB/Redis/nginx rebuilt with isolated compose.
 
+## 2026-08-20 — client purchases audit
+
+- Client purchases Web data теперь объединяет подтверждённые `CartOrder` и `PaymentOrder` текущего user/club, включая subscription/freeze payments; rows маркируются `source`.
+- Существующие fixtures сохранены backward-compatible через `getattr`; regression contract добавлен.
+- Полный suite: `487 passed`.
+
 ## 2026-08-20 — linked-parent client read scope
 
 - Унифицирован client student scope для cabinet, history, freeze, subscriptions и summary: primary parent и `StudentParent` linked parent теперь видят одинаковые записи.

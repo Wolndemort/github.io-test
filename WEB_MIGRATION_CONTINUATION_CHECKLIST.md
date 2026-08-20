@@ -72,6 +72,7 @@
 - [x] Deploy client ownership fix to isolated staging.
 - [x] Unify client read scope across cabinet/history/freeze/subscriptions/summaries for primary and linked parents.
 - [x] Deploy linked-parent scope fix to isolated staging.
+- [x] Audit client purchases and include confirmed CartOrder + PaymentOrder sources under user/club scope.
 - [x] Deploy settings state fix to isolated staging.
 - [ ] Any remaining legacy operations: refunds, payment method changes, receipt delivery, audit search/delete policy, invitations.
 - [x] Add client Web saved payment method list and safe revoke using subscription row lock/club scope/audit.

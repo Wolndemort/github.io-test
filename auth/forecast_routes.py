@@ -1475,8 +1475,11 @@ async def client_subscriptions_data(request: Request, context: AuthContext | Non
 async def client_purchases_data(request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session), limit: int = Query(default=50, ge=1, le=100)):
     actor = require_web_context(context)
     orders = list((await session.execute(select(CartOrder).where(CartOrder.club_id == actor.club_id, CartOrder.user_id == actor.user_id, CartOrder.status == "CONFIRMED").order_by(CartOrder.created_at.desc()).limit(limit))).scalars().all())
+    payments = list((await session.execute(select(PaymentOrder).where(PaymentOrder.club_id == actor.club_id, PaymentOrder.user_id == actor.user_id, PaymentOrder.status == "CONFIRMED").order_by(PaymentOrder.created_at.desc()).limit(limit))).scalars().all())
     pending = list((await session.execute(select(CartOrder).where(CartOrder.club_id == actor.club_id, CartOrder.user_id == actor.user_id, CartOrder.status == "NEW").order_by(CartOrder.created_at.desc()).limit(limit))).scalars().all())
-    return {"club_id": actor.club_id, "purchases": [{"order_id": o.id, "amount_kopecks": o.amount_kopecks, "created_at": o.created_at.isoformat() if o.created_at else None, "discount_name": o.discount_name} for o in orders], "payable_orders": [{"order_id": o.id, "amount_kopecks": o.amount_kopecks, "created_at": o.created_at.isoformat() if o.created_at else None} for o in pending], "read_only": True}
+    purchase_rows = ([{"order_id": o.id, "amount_kopecks": o.amount_kopecks, "created_at": o.created_at.isoformat() if o.created_at else None, "discount_name": getattr(o, "discount_name", None), "source": "cart"} for o in orders] + [{"order_id": o.id, "amount_kopecks": o.amount_kopecks, "created_at": o.created_at.isoformat() if o.created_at else None, "discount_name": getattr(o, "discount_name", None), "source": "payment", "type": getattr(o, "type", None)} for o in payments])
+    purchase_rows.sort(key=lambda row: row.get("created_at") or "", reverse=True)
+    return {"club_id": actor.club_id, "purchases": purchase_rows[:limit], "payable_orders": [{"order_id": o.id, "amount_kopecks": o.amount_kopecks, "created_at": o.created_at.isoformat() if o.created_at else None} for o in pending], "read_only": True}
 
 
 @client_router.post("/bind-phone")
