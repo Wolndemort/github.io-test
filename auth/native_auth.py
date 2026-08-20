@@ -9,6 +9,8 @@ from redis.asyncio import Redis
 
 OTP_TTL = 10 * 60
 OTP_ATTEMPTS = 5
+REQUEST_LIMIT = 3
+REQUEST_WINDOW = 300
 
 
 def normalize_email(value: str) -> str:
@@ -29,6 +31,20 @@ async def issue_otp(redis: Redis, email: str, club_id: int, purpose: str = "logi
     await redis.hset(_key(email, club_id, purpose), mapping={"hash": _hash(code), "attempts": 0})
     await redis.expire(_key(email, club_id, purpose), OTP_TTL)
     return code
+
+
+async def allow_otp_request(redis: Redis, email: str, club_id: int, client_ip: str) -> bool:
+    keys = (
+        f"web_native_limit:email:{normalize_email(email)}",
+        f"web_native_limit:club:{club_id}:{client_ip}",
+    )
+    for key in keys:
+        count = await redis.incr(key)
+        if count == 1:
+            await redis.expire(key, REQUEST_WINDOW)
+        if count > REQUEST_LIMIT:
+            return False
+    return True
 
 
 async def consume_otp(redis: Redis, email: str, club_id: int, code: str, purpose: str = "login") -> bool:

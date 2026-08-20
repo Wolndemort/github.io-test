@@ -24,7 +24,7 @@ from .web_session import (
     set_session_cookie,
     validate_csrf,
 )
-from .native_auth import consume_otp, deliver_email_otp, issue_otp, normalize_email
+from .native_auth import allow_otp_request, consume_otp, deliver_email_otp, issue_otp, normalize_email
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 logger = logging.getLogger(__name__)
@@ -65,6 +65,9 @@ async def native_email_bind_request(payload: NativeOtpRequest, request: Request,
     email = normalize_email(payload.email)
     if payload.club_id != actor.club_id or not email or "@" not in email:
         raise HTTPException(status_code=400, detail={"code": "invalid_email"})
+    client_ip = request.client.host if request.client else "unknown"
+    if not await allow_otp_request(request.app.state.redis_client, email, actor.club_id, client_ip):
+        raise HTTPException(status_code=429, detail={"code": "rate_limited"})
     code = await issue_otp(request.app.state.redis_client, email, actor.club_id, purpose="bind")
     await deliver_email_otp(email, code)
     return {"ok": True, "message": "Verification code sent."}

@@ -935,5 +935,8 @@ Verification for Stage 50:
 - Native login page contract passed; full suite: `420 passed`, `git diff --check` clean. Следом staging rebuild и logout → `/auth/native-login?club_id=2` smoke.
 - Исправлен browser validation bug: f-string превращал `[0-9]{6}` в `[0-9]6`; pattern экранирован, targeted test `1 passed`, staging rebuilt, `/ready` 200.
 - Реальный email login smoke подтверждён: после OTP открыт `/staff/overview` через native email session; screenshot показал staging metrics. После smoke staging очищен: ручной email удалён из staging user, native flags отключены, временный public HTTPS nginx остановлен (`PUBLIC 000`), SSH-only API `/ready` 200. Live/ALTER не затронуты.
+- Начат security-пакет: Email binding request ограничен по email и IP/club (`3` запроса за `300` секунд), добавлен security contract test. Все изменения только в `web-migration/phase-0-auth`.
+- В общий navigation добавлен переключатель `EN/RU` с сохранением выбора в localStorage и `document.lang`; полноценный перевод текстов и финальный дизайн оставлены отдельным последним этапом.
+- Security/language пакет проверен: full suite `422 passed`, `git diff --check` clean. Staging remains isolated and production branch untouched.
 - Restricted pages enforce `analytics_view`/`qr_checkin`; no settings mutation was exposed.
 - Added settings page tests; remaining: continue the next 3–4 migration blocks.

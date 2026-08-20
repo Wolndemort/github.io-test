@@ -1,8 +1,10 @@
 window.SpeedyCRMWeb = {
   navigation(label) {
     const client = String(label || "").toLowerCase().includes("client");
+    const language = localStorage.getItem("speedycrm_language") || "en";
+    document.documentElement.lang = language;
     const links = client ? `<a href="/client/cabinet">Cabinet</a><a href="/client/subscriptions">Subscriptions</a><a href="/client/purchases">Purchases</a><a href="/client/history">History</a><a href="/client/freeze">Freeze</a><a href="/client/schedule">Schedule</a><a href="/client/products">Products</a><a href="/client/discounts">Discounts</a><a href="/client/tariffs">Tariffs</a><a href="/client/club">Club</a><a href="/client/me">Profile</a><a href="/client/legal">Legal</a><a href="/client/summary/attendance">Attendance</a><a href="/client/summary/subscriptions">Summary</a><a href="/client/summary/purchases">Purchase summary</a>` : `<a href="/staff/overview">Overview</a><a href="/staff/forecast">Forecast</a><a href="/staff/revenue">Revenue</a><a href="/staff/students">Students</a><a href="/staff/cash">Cash</a><a href="/staff/sales">Sales</a><a href="/staff/audit">Audit</a><a href="/staff/schedule">Schedule</a><a href="/staff/products">Products</a><a href="/staff/discounts">Discounts</a><a href="/staff/tariffs">Tariffs</a><a href="/staff/checkin">Check-in</a><a href="/staff/freeze">Freeze</a><a href="/staff/settings/legal">Legal settings</a><a href="/staff/settings/camera">Camera</a><a href="/staff/settings/features">Features</a><a href="/staff/settings/limits">Limits</a><a href="/staff/settings/branding">Branding</a><a href="/staff/settings/integrations">Integrations</a>`;
-    return `<nav class="web-nav"><a class="web-brand" href="${client ? "/client/cabinet" : "/staff/overview"}">SpeedyCRM</a><span class="web-kicker">${label || "Staff web"}</span><div class="web-links">${links}<a href="/auth/email-profile">Email login</a><button type="button" data-web-logout onclick="SpeedyCRMWeb.logout()">Logout</button></div></nav>`;
+    return `<nav class="web-nav"><a class="web-brand" href="${client ? "/client/cabinet" : "/staff/overview"}">SpeedyCRM</a><span class="web-kicker">${label || "Staff web"}</span><div class="web-links">${links}<a href="/auth/email-profile">Email login</a><label class="web-language">Language <select data-web-language onchange="SpeedyCRMWeb.setLanguage(this.value)"><option value="en" ${language === "en" ? "selected" : ""}>EN</option><option value="ru" ${language === "ru" ? "selected" : ""}>RU</option></select></label><button type="button" data-web-logout onclick="SpeedyCRMWeb.logout()">Logout</button></div></nav>`;
   },
   loading(message = "Загрузка данных…") {
     return `<p class="web-card web-status" data-web-loading>${message}</p>`;
@@ -15,6 +17,17 @@ window.SpeedyCRMWeb = {
   },
   breadcrumb(items) {
     return `<div class="web-breadcrumb">${(items || []).map(item => `<a href="${item.href || "#"}">${item.label}</a>`).join(" / ")}</div>`;
+  },
+  setLanguage(language) {
+    if (!["en", "ru"].includes(language)) return;
+    localStorage.setItem("speedycrm_language", language);
+    document.documentElement.lang = language;
+  },
+  bindLanguage() {
+    const language = localStorage.getItem("speedycrm_language") || "en";
+    document.documentElement.lang = language;
+    const select = document.querySelector("[data-web-language]");
+    if (select) select.value = language;
   },
   table(columns, rows, empty = "Нет данных") {
     if (!rows || !rows.length) return `<div class="web-empty">${empty}</div>`;
