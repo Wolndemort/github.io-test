@@ -21,7 +21,7 @@ from database.db import WebCredential, get_session
 from .context import AuthContext
 from .web_session import get_web_session, require_csrf, require_web_context
 
-router = APIRouter(prefix="/auth/webauthn", tags=["WebAuthn"])
+router = APIRouter(prefix="/webauthn", tags=["WebAuthn"])
 TTL = 300
 
 async def web_context(request: Request) -> AuthContext | None:

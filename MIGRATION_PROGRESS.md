@@ -1687,3 +1687,9 @@ Verification for Stage 50:
 - Исправлен найденный по owner smoke дефект: `/staff/profile` отсутствовал и возвращал `detail not found`.
 - Добавлена защищённая owner/staff profile page и вкладка Profile в staff-навигации; passkey panel теперь доступен обычным переходом из интерфейса.
 - Полный suite: `483 passed`; staging пересобран, `/health=200`, `/staff/profile=401` без сессии (корректная auth-gate).
+
+## 2026-08-20 — WebAuthn endpoint prefix fixed
+
+- По ручному smoke найден 404: вложенный router создавал двойной `/auth/auth/webauthn` prefix.
+- Исправлено на рабочие `/auth/webauthn/*`; staging пересобран, `/auth/webauthn/credentials=401` без сессии, `/health=200`.
+- Полный suite после исправления: `483 passed`.
