@@ -1675,3 +1675,9 @@ Verification for Stage 50:
 - Staging пересобран и поднят: API, PostgreSQL, Redis и nginx работают; `/health=200`, `/ready=200`.
 - Alembic успешно применил `a1b2c3d4e5f6`; WebAuthn API/UI присутствуют в staging image.
 - Hardware/browser Face ID smoke ещё не отмечается выполненным: нужен authenticated staging-сеанс и поддерживаемый браузер/телефон.
+
+## 2026-08-20 — staging owner access restored
+
+- Проверена staging БД: owner `1271717628` находится в club 2; для него восстановлен email `omarovadam405@gmail.com` через staging-only helper.
+- Включены только staging-флаги Email OTP; API после перезапуска снова отвечает `/health=200`.
+- Для проверки использовать `club_id=2`; production/live/ALTER не затрагивались.

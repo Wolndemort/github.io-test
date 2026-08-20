@@ -81,6 +81,7 @@
 - [x] Add `fido2==2.2.1` to application requirements and run full local suite after the package.
 - [x] Add browser-native WebAuthn UI for profile device registration and revoke.
 - [ ] Run authenticated hardware/browser WebAuthn smoke on staging (requires supported browser/device and enabled staging flag).
+- [x] Restore approved staging owner Email OTP fixture and confirm API restart/health after enabling the staging-only mail test helper.
 - [ ] Add tests for every remaining legacy operation: refunds, payment-method changes, receipt delivery and invitations.
 - [x] Staging unauthenticated/auth-gating smoke after latest settings build; temporary flags remained disabled and no test data was created.
 - [x] Verify staging rebuild and migration upgrade after current changes; staging is at `a1b2c3d4e5f6`.

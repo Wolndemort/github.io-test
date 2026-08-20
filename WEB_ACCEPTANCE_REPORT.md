@@ -52,6 +52,7 @@ Scheduler flags and Turnstile configuration now have Web controls; real relay pu
 - Real staging payment: not executed; requires approved provider test account/credentials.
 - Real staging turnstile pulse: passed after staging restore. One direct pulse was sent through `speedycrm_staging_api` using club 2 configuration; no student was selected and no visit/CRM record was created.
 - Latest staging rebuild: passed; isolated staging API/DB/Redis/nginx are running, `/health=200`, `/ready=200`, and Alembic head is `a1b2c3d4e5f6`.
+- Owner Email OTP fixture restored in isolated staging only: owner is in club 2 and the approved test email is bound; authenticated browser/Face ID smoke remains pending.
 - Hardware result is limited to the explicitly approved staging/work-area relay test; production/master were not involved.
 - Manual authenticated owner/client Email OTP/API smoke: previously passed and recorded in `MIGRATION_PROGRESS.md` (including owner session, `auth_source=email`, club scope and logout).
 - Manual visual browser re-check: pending for every client page, QR pass, freeze, purchases and each mutation button because earlier pages could render empty.
