@@ -15,8 +15,9 @@ Branch: `web-migration/phase-0-auth`
 ## Required before production
 
 - [ ] Human review of `git diff master...HEAD` and changed-file list.
-- [ ] Fresh production backup, with artifact listing and retention check.
-- [ ] Restore check into a separately named non-production database.
+- [x] Staging custom-format backup created and verified with `pg_restore --list`.
+- [x] Staging restore check completed in separately named `crm_restore_check_20260820`, then test DB removed.
+- [ ] Fresh production backup, with artifact listing and retention check — requires explicit production approval.
 - [ ] Confirm migration upgrade/downgrade compatibility against a staging DB refreshed from current live snapshot.
 - [ ] Final Telegram regression smoke on the unchanged live bot path.
 - [ ] Decide native Email OTP rollout percentage and rollback trigger; keep production flags disabled until approved.

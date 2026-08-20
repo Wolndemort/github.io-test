@@ -945,6 +945,21 @@ Verification for Stage 50:
 - Seeded staging-only synthetic client fixture: `user_id=990000001`, club 1, one student, same test email; added seed/cleanup helpers. Native flags enabled only in staging for client Web smoke; fixture must be removed after verification.
 - Restricted pages enforce `analytics_view`/`qr_checkin`; no settings mutation was exposed.
 
+## 2026-08-20 — staging backup and restore gate
+
+- В staging создан custom-format PostgreSQL backup из отдельной staging DB, размер артефакта `174K`.
+- Проверка `pg_restore --list` прошла успешно.
+- Выполнен restore-check в отдельную staging test DB `crm_restore_check_20260820`; restore прошёл, затем test DB удалена.
+- После операций staging `/ready=200`; live `/root/github.io-test` и ALTER `/root/alter` не использовались.
+- Production backup пока не выполнялся: он требует отдельного явного approval и не нужен для безопасной проверки staging.
+- В серверной копии backup helper обнаружен CRLF/permission issue; staging-проверка выполнена напрямую теми же pg_dump/pg_restore операциями, код репозитория не менялся.
+
+### Следующий пакет
+
+- Выполнить staging migration refresh/upgrade compatibility check на копии staging DB.
+- Проверить downgrade email migration только на временной test DB.
+- После этого остаются UI/translation polish и отдельное решение о production rollout.
+
 ## 2026-08-20 — final review package started
 
 - Выполнен read-only diff review `master...HEAD`: изменения находятся в web/auth/staging/docs/tests контуре; production workflow не запускался.
