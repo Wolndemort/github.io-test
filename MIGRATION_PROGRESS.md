@@ -1762,3 +1762,9 @@ Verification for Stage 50:
 
 - Current Web package deployed only to `/root/speedycrm-staging`; API/DB/Redis/nginx containers recreated with isolated compose.
 - No real receipt, invitation or broadcast was sent during deployment; only build/auth-gate checks are allowed without explicit external-recipient approval.
+
+## 2026-08-20 — main navigation route audit
+
+- Static client/staff/settings menu links in `static/web/components.js` were matched against registered FastAPI routes.
+- All static links resolve; audit/student detail links are dynamic parameterized routes and are covered by backend.
+- Main menu audit passed without a static 404 mismatch; next scope is admin cabinet and club settings button-by-button.
