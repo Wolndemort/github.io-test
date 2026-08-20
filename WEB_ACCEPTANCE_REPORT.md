@@ -71,6 +71,7 @@ Scheduler flags and Turnstile configuration now have Web controls; real relay pu
 - Linked-parent scope fix is deployed to isolated staging; no real client mutation executed during deployment.
 - Client purchases audit fixed missing confirmed subscription/freeze payment rows; suite: `487 passed`.
 - Client profile now displays scoped full name/email and populates the edit form; suite: `488 passed`.
+- Client profile package is deployed to isolated staging; authenticated visual mutation smoke remains in the full audit queue.
 - Settings state fix is deployed to isolated staging; authenticated button-by-button settings smoke remains part of the ongoing audit.
 - Hardware result is limited to the explicitly approved staging/work-area relay test; production/master were not involved.
 - Manual authenticated owner/client Email OTP/API smoke: previously passed and recorded in `MIGRATION_PROGRESS.md` (including owner session, `auth_source=email`, club scope and logout).

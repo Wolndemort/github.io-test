@@ -1,5 +1,9 @@
 # Web migration progress
 
+## 2026-08-20 — client profile package staged
+
+- Client purchases/profile/scope audit package deployed only to `/root/speedycrm-staging`; isolated API/DB/Redis/nginx containers rebuilt.
+
 ## Current state
 
 - Project: `C:\Users\79615\PycharmProjects\aaaa`
