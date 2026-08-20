@@ -83,7 +83,8 @@
 - [ ] Run authenticated hardware/browser WebAuthn smoke on staging (requires supported browser/device and enabled staging flag).
 - [ ] Add tests for every remaining legacy operation: refunds, payment-method changes, receipt delivery and invitations.
 - [x] Staging unauthenticated/auth-gating smoke after latest settings build; temporary flags remained disabled and no test data was created.
-- [ ] Verify staging migration refresh and downgrade/upgrade after current changes (WebAuthn migration not deployed yet).
+- [x] Verify staging rebuild and migration upgrade after current changes; staging is at `a1b2c3d4e5f6`.
+- [ ] Verify migration downgrade/upgrade in a disposable separate staging test DB.
 - [ ] Verify backup artifact and restore in a separate test DB.
 - [ ] Human diff review, production backup approval, rollback image/commit review.
 - [ ] Final Telegram regression smoke.

@@ -1668,3 +1668,10 @@ Verification for Stage 50:
 - В клиентский и staff-профиль добавлен feature-gated блок Passkeys: регистрация через `navigator.credentials.create`, список устройств и revoke.
 - UI не заявляет успешность без ответа API; при отключённом флаге показывает безопасное состояние. Native browser smoke на staging ещё не выполнялся.
 - После UI-пакета полный локальный suite: `483 passed`; `git diff --check` чистый.
+
+## 2026-08-20 — WebAuthn staging deployment
+
+- Текущий архив проекта синхронизирован только в `/root/speedycrm-staging`; live, ALTER, `master` и production не использовались.
+- Staging пересобран и поднят: API, PostgreSQL, Redis и nginx работают; `/health=200`, `/ready=200`.
+- Alembic успешно применил `a1b2c3d4e5f6`; WebAuthn API/UI присутствуют в staging image.
+- Hardware/browser Face ID smoke ещё не отмечается выполненным: нужен authenticated staging-сеанс и поддерживаемый браузер/телефон.
