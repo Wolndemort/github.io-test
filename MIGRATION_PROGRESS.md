@@ -921,5 +921,7 @@ Verification for Stage 50:
 - Yandex adapter проверен локально, full suite: `418 passed`; boto3 добавлен в requirements. Staging rebuild/send test — следующий шаг, native flags пока выключены после SMTP egress failure.
 - Yandex Postbox staging send test достиг adapter, но вернул безопасный `503`; добавлено server-side exception logging без secrets для диагностики provider rejection. Native flags временно включены только staging.
 - Postbox HTTPS transport работает, но API ответил `ResponseParserError` с request/trace IDs без XML; flags удалены из staging и API healthy. Следом нужно сверить Yandex IAM role/API operation (`ses` vs `sesv2`) и sender identity, затем повторить один тест.
+- Добавлен non-sending `scripts/check_postbox_api.py` для проверки `GetSendQuota` через `ses`/`sesv2` без раскрытия keys и без отправки письма. Следующий staging diagnostic.
+- Postbox diagnostic: `ses` endpoint отвечает `ResponseParserError`, `sesv2` не предоставляет `GetSendQuota` в этом API. Письма не отправлялись; native flags остаются выключены. Нужно сверить именно SendEmail API/адрес отправителя по Postbox docs, а не делать повторные blind sends.
 - Restricted pages enforce `analytics_view`/`qr_checkin`; no settings mutation was exposed.
 - Added settings page tests; remaining: continue the next 3–4 migration blocks.
