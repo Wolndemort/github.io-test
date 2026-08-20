@@ -51,7 +51,8 @@
 - [x] Subscription/freeze UI with scoped tariff/student selectors.
 - [x] Online payment provider integration smoke with mocked provider; approved real staging payment test remains pending.
 - [x] Webhook integration matrix contracts for success, wrong amount, wrong metadata, duplicate and provider retry.
-- [ ] Any remaining legacy operations: refunds, payment method changes, receipt delivery, audit search/delete policy, invitations, phone/email binding.
+- [ ] Any remaining legacy operations: refunds, payment method changes, receipt delivery, audit search/delete policy, invitations.
+- [x] Client phone binding UI wired to the existing rate-limited Web endpoint; email binding UI already present.
 
 ### Frontend
 
@@ -61,7 +62,7 @@
 - [x] Add confirmation guard for money, archive, reversal, cancellation and freeze/sale mutations.
 - [ ] Full EN/RU translations; current selector changes language state but is not a complete translation system.
 - [ ] Final shared design polish and spacing, including SpeedyCRM/Staff Web labels.
-- [ ] Mobile/browser accessibility pass.
+- [x] Shared mobile/browser accessibility pass: navigation labels, language label, focus-visible states and mobile link overflow.
 
 ### Verification and rollout
 

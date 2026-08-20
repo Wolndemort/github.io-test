@@ -1509,3 +1509,21 @@ Verification for Stage 50:
 ### Следующий пакет
 
 - Закрыть legacy operations audit и финальные client/browser accessibility checks.
+## 2026-08-20 — Client legacy binding UI
+
+- В Client Profile добавлена phone binding форма с `tel`/`autocomplete`, CSRF, idempotency и понятным success/error сообщением.
+- Используется существующий rate-limited `/api/v1/client/bind-phone`; backend остаётся feature-flagged и club-scoped.
+- Добавлен legacy UI contract test.
+
+### Следующий пакет
+
+- Проверить accessibility маркировку, mobile navigation и полный suite.
+## 2026-08-20 — Shared Web accessibility pass
+
+- Shared navigation получил `aria-label`, language select — accessible label, controls — visible `:focus-visible` outline.
+- Mobile navigation сохраняет горизонтальный scroll без выхода за viewport.
+- Добавлен accessibility contract test.
+
+### Следующий пакет
+
+- Полный suite и review оставшихся legacy operation gaps.
