@@ -933,5 +933,6 @@ Verification for Stage 50:
 - Первый UI smoke email profile подтверждён скриншотом: account/email page открывается, verified email отображается. Убран дублирующийся текст формы для уже подтверждённого email; теперь verified account показывает только статус и passwordless availability.
 - Добавлена функциональная public page `/auth/native-login?club_id=2` для email request/verify без Telegram. Визуальная полировка намеренно отложена; добавлен contract test.
 - Native login page contract passed; full suite: `420 passed`, `git diff --check` clean. Следом staging rebuild и logout → `/auth/native-login?club_id=2` smoke.
+- Исправлен browser validation bug: f-string превращал `[0-9]{6}` в `[0-9]6`; pattern экранирован, targeted test `1 passed`, staging rebuilt, `/ready` 200.
 - Restricted pages enforce `analytics_view`/`qr_checkin`; no settings mutation was exposed.
 - Added settings page tests; remaining: continue the next 3–4 migration blocks.
