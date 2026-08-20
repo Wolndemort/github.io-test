@@ -503,6 +503,42 @@ async def manual_checkin(request: Request, context: AuthContext | None = Depends
     return {"ok": True, "club_id": actor.club_id, "student_id": student_id, "result": result, "read_only": False}
 
 
+@checkin_router.post("/cancel")
+async def cancel_checkin(request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):
+    actor = require_web_context(context)
+    if os.getenv("WEB_CHECKIN_CANCEL_ENABLED", "0") != "1":
+        raise HTTPException(status_code=404, detail={"code": "feature_disabled"})
+    if actor.actor_type == "staff" and "manual_checkin" not in actor.permissions:
+        raise HTTPException(status_code=403, detail={"code": "permission_denied"})
+    await require_csrf(request.app.state.redis_client, request)
+    payload = await request.json()
+    if set(payload) - {"visit_id", "reason", "idempotency_key"}:
+        raise HTTPException(status_code=400, detail={"code": "invalid_checkin_cancel_fields"})
+    try:
+        visit_id = int(payload.get("visit_id"))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail={"code": "invalid_visit_id"})
+    reason = str(payload.get("reason") or "").strip()
+    key = str(payload.get("idempotency_key") or "").strip()
+    if not key or len(key) > 100 or not 3 <= len(reason) <= 500:
+        raise HTTPException(status_code=400, detail={"code": "invalid_checkin_cancel_request"})
+    accepted = await request.app.state.redis_client.set(f"web:cancel-checkin:{actor.club_id}:{visit_id}:{key}", "1", ex=300, nx=True)
+    if not accepted:
+        return {"ok": True, "idempotent_replay": True, "club_id": actor.club_id, "visit_id": visit_id}
+    visit = await session.scalar(select(VisitLog).where(VisitLog.id == visit_id, VisitLog.club_id == actor.club_id).with_for_update())
+    if not visit:
+        raise HTTPException(status_code=404, detail={"code": "visit_not_found"})
+    student = await session.scalar(select(Student).where(Student.id == visit.student_id, Student.club_id == actor.club_id).with_for_update())
+    if not student:
+        raise HTTPException(status_code=404, detail={"code": "student_not_found"})
+    previous = await session.scalar(select(VisitLog.visited_at).where(VisitLog.student_id == student.id, VisitLog.club_id == actor.club_id, VisitLog.id != visit_id).order_by(VisitLog.visited_at.desc()).limit(1))
+    student.last_visit = previous
+    await session.delete(visit)
+    await session.commit()
+    audit_event("web_checkin_cancelled", club_id=actor.club_id, actor_user_id=actor.user_id, action="cancel", object_type="visit", object_id=visit_id, location="web/staff/checkin", reason=reason)
+    return {"ok": True, "club_id": actor.club_id, "visit_id": visit_id, "student_id": student.id, "read_only": False}
+
+
 @freeze_router.get("/data")
 async def staff_freeze_data(request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):
     actor = require_web_context(context)

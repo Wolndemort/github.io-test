@@ -945,6 +945,19 @@ Verification for Stage 50:
 - Seeded staging-only synthetic client fixture: `user_id=990000001`, club 1, one student, same test email; added seed/cleanup helpers. Native flags enabled only in staging for client Web smoke; fixture must be removed after verification.
 - Restricted pages enforce `analytics_view`/`qr_checkin`; no settings mutation was exposed.
 
+## 2026-08-20 — functional Web operations: check-in cancellation
+
+- Добавлен `POST /api/v1/staff/checkin/cancel` для отмены конкретного посещения.
+- Реализованы feature flag `WEB_CHECKIN_CANCEL_ENABLED`, permission `manual_checkin`, CSRF, strict payload allowlist, reason validation, idempotency, club-scoped row locks для visit/student, корректное восстановление `student.last_visit`, transaction и audit.
+- Добавлен отдельный contract test полного safety-контура.
+- Targeted suite: `5 passed`; полный suite: `444 passed`; `git diff --check` чист.
+- Telegram, live, ALTER и `master` не затронуты.
+
+### Следующий пакет
+
+- Добавить UI для редактирования ученика, manual check-in и отмены посещения.
+- Реализовать кассовую операцию через Web AuthContext: приход/расход со строгой суммой, idempotency, audit и reversal вместо небезопасного удаления.
+
 ## 2026-08-20 — functional Web operations: student update and manual check-in
 
 - Web student update mutation уже добавлен и покрыт полным safety-контуром.
