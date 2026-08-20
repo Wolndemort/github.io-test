@@ -923,5 +923,7 @@ Verification for Stage 50:
 - Postbox HTTPS transport работает, но API ответил `ResponseParserError` с request/trace IDs без XML; flags удалены из staging и API healthy. Следом нужно сверить Yandex IAM role/API operation (`ses` vs `sesv2`) и sender identity, затем повторить один тест.
 - Добавлен non-sending `scripts/check_postbox_api.py` для проверки `GetSendQuota` через `ses`/`sesv2` без раскрытия keys и без отправки письма. Следующий staging diagnostic.
 - Postbox diagnostic: `ses` endpoint отвечает `ResponseParserError`, `sesv2` не предоставляет `GetSendQuota` в этом API. Письма не отправлялись; native flags остаются выключены. Нужно сверить именно SendEmail API/адрес отправителя по Postbox docs, а не делать повторные blind sends.
+- Подготовлен одноразовый `scripts/send_postbox_probe.py` для реального `sesv2.SendEmail` на staging test email; secrets не печатаются, приложение/native flags не включаются.
+- Реальный Postbox probe успешно отправил письмо (`sesv2.SendEmail: send=ok`). Adapter переключён с несовместимого `ses` на `sesv2`; следующий шаг — staging rebuild и один Email OTP request.
 - Restricted pages enforce `analytics_view`/`qr_checkin`; no settings mutation was exposed.
 - Added settings page tests; remaining: continue the next 3–4 migration blocks.

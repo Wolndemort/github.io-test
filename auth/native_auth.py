@@ -84,19 +84,19 @@ def _send_yandex_postbox(recipient: str, code: str) -> None:
     if not all((access_key, secret_key, sender)):
         raise RuntimeError("Yandex Postbox is not configured")
     client = boto3.client(
-        "ses",
+        "sesv2",
         region_name=region,
         endpoint_url=endpoint,
         aws_access_key_id=access_key,
         aws_secret_access_key=secret_key,
     )
     client.send_email(
-        Source=sender,
+        FromEmailAddress=sender,
         Destination={"ToAddresses": [recipient]},
-        Message={
+        Content={"Simple": {
             "Subject": {"Data": "SpeedyCRM Web login code", "Charset": "UTF-8"},
             "Body": {"Text": {"Data": f"Your SpeedyCRM login code is {code}. It expires in 10 minutes.", "Charset": "UTF-8"}},
-        },
+        }},
     )
 
 
