@@ -44,7 +44,7 @@
 - [x] Discipline configuration mutation with safe schedule block allowlist.
 - [x] Camera/turnstile configuration controls without exposing device secrets.
 - [x] Notification preference mutation for safe boolean flags.
-- [ ] Staff list/edit UI, staff permissions UI and user/client profile editing.
+- [x] Staff list UI and staff create/update backend; permissions editing UI remains.
 - [ ] Discount assignment removal/list UI.
 - [ ] Product sale UI with product picker, buyer picker and discount picker.
 - [ ] Subscription/freeze UI with tariff/student selectors.
