@@ -869,9 +869,16 @@ async def update_club_settings_web(request: Request, context: AuthContext | None
     club = await session.scalar(select(Club).where(Club.id == actor.club_id).with_for_update())
     if not club: raise HTTPException(status_code=404, detail={"code": "club_not_found"})
     settings = dict(club.club_settings or {})
+    section_keys = {
+        "branding": {"club_name", "logo_url", "theme"},
+        "limits": {"session_timeout_minutes", "freeze_price_per_day", "max_upload_mb", "max_students"},
+        "features": {"freeze", "qr_checkin", "online_payments", "work_schedule_reminders"},
+        "menu": {"show_schedule", "show_shop", "show_payments", "show_history", "show_freeze"},
+    }
     for section in ("branding", "limits", "features", "menu"):
         if section in payload:
             if not isinstance(payload[section], dict) or len(payload[section]) > 50: raise HTTPException(status_code=400, detail={"code": "invalid_settings_section"})
+            if set(payload[section]) - section_keys[section]: raise HTTPException(status_code=400, detail={"code": "invalid_settings_keys"})
             settings["ui" if section == "branding" else section] = dict(payload[section])
     if "branding" in payload:
         if any(len(str(v)) > 500 for v in payload["branding"].values()): raise HTTPException(status_code=400, detail={"code": "invalid_branding"})

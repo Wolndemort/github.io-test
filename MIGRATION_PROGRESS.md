@@ -945,6 +945,20 @@ Verification for Stage 50:
 - Seeded staging-only synthetic client fixture: `user_id=990000001`, club 1, one student, same test email; added seed/cleanup helpers. Native flags enabled only in staging for client Web smoke; fixture must be removed after verification.
 - Restricted pages enforce `analytics_view`/`qr_checkin`; no settings mutation was exposed.
 
+## 2026-08-20 — club settings UI and strict allowlists
+
+- Клубные settings UI теперь содержит формы для branding, limits, features, menu и integrations.
+- Server settings mutation ужесточён allowlist ключей: branding (`club_name`, `logo_url`, `theme`), limits, safe features и user menu flags; произвольные JSON keys отклоняются.
+- Integration UI изменяет только `email_enabled`/`push_enabled`; provider credentials и bot/payment secrets не принимаются.
+- Targeted suite: `4 passed`; полный suite: `460 passed`; JavaScript `node --check` и `git diff --check` чистые.
+- Telegram, live, ALTER и `master` не затронуты.
+
+### Следующий пакет
+
+- Проверить staging browser flow для настроек и staff management с временными flags.
+- Перенести оставшиеся клубные настройки: disciplines/schedule configuration, camera/turnstile safe controls и notification preferences.
+- Затем закрыть финальный функциональный список и production smoke.
+
 ## 2026-08-20 — online payment UI and webhook safety
 
 - В client purchases UI добавлена форма payment redirect через `POST /api/v1/client/payments/{order_id}/intent`.
