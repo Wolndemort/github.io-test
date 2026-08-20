@@ -1745,3 +1745,8 @@ Verification for Stage 50:
 - Добавлены client Web endpoints `/api/v1/client/payment-methods` и DELETE для отвязки saved card token (`Subscription.rebill_id`) только текущего user/club.
 - Удаление использует CSRF, row lock, club scope, audit; UI добавлен в client profile. Сырые payment tokens и masked card data не раскрываются.
 - Refunds/receipt delivery/invitations ещё не реализованы в Web; локальный suite после пакета: `483 passed`.
+
+## 2026-08-20 — payment method package staged
+
+- Пакет saved payment method revoke развернут только в staging вместе с broadcast; containers пересозданы через staging compose.
+- Реальный payment mutation не выполнялся; нужен authenticated browser smoke с тестовой сохранённой картой.
