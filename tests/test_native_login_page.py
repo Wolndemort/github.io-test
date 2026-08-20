@@ -8,4 +8,5 @@ def test_public_native_login_page_has_request_and_verify_flow():
     assert "auth/native/request" in block
     assert "auth/native/verify" in block
     assert "one-time-code" in block
+    assert "[0-9]{{6}}" in block
     assert "Telegram is not required" in block
