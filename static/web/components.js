@@ -79,3 +79,17 @@ window.SpeedyCRMWeb = {
     });
   }
 };
+
+// Functional operation panels are mounted consistently on the existing pages.
+// Server-side feature flags remain the final safety gate.
+document.addEventListener("DOMContentLoaded", () => {
+  const csrf = () => decodeURIComponent((document.cookie.match(/(?:^|; )speedycrm_csrf_token=([^;]*)/) || [])[1] || "");
+  const post = (url, body) => SpeedyCRMWeb.json(url, {method: "POST", headers: {"Content-Type": "application/json", "X-CSRF-Token": csrf()}, body: JSON.stringify({...body, idempotency_key: crypto.randomUUID()})});
+  const form = (html, handler) => { const wrapper = document.createElement("div"); wrapper.className = "web-card"; wrapper.innerHTML = html; wrapper.querySelector("form").addEventListener("submit", handler); return wrapper; };
+  setTimeout(() => {
+    const cash = document.querySelector("#cash");
+    if (cash) cash.appendChild(form('<h2>Cash operation</h2><form><select name="entry_type"><option value="income">Income</option><option value="expense">Expense</option></select><input name="amount" type="number" min="0.01" step="0.01" placeholder="Amount" required><input name="description" maxlength="500" placeholder="Reason" required><button>Save</button></form><p data-operation-result role="status"></p>', async event => { event.preventDefault(); const f = new FormData(event.target), result = event.currentTarget.querySelector("[data-operation-result]"); try { await post("/api/v1/staff/cash/entries", {entry_type: f.get("entry_type"), amount_kopecks: Math.round(Number(f.get("amount")) * 100), description: f.get("description"), category: "other"}); result.textContent = "Cash entry saved."; } catch (_) { result.textContent = "Operation unavailable or disabled."; } }));
+    const sales = document.querySelector("#sales");
+    if (sales) sales.appendChild(form('<h2>Cash product sale</h2><form><input name="product_id" type="number" min="1" placeholder="Product ID" required><input name="quantity" type="number" min="1" max="99" value="1" required><input name="buyer_user_id" type="number" min="1" placeholder="Buyer user ID" required><button>Sell</button></form><p data-operation-result role="status"></p>', async event => { event.preventDefault(); const f = new FormData(event.target), result = event.currentTarget.querySelector("[data-operation-result]"); try { const data = await post("/api/v1/staff/sales/cash-product", {buyer_user_id: Number(f.get("buyer_user_id")), items: [{product_id: Number(f.get("product_id")), quantity: Number(f.get("quantity"))}]}); result.textContent = `Sale ${data.order_id} saved.`; } catch (_) { result.textContent = "Sale unavailable or disabled."; } }));
+  }, 0);
+});
