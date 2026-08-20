@@ -107,6 +107,8 @@ The next acceptance block is not styling-only: first compare every Telegram CRM 
 
 The staff forecast, athlete list and overview routes are present in the Web backend, but the navigation labels were English and therefore did not match the Telegram menu. A separate Web “Recent operations” page is genuinely missing. Telegram’s `admin_sales` is richer than the current Web sales summary and must be ported as a distinct financial operations page; Web Audit must remain a separate technical event log.
 
+The gap is larger than navigation: legacy `/admin` (`templates/admin.html`) is the full `Таблица WebApp`, legacy `/stats` is the full statistics dashboard, and legacy `/forecast` (`templates/forecast.html`) includes filters, athlete forecast rows, discipline/tariff breakdown and Chart.js revenue/visit graphs. Current Web pages are only proof-of-concept KPI/list shells and do not meet parity acceptance yet.
+
 ### 2026-08-20 — navigation visual checkpoint
 
 The Web navigation now uses a left off-canvas drawer instead of an inline menu. All static and dynamically-added role/settings links are spaced readable links inside the drawer; language and logout are separated into its footer. The overlay, Escape key, close action and navigation links close the drawer safely. Local validation passed: JavaScript syntax check, whitespace check and 491 pytest tests. Authenticated staging visual confirmation remains to be recorded after deployment.

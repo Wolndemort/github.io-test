@@ -156,6 +156,9 @@
 - [ ] Add explicit drawer entries for `Атлеты` (`/staff/students`), `Прогноз` (`/staff/forecast`) and `Последние операции` (new Web page).
 - [ ] Port Telegram `admin_sales` operation list: period/type/payment filters, totals, buyer/athlete, order details, receipt/payment method actions and audit-safe delete policy.
 - [ ] Keep `Audit` separate: it is the technical audit log, not the financial recent-operations page.
+- [ ] Port legacy `/admin` as a real Web `Таблица`: filters, athlete rows, balances/subscriptions/visits, inline actions and safe mutations.
+- [ ] Port legacy `/stats` as a real Web `Статистика`: KPI blocks, periods, disciplines, churn/top athletes, cash/revenue/expenses/margin and export where approved.
+- [ ] Port legacy `/forecast` fully: date filters, forecast athlete table, renewal/revenue data, discipline breakdown and revenue/visit charts; 3 KPI cards alone are not acceptance.
 
 ## 2026-08-20 checkpoint — navigation visual package
 
