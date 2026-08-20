@@ -1734,3 +1734,8 @@ Verification for Stage 50:
 - Контур защищён AuthContext, `broadcast` permission, feature flag, CSRF, club scope, Redis idempotency, лимитом 4096 символов и audit; recipients собираются из users + linked student parents текущего клуба.
 - Media-copy пока сознательно не добавлен в Web; сначала проверяется text-only staging smoke.
 - После пакета локальный suite: `483 passed`.
+
+## 2026-08-20 — broadcast package staged
+
+- Текстовая Web-рассылка развернута только в `speedycrm-staging`; `/health=200`, `/staff/broadcast=401` без сессии, POST API route присутствует.
+- Реальный broadcast не отправлялся: внешняя рассылка требует отдельного подтверждения и безопасного тестового recipient scope.
