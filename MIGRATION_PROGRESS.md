@@ -945,6 +945,13 @@ Verification for Stage 50:
 - Seeded staging-only synthetic client fixture: `user_id=990000001`, club 1, one student, same test email; added seed/cleanup helpers. Native flags enabled only in staging for client Web smoke; fixture must be removed after verification.
 - Restricted pages enforce `analytics_view`/`qr_checkin`; no settings mutation was exposed.
 
+## 2026-08-20 — continuation handoff checkpoint
+
+- Создан `WEB_MIGRATION_CONTINUATION_CHECKLIST.md` для продолжения работы после лагов/перезапуска чата.
+- В checklist записаны branch/staging context, completed functional blocks, оставшийся A-to-Z scope, обязательный safety standard для каждой mutation, тестовые gates и безопасные команды продолжения.
+- Secrets, tokens, cookies и `init_data` в checklist не записывались.
+- Текущая ветка остаётся `web-migration/phase-0-auth`; live SpeedyCRM, ALTER и `master` не затронуты.
+
 ## 2026-08-20 — club settings UI and strict allowlists
 
 - Клубные settings UI теперь содержит формы для branding, limits, features, menu и integrations.
