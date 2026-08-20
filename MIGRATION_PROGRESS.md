@@ -869,6 +869,7 @@ Verification for Stage 50:
 - `/health` и `/ready` возвращают 200, DB/Redis ok, `bots_active: 0`, staging API healthy.
 - Live-контейнеры продолжили работать; `/root/alter` не использовался. Ветка `web-migration/phase-0-auth`, production deploy не выполнялся.
 - Tunnel: `ssh -N -L 18000:127.0.0.1:18000 -i C:\Users\79615\.ssh\alter_agent root@77.73.131.175`
+- Smoke через tunnel: `/health` 200, `/ready` 200, `/auth/login` 200; `/auth/me` и `/staff` без сессии корректно возвращают 401. Сторонние `/api/*` пути не являются текущим web-контрактом и не использовались как критерий.
 - Осталось: browser smoke через tunnel, auth/read-only проверка и отдельное решение по mutations; production rollout запрещён.
 - Restricted pages enforce `analytics_view`/`qr_checkin`; no settings mutation was exposed.
 - Added settings page tests; remaining: continue the next 3–4 migration blocks.
