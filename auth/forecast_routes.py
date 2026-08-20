@@ -1,5 +1,9 @@
 import os
 import uuid
+import base64
+import hashlib
+import hmac
+import io
 from datetime import date, timedelta
 import re
 
@@ -15,7 +19,8 @@ from services.schedule_utils import normalize_schedule_block
 from services.gate_control import process_athlete_gate_pass
 from services.discounts import active_discounts, apply_discounts
 from services.yookassa_client import YooKassaClient
-from config import PROXY_URL
+from config import PROXY_URL, secret_key
+import qrcode
 from services.analytics import (
     build_expiry_series,
     build_revenue_series,
@@ -1141,6 +1146,24 @@ async def client_cabinet_data(request: Request, context: AuthContext | None = De
     students = list((await session.execute(select(Student).where(Student.club_id == actor.club_id, Student.parent_id == actor.user_id).order_by(Student.name))).scalars().all())
     return {"club_id": actor.club_id, "user_id": actor.user_id, "students": [{"id": s.id, "name": s.name, "discipline": s.discipline, "expire_date": s.expire_date.isoformat() if s.expire_date else None, "balance_lessons": s.balance_lessons or 0} for s in students], "read_only": True}
 
+@client_router.get("/pass/data")
+async def client_pass_data(request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):
+    actor = require_web_context(context)
+    club = await session.scalar(select(Club).where(Club.id == actor.club_id))
+    settings = club.club_settings if club and isinstance(club.club_settings, dict) else {}
+    if not (settings.get("features", {}) or {}).get("qr_checkin", True):
+        raise HTTPException(status_code=404, detail={"code": "feature_disabled"})
+    students = list((await session.execute(select(Student).outerjoin(StudentParent, StudentParent.student_id == Student.id).where(Student.club_id == actor.club_id, (Student.parent_id == actor.user_id) | (StudentParent.parent_id == actor.user_id)).distinct().order_by(Student.name))).scalars().all())
+    from datetime import datetime, timezone
+    time_salt = datetime.now(timezone.utc).strftime("%Y-%m-%d-%H")
+    passes = []
+    for student in students:
+        signature = hmac.new((secret_key or "").encode(), f"{student.id}:{time_salt}".encode(), hashlib.sha256).hexdigest()[:10]
+        qr_data = f"student:{student.id}:{time_salt}:{signature}"
+        image = qrcode.make(qr_data); buffer = io.BytesIO(); image.save(buffer, format="PNG")
+        passes.append({"student_id": student.id, "name": student.name, "qr_data": qr_data, "image_data_url": "data:image/png;base64," + base64.b64encode(buffer.getvalue()).decode("ascii")})
+    return {"club_id": actor.club_id, "passes": passes, "expires_hour": time_salt, "read_only": True}
+
 
 @client_router.get("/me")
 async def client_me(request: Request, context: AuthContext | None = Depends(web_context)):
@@ -1503,6 +1526,11 @@ async def _client_page(context, title, endpoint, label):
     require_web_context(context)
     return HTMLResponse(f'''<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>{title} · SpeedyCRM</title><link rel="stylesheet" href="/static/web/design.css"><script src="/static/web/components.js"></script></head><body><div class="web-shell"><div class="web-container"><div id="navigation"></div><section class="web-hero"><span class="web-kicker">Client / {label}</span><h1>{title},<br>at hand.</h1><p>Ваши данные в read-only режиме.</p></section><section class="web-card" id="client-data">Загрузка…</section></div></div><script>document.querySelector("#navigation").innerHTML=SpeedyCRMWeb.navigation("Client web / {label}");SpeedyCRMWeb.json("{endpoint}").then(data=>{{const items=data.history||data.students||[];document.querySelector('#client-data').innerHTML=`<h2>${{items.length}} записей</h2>`}}).catch(()=>{{document.querySelector('#client-data').innerHTML=SpeedyCRMWeb.error("Не удалось загрузить данные")}});</script></body></html>''')
 
+
+@web_router.get("/client/pass", response_class=HTMLResponse)
+async def web_client_pass_page(context: AuthContext | None = Depends(web_context)):
+    require_web_context(context)
+    return HTMLResponse('''<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>QR pass · SpeedyCRM</title><link rel="stylesheet" href="/static/web/design.css"><script src="/static/web/components.js"></script></head><body><div class="web-shell"><div class="web-container"><div id="navigation"></div><section class="web-hero"><span class="web-kicker">Client / QR pass</span><h1>Pass,<br>ready.</h1><p>QR-код генерируется только для студентов текущего authenticated клиента и действует в текущем часовом окне.</p></section><section class="web-card" id="pass">Загрузка…</section></div></div><script>document.querySelector("#navigation").innerHTML=SpeedyCRMWeb.navigation("Client web / QR pass");SpeedyCRMWeb.json("/api/v1/client/pass/data").then(data=>{document.querySelector('#pass').innerHTML=data.passes.length?data.passes.map(item=>`<article class="web-card"><h2>${item.name}</h2><img src="${item.image_data_url}" alt="QR pass for ${item.name}" width="240" height="240"><p>Expires: ${data.expires_hour} UTC hour</p><code>${item.qr_data}</code></article>`).join(""):"<p class=web-empty>No linked students.</p>"}).catch(()=>{document.querySelector('#pass').innerHTML=SpeedyCRMWeb.error("Не удалось загрузить QR-пропуск")});</script></body></html>''')
 
 @web_router.get("/client/history", response_class=HTMLResponse)
 async def web_client_history_page(context: AuthContext | None = Depends(web_context)):

@@ -40,6 +40,7 @@
 ### Functional backend
 
 - [ ] Verify and complete all legacy operations against Web AuthContext, not Telegram `init_data`.
+- [ ] Complete authenticated browser acceptance matrix and record results in `WEB_ACCEPTANCE_REPORT.md`.
 - [x] Schedule editing UI and backend contract smoke.
 - [x] Discipline configuration mutation with safe schedule block allowlist.
 - [x] Camera/turnstile configuration controls without exposing device secrets.
@@ -53,6 +54,7 @@
 - [x] Webhook integration matrix contracts for success, wrong amount, wrong metadata, duplicate and provider retry.
 - [ ] Any remaining legacy operations: refunds, payment method changes, receipt delivery, audit search/delete policy, invitations.
 - [x] Client phone binding UI wired to the existing rate-limited Web endpoint; email binding UI already present.
+- [x] Client QR pass UI/API with authenticated parent/club scope and Telegram-compatible hourly HMAC payload.
 
 ### Frontend
 

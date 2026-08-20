@@ -1527,3 +1527,27 @@ Verification for Stage 50:
 ### Следующий пакет
 
 - Полный suite и review оставшихся legacy operation gaps.
+## 2026-08-20 — Client QR pass parity
+
+- Добавлен native Web Client QR pass: `/client/pass` и `/api/v1/client/pass/data`.
+- Студенты выбираются только по `actor.user_id`/`actor.club_id` с учётом `StudentParent`; QR payload совместим с Telegram hourly HMAC format.
+- API возвращает QR image data URL и raw payload для scanner; feature `qr_checkin` и Web AuthContext обязательны.
+- Добавлен client pass contract test.
+
+### Следующий пакет
+
+- Проверить client/staff authenticated data matrix и подготовить финальный acceptance report.
+## 2026-08-20 — Web A–Z acceptance report started
+
+- Добавлен `WEB_ACCEPTANCE_REPORT.md` с A–Z функциональной матрицей Telegram/Web, окружениями, проверенными safety gates и честным списком pending authenticated browser scenarios.
+- Отдельно зафиксировано: нельзя объявлять ручной authenticated auth smoke пройденным без approved staging test account/mailbox.
+- QR pass parity добавлен в матрицу; полный suite нужно повторить после этого изменения.
+
+### Следующий пакет
+
+- Запустить полный suite после QR pass и завершить authenticated acceptance только с approved staging fixture.
+## 2026-08-20 — QR pass and acceptance report verified
+
+- После QR pass выполнен полный regression suite: `476 passed`; `git diff --check` чист.
+- A–Z report обновлён в `WEB_ACCEPTANCE_REPORT.md`.
+- Authenticated browser acceptance и реальный staging payment остаются явно pending до approved staging fixture; master/production не трогались.
