@@ -917,5 +917,7 @@ Verification for Stage 50:
 - Следующая диагностика показала реальную причину: staging SMTP host — `smtp.gmail.com:587`, контейнер получает `Network is unreachable`. Credentials загружены; требуется сетевой маршрут/разрешение outbound SMTP, не изменение auth-кода.
 - После сетевого теста (`host timeout`, `container OSError`) native flags удалены из staging secret file и API перезапущен, `/ready` 200. SMTP delivery failure теперь будет безопасным `503 email_delivery_unavailable`, без внутренних traceback.
 - Проверен firewall: UFW inactive, `iptables OUTPUT ACCEPT`, host default route присутствует. Дополнительное allow-правило для 587 не требуется; timeout/Network unreachable к Gmail находится вне локального firewall. Native flags остаются выключены.
+- Подготовлен Yandex Cloud Postbox HTTPS adapter через boto3/443 как альтернатива заблокированному SMTP 587. Secrets используются только из staging env и не логируются; добавлен contract test. Требуется staging rebuild и безопасный send test.
+- Yandex adapter проверен локально, full suite: `418 passed`; boto3 добавлен в requirements. Staging rebuild/send test — следующий шаг, native flags пока выключены после SMTP egress failure.
 - Restricted pages enforce `analytics_view`/`qr_checkin`; no settings mutation was exposed.
 - Added settings page tests; remaining: continue the next 3–4 migration blocks.

@@ -51,6 +51,9 @@ async def consume_otp(redis: Redis, email: str, club_id: int, code: str, purpose
 
 
 def send_email_otp(recipient: str, code: str) -> None:
+    if os.getenv("EMAIL_PROVIDER", "smtp").casefold() == "yandex_postbox":
+        _send_yandex_postbox(recipient, code)
+        return
     host = os.getenv("SMTP_HOST")
     user = os.getenv("SMTP_USERNAME", os.getenv("SMTP_USER"))
     password = os.getenv("SMTP_PASSWORD")
@@ -68,6 +71,33 @@ def send_email_otp(recipient: str, code: str) -> None:
         if user and password:
             smtp.login(user, password)
         smtp.send_message(message)
+
+
+def _send_yandex_postbox(recipient: str, code: str) -> None:
+    import boto3
+
+    endpoint = os.getenv("YANDEX_POSTBOX_ENDPOINT", "https://postbox.cloud.yandex.net")
+    region = os.getenv("YANDEX_POSTBOX_REGION", "ru-central1")
+    access_key = os.getenv("YANDEX_ACCESS_KEY_ID")
+    secret_key = os.getenv("YANDEX_SECRET_ACCESS_KEY")
+    sender = os.getenv("EMAIL_FROM_EMAIL")
+    if not all((access_key, secret_key, sender)):
+        raise RuntimeError("Yandex Postbox is not configured")
+    client = boto3.client(
+        "ses",
+        region_name=region,
+        endpoint_url=endpoint,
+        aws_access_key_id=access_key,
+        aws_secret_access_key=secret_key,
+    )
+    client.send_email(
+        Source=sender,
+        Destination={"ToAddresses": [recipient]},
+        Message={
+            "Subject": {"Data": "SpeedyCRM Web login code", "Charset": "UTF-8"},
+            "Body": {"Text": {"Data": f"Your SpeedyCRM login code is {code}. It expires in 10 minutes.", "Charset": "UTF-8"}},
+        },
+    )
 
 
 async def deliver_email_otp(recipient: str, code: str) -> None:
