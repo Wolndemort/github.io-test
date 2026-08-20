@@ -10,7 +10,7 @@ import asyncio
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database.db import AuditEntry, CartOrder, CartItem, CashEntry, Club, ClubProduct, ClubStaff, Discount, DiscountAssignment, PaymentOrder, Subscription, Student, StudentParent, VisitLog, User, add_abon, purchase_student_freeze, get_session
@@ -50,6 +50,15 @@ client_router = APIRouter(prefix="/api/v1/client", tags=["Web Client"])
 settings_router = APIRouter(prefix="/api/v1/staff/settings", tags=["Web Settings"])
 checkin_router = APIRouter(prefix="/api/v1/staff/checkin", tags=["Web Checkin"])
 freeze_router = APIRouter(prefix="/api/v1/staff/freeze", tags=["Web Freeze"])
+
+async def client_scoped_students(actor: AuthContext, session: AsyncSession):
+    result = await session.execute(
+        select(Student).outerjoin(StudentParent, StudentParent.student_id == Student.id).where(
+            Student.club_id == actor.club_id,
+            or_(Student.parent_id == actor.user_id, StudentParent.parent_id == actor.user_id),
+        ).distinct().order_by(Student.name)
+    )
+    return list(result.scalars().all())
 
 @router.post("/broadcast")
 async def web_broadcast(request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):
@@ -1301,7 +1310,7 @@ async def staff_freeze_data(request: Request, context: AuthContext | None = Depe
 @client_router.get("/cabinet/data")
 async def client_cabinet_data(request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):
     actor = require_web_context(context)
-    students = list((await session.execute(select(Student).where(Student.club_id == actor.club_id, Student.parent_id == actor.user_id).order_by(Student.name))).scalars().all())
+    students = await client_scoped_students(actor, session)
     return {"club_id": actor.club_id, "user_id": actor.user_id, "students": [{"id": s.id, "name": s.name, "discipline": s.discipline, "expire_date": s.expire_date.isoformat() if s.expire_date else None, "balance_lessons": s.balance_lessons or 0} for s in students], "read_only": True}
 
 @client_router.get("/pass/data")
@@ -1396,13 +1405,13 @@ async def client_club_data(request: Request, context: AuthContext | None = Depen
 
 @client_router.get("/summary/attendance")
 async def client_attendance_summary(request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):
-    actor=require_web_context(context); students=list((await session.execute(select(Student.id).where(Student.club_id==actor.club_id,Student.parent_id==actor.user_id))).scalars().all()); visits=[]
+    actor=require_web_context(context); students=[s.id for s in await client_scoped_students(actor, session)]; visits=[]
     if students: visits=list((await session.execute(select(VisitLog).where(VisitLog.club_id==actor.club_id,VisitLog.student_id.in_(students)))).scalars().all())
     return {"club_id":actor.club_id,"student_count":len(students),"visit_count":len(visits),"read_only":True}
 
 @client_router.get("/summary/subscriptions")
 async def client_subscription_summary(request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):
-    actor=require_web_context(context); students=list((await session.execute(select(Student).where(Student.club_id==actor.club_id,Student.parent_id==actor.user_id))).scalars().all()); active=sum(1 for s in students if s.expire_date and s.balance_lessons and not s.is_frozen)
+    actor=require_web_context(context); students=await client_scoped_students(actor, session); active=sum(1 for s in students if s.expire_date and s.balance_lessons and not s.is_frozen)
     return {"club_id":actor.club_id,"total":len(students),"active":active,"read_only":True}
 
 @client_router.get("/summary/purchases")
@@ -1441,7 +1450,7 @@ async def client_create_student(request: Request, context: AuthContext | None = 
 @client_router.get("/history/data")
 async def client_history_data(request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session), limit: int = Query(default=50, ge=1, le=100)):
     actor = require_web_context(context)
-    student_ids = list((await session.execute(select(Student.id).where(Student.club_id == actor.club_id, Student.parent_id == actor.user_id))).scalars().all())
+    student_ids = [student.id for student in await client_scoped_students(actor, session)]
     visits = []
     if student_ids:
         visits = list((await session.execute(select(VisitLog).where(VisitLog.club_id == actor.club_id, VisitLog.student_id.in_(student_ids)).order_by(VisitLog.visited_at.desc()).limit(limit))).scalars().all())
@@ -1451,14 +1460,14 @@ async def client_history_data(request: Request, context: AuthContext | None = De
 @client_router.get("/freeze/data")
 async def client_freeze_data(request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):
     actor = require_web_context(context)
-    students = list((await session.execute(select(Student).where(Student.club_id == actor.club_id, Student.parent_id == actor.user_id))).scalars().all())
+    students = await client_scoped_students(actor, session)
     return {"club_id": actor.club_id, "students": [{"id": s.id, "name": s.name, "is_frozen": bool(s.is_frozen), "frozen_until": s.frozen_until.isoformat() if getattr(s, "frozen_until", None) else None} for s in students], "read_only": True}
 
 
 @client_router.get("/subscriptions/data")
 async def client_subscriptions_data(request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):
     actor = require_web_context(context)
-    students = list((await session.execute(select(Student).where(Student.club_id == actor.club_id, Student.parent_id == actor.user_id).order_by(Student.name))).scalars().all())
+    students = await client_scoped_students(actor, session)
     return {"club_id": actor.club_id, "subscriptions": [{"student_id": s.id, "student_name": s.name, "discipline": s.discipline, "expire_date": s.expire_date.isoformat() if s.expire_date else None, "balance_lessons": s.balance_lessons or 0, "is_active": bool(s.expire_date and s.balance_lessons and not s.is_frozen)} for s in students], "read_only": True}
 
 

@@ -1793,3 +1793,9 @@ Verification for Stage 50:
 ## 2026-08-20 — client scope fix staged
 
 - Client ownership security fix for freeze/student scope deployed only to `/root/speedycrm-staging`; containers rebuilt with isolated compose.
+
+## 2026-08-20 — linked-parent client read scope
+
+- Унифицирован client student scope для cabinet, history, freeze, subscriptions и summary: primary parent и `StudentParent` linked parent теперь видят одинаковые записи.
+- QR pass уже использовал linked scope; теперь остальные client read pages согласованы с ним.
+- Добавлен regression contract; полный suite: `486 passed`.
