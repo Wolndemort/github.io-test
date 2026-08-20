@@ -5,7 +5,11 @@ SECRETS=/root/speedycrm-staging/.staging-secrets
 DB_CONTAINER=speedycrm_staging_db
 
 test -s "$SECRETS"
-token="$(awk -F= '$1 == "STAGING_BOT_TOKEN" {print substr($0, index($0,$2)); exit}' "$SECRETS")"
+if grep -q '^STAGING_BOT_TOKEN=' "$SECRETS"; then
+  token="$(sed -n 's/^STAGING_BOT_TOKEN=//p' "$SECRETS" | head -n 1)"
+else
+  token="$(head -n 1 "$SECRETS")"
+fi
 test -n "$token"
 club_id="$(docker exec "$DB_CONTAINER" psql -U postgres -d crm_db -Atc 'SELECT id FROM clubs ORDER BY id LIMIT 1')"
 test -n "$club_id"

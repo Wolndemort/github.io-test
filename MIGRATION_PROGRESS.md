@@ -883,5 +883,7 @@ Verification for Stage 50:
 - Добавлен `STAGING_RUNBOOK.md` с tunnel, smoke, lifecycle и DB-refresh процедурами. Runbook не содержит секретов и явно запрещает операции с live/ALTER.
 - Production-readiness обновлён: suite `411 passed`, staging gate отмечен выполненным для изолированного окружения и unauthenticated smoke. Production gate остаётся закрытым до отдельного Telegram test account, browser smoke, backup/rollback review и явного approval.
 - При настройке staging bot PostgreSQL diagnostic раскрыл token из-за попытки записать один token сразу в две уникальные club-записи. Token немедленно удалён с сервера; staging DB подтверждён с `0` bot tokens. Требуется отозвать этот token через BotFather и создать новый. Helper исправлен: новый token будет назначаться только первой staging club-записи.
+- Новый staging bot token принят без вывода в логи, записан только в одну staging club-запись (`1` non-null token), API перезапущен только в staging. `/health` и `/ready` — 200, `bots_active: 1`, DB/Redis ok. Live и ALTER не затронуты.
+- Следующий production-readiness блок: получить реальный `init_data` от staging bot/test account. Для полноценного Telegram WebApp browser smoke потребуется безопасный HTTPS staging entry или ручная передача одноразового init_data без публикации token.
 - Restricted pages enforce `analytics_view`/`qr_checkin`; no settings mutation was exposed.
 - Added settings page tests; remaining: continue the next 3–4 migration blocks.
