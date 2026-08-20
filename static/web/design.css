@@ -1,11 +1,11 @@
 :root {
-  --web-bg: #f4f4f1;
+  --web-bg: #ffffff;
   --web-surface: #ffffff;
   --web-ink: #111111;
   --web-muted: #777773;
-  --web-line: #deded8;
-  --web-radius: 24px;
-  --web-shadow: 0 12px 36px rgba(17, 17, 17, .06);
+  --web-line: #e6e6e6;
+  --web-radius: 20px;
+  --web-shadow: 0 14px 40px rgba(17, 17, 17, .05);
   --web-space: clamp(16px, 3vw, 40px);
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   color: var(--web-ink);
@@ -16,11 +16,25 @@
 body { margin: 0; background: var(--web-bg); }
 .web-shell { min-height: 100vh; padding: var(--web-space); }
 .web-container { width: min(1180px, 100%); margin: 0 auto; }
-.web-nav { display: flex; justify-content: space-between; align-items: center; margin-bottom: clamp(32px, 7vw, 84px); }
+.web-nav { display: flex; justify-content: space-between; align-items: center; gap: 20px; margin-bottom: clamp(32px, 7vw, 84px); }
 .web-brand { font-weight: 800; letter-spacing: .14em; font-size: 12px; }
 .web-brand, .web-links a { color: inherit; text-decoration: none; }
 .web-links a:focus-visible, .web-brand:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px solid #111; outline-offset: 3px; }
-.web-links { display: flex; gap: 14px; color: var(--web-muted); font-size: 12px; }
+.web-links { display: flex; align-items: center; gap: 12px; color: var(--web-muted); font-size: 12px; }
+.web-menu { position: relative; }
+.web-menu summary { cursor: pointer; list-style: none; border: 1px solid var(--web-ink); border-radius: 999px; padding: 10px 14px; color: var(--web-ink); background: #fff; font-weight: 700; }
+.web-menu summary::-webkit-details-marker { display: none; }
+.web-menu[open] summary { background: var(--web-ink); color: #fff; }
+.web-menu-panel { position: absolute; z-index: 20; top: calc(100% + 8px); left: 0; min-width: 230px; max-height: 70vh; overflow: auto; padding: 8px; border: 1px solid var(--web-line); border-radius: 16px; background: #fff; box-shadow: var(--web-shadow); }
+.web-menu-panel a { display: block; padding: 10px 12px; border-radius: 10px; color: var(--web-ink); }
+.web-menu-panel a:hover { background: #f2f2f2; }
+.web-language { display: inline-flex; align-items: center; gap: 6px; color: var(--web-muted); }
+button, input, select, textarea { font: inherit; }
+button { border: 1px solid var(--web-ink); border-radius: 12px; padding: 11px 16px; background: var(--web-ink); color: #fff; cursor: pointer; font-weight: 700; transition: transform .15s ease, opacity .15s ease; }
+button:hover:not(:disabled) { transform: translateY(-1px); }
+button:disabled { cursor: wait; opacity: .55; }
+input, select, textarea { width: 100%; border: 1px solid #cfcfcf; border-radius: 12px; padding: 12px 14px; background: #fff; color: var(--web-ink); }
+label { display: grid; gap: 8px; margin-bottom: 14px; color: var(--web-muted); font-size: 13px; }
 .web-kicker { color: var(--web-muted); font-size: 12px; letter-spacing: .12em; text-transform: uppercase; }
 .web-breadcrumb { color: var(--web-muted); font-size: 12px; margin-bottom: 18px; }
 .web-breadcrumb a { color: inherit; }
@@ -38,4 +52,4 @@ body { margin: 0; background: var(--web-bg); }
 .web-value { font-size: clamp(28px, 5vw, 48px); letter-spacing: -.06em; font-weight: 750; }
 .web-status { color: var(--web-muted); font-size: 14px; }
 .web-error { color: #8b1e1e; }
-@media (max-width: 720px) { .web-grid { grid-template-columns: 1fr; } .web-nav { margin-bottom: 40px; align-items: flex-start; flex-wrap: wrap; gap: 12px; } .web-links { order: 3; width: 100%; overflow-x: auto; } }
+@media (max-width: 720px) { .web-grid { grid-template-columns: 1fr; } .web-nav { margin-bottom: 40px; align-items: flex-start; flex-wrap: wrap; gap: 12px; } .web-links { order: 3; width: 100%; justify-content: space-between; } .web-menu-panel { position: fixed; left: 16px; right: 16px; top: 72px; max-height: calc(100vh - 96px); } }

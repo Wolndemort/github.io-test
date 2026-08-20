@@ -80,6 +80,8 @@
 - [x] Verify cash and check-in secondary forms have explicit handlers (reversal/cancel).
 - [x] Audit owner/staff/client role and feature-gate contracts for legacy Web operations; regression assertions added.
 - [x] Add GET data endpoints for notifications and disciplines after staging `405` log review.
+- [x] Start shared visual pass: white background, black contrast, unified controls and compact dropdown navigation.
+- [ ] Complete authenticated visual review of every page after CSS deployment.
 - [ ] Configure a separate approved staging bot token before real broadcast smoke; never reuse live token.
 - [x] Deploy settings state fix to isolated staging.
 - [ ] Any remaining legacy operations: refunds, payment method changes, receipt delivery, audit search/delete policy, invitations.

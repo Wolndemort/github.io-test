@@ -97,6 +97,14 @@ document.addEventListener("DOMContentLoaded", () => {
   const post = (url, body) => SpeedyCRMWeb.json(url, {method: "POST", headers: {"Content-Type": "application/json", "X-CSRF-Token": csrf()}, body: JSON.stringify({...body, idempotency_key: crypto.randomUUID()})});
   const form = (html, handler) => { const wrapper = document.createElement("div"); wrapper.className = "web-card"; wrapper.innerHTML = html; const target = wrapper.querySelector("form"); target.addEventListener("submit", event => { const title = wrapper.querySelector("h2")?.textContent || ""; if (/(Cash|Sell|Activate|Freeze|Cancel|Reverse|Archive|deactivat)/i.test(title) && !window.confirm(`Confirm: ${title}?`)) event.preventDefault(); }, {capture: true}); target.addEventListener("submit", async event => { if (event.defaultPrevented) return; const button = target.querySelector("button[type=submit], button"); const label = button?.textContent; if (button) { button.disabled = true; button.textContent = "Saving…"; target.setAttribute("aria-busy", "true"); } try { await handler(event); } finally { if (button) { button.disabled = false; button.textContent = label; } target.removeAttribute("aria-busy"); } }); return wrapper; };
   setTimeout(() => {
+    document.querySelectorAll(".web-links").forEach(container => {
+      if (container.querySelector(".web-menu")) return;
+      const menu = document.createElement("details"); menu.className = "web-menu";
+      const summary = document.createElement("summary"); summary.textContent = "Menu";
+      const panel = document.createElement("div"); panel.className = "web-menu-panel";
+      [...container.querySelectorAll(":scope > a")].forEach(link => panel.appendChild(link));
+      menu.append(summary, panel); container.prepend(menu);
+    });
     if (location.pathname.startsWith("/client/") && !document.querySelector('.web-links a[href="/client/pass"]')) { const passLink = document.createElement("a"); passLink.href = "/client/pass"; passLink.textContent = "QR pass"; document.querySelector(".web-links")?.prepend(passLink); }
     if (location.pathname.startsWith("/staff/") && !document.querySelector('.web-links a[href="/staff/profile"]')) { const profileLink = document.createElement("a"); profileLink.href = "/staff/profile"; profileLink.textContent = "Profile"; document.querySelector(".web-links")?.prepend(profileLink); }
     if (location.pathname.startsWith("/staff/") && !document.querySelector('.web-links a[href="/staff/broadcast"]')) { const broadcastLink = document.createElement("a"); broadcastLink.href = "/staff/broadcast"; broadcastLink.textContent = "Broadcast"; document.querySelector(".web-links")?.prepend(broadcastLink); }

@@ -1,5 +1,11 @@
 # Web migration progress
 
+## 2026-08-20 — visual system pass started
+
+- Общий Web UI переведён на белоснежный фон, чёрный контрастный ink, единые rounded controls, inputs/selects/textareas/buttons, focus/hover/disabled states.
+- Длинная верхняя навигация собрана в компактное левое выпадающее Menu; mobile menu открывается fixed-панелью без горизонтального overflow.
+- `node --check` и полный suite: `491 passed`.
+
 ## 2026-08-20 — settings GET endpoints fixed
 
 - Staging logs выявили: `/settings/notifications` и `/settings/disciplines` имели только PATCH, UI GET получал `405` и показывал пустые данные.
