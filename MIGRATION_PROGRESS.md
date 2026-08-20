@@ -945,6 +945,20 @@ Verification for Stage 50:
 - Seeded staging-only synthetic client fixture: `user_id=990000001`, club 1, one student, same test email; added seed/cleanup helpers. Native flags enabled only in staging for client Web smoke; fixture must be removed after verification.
 - Restricted pages enforce `analytics_view`/`qr_checkin`; no settings mutation was exposed.
 
+## 2026-08-20 — final review package started
+
+- Выполнен read-only diff review `master...HEAD`: изменения находятся в web/auth/staging/docs/tests контуре; production workflow не запускался.
+- Secret hygiene review не обнаружил staging/live credentials в новых web-asset и contract-файлах; реальные secrets остаются только во внешних server env files.
+- Проверена последняя Email migration: revision `z8a9b0c1d2e3` → `y7z8a9b0c1d2`, nullable upgrade и downgrade присутствуют.
+- Добавлен [PRODUCTION_MIGRATION_CHECKLIST.md](PRODUCTION_MIGRATION_CHECKLIST.md) с completed/required gates и safety rules.
+- `master`, live SpeedyCRM и ALTER не затронуты; merge/push не выполнялись.
+
+### Следующий пакет
+
+- Выполнить backup artifact verification и restore-check только в отдельной test DB.
+- Сверить staging migration upgrade/downgrade после refresh из актуального snapshot.
+- После закрытия технических gates отдельно решить вопрос merge в `master`; автоматический production deploy без явного approval запрещён.
+
 ## 2026-08-20 — production-readiness package: isolation, backup and rollback
 
 - Добавлены cross-club contract checks для native client auth и read-only client routes: actor scope проверяется до выдачи web session/данных.
