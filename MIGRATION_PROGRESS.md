@@ -920,5 +920,6 @@ Verification for Stage 50:
 - Подготовлен Yandex Cloud Postbox HTTPS adapter через boto3/443 как альтернатива заблокированному SMTP 587. Secrets используются только из staging env и не логируются; добавлен contract test. Требуется staging rebuild и безопасный send test.
 - Yandex adapter проверен локально, full suite: `418 passed`; boto3 добавлен в requirements. Staging rebuild/send test — следующий шаг, native flags пока выключены после SMTP egress failure.
 - Yandex Postbox staging send test достиг adapter, но вернул безопасный `503`; добавлено server-side exception logging без secrets для диагностики provider rejection. Native flags временно включены только staging.
+- Postbox HTTPS transport работает, но API ответил `ResponseParserError` с request/trace IDs без XML; flags удалены из staging и API healthy. Следом нужно сверить Yandex IAM role/API operation (`ses` vs `sesv2`) и sender identity, затем повторить один тест.
 - Restricted pages enforce `analytics_view`/`qr_checkin`; no settings mutation was exposed.
 - Added settings page tests; remaining: continue the next 3–4 migration blocks.
