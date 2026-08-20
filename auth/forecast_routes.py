@@ -818,6 +818,24 @@ async def camera_data(request: Request, context: AuthContext | None = Depends(we
     camera = settings.get("camera", {}) if isinstance(settings.get("camera", {}), dict) else {}
     return {"club_id": actor.club_id, "camera": {"enabled": bool(camera.get("enabled", False)), "name": str(camera.get("name", "camera1"))[:100]}, "read_only": True}
 
+
+@settings_router.patch("/camera")
+async def update_camera_web(request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):
+    actor = require_web_context(context)
+    if os.getenv("WEB_SETTINGS_MUTATIONS_ENABLED", "0") != "1": raise HTTPException(status_code=404, detail={"code": "feature_disabled"})
+    if actor.actor_type != "owner" and "settings_manage" not in actor.permissions: raise HTTPException(status_code=403, detail={"code": "permission_denied"})
+    await require_csrf(request.app.state.redis_client, request); payload = await request.json(); key = str(payload.get("idempotency_key") or "").strip()
+    if set(payload) - {"enabled", "name", "base_url", "idempotency_key"} or not key or len(key) > 100: raise HTTPException(status_code=400, detail={"code": "invalid_camera_fields"})
+    if "enabled" in payload and not isinstance(payload["enabled"], bool): raise HTTPException(status_code=400, detail={"code": "invalid_camera_enabled"})
+    name = str(payload.get("name") or "camera1").strip(); base_url = str(payload.get("base_url") or "").strip()
+    if len(name) > 100 or len(base_url) > 300 or (base_url and not (base_url.startswith("http://") or base_url.startswith("https://"))): raise HTTPException(status_code=400, detail={"code": "invalid_camera_address"})
+    if not await request.app.state.redis_client.set(f"web:camera:{actor.club_id}:{key}", "1", ex=900, nx=True): return {"ok": True, "idempotent_replay": True, "club_id": actor.club_id}
+    club = await session.scalar(select(Club).where(Club.id == actor.club_id).with_for_update())
+    if not club: raise HTTPException(status_code=404, detail={"code": "club_not_found"})
+    settings = dict(club.club_settings or {}); current = dict(settings.get("camera", {}) or {}); current.update({k: payload[k] for k in ("enabled", "name", "base_url") if k in payload}); settings["camera"] = current; club.club_settings = settings; await session.commit()
+    audit_event("web_camera_updated", club_id=actor.club_id, actor_user_id=actor.user_id, action="update", object_type="camera", location="web/staff/settings/camera", enabled=current.get("enabled", False))
+    return {"ok": True, "club_id": actor.club_id, "camera": {"enabled": bool(current.get("enabled", False)), "name": str(current.get("name", "camera1"))[:100]}, "read_only": False}
+
 @settings_router.get("/features")
 async def features_data(request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):
     actor = require_web_context(context); club = await session.scalar(select(Club).where(Club.id == actor.club_id)); settings = club.club_settings if club and isinstance(club.club_settings, dict) else {}
