@@ -30,3 +30,11 @@ def test_client_profile_response_is_user_and_club_scoped_with_real_fields():
 
 def test_client_freeze_data_exposes_derived_frozen_until():
     assert 'timedelta(days=int(getattr(s, "frozen_days", None) or 0))' in SOURCE
+
+
+def test_legacy_web_operations_keep_scope_and_audit_contracts():
+    assert 'web_payment_method_deleted' in SOURCE
+    assert 'web_receipt_delivered' in SOURCE
+    assert 'web_student_invite_created' in SOURCE
+    assert 'web:broadcast:' in SOURCE
+    assert 'actor.club_id' in SOURCE

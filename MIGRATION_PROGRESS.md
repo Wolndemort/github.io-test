@@ -7,6 +7,11 @@
 
 - Staging UI rebuilt after the multi-form handler fix; cash/check-in forms were separately verified as explicitly bound handlers.
 
+## 2026-08-20 — final role/scope contract audit
+
+- Сверены owner/staff/client permission and feature-gate contracts для legacy Web operations: broadcast, payment method revoke, receipt, invitation, freeze, profile and payments.
+- Добавлены regression assertions на audit/idempotency/scope markers; полный suite: `490 passed`.
+
 ## 2026-08-20 — client profile package staged
 
 - Client purchases/profile/scope audit package deployed only to `/root/speedycrm-staging`; isolated API/DB/Redis/nginx containers rebuilt.
