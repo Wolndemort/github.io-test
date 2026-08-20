@@ -945,6 +945,20 @@ Verification for Stage 50:
 - Seeded staging-only synthetic client fixture: `user_id=990000001`, club 1, one student, same test email; added seed/cleanup helpers. Native flags enabled only in staging for client Web smoke; fixture must be removed after verification.
 - Restricted pages enforce `analytics_view`/`qr_checkin`; no settings mutation was exposed.
 
+## 2026-08-20 — functional Web operations: tariffs and discount assignments
+
+- Добавлен `PATCH /api/v1/staff/catalog/tariffs/{discipline}` с allowlisted tariff fields, count/days/price validation, club row lock, idempotency, `tariffs_manage`, CSRF, feature flag `WEB_PRICING_MUTATIONS_ENABLED`, transaction и audit.
+- Добавлен `POST /api/v1/staff/catalog/discounts/{discount_id}/assign` для назначения скидки user или student.
+- Assignment проверяет ровно одну target-сущность, существование в том же клубе, активность скидки, idempotency, CSRF, permission и audit.
+- Targeted suite: `4 passed`; полный suite: `456 passed`; `git diff --check` чист.
+- Telegram, live, ALTER и `master` не затронуты.
+
+### Следующий пакет
+
+- Перенести staff/user management и пользовательские меню.
+- Перенести integrations/settings безопасными allowlists без секретов.
+- Затем online payment intent/webhook и staging functional smoke.
+
 ## 2026-08-20 — functional Web operations: club settings and pricing
 
 - Добавлен `PATCH /api/v1/staff/settings/club` для allowlisted branding/limits/features/menu sections.

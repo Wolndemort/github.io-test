@@ -737,6 +737,50 @@ async def tariff_detail_data(discipline: str, request: Request, context: AuthCon
     return {"club_id": actor.club_id, "discipline": discipline, "tariffs": block.get("tariffs", []), "read_only": True}
 
 
+@catalog_router.patch("/tariffs/{discipline}")
+async def update_tariffs_web(discipline: str, request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):
+    actor = require_web_context(context)
+    if os.getenv("WEB_PRICING_MUTATIONS_ENABLED", "0") != "1": raise HTTPException(status_code=404, detail={"code": "feature_disabled"})
+    if actor.actor_type == "staff" and "tariffs_manage" not in actor.permissions: raise HTTPException(status_code=403, detail={"code": "permission_denied"})
+    await require_csrf(request.app.state.redis_client, request); payload = await request.json(); key = str(payload.get("idempotency_key") or "").strip(); tariffs = payload.get("tariffs")
+    if set(payload) - {"tariffs", "idempotency_key"} or not key or len(key) > 100 or not isinstance(tariffs, list) or len(tariffs) > 100: raise HTTPException(status_code=400, detail={"code": "invalid_tariffs"})
+    for tariff in tariffs:
+        if not isinstance(tariff, dict) or set(tariff) - {"name", "count", "days", "price", "min_age", "max_age"}: raise HTTPException(status_code=400, detail={"code": "invalid_tariff_fields"})
+        try: count = int(tariff.get("count", 0)); days = int(tariff.get("days", 0)); price = int(float(tariff.get("price", 0)))
+        except (TypeError, ValueError): raise HTTPException(status_code=400, detail={"code": "invalid_tariff_numbers"})
+        if not 1 <= count <= 999 or not 1 <= days <= 366 or price <= 0 or len(str(tariff.get("name", ""))) > 120: raise HTTPException(status_code=400, detail={"code": "invalid_tariff"})
+    if not await request.app.state.redis_client.set(f"web:tariffs:{actor.club_id}:{discipline}:{key}", "1", ex=900, nx=True): return {"ok": True, "idempotent_replay": True, "club_id": actor.club_id, "discipline": discipline}
+    club = await session.scalar(select(Club).where(Club.id == actor.club_id).with_for_update())
+    settings = dict(club.club_settings or {}) if club else {}; disciplines = dict(settings.get("disciplines", {}) or {})
+    if discipline not in disciplines or not isinstance(disciplines[discipline], dict): raise HTTPException(status_code=404, detail={"code": "discipline_not_found"})
+    block = dict(disciplines[discipline]); block["tariffs"] = tariffs; disciplines[discipline] = block; settings["disciplines"] = disciplines; club.club_settings = settings
+    await session.commit(); audit_event("web_tariffs_updated", club_id=actor.club_id, actor_user_id=actor.user_id, action="update", object_type="tariffs", object_id=discipline, location="web/staff/tariffs")
+    return {"ok": True, "club_id": actor.club_id, "discipline": discipline, "tariff_count": len(tariffs), "read_only": False}
+
+
+@catalog_router.post("/discounts/{discount_id}/assign")
+async def assign_discount_web(discount_id: int, request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):
+    actor = require_web_context(context)
+    if os.getenv("WEB_PRICING_MUTATIONS_ENABLED", "0") != "1": raise HTTPException(status_code=404, detail={"code": "feature_disabled"})
+    if actor.actor_type == "staff" and "tariffs_manage" not in actor.permissions: raise HTTPException(status_code=403, detail={"code": "permission_denied"})
+    await require_csrf(request.app.state.redis_client, request); payload = await request.json(); key = str(payload.get("idempotency_key") or "").strip()
+    if set(payload) - {"user_id", "student_id", "idempotency_key"} or not key or len(key) > 100: raise HTTPException(status_code=400, detail={"code": "invalid_discount_assignment"})
+    user_id = payload.get("user_id"); student_id = payload.get("student_id")
+    if (user_id is None) == (student_id is None): raise HTTPException(status_code=400, detail={"code": "one_assignment_target_required"})
+    if not await request.app.state.redis_client.set(f"web:discount-assign:{actor.club_id}:{discount_id}:{key}", "1", ex=900, nx=True): return {"ok": True, "idempotent_replay": True, "club_id": actor.club_id, "discount_id": discount_id}
+    discount = await session.scalar(select(Discount).where(Discount.id == discount_id, Discount.club_id == actor.club_id, Discount.is_active.is_(True)).with_for_update())
+    if not discount: raise HTTPException(status_code=404, detail={"code": "discount_not_found"})
+    if user_id is not None:
+        user = await session.scalar(select(User).where(User.user_id == int(user_id), User.club_id == actor.club_id))
+        if not user: raise HTTPException(status_code=404, detail={"code": "user_not_found"})
+    else:
+        student = await session.scalar(select(Student).where(Student.id == int(student_id), Student.club_id == actor.club_id))
+        if not student: raise HTTPException(status_code=404, detail={"code": "student_not_found"})
+    assignment = DiscountAssignment(club_id=actor.club_id, discount_id=discount_id, user_id=int(user_id) if user_id is not None else None, student_id=int(student_id) if student_id is not None else None); session.add(assignment)
+    await session.commit(); audit_event("web_discount_assigned", club_id=actor.club_id, actor_user_id=actor.user_id, action="assign", object_type="discount", object_id=discount_id, location="web/staff/discounts", user_id=user_id, student_id=student_id)
+    return {"ok": True, "club_id": actor.club_id, "discount_id": discount_id, "assignment_id": assignment.id, "read_only": False}
+
+
 @settings_router.get("/legal")
 async def legal_data(request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):
     actor = require_web_context(context)
