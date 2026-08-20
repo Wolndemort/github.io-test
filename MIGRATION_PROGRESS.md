@@ -877,5 +877,6 @@ Verification for Stage 50:
 - Полный локальный regression suite после фикса: `411 passed`.
 - Повторная серверная проверка: staging API/DB/Redis healthy; live `gym_*` и `githubio-test-redis-1` healthy; staging слушает только `127.0.0.1:18000`, публичные 80/443 принадлежат live nginx.
 - Осталось: получить тестовую Telegram Web авторизацию для staging и пройти авторизованные staff/client страницы; без неё проверяется только корректное auth-gating. Затем — review перед любым rollout.
+- Добавлен воспроизводимый `scripts/staging_smoke.ps1`: через SSH tunnel проверяет health/readiness, auth entry и 32 защищённых staff/client web routes. Smoke пройден: все ожидаемые статусы корректны.
 - Restricted pages enforce `analytics_view`/`qr_checkin`; no settings mutation was exposed.
 - Added settings page tests; remaining: continue the next 3–4 migration blocks.
