@@ -1,3 +1,5 @@
+import os
+
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel
@@ -20,8 +22,66 @@ from .web_session import (
     set_session_cookie,
     validate_csrf,
 )
+from .native_auth import consume_otp, deliver_email_otp, issue_otp, normalize_email
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
+
+
+class TelegramExchangePayload(BaseModel):
+    init_data: str
+    club_id: int
+
+
+class NativeOtpRequest(BaseModel):
+    email: str
+    club_id: int
+
+
+class NativeOtpVerify(NativeOtpRequest):
+    code: str
+
+
+def native_auth_enabled() -> bool:
+    return os.getenv("WEB_NATIVE_AUTH_ENABLED", "0") == "1"
+
+
+@router.post("/native/request")
+async def native_request(payload: NativeOtpRequest, request: Request, session: AsyncSession = Depends(get_session)):
+    if not native_auth_enabled():
+        raise HTTPException(status_code=404, detail={"code": "feature_disabled"})
+    email = normalize_email(payload.email)
+    club = await session.scalar(select(Club).where(Club.id == payload.club_id))
+    user = await session.scalar(select(User).where(User.club_id == payload.club_id, User.email == email)) if club else None
+    if user:
+        code = await issue_otp(request.app.state.redis_client, email, payload.club_id)
+        await deliver_email_otp(email, code)
+    return {"ok": True, "message": "If the account exists, a code was sent."}
+
+
+@router.post("/native/verify")
+async def native_verify(payload: NativeOtpVerify, request: Request, session: AsyncSession = Depends(get_session)):
+    if not native_auth_enabled():
+        raise HTTPException(status_code=404, detail={"code": "feature_disabled"})
+    email = normalize_email(payload.email)
+    user = await session.scalar(select(User).where(User.club_id == payload.club_id, User.email == email))
+    if not user or not await consume_otp(request.app.state.redis_client, email, payload.club_id, payload.code):
+        raise HTTPException(status_code=401, detail={"code": "invalid_code"})
+    club = await session.scalar(select(Club).where(Club.id == payload.club_id))
+    staff = await session.scalar(select(ClubStaff).where(ClubStaff.club_id == payload.club_id, ClubStaff.telegram_id == user.user_id, ClubStaff.is_active.is_(True)))
+    if user.user_id == int(club.owner_id or 0):
+        actor_type, role, permissions = "owner", "owner", frozenset()
+    elif staff:
+        actor_type, role, permissions = "staff", staff.role, frozenset(permissions_for_staff(staff))
+    else:
+        actor_type, role, permissions = "client", "client", frozenset()
+    session_id = await create_web_session(request.app.state.redis_client, AuthContext(user.user_id, payload.club_id, actor_type, role, permissions, "email"))
+    response = JSONResponse({"ok": True, "redirect": "/staff" if actor_type != "client" else "/client/cabinet"})
+    set_session_cookie(response, session_id)
+    raw_session = await request.app.state.redis_client.get(f"web_session:{session_id}")
+    if isinstance(raw_session, bytes): raw_session = raw_session.decode("utf-8")
+    import json
+    set_csrf_cookie(response, json.loads(raw_session)["csrf_token"])
+    return response
 
 
 @router.get("/web-entry", response_class=HTMLResponse)
@@ -33,11 +93,6 @@ const tg=window.Telegram&&window.Telegram.WebApp;
 if(!tg||!tg.initData){{status.textContent="Open this page from the staging Telegram bot.";}}
 else{{tg.ready();fetch("/auth/telegram/exchange",{{method:"POST",headers:{{"Content-Type":"application/json"}},body:JSON.stringify({{init_data:tg.initData,club_id:{club_id}}})}}).then(async r=>{{if(!r.ok)throw new Error(await r.text());return r.json();}}).then(d=>location.replace(d.redirect||"/staff")).catch(e=>{{status.textContent="Authentication failed.";console.error(e);}});}}
 </script></body></html>''')
-
-
-class TelegramExchangePayload(BaseModel):
-    init_data: str
-    club_id: int
 
 
 @router.get("/login")

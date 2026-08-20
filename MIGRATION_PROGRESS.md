@@ -900,5 +900,7 @@ Verification for Stage 50:
 - Client Telegram smoke признан необязательным для цели миграции. Native auth переведён с SMS на Email OTP: обновлён контракт с Redis/session/CSRF правилами и feature-flag rollout. Telegram остаётся fallback; native auth пока не включён.
 - Добавлено nullable `users.email` и обратимая Alembic-миграция `z8a9b0c1d2e3` для будущего Email OTP; добавлен migration contract test. Existing users не требуют немедленного заполнения email.
 - Email schema проверена: полный suite `414 passed`; staging обновлён миграцией, `users.email` доступно, `/ready` 200, `bots_active: 1`. Native Email OTP всё ещё выключен до mail adapter/provider.
+- Реализован feature-gated Email OTP core: `/auth/native/request` и `/auth/native/verify`, Redis hash/TTL/attempt limit, SMTP adapter, server-side session/CSRF и club-scoped actor resolution. Добавлен contract test; flag `WEB_NATIVE_AUTH_ENABLED=0`, поэтому flow не активен.
+- После исправления порядка деклараций моделей полный suite: `415 passed`, `git diff --check` без ошибок. Email OTP endpoints остаются выключенными флагом.
 - Restricted pages enforce `analytics_view`/`qr_checkin`; no settings mutation was exposed.
 - Added settings page tests; remaining: continue the next 3–4 migration blocks.
