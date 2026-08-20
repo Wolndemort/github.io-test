@@ -49,8 +49,8 @@ Scheduler flags and Turnstile configuration now have Web controls; real relay pu
 - После восстановления staging текущий commit был пересобран только в `/root/speedycrm-staging`; health/ready smoke снова зелёный, новые scheduler/turnstile/menu/client-pass routes корректно gated `401` без сессии.
 - Staging flags/data: no production flags enabled and no test data created by the smoke.
 - Real staging payment: not executed; requires approved provider test account/credentials.
-- Real turnstile pulse: not executed; staging endpoint was unavailable during the latest attempt, so no hardware side effect occurred.
-- Current staging API is now available; relay pulse remains pending until the configured device is confirmed as a non-production test relay.
+- Real staging turnstile pulse: passed after staging restore. One direct pulse was sent through `speedycrm_staging_api` using club 2 configuration; no student was selected and no visit/CRM record was created.
+- Hardware result is limited to the explicitly approved staging/work-area relay test; production/master were not involved.
 - Manual authenticated owner/client Email OTP/API smoke: previously passed and recorded in `MIGRATION_PROGRESS.md` (including owner session, `auth_source=email`, club scope and logout).
 - Manual visual browser re-check: pending for every client page, QR pass, freeze, purchases and each mutation button because earlier pages could render empty.
 

@@ -47,7 +47,7 @@
 - [x] Camera mutation and Menu flags settings pages are wired to scoped APIs.
 - [x] Staff management editor uses authenticated staff selector for role, active state and permissions.
 - [x] Scheduler flags and safe Turnstile configuration controls are wired to Web APIs; real relay hardware smoke remains staging-only.
-- [ ] Real staging turnstile pulse smoke; latest attempt blocked by unavailable staging endpoint, with no relay request sent.
+- [x] Real staging turnstile pulse smoke passed after isolated staging restore; no student/visit record was created.
 - [x] Schedule editing UI and backend contract smoke.
 - [x] Discipline configuration mutation with safe schedule block allowlist.
 - [x] Camera/turnstile configuration controls without exposing device secrets.

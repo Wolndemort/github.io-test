@@ -1643,3 +1643,9 @@ Verification for Stage 50:
 - Текущий commit пересобран в `/root/speedycrm-staging`; `/health=200`, `/ready=200`, `/auth/login=200`, `/auth/me=401`.
 - Старые 32 protected routes и новые scheduler/turnstile/menu/client-pass routes корректно gated без сессии.
 - Физический relay pulse не выполнялся до подтверждения, что конфигурация указывает на отдельное тестовое устройство.
+## 2026-08-20 — real staging turnstile pulse passed
+
+- После восстановления staging nginx/tunnel и пересборки текущего commit выполнен один direct pulse через `speedycrm_staging_api` для club 2.
+- Результат relay: `success`; student ID не использовался, посещение/CRM mutation не создавались.
+- Перед pulse проверены только redacted config flags (`enabled`, configured URL presence); секреты в отчёт не записывались.
+- Production/live/ALTER/master не затрагивались.
