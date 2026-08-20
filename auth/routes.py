@@ -1,4 +1,5 @@
 import os
+import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -26,6 +27,7 @@ from .web_session import (
 from .native_auth import consume_otp, deliver_email_otp, issue_otp, normalize_email
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
+logger = logging.getLogger(__name__)
 
 
 async def web_context(request: Request) -> AuthContext | None:
@@ -98,6 +100,7 @@ async def native_request(payload: NativeOtpRequest, request: Request, session: A
         try:
             await deliver_email_otp(email, code)
         except Exception:
+            logger.exception("native email delivery failed")
             raise HTTPException(status_code=503, detail={"code": "email_delivery_unavailable"})
     return {"ok": True, "message": "If the account exists, a code was sent."}
 

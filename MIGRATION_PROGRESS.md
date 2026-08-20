@@ -919,5 +919,6 @@ Verification for Stage 50:
 - Проверен firewall: UFW inactive, `iptables OUTPUT ACCEPT`, host default route присутствует. Дополнительное allow-правило для 587 не требуется; timeout/Network unreachable к Gmail находится вне локального firewall. Native flags остаются выключены.
 - Подготовлен Yandex Cloud Postbox HTTPS adapter через boto3/443 как альтернатива заблокированному SMTP 587. Secrets используются только из staging env и не логируются; добавлен contract test. Требуется staging rebuild и безопасный send test.
 - Yandex adapter проверен локально, full suite: `418 passed`; boto3 добавлен в requirements. Staging rebuild/send test — следующий шаг, native flags пока выключены после SMTP egress failure.
+- Yandex Postbox staging send test достиг adapter, но вернул безопасный `503`; добавлено server-side exception logging без secrets для диагностики provider rejection. Native flags временно включены только staging.
 - Restricted pages enforce `analytics_view`/`qr_checkin`; no settings mutation was exposed.
 - Added settings page tests; remaining: continue the next 3–4 migration blocks.
