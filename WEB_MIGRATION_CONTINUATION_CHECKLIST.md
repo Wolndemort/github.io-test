@@ -48,7 +48,7 @@
 - [x] Staff management editor uses authenticated staff selector for role, active state and permissions.
 - [x] Scheduler flags and safe Turnstile configuration controls are wired to Web APIs; real relay hardware smoke remains staging-only.
 - [x] Real staging turnstile pulse smoke passed after isolated staging restore; no student/visit record was created.
-- [ ] Native browser Face ID via WebAuthn/passkeys: store credential ID/public key only; keep Telegram BiometricManager flow unchanged.
+- [x] Native browser Face ID via WebAuthn/passkeys: store credential ID/public key only; keep Telegram BiometricManager flow unchanged.
 - [x] Schedule editing UI and backend contract smoke.
 - [x] Discipline configuration mutation with safe schedule block allowlist.
 - [x] Camera/turnstile configuration controls without exposing device secrets.
@@ -80,7 +80,7 @@
 - [x] Add feature-gated WebAuthn registration, assertion, challenge expiry/replay protection, club/user scope and credential revoke endpoints.
 - [x] Add `fido2==2.2.1` to application requirements and run full local suite after the package.
 - [x] Add browser-native WebAuthn UI for profile device registration and revoke.
-- [ ] Run authenticated hardware/browser WebAuthn smoke on staging (requires supported browser/device and enabled staging flag).
+- [x] Run authenticated hardware/browser WebAuthn smoke on staging: iOS Safari 17.6.1 registration succeeded and device revoke was confirmed.
 - [x] Restore approved staging owner Email OTP fixture and confirm API restart/health after enabling the staging-only mail test helper.
 - [x] Add and deploy staff Profile route so passkey controls are reachable from the authenticated navigation.
 - [x] Fix and deploy WebAuthn nested-router prefix; verify `/auth/webauthn/credentials` auth gate.

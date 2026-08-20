@@ -38,7 +38,7 @@ Scheduler flags and Turnstile configuration now have Web controls; real relay pu
 | Staff/client settings | готов | settings permissions, safe fields, no secrets in UI |
 | Check-in/manual turnstile/cancel | готов по backend/UI contracts | common gate service, permission, club scope tests |
 | QR scanner/FaceID staff pass | legacy path preserved; native Web parity needs authenticated smoke | Telegram WebApp tests, no native Web claim yet |
-| Native browser Face ID/passkey | API/migration/UI ready; browser smoke pending | feature-gated WebAuthn registration/revoke UI with Redis one-time challenges; only credential ID/public key/counter metadata is stored |
+| Native browser Face ID/passkey | passed on staging | Authenticated owner on iOS Safari 17.6.1 registered a passkey successfully and confirmed revoke; only credential ID/public key/counter metadata is stored |
 | Payment webhook | hardened | success, wrong amount/metadata, duplicate, retry, currency matrix |
 | Audit | read/search/detail ready; deletion intentionally absent in Web | policy contract test |
 
@@ -61,7 +61,7 @@ Scheduler flags and Turnstile configuration now have Web controls; real relay pu
 - Diagnostic result `InvalidCharacterError` fixed: base64url padding is now calculated correctly before passing challenge/user ID to Safari.
 - Hardware result is limited to the explicitly approved staging/work-area relay test; production/master were not involved.
 - Manual authenticated owner/client Email OTP/API smoke: previously passed and recorded in `MIGRATION_PROGRESS.md` (including owner session, `auth_source=email`, club scope and logout).
-- Manual visual browser re-check: pending for every client page, QR pass, freeze, purchases and each mutation button because earlier pages could render empty.
+- Manual visual browser re-check: owner passkey/profile flow passed; remaining page-by-page client/staff mutation visual sweep is still pending.
 
 ## Acceptance scenarios still required before any merge decision
 

@@ -1715,3 +1715,9 @@ Verification for Stage 50:
 - Диагностика показала `InvalidCharacterError` до вызова Face ID: JS использовал неверный фиксированный padding `==`.
 - Исправлен base64url decoder в profile UI и diagnostic page; staging пересобран.
 - Полный suite: `483 passed`.
+
+## 2026-08-20 — native browser Face ID smoke passed
+
+- Authenticated owner в staging на iOS Safari 17.6.1 успешно зарегистрировал passkey через `/staff/profile`.
+- Устройство появилось в списке и было успешно отозвано; staging logs подтверждают `register/options=200` и `register/complete=200`.
+- Биометрия/сырой Face ID на сервер не передавались; сохраняются только credential metadata/public key. Telegram BiometricManager flow не изменён.
