@@ -1804,6 +1804,12 @@ Verification for Stage 50:
 - Существующие fixtures сохранены backward-compatible через `getattr`; regression contract добавлен.
 - Полный suite: `487 passed`.
 
+## 2026-08-20 — client profile data audit
+
+- `/api/v1/client/me` теперь возвращает full_name/email только из user row текущего user+club; legacy minimal test contract сохранён, если fixture user отсутствует.
+- Profile UI подставляет текущее имя в edit form; sensitive fields не раскрываются.
+- Полный suite: `488 passed`.
+
 ## 2026-08-20 — linked-parent client read scope
 
 - Унифицирован client student scope для cabinet, history, freeze, subscriptions и summary: primary parent и `StudentParent` linked parent теперь видят одинаковые записи.

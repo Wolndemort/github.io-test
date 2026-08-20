@@ -21,3 +21,8 @@ def test_client_reads_use_primary_or_linked_parent_scope():
 def test_client_purchases_merge_cart_and_confirmed_payment_orders():
     assert 'PaymentOrder.club_id == actor.club_id, PaymentOrder.user_id == actor.user_id, PaymentOrder.status == "CONFIRMED"' in SOURCE
     assert '"source": "cart"' in SOURCE and '"source": "payment"' in SOURCE
+
+
+def test_client_profile_response_is_user_and_club_scoped_with_real_fields():
+    assert 'User.user_id == actor.user_id, User.club_id == actor.club_id' in SOURCE
+    assert 'response.update({"full_name": user.full_name, "email": user.email})' in SOURCE

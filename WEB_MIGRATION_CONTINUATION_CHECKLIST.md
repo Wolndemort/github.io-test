@@ -73,6 +73,7 @@
 - [x] Unify client read scope across cabinet/history/freeze/subscriptions/summaries for primary and linked parents.
 - [x] Deploy linked-parent scope fix to isolated staging.
 - [x] Audit client purchases and include confirmed CartOrder + PaymentOrder sources under user/club scope.
+- [x] Audit client profile data; return scoped full_name/email and populate edit form without changing minimal auth contract.
 - [x] Deploy settings state fix to isolated staging.
 - [ ] Any remaining legacy operations: refunds, payment method changes, receipt delivery, audit search/delete policy, invitations.
 - [x] Add client Web saved payment method list and safe revoke using subscription row lock/club scope/audit.

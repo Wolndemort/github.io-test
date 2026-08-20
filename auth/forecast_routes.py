@@ -807,7 +807,10 @@ async def create_payment_intent_web(order_id: str, request: Request, context: Au
     club = await session.scalar(select(Club).where(Club.id == actor.club_id)); settings = dict(club.club_settings or {}) if club else {}; payments = dict(settings.get("payments", {}) or {})
     shop_id = str(payments.get("yookassa_shop_id") or ""); secret = str(payments.get("yookassa_secret_key") or "")
     if not shop_id or not secret: raise HTTPException(status_code=503, detail={"code": "payment_provider_unavailable"})
-    user = await session.scalar(select(User).where(User.user_id == actor.user_id, User.club_id == actor.club_id))
+    try:
+        user = await session.scalar(select(User).where(User.user_id == actor.user_id, User.club_id == actor.club_id))
+    except AttributeError:
+        user = None
     result = await YooKassaClient(shop_id, secret, proxy_url=PROXY_URL).init_payment(order.id, int(order.amount_kopecks), actor.user_id, str(settings.get("bot_username") or "speedycrm_bot"), user_email=user.email if user else None)
     if not result.get("Success"): raise HTTPException(status_code=502, detail={"code": "payment_provider_error"})
     order.provider_payment_id = str(result.get("PaymentId")); await session.commit()
@@ -1333,9 +1336,16 @@ async def client_pass_data(request: Request, context: AuthContext | None = Depen
 
 
 @client_router.get("/me")
-async def client_me(request: Request, context: AuthContext | None = Depends(web_context)):
+async def client_me(request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):
     actor = require_web_context(context)
-    return {"user_id": actor.user_id, "club_id": actor.club_id, "actor_type": actor.actor_type, "auth_source": actor.auth_source, "read_only": True}
+    try:
+        user = await session.scalar(select(User).where(User.user_id == actor.user_id, User.club_id == actor.club_id))
+    except AttributeError:
+        user = None
+    response = {"user_id": actor.user_id, "club_id": actor.club_id, "actor_type": actor.actor_type, "auth_source": actor.auth_source, "read_only": True}
+    if user:
+        response.update({"full_name": user.full_name, "email": user.email})
+    return response
 
 
 @client_router.patch("/me")
