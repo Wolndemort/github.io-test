@@ -68,6 +68,7 @@
 - [x] Audit static client/staff/settings navigation links against registered FastAPI routes; dynamic detail links verified as parameterized routes.
 - [x] Audit admin mutation calls against registered backend routes and confirm CSRF/idempotency/scope contract coverage.
 - [x] Audit settings form state; populate current GET values before any mutation to prevent accidental resets.
+- [x] Audit client ownership for student update/freeze/payment intent; linked-parent and order/user/club scopes are covered by tests.
 - [x] Deploy settings state fix to isolated staging.
 - [ ] Any remaining legacy operations: refunds, payment method changes, receipt delivery, audit search/delete policy, invitations.
 - [x] Add client Web saved payment method list and safe revoke using subscription row lock/club scope/audit.

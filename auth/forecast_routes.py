@@ -228,6 +228,10 @@ async def update_student_data(student_id: int, request: Request, context: AuthCo
     student = await session.scalar(select(Student).where(Student.id == student_id, Student.club_id == actor.club_id).with_for_update())
     if not student:
         raise HTTPException(status_code=404, detail={"code": "student_not_found"})
+    if actor.actor_type == "client" and student.parent_id != actor.user_id:
+        linked = await session.scalar(select(StudentParent).where(StudentParent.student_id == student.id, StudentParent.parent_id == actor.user_id))
+        if not linked:
+            raise HTTPException(status_code=403, detail={"code": "student_scope_denied"})
     allowed = {"name", "discipline"}
     if set(payload) - allowed - {"idempotency_key"}:
         raise HTTPException(status_code=400, detail={"code": "invalid_student_fields"})
@@ -763,6 +767,10 @@ async def purchase_freeze_web(request: Request, context: AuthContext | None = De
     student = await session.scalar(select(Student).where(Student.id == student_id, Student.club_id == actor.club_id).with_for_update())
     if not student:
         raise HTTPException(status_code=404, detail={"code": "student_not_found"})
+    if actor.actor_type == "client" and student.parent_id != actor.user_id:
+        linked = await session.scalar(select(StudentParent).where(StudentParent.student_id == student.id, StudentParent.parent_id == actor.user_id))
+        if not linked:
+            raise HTTPException(status_code=403, detail={"code": "student_scope_denied"})
     settings = dict((await session.scalar(select(Club).where(Club.id == actor.club_id))).club_settings or {})
     original = int(float(settings.get("limits", {}).get("freeze_price_per_day", 0) or 0) * days * 100)
     if original <= 0:

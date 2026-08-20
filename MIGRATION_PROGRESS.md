@@ -1775,6 +1775,12 @@ Verification for Stage 50:
 - Все найденные вызовы имеют backend route; mutation-контуры используют CSRF/idempotency, actor permission и club scope.
 - Следующий аудит: payload selectors/data ownership и error/loading/confirmation behavior на каждой странице.
 
+## 2026-08-20 — client ownership audit
+
+- Найден и исправлен security gap в Web freeze: client теперь может передать только своего primary/linked student; чужой student ID получает `student_scope_denied`.
+- Та же linked-parent scope проверяется в client student update; payment intent уже проверяет order + club + user.
+- Добавлены targeted scope contracts; полный suite вырос до `485 passed`.
+
 ## 2026-08-20 — settings form state audit
 
 - Исправлен риск сброса настроек: Web settings forms теперь подгружают текущие GET-значения перед PATCH, включая checkbox/text fields для branding, limits, features, menu, camera, turnstile, schedulers, notifications и integrations.
