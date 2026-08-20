@@ -1681,3 +1681,9 @@ Verification for Stage 50:
 - Проверена staging БД: owner `1271717628` находится в club 2; для него восстановлен email `omarovadam405@gmail.com` через staging-only helper.
 - Включены только staging-флаги Email OTP; API после перезапуска снова отвечает `/health=200`.
 - Для проверки использовать `club_id=2`; production/live/ALTER не затрагивались.
+
+## 2026-08-20 — staff profile route fixed and staged
+
+- Исправлен найденный по owner smoke дефект: `/staff/profile` отсутствовал и возвращал `detail not found`.
+- Добавлена защищённая owner/staff profile page и вкладка Profile в staff-навигации; passkey panel теперь доступен обычным переходом из интерфейса.
+- Полный suite: `483 passed`; staging пересобран, `/health=200`, `/staff/profile=401` без сессии (корректная auth-gate).
