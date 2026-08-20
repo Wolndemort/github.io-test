@@ -945,6 +945,21 @@ Verification for Stage 50:
 - Seeded staging-only synthetic client fixture: `user_id=990000001`, club 1, one student, same test email; added seed/cleanup helpers. Native flags enabled only in staging for client Web smoke; fixture must be removed after verification.
 - Restricted pages enforce `analytics_view`/`qr_checkin`; no settings mutation was exposed.
 
+## 2026-08-20 — functional Web operations: cash subscription sale
+
+- Добавлен `POST /api/v1/staff/sales/cash-subscription` для продажи абонемента за наличные.
+- Операция использует `WEB_SUBSCRIPTION_SALES_ENABLED`, `cash_sale`, CSRF, allowlist, idempotency, club-scoped student row lock, проверку тарифа клуба, назначенные скидки, общий `add_abon`, создание подтверждённого `PaymentOrder` и audit.
+- Баланс/срок ученика изменяются только внутри transaction; online payment flow остаётся отдельным следующим пакетом.
+- Добавлен contract test tariff/discount/activation safety-контура.
+- Targeted suite: `4 passed`; полный suite: `449 passed`; `git diff --check` чист.
+- Telegram, live, ALTER и `master` не затронуты.
+
+### Следующий пакет
+
+- Добавить Web UI для cash sale товара/абонемента и stock adjustment.
+- Перенести заморозку как отдельную операцию с lock/idempotency/audit.
+- Затем подключить online payment intent и webhook в Web-контекст.
+
 ## 2026-08-20 — functional Web operations: cash product sale
 
 - Добавлен `POST /api/v1/staff/sales/cash-product` для продажи товаров за наличные через Web.

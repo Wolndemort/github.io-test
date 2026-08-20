@@ -8,7 +8,7 @@ from fastapi.responses import HTMLResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from database.db import AuditEntry, CartOrder, CashEntry, Club, ClubProduct, Discount, DiscountAssignment, PaymentOrder, Student, StudentParent, VisitLog, User, get_session
+from database.db import AuditEntry, CartOrder, CartItem, CashEntry, Club, ClubProduct, Discount, DiscountAssignment, PaymentOrder, Student, StudentParent, VisitLog, User, add_abon, get_session
 from services.input_normalization import normalize_ru_phone
 from services.audit import audit_event
 from services.schedule_utils import normalize_schedule_block
@@ -516,6 +516,50 @@ async def create_cash_product_sale_web(request: Request, context: AuthContext | 
     await session.commit()
     audit_event("web_cash_product_sale", club_id=actor.club_id, actor_user_id=actor.user_id, action="sale", object_type="cart_order", object_id=order_id, location="web/staff/sales", amount_kopecks=total, method="cash", buyer_user_id=buyer_id)
     return {"ok": True, "club_id": actor.club_id, "order_id": order_id, "amount_kopecks": total, "read_only": False}
+
+
+@sales_router.post("/cash-subscription")
+async def create_cash_subscription_sale_web(request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):
+    actor = require_web_context(context)
+    if os.getenv("WEB_SUBSCRIPTION_SALES_ENABLED", "0") != "1":
+        raise HTTPException(status_code=404, detail={"code": "feature_disabled"})
+    if actor.actor_type == "staff" and "cash_sale" not in actor.permissions:
+        raise HTTPException(status_code=403, detail={"code": "permission_denied"})
+    await require_csrf(request.app.state.redis_client, request)
+    payload = await request.json()
+    if set(payload) - {"student_id", "discipline", "tariff_idx", "discount_ids", "idempotency_key"}:
+        raise HTTPException(status_code=400, detail={"code": "invalid_subscription_sale_fields"})
+    key = str(payload.get("idempotency_key") or "").strip()
+    if not key or len(key) > 100:
+        raise HTTPException(status_code=400, detail={"code": "invalid_idempotency_key"})
+    accepted = await request.app.state.redis_client.set(f"web:subscription-sale:{actor.club_id}:{key}", "1", ex=900, nx=True)
+    if not accepted:
+        return {"ok": True, "idempotent_replay": True, "club_id": actor.club_id}
+    try: student_id = int(payload.get("student_id")); tariff_idx = int(payload.get("tariff_idx"))
+    except (TypeError, ValueError): raise HTTPException(status_code=400, detail={"code": "invalid_subscription_sale"})
+    student = await session.scalar(select(Student).where(Student.id == student_id, Student.club_id == actor.club_id).with_for_update())
+    if not student:
+        raise HTTPException(status_code=404, detail={"code": "student_not_found"})
+    settings = dict((await session.scalar(select(Club).where(Club.id == actor.club_id))).club_settings or {})
+    discipline = str(payload.get("discipline") or student.discipline or "").strip()
+    cfg = (settings.get("disciplines", {}) or {}).get(discipline) or {}; tariffs = cfg.get("tariffs", [])
+    if tariff_idx < 0 or tariff_idx >= len(tariffs):
+        raise HTTPException(status_code=400, detail={"code": "tariff_not_found"})
+    tariff = tariffs[tariff_idx] if isinstance(tariffs[tariff_idx], dict) else {}
+    count = int(tariff.get("count", 0) or 0); days = int(tariff.get("days", 30) or 30); original = int(tariff.get("price", 0) or 0) * 100
+    if count < 1 or days < 1 or original <= 0:
+        raise HTTPException(status_code=400, detail={"code": "invalid_tariff"})
+    discount_ids = [int(x) for x in (payload.get("discount_ids") or [])]
+    discounts = await active_discounts(session, actor.club_id, student.parent_id, "subscriptions", student.id, discount_ids or None)
+    total, applied = apply_discounts(original, discounts); primary = applied[0][0] if applied else None
+    order_id = f"CASH_SUB_{uuid.uuid4().hex[:16].upper()}"
+    result = await add_abon(student.id, count, session, actor.club_id, settings, days_to_add=days, discipline=discipline)
+    if not result:
+        raise HTTPException(status_code=409, detail={"code": "subscription_activation_failed"})
+    session.add(PaymentOrder(id=order_id, user_id=student.parent_id or actor.user_id, student_id=student.id, club_id=actor.club_id, discipline=discipline, amount_kopecks=total, original_amount_kopecks=original, discount_id=primary.id if primary else None, discount_name=primary.name if primary else None, discount_amount_kopecks=original - total or None, status="CONFIRMED", type="CASH_SUBSCRIPTION", provider_payment_id=f"CASH:{order_id}", lesson_count=count, days_to_add=days))
+    await session.commit()
+    audit_event("web_cash_subscription_sale", club_id=actor.club_id, actor_user_id=actor.user_id, action="sale", object_type="payment_order", object_id=order_id, location="web/staff/sales", amount_kopecks=total, method="cash", student_id=student.id, lesson_count=count, days_to_add=days)
+    return {"ok": True, "club_id": actor.club_id, "order_id": order_id, "student_id": student.id, "amount_kopecks": total, "read_only": False}
 
 
 @catalog_router.get("/discounts")
