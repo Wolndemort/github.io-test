@@ -76,6 +76,7 @@
 - [x] Audit client profile data; return scoped full_name/email and populate edit form without changing minimal auth contract.
 - [x] Deploy client profile package to isolated staging.
 - [x] Audit client freeze display and derive frozen_until from stored frozen_at/frozen_days.
+- [x] Audit multi-form admin panels; secondary Products/Discounts buttons now submit through their backend contracts.
 - [x] Deploy settings state fix to isolated staging.
 - [ ] Any remaining legacy operations: refunds, payment method changes, receipt delivery, audit search/delete policy, invitations.
 - [x] Add client Web saved payment method list and safe revoke using subscription row lock/club scope/audit.

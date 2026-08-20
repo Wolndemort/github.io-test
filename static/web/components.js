@@ -162,5 +162,17 @@ if (location.pathname === "/staff/discounts") { const target = document.querySel
       if (profile) { const panel = document.createElement("div"); panel.className = "web-card"; panel.innerHTML = "<h2>Payment methods</h2><div data-payment-methods>Loading…</div>"; profile.parentElement.appendChild(panel); SpeedyCRMWeb.json("/api/v1/client/payment-methods").then(data => { const target = panel.querySelector("[data-payment-methods]"); target.innerHTML = data.payment_methods.length ? data.payment_methods.map(method => `<p>${method.type} ${method.masked} <button type=\"button\" data-remove-card=\"${method.id}\">Remove</button></p>`).join("") : "<p>No saved payment methods.</p>"; target.querySelectorAll("[data-remove-card]").forEach(button => button.onclick = async () => { if (!window.confirm("Remove saved payment method?")) return; await SpeedyCRMWeb.json(`/api/v1/client/payment-methods/${button.dataset.removeCard}`, {method: "DELETE", headers: {"X-CSRF-Token": csrf()}}); button.parentElement.remove(); }); }).catch(() => { panel.querySelector("[data-payment-methods]").textContent = "Payment methods unavailable."; }); }
       SpeedyCRMWeb.json("/api/v1/client/me").then(data => { const field = document.querySelector('input[name="full_name"]'); if (field && data.full_name) field.value = data.full_name; }).catch(() => {});
     }
+    document.addEventListener("submit", async event => {
+      const target = event.target;
+      if (!(target instanceof HTMLFormElement) || !["stock-adjust", "product-archive", "discount-update"].some(name => target.matches(`[data-${name}]`))) return;
+      event.preventDefault();
+      const f = new FormData(target); const result = target.parentElement.querySelector("[data-operation-result]");
+      try {
+        if (target.matches("[data-stock-adjust]")) await post(`/api/v1/staff/catalog/products/${Number(f.get("product_id"))}/stock`, {delta: Number(f.get("delta")), reason: f.get("reason")});
+        else if (target.matches("[data-product-archive]")) await SpeedyCRMWeb.json(`/api/v1/staff/catalog/products/${Number(f.get("product_id"))}`, {method: "DELETE", headers: {"Content-Type": "application/json", "X-CSRF-Token": csrf()}, body: JSON.stringify({reason: f.get("reason"), idempotency_key: crypto.randomUUID()})});
+        else await post(`/api/v1/staff/catalog/discounts/${Number(f.get("discount_id"))}`, {value: Number(f.get("update_value")), comment: f.get("comment")});
+        if (result) result.textContent = "Operation saved.";
+      } catch (_) { if (result) result.textContent = "Operation unavailable or disabled."; }
+    });
   }, 0);
 });

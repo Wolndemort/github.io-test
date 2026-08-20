@@ -1,5 +1,10 @@
 # Web migration progress
 
+## 2026-08-20 — admin multi-form button audit
+
+- Исправлены secondary forms в Products/Discounts panels: stock adjust, archive и discount update теперь имеют собственный submit handler, CSRF/idempotency и error state.
+- Node syntax check и полный suite: `489 passed`.
+
 ## 2026-08-20 — client profile package staged
 
 - Client purchases/profile/scope audit package deployed only to `/root/speedycrm-staging`; isolated API/DB/Redis/nginx containers rebuilt.
