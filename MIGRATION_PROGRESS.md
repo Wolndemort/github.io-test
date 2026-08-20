@@ -945,6 +945,19 @@ Verification for Stage 50:
 - Seeded staging-only synthetic client fixture: `user_id=990000001`, club 1, one student, same test email; added seed/cleanup helpers. Native flags enabled only in staging for client Web smoke; fixture must be removed after verification.
 - Restricted pages enforce `analytics_view`/`qr_checkin`; no settings mutation was exposed.
 
+## 2026-08-20 — migration compatibility gate
+
+- Свежий staging dump восстановлен в отдельную `crm_migration_check_20260820`.
+- На этой test DB выполнены Alembic `downgrade z8a9b0c1d2e3 -> y7z8a9b0c1d2` и повторный `upgrade head`; обе операции успешны.
+- Временная migration-check DB удалена после проверки; staging `/ready=200`.
+- Обновлён production checklist: migration upgrade/downgrade gate отмечен выполненным.
+- Live, ALTER и `master` не затрагивались; production deploy не выполнялся.
+
+### Следующий пакет
+
+- Завершить техническую часть: финальный локальный suite и `git diff --check` после документирования.
+- Оставшиеся пункты: Telegram regression smoke, финальный UI/translation pass и явное решение о merge/production rollout.
+
 ## 2026-08-20 — staging backup and restore gate
 
 - В staging создан custom-format PostgreSQL backup из отдельной staging DB, размер артефакта `174K`.
