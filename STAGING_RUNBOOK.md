@@ -64,6 +64,10 @@ Never restore into `gym_db`; never copy staging data back to live.
 
 Authorized browser smoke requires a separate staging Telegram bot token and test account. Live bot credentials must not be reused. Until then, use the unauthenticated smoke and local test suite.
 
+## Staging SMTP
+
+Create `/root/speedycrm-staging/.staging-mail.env` on the server using the same variable names as `.staging-mail.env.example`. Keep `WEB_NATIVE_AUTH_ENABLED=0` and `WEB_NATIVE_EMAIL_BINDING_ENABLED=0` until the SMTP test is explicitly approved. The file is optional and is never committed.
+
 When the separate token is present in `/root/speedycrm-staging/.staging-secrets`, configure only the staging database with the server-side helper:
 
 ```bash

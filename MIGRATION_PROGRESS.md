@@ -908,5 +908,6 @@ Verification for Stage 50:
 - Role-agnostic email binding собран в staging с default-disabled flags; staging `/ready` 200, Telegram `/auth/login` 200, `bots_active: 1`. Native endpoint не включался.
 - SMTP adapter сверён read-only с ALTER: перенесены только совместимые имена/поведение (`SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM_EMAIL`, `SMTP_USE_TLS`), credentials ALTER не копировались. Добавлен adapter contract test; native flags остаются disabled.
 - SMTP reference block verified: targeted `3 passed`, full suite `417 passed`. Настройки SMTP в staging пока не добавлялись и native Email OTP не включался.
+- Подготовлен отдельный optional `/root/speedycrm-staging/.staging-mail.env`, подключаемый только staging Compose; шаблон `.staging-mail.env.example` и runbook добавлены. Реальные SMTP secrets не копируются из ALTER и не попадают в git; native flags остаются `0`.
 - Restricted pages enforce `analytics_view`/`qr_checkin`; no settings mutation was exposed.
 - Added settings page tests; remaining: continue the next 3–4 migration blocks.

@@ -1,5 +1,6 @@
 #секреты
 .env
+.staging-mail.env
 .backup.env
 backups/
 certbot/conf/
