@@ -77,6 +77,16 @@ window.SpeedyCRMWeb = {
         result.textContent = `Email verified: ${verified.email}`;
       } catch (error) { result.textContent = "Email verification is unavailable."; }
     });
+  },
+  async mountPasskeys(targetId) {
+    const target = document.getElementById(targetId);
+    if (!target || !window.PublicKeyCredential) return;
+    const csrf = () => decodeURIComponent((document.cookie.match(/(?:^|; )speedycrm_csrf_token=([^;]*)/) || [])[1] || "");
+    const bin = value => Uint8Array.from(atob(value.replace(/-/g, "+").replace(/_/g, "/") + "=="), c => c.charCodeAt(0));
+    const enc = value => { const bytes = new Uint8Array(value); let s = ""; bytes.forEach(b => s += String.fromCharCode(b)); return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, ""); };
+    const json = (url, options) => this.json(url, {...options, headers: {...(options?.headers || {}), "X-CSRF-Token": csrf()}});
+    const render = async () => { const data = await this.json("/auth/webauthn/credentials"); target.innerHTML = `<h2>Passkeys</h2><p>Face ID/Touch ID остаётся на устройстве; сервер хранит только публичный ключ.</p><button type="button" data-passkey-add>Добавить устройство</button><div data-passkey-list>${data.credentials.map(c => `<p>${c.device_label || "Без названия"} <button type="button" data-revoke="${c.id}">Отозвать</button></p>`).join("") || "<p>Устройства не добавлены.</p>"}</div><p data-passkey-result role="status"></p>`; target.querySelector("[data-passkey-add]").onclick = async () => { try { const options = await json("/auth/webauthn/register/options", {method: "POST"}); const publicKey = options.publicKey; publicKey.challenge = bin(publicKey.challenge); publicKey.user.id = bin(publicKey.user.id); if (publicKey.excludeCredentials) publicKey.excludeCredentials.forEach(c => c.id = bin(c.id)); const credential = await navigator.credentials.create({publicKey}); const response = credential.response; await json("/auth/webauthn/register/complete", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({device_label: navigator.userAgent.slice(0, 80), response: {id: credential.id, rawId: enc(credential.rawId), type: credential.type, response: {clientDataJSON: enc(response.clientDataJSON), attestationObject: enc(response.attestationObject)}}})}); await render(); } catch (_) { target.querySelector("[data-passkey-result]").textContent = "Не удалось добавить passkey."; } }; target.querySelectorAll("[data-revoke]").forEach(button => button.onclick = async () => { if (!window.confirm("Отозвать устройство?")) return; await json(`/auth/webauthn/credentials/${button.dataset.revoke}`, {method: "DELETE"}); await render(); }); };
+    try { await render(); } catch (_) { target.innerHTML = "<h2>Passkeys</h2><p>Passkeys отключены или пока недоступны.</p>"; }
   }
 };
 
@@ -135,6 +145,10 @@ if (location.pathname === "/staff/discounts") { const target = document.querySel
     if (location.pathname === "/client/me") {
       const target = document.querySelector("#profile");
       if (target) { target.parentElement.appendChild(form('<h2>Edit profile</h2><form><input name="full_name" minlength="2" maxlength="150" placeholder="Full name" required><button>Save profile</button></form><p data-operation-result role="status"></p>', async event => { event.preventDefault(); const f = new FormData(event.target), result = event.currentTarget.querySelector("[data-operation-result]"); try { await post("/api/v1/client/me", {full_name: f.get("full_name")}); result.textContent = "Profile saved."; } catch (_) { result.textContent = "Profile editing unavailable or disabled."; } })); target.parentElement.appendChild(form('<h2>Link phone</h2><form><input name="phone" type="tel" inputmode="tel" autocomplete="tel" placeholder="+7 999 123-45-67" required><button>Link phone</button></form><p data-operation-result role="status"></p>', async event => { event.preventDefault(); const f = new FormData(event.target), result = event.currentTarget.querySelector("[data-operation-result]"); try { const data = await post("/api/v1/client/bind-phone", {phone: f.get("phone")}); result.textContent = `Linked students: ${data.linked}.`; } catch (_) { result.textContent = "Phone binding unavailable or no matching student."; } })); }
+    }
+    if (location.pathname === "/client/me" || location.pathname === "/staff/profile") {
+      const profile = document.querySelector("#profile");
+      if (profile) { const panel = document.createElement("div"); panel.className = "web-card"; panel.id = "passkeys"; panel.textContent = "Загрузка passkeys…"; profile.parentElement.appendChild(panel); SpeedyCRMWeb.mountPasskeys("passkeys"); }
     }
   }, 0);
 });

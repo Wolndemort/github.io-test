@@ -38,7 +38,7 @@ Scheduler flags and Turnstile configuration now have Web controls; real relay pu
 | Staff/client settings | готов | settings permissions, safe fields, no secrets in UI |
 | Check-in/manual turnstile/cancel | готов по backend/UI contracts | common gate service, permission, club scope tests |
 | QR scanner/FaceID staff pass | legacy path preserved; native Web parity needs authenticated smoke | Telegram WebApp tests, no native Web claim yet |
-| Native browser Face ID/passkey | API/migration ready; browser smoke pending | feature-gated WebAuthn registration/assertion/revoke with Redis one-time challenges; only credential ID/public key/counter metadata is stored |
+| Native browser Face ID/passkey | API/migration/UI ready; browser smoke pending | feature-gated WebAuthn registration/revoke UI with Redis one-time challenges; only credential ID/public key/counter metadata is stored |
 | Payment webhook | hardened | success, wrong amount/metadata, duplicate, retry, currency matrix |
 | Audit | read/search/detail ready; deletion intentionally absent in Web | policy contract test |
 

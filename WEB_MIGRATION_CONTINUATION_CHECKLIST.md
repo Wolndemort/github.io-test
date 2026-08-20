@@ -79,7 +79,8 @@
 - [x] Add WebAuthn/passkey credential model and Alembic migration; persist only credential ID/public key/counter/device metadata.
 - [x] Add feature-gated WebAuthn registration, assertion, challenge expiry/replay protection, club/user scope and credential revoke endpoints.
 - [x] Add `fido2==2.2.1` to application requirements and run full local suite after the package.
-- [ ] Add browser-native WebAuthn UI and authenticated hardware/browser smoke on staging.
+- [x] Add browser-native WebAuthn UI for profile device registration and revoke.
+- [ ] Run authenticated hardware/browser WebAuthn smoke on staging (requires supported browser/device and enabled staging flag).
 - [ ] Add tests for every remaining legacy operation: refunds, payment-method changes, receipt delivery and invitations.
 - [x] Staging unauthenticated/auth-gating smoke after latest settings build; temporary flags remained disabled and no test data was created.
 - [ ] Verify staging migration refresh and downgrade/upgrade after current changes (WebAuthn migration not deployed yet).

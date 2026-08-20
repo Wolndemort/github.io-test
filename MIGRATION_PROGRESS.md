@@ -1662,3 +1662,9 @@ Verification for Stage 50:
 - В БД сохраняются только credential ID, публичный ключ, sign counter, label и timestamps; биометрический шаблон/сырые Face ID данные сервер не получает.
 - Добавлен `fido2==2.2.1`; локальный полный suite: `483 passed`.
 - Не закрыто: browser UI/native hardware smoke, staging migration deployment, remaining legacy refunds/payment-method/receipt/invitation policies. `master`, live и другие проекты не затрагивались.
+
+## 2026-08-20 — WebAuthn profile UI
+
+- В клиентский и staff-профиль добавлен feature-gated блок Passkeys: регистрация через `navigator.credentials.create`, список устройств и revoke.
+- UI не заявляет успешность без ответа API; при отключённом флаге показывает безопасное состояние. Native browser smoke на staging ещё не выполнялся.
+- После UI-пакета полный локальный suite: `483 passed`; `git diff --check` чистый.
