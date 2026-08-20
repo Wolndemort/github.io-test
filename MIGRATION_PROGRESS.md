@@ -1704,3 +1704,8 @@ Verification for Stage 50:
 
 - Для iOS/Safari 17.6.1 registration options ограничены совместимыми алгоритмами ES256/RS256 и явно запрошена user verification `preferred`.
 - Staging пересобран после изменения; локальный suite: `483 passed`.
+
+## 2026-08-20 — passkey browser diagnostics
+
+- Добавлена защищённая staging-страница `/staff/passkey-debug`: credential не сохраняется, на экране показывается точная ошибка Safari/WebAuthn.
+- Staging пересобран; полный suite: `483 passed`.

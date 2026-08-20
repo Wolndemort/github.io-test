@@ -57,6 +57,7 @@ Scheduler flags and Turnstile configuration now have Web controls; real relay pu
 - Owner smoke found and fixed WebAuthn double-prefix 404; authenticated endpoint path is now deployed and correctly auth-gated (`401` without session).
 - Latest WebAuthn log issue fixed: binary challenge options are now serialized as base64url instead of UTF-8; staging rebuilt, browser retry required.
 - Safari compatibility adjustment deployed: registration advertises ES256/RS256 and preferred user verification; iOS 17.6.1 retry pending.
+- Added non-persisting authenticated diagnostic page `/staff/passkey-debug` to capture browser error before registration complete.
 - Hardware result is limited to the explicitly approved staging/work-area relay test; production/master were not involved.
 - Manual authenticated owner/client Email OTP/API smoke: previously passed and recorded in `MIGRATION_PROGRESS.md` (including owner session, `auth_source=email`, club scope and logout).
 - Manual visual browser re-check: pending for every client page, QR pass, freeze, purchases and each mutation button because earlier pages could render empty.
