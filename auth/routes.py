@@ -142,6 +142,12 @@ else{{tg.ready();fetch("/auth/telegram/exchange",{{method:"POST",headers:{{"Cont
 </script></body></html>''')
 
 
+@router.get("/email-profile", response_class=HTMLResponse)
+async def email_profile_page(context: AuthContext | None = Depends(web_context)):
+    require_web_context(context)
+    return HTMLResponse('''<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Email login · SpeedyCRM</title><link rel="stylesheet" href="/static/web/design.css"><script src="/static/web/components.js"></script></head><body><main class="web-shell"><div class="web-container"><div id="navigation"></div><section class="web-hero"><span class="web-kicker">Account security</span><h1>One account,<br>two doors.</h1><p>Bind an email to use Web without Telegram.</p></section><section class="web-card" id="email-binding"></section></div></main><script>document.querySelector("#navigation").innerHTML=SpeedyCRMWeb.navigation("Account / Email");SpeedyCRMWeb.mountEmailBinding("email-binding");</script></body></html>''')
+
+
 @router.get("/login")
 async def auth_login():
     return {"ok": True, "method": "telegram_exchange", "exchange_endpoint": "/auth/telegram/exchange", "message": "Откройте Web через Telegram и выполните одноразовый exchange"}
@@ -195,8 +201,9 @@ async def telegram_exchange(
 
 
 @router.get("/me")
-async def auth_me(context: AuthContext | None = Depends(web_context)):
+async def auth_me(context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):
     actor = require_web_context(context)
+    user = await session.scalar(select(User).where(User.user_id == actor.user_id, User.club_id == actor.club_id))
     return {
         "user_id": actor.user_id,
         "club_id": actor.club_id,
@@ -204,6 +211,7 @@ async def auth_me(context: AuthContext | None = Depends(web_context)):
         "role": actor.role,
         "permissions": sorted(actor.permissions),
         "auth_source": actor.auth_source,
+        "email": user.email if user else None,
     }
 
 

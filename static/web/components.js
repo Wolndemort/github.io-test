@@ -2,7 +2,7 @@ window.SpeedyCRMWeb = {
   navigation(label) {
     const client = String(label || "").toLowerCase().includes("client");
     const links = client ? `<a href="/client/cabinet">Cabinet</a><a href="/client/subscriptions">Subscriptions</a><a href="/client/purchases">Purchases</a><a href="/client/history">History</a><a href="/client/freeze">Freeze</a><a href="/client/schedule">Schedule</a><a href="/client/products">Products</a><a href="/client/discounts">Discounts</a><a href="/client/tariffs">Tariffs</a><a href="/client/club">Club</a><a href="/client/me">Profile</a><a href="/client/legal">Legal</a><a href="/client/summary/attendance">Attendance</a><a href="/client/summary/subscriptions">Summary</a><a href="/client/summary/purchases">Purchase summary</a>` : `<a href="/staff/overview">Overview</a><a href="/staff/forecast">Forecast</a><a href="/staff/revenue">Revenue</a><a href="/staff/students">Students</a><a href="/staff/cash">Cash</a><a href="/staff/sales">Sales</a><a href="/staff/audit">Audit</a><a href="/staff/schedule">Schedule</a><a href="/staff/products">Products</a><a href="/staff/discounts">Discounts</a><a href="/staff/tariffs">Tariffs</a><a href="/staff/checkin">Check-in</a><a href="/staff/freeze">Freeze</a><a href="/staff/settings/legal">Legal settings</a><a href="/staff/settings/camera">Camera</a><a href="/staff/settings/features">Features</a><a href="/staff/settings/limits">Limits</a><a href="/staff/settings/branding">Branding</a><a href="/staff/settings/integrations">Integrations</a>`;
-    return `<nav class="web-nav"><a class="web-brand" href="${client ? "/client/cabinet" : "/staff/overview"}">SpeedyCRM</a><span class="web-kicker">${label || "Staff web"}</span><div class="web-links">${links}<button type="button" data-web-logout onclick="SpeedyCRMWeb.logout()">Logout</button></div></nav>`;
+    return `<nav class="web-nav"><a class="web-brand" href="${client ? "/client/cabinet" : "/staff/overview"}">SpeedyCRM</a><span class="web-kicker">${label || "Staff web"}</span><div class="web-links">${links}<a href="/auth/email-profile">Email login</a><button type="button" data-web-logout onclick="SpeedyCRMWeb.logout()">Logout</button></div></nav>`;
   },
   loading(message = "Загрузка данных…") {
     return `<p class="web-card web-status" data-web-loading>${message}</p>`;
@@ -40,5 +40,25 @@ window.SpeedyCRMWeb = {
     const token = match ? decodeURIComponent(match[1]) : "";
     await this.json("/auth/logout", {method: "POST", headers: {"X-CSRF-Token": token}});
     window.location.href = "/auth/login";
+  },
+  async mountEmailBinding(targetId) {
+    const target = document.getElementById(targetId);
+    if (!target) return;
+    const me = await this.json("/auth/me");
+    target.innerHTML = `<h2>Email login</h2><p>${me.email ? `Verified: ${me.email}` : "Add an email to enable passwordless Web login."}</p><form data-email-bind><input type="email" name="email" required placeholder="you@example.com"><button>Send code</button></form><div data-email-result role="status"></div>`;
+    const csrf = () => decodeURIComponent((document.cookie.match(/(?:^|; )speedycrm_csrf_token=([^;]*)/) || [])[1] || "");
+    const form = target.querySelector("[data-email-bind]");
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const email = new FormData(form).get("email");
+      const result = target.querySelector("[data-email-result]");
+      try {
+        await this.json("/auth/native/email/request", {method: "POST", headers: {"Content-Type": "application/json", "X-CSRF-Token": csrf()}, body: JSON.stringify({email, club_id: me.club_id})});
+        const code = window.prompt("Enter the code from your email");
+        if (!code) return;
+        const verified = await this.json("/auth/native/email/verify", {method: "POST", headers: {"Content-Type": "application/json", "X-CSRF-Token": csrf()}, body: JSON.stringify({email, club_id: me.club_id, code})});
+        result.textContent = `Email verified: ${verified.email}`;
+      } catch (error) { result.textContent = "Email verification is unavailable."; }
+    });
   }
 };

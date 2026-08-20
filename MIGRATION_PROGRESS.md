@@ -928,5 +928,7 @@ Verification for Stage 50:
 - Adapter переключён на `sesv2`, staging rebuilt; с native flags только в staging `/auth/native/request` вернул 200 для `omarovadam405@gmail.com`. Письмо отправлено через Yandex Postbox HTTPS; следующий шаг — локально ввести код и проверить `/auth/me` с `auth_source=email`.
 - Email OTP официально подтверждён в staging: `verify=200`, `/auth/me` показал `auth_source=email`, `actor_type=owner`, `user_id=1271717628`, `club_id=2`. Общий backend/AuthContext работает для native email login.
 - Следующее: добавить UI входа/привязки email в общий Web shell, протестировать staff/client роли через email и после этого обновить production gates. Production flags остаются выключенными.
+- Добавлен общий `/auth/email-profile` и navigation link для всех ролей; UI выполняет CSRF-защищённую request/verify привязку email через общий backend. Добавлен page contract test.
+- UI email profile проверен локально; full suite `419 passed`. Staging flags остаются включёнными только для дальнейшего Email owner smoke, production flags не менялись.
 - Restricted pages enforce `analytics_view`/`qr_checkin`; no settings mutation was exposed.
 - Added settings page tests; remaining: continue the next 3–4 migration blocks.
