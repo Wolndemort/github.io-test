@@ -5,6 +5,7 @@ Staging расположен на том же сервере, но полнос�
 - directory: `/root/speedycrm-staging`
 - compose project: `speedycrm-staging`
 - API bind: `127.0.0.1:18000`
+- temporary HTTPS entry: `https://staging.speedycrm.ru:18443`
 - database/Redis/network/volumes: staging-only
 - production directories `/root/github.io-test` and `/root/alter` must not be used by these commands
 
@@ -27,6 +28,7 @@ cd /root/speedycrm-staging
 docker compose -p speedycrm-staging -f docker-compose.staging.yml ps
 curl -fsS http://127.0.0.1:18000/health
 curl -fsS http://127.0.0.1:18000/ready
+curl -kfsS https://staging.speedycrm.ru:18443/ready
 ```
 
 ## Start/rebuild staging

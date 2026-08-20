@@ -889,5 +889,7 @@ Verification for Stage 50:
 - Для SSH-only staging выставлен `COOKIE_SECURE=0` только в `docker-compose.staging.yml`: tunnel локально использует HTTP, а production cookie policy не изменялась. Staging API перезапущен, `/ready` 200, `bots_active: 1`.
 - По согласованному варианту 1 подготовлен отдельный HTTPS staging entry `https://staging.speedycrm.ru:18443`: DNS уже указывает на сервер, wildcard-сертификат действителен, отдельный nginx не использует live 80/443 и подключён к staging network. Это временно публичная точка только для Telegram WebApp smoke.
 - Добавлен `/auth/web-entry?club_id=1`: отдельная Telegram WebApp entry-страница получает `Telegram.WebApp.initData`, отправляет его на штатный exchange и не отображает/сохраняет init data. Добавлен contract test.
+- Web entry собран и развернут только в staging; `https://staging.speedycrm.ru:18443/ready` — 200, entry содержит Telegram WebApp SDK. Staging API/DB/Redis healthy, `bots_active: 1`.
+- Для запуска из Telegram в отдельном staging-боте нужно установить Menu Button/Web App URL: `https://staging.speedycrm.ru:18443/auth/web-entry?club_id=1`. Live-бота и его кнопки не менять.
 - Restricted pages enforce `analytics_view`/`qr_checkin`; no settings mutation was exposed.
 - Added settings page tests; remaining: continue the next 3–4 migration blocks.
