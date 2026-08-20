@@ -49,7 +49,7 @@
 - [x] Discount assignment list/removal backend; UI selector polish remains.
 - [x] Product sale UI with scoped product, buyer and discount pickers.
 - [x] Subscription/freeze UI with scoped tariff/student selectors.
-- [ ] Online payment provider integration smoke with mocked provider; then approved real staging test.
+- [x] Online payment provider integration smoke with mocked provider; approved real staging payment test remains pending.
 - [x] Webhook integration matrix contracts for success, wrong amount, wrong metadata, duplicate and provider retry.
 - [ ] Any remaining legacy operations: refunds, payment method changes, receipt delivery, audit search/delete policy, invitations, phone/email binding.
 

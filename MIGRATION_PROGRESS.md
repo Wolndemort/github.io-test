@@ -1500,3 +1500,12 @@ Verification for Stage 50:
 ### Следующий пакет
 
 - Завершить полный suite и зафиксировать payment/webhook/client package.
+## 2026-08-20 — staging Web route smoke after UI/payment package
+
+- Повторно выполнен `scripts/staging_smoke.ps1`: `/health=200`, `/ready=200`, `/auth/login=200`, `/auth/me=401`.
+- Все 32 защищённых staff/client маршрута вернули ожидаемый `401` без сессии; staging flags и данные не изменялись.
+- Mocked provider/payment matrix локально проверены; реальный staging payment требует отдельного approved test account/provider credentials и не запускался.
+
+### Следующий пакет
+
+- Закрыть legacy operations audit и финальные client/browser accessibility checks.
