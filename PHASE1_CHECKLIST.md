@@ -17,6 +17,7 @@ Branch: `web-migration/phase-0-auth`
 - [x] Open Web entry from a real Telegram exchange.
 - [ ] Confirm HttpOnly session cookie and readable CSRF cookie attributes.
 - [ ] Confirm refresh keeps the session and logout revokes it.
+- [x] Confirm refresh keeps the session and logout revokes it in staging staff WebApp.
 - [x] Open Forecast, Revenue, Students, and staff detail/navigation pages in staging Telegram WebApp.
 - [ ] Verify a user cannot read another club by changing IDs in URLs.
 - [ ] Verify expired/invalid session returns 401/redirect behavior.

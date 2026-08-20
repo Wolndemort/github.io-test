@@ -893,5 +893,7 @@ Verification for Stage 50:
 - Для запуска из Telegram в отдельном staging-боте нужно установить Menu Button/Web App URL: `https://staging.speedycrm.ru:18443/auth/web-entry?club_id=1`. Live-бота и его кнопки не менять.
 - Получен первый реальный browser smoke внутри staging Telegram WebApp: открыт `SpeedyCRM / STAFF WEB`, авторизация через staging bot прошла, Forecast и общая navigation отрисовались. Полный сценарий cookies/refresh/logout, всех страниц и cross-club isolation ещё не закрыт.
 - Пользователь подтвердил полный staff browser smoke в staging: все кнопки/разделы работают, WebApp закрывается и открывается повторно корректно. Logout/revocation и client/cross-club сценарии остаются следующими проверками.
+- Реальный staging logout smoke подтверждён скриншотами: после Logout открывается `/auth/login` без staff-контента, повторное открытие через меню staging-бота выполняет новый exchange и возвращает в Staff Web. Staff session/revocation gate закрыт.
+- Следующий блок: client WebApp с отдельным Telegram test account, привязанным к staging club; затем cross-club denial. Текущий staging account — staff/owner, поэтому client cabinet им проверять нельзя.
 - Restricted pages enforce `analytics_view`/`qr_checkin`; no settings mutation was exposed.
 - Added settings page tests; remaining: continue the next 3–4 migration blocks.
