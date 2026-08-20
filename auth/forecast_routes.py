@@ -895,6 +895,23 @@ async def update_staff_web(staff_id: int, request: Request, context: AuthContext
     return {"ok": True, "club_id": actor.club_id, "staff_id": staff_id, "read_only": False}
 
 
+@settings_router.patch("/integrations")
+async def update_integrations_web(request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):
+    actor = require_web_context(context)
+    if os.getenv("WEB_SETTINGS_MUTATIONS_ENABLED", "0") != "1": raise HTTPException(status_code=404, detail={"code": "feature_disabled"})
+    if actor.actor_type != "owner" and "settings_manage" not in actor.permissions: raise HTTPException(status_code=403, detail={"code": "permission_denied"})
+    await require_csrf(request.app.state.redis_client, request); payload = await request.json(); key = str(payload.get("idempotency_key") or "").strip()
+    if set(payload) - {"email_enabled", "push_enabled", "idempotency_key"} or not key or len(key) > 100 or any(not isinstance(payload.get(k), bool) for k in ("email_enabled", "push_enabled") if k in payload): raise HTTPException(status_code=400, detail={"code": "invalid_integration_flags"})
+    if not await request.app.state.redis_client.set(f"web:integrations:{actor.club_id}:{key}", "1", ex=900, nx=True): return {"ok": True, "idempotent_replay": True, "club_id": actor.club_id}
+    club = await session.scalar(select(Club).where(Club.id == actor.club_id).with_for_update())
+    if not club: raise HTTPException(status_code=404, detail={"code": "club_not_found"})
+    settings = dict(club.club_settings or {}); notifications = dict(settings.get("notifications", {}) or {})
+    for field in ("email_enabled", "push_enabled"):
+        if field in payload: notifications[field] = payload[field]
+    settings["notifications"] = notifications; club.club_settings = settings; await session.commit(); audit_event("web_integrations_updated", club_id=actor.club_id, actor_user_id=actor.user_id, action="update", object_type="integrations", location="web/staff/settings/integrations")
+    return {"ok": True, "club_id": actor.club_id, "updated": [x for x in ("email_enabled", "push_enabled") if x in payload], "read_only": False}
+
+
 @checkin_router.get("/data")
 async def checkin_data(request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session), limit: int = Query(default=50, ge=1, le=100)):
     actor = require_web_context(context)
@@ -1462,6 +1479,13 @@ async def web_branding_page(context: AuthContext | None = Depends(web_context)):
 async def web_integrations_page(context: AuthContext | None = Depends(web_context)):
     require_web_context(context)
     return await _settings_page(context, "Integrations", "/api/v1/staff/settings/integrations")
+
+
+@web_router.get("/staff/settings/staff", response_class=HTMLResponse)
+async def web_staff_management_page(context: AuthContext | None = Depends(web_context)):
+    actor = require_web_context(context)
+    if actor.actor_type != "owner" and "settings_manage" not in actor.permissions: raise HTTPException(status_code=403, detail={"code": "permission_denied"})
+    return HTMLResponse('''<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Staff management · SpeedyCRM</title><link rel="stylesheet" href="/static/web/design.css"><script src="/static/web/components.js"></script></head><body><main class="web-shell"><div class="web-container"><div id="navigation"></div><section class="web-hero"><span class="web-kicker">Staff / Management</span><h1>People,<br>with control.</h1></section><section class="web-card"><form id="staff-create"><input name="telegram_id" type="number" placeholder="Telegram ID" required><input name="full_name" placeholder="Full name" required><select name="role"><option>cashier</option><option>coach</option><option>manager</option></select><button>Create staff</button></form><p id="staff-result" role="status"></p></section></div></main><script>navigation.innerHTML=SpeedyCRMWeb.navigation("Staff web / Management");const csrf=()=>decodeURIComponent((document.cookie.match(/(?:^|; )speedycrm_csrf_token=([^;]*)/)||[])[1]||"");document.querySelector("#staff-create").addEventListener("submit",async e=>{e.preventDefault();const f=new FormData(e.target);try{const d=await SpeedyCRMWeb.json("/api/v1/staff/settings/staff",{method:"POST",headers:{"Content-Type":"application/json","X-CSRF-Token":csrf()},body:JSON.stringify({telegram_id:Number(f.get("telegram_id")),full_name:f.get("full_name"),role:f.get("role"),permissions:{},idempotency_key:crypto.randomUUID()})});document.querySelector("#staff-result").textContent=`Staff ${d.staff_id} created.`}catch(_){document.querySelector("#staff-result").textContent="Staff management unavailable or disabled."}});</script></body></html>''')
 
 
 @web_router.get("/staff/checkin", response_class=HTMLResponse)

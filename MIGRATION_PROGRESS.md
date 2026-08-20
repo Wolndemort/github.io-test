@@ -945,6 +945,21 @@ Verification for Stage 50:
 - Seeded staging-only synthetic client fixture: `user_id=990000001`, club 1, one student, same test email; added seed/cleanup helpers. Native flags enabled only in staging for client Web smoke; fixture must be removed after verification.
 - Restricted pages enforce `analytics_view`/`qr_checkin`; no settings mutation was exposed.
 
+## 2026-08-20 — functional Web UI: staff management and integrations
+
+- Добавлена отдельная `/staff/settings/staff` page с формой создания staff через Web API.
+- Добавлен `PATCH /api/v1/staff/settings/integrations` только для boolean `email_enabled`/`push_enabled`.
+- Integration mutation защищён settings permission/owner, CSRF, `WEB_SETTINGS_MUTATIONS_ENABLED`, allowlist, club row lock, idempotency, transaction и audit.
+- Web payload не принимает SMTP/Yandex/Telegram/payment secrets; credentials остаются server-side.
+- Targeted suite: `4 passed`; полный suite: `458 passed`; `git diff --check` чист.
+- Telegram, live, ALTER и `master` не затронуты.
+
+### Следующий пакет
+
+- Добавить UI редактирования staff и integrations flags.
+- Перенести online payment intent/webhook с provider verification, duplicate-event protection и audit.
+- Провести staging functional smoke после включения flags только на staging.
+
 ## 2026-08-20 — functional Web operations: staff management
 
 - Добавлены `POST /api/v1/staff/settings/staff` и `PATCH /api/v1/staff/settings/staff/{staff_id}`.
