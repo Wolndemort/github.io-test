@@ -38,6 +38,7 @@ class User(Base):
     club_id: Mapped[Optional[int]] = mapped_column(ForeignKey('clubs.id'), nullable=True, index=True)
     is_accepted: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
     full_name: Mapped[Optional[str]] = mapped_column(String)
+    email: Mapped[Optional[str]] = mapped_column(String(320), nullable=True, index=True)
     students: Mapped[List["Student"]] = relationship(back_populates='parent', cascade="all, delete-orphan")
     is_biometric_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
 
