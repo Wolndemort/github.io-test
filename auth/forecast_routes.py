@@ -240,6 +240,69 @@ async def cash_data(request: Request, context: AuthContext | None = Depends(web_
     return {"club_id": actor.club_id, "income_kopecks": income, "expense_kopecks": expense, "balance_kopecks": income - expense, "read_only": True}
 
 
+@cash_router.post("/entries")
+async def create_cash_entry_web(request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):
+    actor = require_web_context(context)
+    if os.getenv("WEB_CASH_MUTATIONS_ENABLED", "0") != "1":
+        raise HTTPException(status_code=404, detail={"code": "feature_disabled"})
+    if actor.actor_type == "staff" and "cash_sale" not in actor.permissions:
+        raise HTTPException(status_code=403, detail={"code": "permission_denied"})
+    await require_csrf(request.app.state.redis_client, request)
+    payload = await request.json()
+    if set(payload) - {"entry_type", "category", "amount_kopecks", "description", "idempotency_key"}:
+        raise HTTPException(status_code=400, detail={"code": "invalid_cash_fields"})
+    entry_type = str(payload.get("entry_type") or "").strip().lower()
+    category = str(payload.get("category") or "other").strip()[:50]
+    description = str(payload.get("description") or "").strip()
+    key = str(payload.get("idempotency_key") or "").strip()
+    try:
+        amount = int(payload.get("amount_kopecks"))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail={"code": "invalid_amount"})
+    if entry_type not in {"income", "expense"} or not 1 <= amount <= 100_000_000_00 or not key or len(key) > 100 or len(description) > 500:
+        raise HTTPException(status_code=400, detail={"code": "invalid_cash_entry"})
+    accepted = await request.app.state.redis_client.set(f"web:cash-entry:{actor.club_id}:{key}", "1", ex=900, nx=True)
+    if not accepted:
+        return {"ok": True, "idempotent_replay": True, "club_id": actor.club_id}
+    entry = CashEntry(club_id=actor.club_id, entry_type=entry_type, category=category, amount_kopecks=amount, description=description, idempotency_key=f"web:{actor.club_id}:{key}"[:80], created_by=actor.user_id)
+    session.add(entry)
+    await session.commit()
+    audit_event("web_cash_entry_created", club_id=actor.club_id, actor_user_id=actor.user_id, action="create", object_type="cash_entry", object_id=entry.id, location="web/staff/cash", amount_kopecks=amount, method="cash")
+    return {"ok": True, "club_id": actor.club_id, "entry_id": entry.id, "read_only": False}
+
+
+@cash_router.post("/entries/{entry_id}/reverse")
+async def reverse_cash_entry_web(entry_id: int, request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):
+    actor = require_web_context(context)
+    if os.getenv("WEB_CASH_MUTATIONS_ENABLED", "0") != "1":
+        raise HTTPException(status_code=404, detail={"code": "feature_disabled"})
+    if actor.actor_type == "staff" and "cash_sale" not in actor.permissions:
+        raise HTTPException(status_code=403, detail={"code": "permission_denied"})
+    await require_csrf(request.app.state.redis_client, request)
+    payload = await request.json()
+    if set(payload) - {"reason", "idempotency_key"}:
+        raise HTTPException(status_code=400, detail={"code": "invalid_reversal_fields"})
+    reason = str(payload.get("reason") or "").strip()
+    key = str(payload.get("idempotency_key") or "").strip()
+    if not 3 <= len(reason) <= 500 or not key or len(key) > 100:
+        raise HTTPException(status_code=400, detail={"code": "invalid_reversal"})
+    accepted = await request.app.state.redis_client.set(f"web:cash-reversal:{actor.club_id}:{entry_id}:{key}", "1", ex=900, nx=True)
+    if not accepted:
+        return {"ok": True, "idempotent_replay": True, "club_id": actor.club_id, "entry_id": entry_id}
+    entry = await session.scalar(select(CashEntry).where(CashEntry.id == entry_id, CashEntry.club_id == actor.club_id).with_for_update())
+    if not entry:
+        raise HTTPException(status_code=404, detail={"code": "cash_entry_not_found"})
+    if entry.reversed_entry_id:
+        raise HTTPException(status_code=409, detail={"code": "cash_entry_already_reversed"})
+    reversal = CashEntry(club_id=actor.club_id, entry_type="expense" if entry.entry_type == "income" else "income", category="reversal", amount_kopecks=entry.amount_kopecks, description=f"Reversal #{entry.id}: {reason}"[:500], idempotency_key=f"web-reversal:{actor.club_id}:{entry.id}:{key}"[:80], created_by=actor.user_id)
+    session.add(reversal)
+    await session.flush()
+    entry.reversed_entry_id = reversal.id
+    await session.commit()
+    audit_event("web_cash_entry_reversed", club_id=actor.club_id, actor_user_id=actor.user_id, action="reverse", object_type="cash_entry", object_id=entry_id, location="web/staff/cash", amount_kopecks=entry.amount_kopecks, method="cash", reason=reason)
+    return {"ok": True, "club_id": actor.club_id, "entry_id": entry_id, "reversal_id": reversal.id, "read_only": False}
+
+
 @sales_router.get("/data")
 async def sales_data(request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):
     actor = require_web_context(context)

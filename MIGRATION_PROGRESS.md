@@ -945,6 +945,21 @@ Verification for Stage 50:
 - Seeded staging-only synthetic client fixture: `user_id=990000001`, club 1, one student, same test email; added seed/cleanup helpers. Native flags enabled only in staging for client Web smoke; fixture must be removed after verification.
 - Restricted pages enforce `analytics_view`/`qr_checkin`; no settings mutation was exposed.
 
+## 2026-08-20 — functional Web operations: cash register
+
+- Добавлены `POST /api/v1/staff/cash/entries` для прихода/расхода и `POST /api/v1/staff/cash/entries/{entry_id}/reverse` для сторно.
+- Денежные mutations используют `WEB_CASH_MUTATIONS_ENABLED`, `cash_sale`, CSRF, strict allowlist, положительную сумму в копейках с верхним лимитом, club scope, idempotency и audit.
+- Сторно использует row lock, запрещает повторное reversal и создаёт компенсирующую запись; удаление финансовых записей через Web не добавлялось.
+- Добавлены contract tests полного cash safety-контура.
+- Targeted suite: `8 passed`; полный suite: `446 passed`; `git diff --check` чист.
+- Telegram, live, ALTER и `master` не затронуты.
+
+### Следующий пакет
+
+- Добавить UI для cash entries/reversal.
+- Перенести продажи: товар/абонемент, скидки, inventory lock, payment status и webhook-safe flow.
+- Каждая money/inventory операция будет иметь тот же safety-контур и отдельный тестовый пакет.
+
 ## 2026-08-20 — functional Web operations: check-in cancellation
 
 - Добавлен `POST /api/v1/staff/checkin/cancel` для отмены конкретного посещения.
