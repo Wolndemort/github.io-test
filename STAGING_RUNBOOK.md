@@ -61,3 +61,9 @@ Never restore into `gym_db`; never copy staging data back to live.
 ## Current limitation
 
 Authorized browser smoke requires a separate staging Telegram bot token and test account. Live bot credentials must not be reused. Until then, use the unauthenticated smoke and local test suite.
+
+When the separate token is present in `/root/speedycrm-staging/.staging-secrets`, configure only the staging database with the server-side helper:
+
+```bash
+bash /root/speedycrm-staging/scripts/configure_staging_bot.sh
+```
