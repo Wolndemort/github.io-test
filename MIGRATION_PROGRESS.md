@@ -938,5 +938,6 @@ Verification for Stage 50:
 - Начат security-пакет: Email binding request ограничен по email и IP/club (`3` запроса за `300` секунд), добавлен security contract test. Все изменения только в `web-migration/phase-0-auth`.
 - В общий navigation добавлен переключатель `EN/RU` с сохранением выбора в localStorage и `document.lang`; полноценный перевод текстов и финальный дизайн оставлены отдельным последним этапом.
 - Security/language пакет проверен: full suite `422 passed`, `git diff --check` clean. Staging remains isolated and production branch untouched.
+- Current branch deployed to SSH-only staging: `/ready` 200, public staging nginx exited, API/DB/Redis healthy. EN/RU switcher and OTP rate-limit code are present; native flags remain disabled.
 - Restricted pages enforce `analytics_view`/`qr_checkin`; no settings mutation was exposed.
 - Added settings page tests; remaining: continue the next 3–4 migration blocks.
