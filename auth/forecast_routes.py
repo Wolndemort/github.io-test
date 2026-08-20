@@ -432,6 +432,40 @@ async def product_detail_data(product_id: int, request: Request, context: AuthCo
     return {"club_id": actor.club_id, "product": {"id": product.id, "name": product.name, "category": product.category, "price_kopecks": product.price_kopecks, "stock": product.stock, "details": product.details}, "read_only": True}
 
 
+@catalog_router.post("/products/{product_id}/stock")
+async def adjust_product_stock_web(product_id: int, request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):
+    actor = require_web_context(context)
+    if os.getenv("WEB_INVENTORY_MUTATIONS_ENABLED", "0") != "1":
+        raise HTTPException(status_code=404, detail={"code": "feature_disabled"})
+    if actor.actor_type == "staff" and "products_manage" not in actor.permissions:
+        raise HTTPException(status_code=403, detail={"code": "permission_denied"})
+    await require_csrf(request.app.state.redis_client, request)
+    payload = await request.json()
+    if set(payload) - {"delta", "reason", "idempotency_key"}:
+        raise HTTPException(status_code=400, detail={"code": "invalid_stock_fields"})
+    try:
+        delta = int(payload.get("delta"))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail={"code": "invalid_stock_delta"})
+    reason = str(payload.get("reason") or "").strip()
+    key = str(payload.get("idempotency_key") or "").strip()
+    if delta == 0 or abs(delta) > 100_000 or not 3 <= len(reason) <= 500 or not key or len(key) > 100:
+        raise HTTPException(status_code=400, detail={"code": "invalid_stock_adjustment"})
+    accepted = await request.app.state.redis_client.set(f"web:stock:{actor.club_id}:{product_id}:{key}", "1", ex=900, nx=True)
+    if not accepted:
+        return {"ok": True, "idempotent_replay": True, "club_id": actor.club_id, "product_id": product_id}
+    product = await session.scalar(select(ClubProduct).where(ClubProduct.id == product_id, ClubProduct.club_id == actor.club_id).with_for_update())
+    if not product:
+        raise HTTPException(status_code=404, detail={"code": "product_not_found"})
+    new_stock = int(product.stock or 0) + delta
+    if new_stock < 0:
+        raise HTTPException(status_code=409, detail={"code": "insufficient_stock"})
+    product.stock = new_stock
+    await session.commit()
+    audit_event("web_product_stock_adjusted", club_id=actor.club_id, actor_user_id=actor.user_id, action="update", object_type="club_product", object_id=product_id, location="web/staff/products", quantity=delta, reason=reason)
+    return {"ok": True, "club_id": actor.club_id, "product_id": product_id, "stock": new_stock, "read_only": False}
+
+
 @catalog_router.get("/discounts")
 async def discounts_data(request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):
     actor = require_web_context(context)

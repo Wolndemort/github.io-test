@@ -945,6 +945,19 @@ Verification for Stage 50:
 - Seeded staging-only synthetic client fixture: `user_id=990000001`, club 1, one student, same test email; added seed/cleanup helpers. Native flags enabled only in staging for client Web smoke; fixture must be removed after verification.
 - Restricted pages enforce `analytics_view`/`qr_checkin`; no settings mutation was exposed.
 
+## 2026-08-20 — functional Web operations: inventory adjustment
+
+- Добавлен `POST /api/v1/staff/catalog/products/{product_id}/stock` для безопасной корректировки остатков.
+- Операция использует `WEB_INVENTORY_MUTATIONS_ENABLED`, `products_manage`, CSRF, allowlist, ограничение delta/reason, club scope, row lock товара, idempotency, запрет отрицательного остатка, transaction и audit.
+- Добавлен contract test полного inventory safety-контура.
+- Targeted suite: `5 passed`; полный suite: `447 passed`; `git diff --check` чист.
+- Telegram, live, ALTER и `master` не затронуты.
+
+### Следующий пакет
+
+- Перенести продажу товара через Web: проверка товара/остатка под lock, скидки, создание order/cart items, idempotency и payment status.
+- Перенести продажу абонемента по тому же принципу, затем добавить UI кассы/товаров.
+
 ## 2026-08-20 — functional Web operations: cash register
 
 - Добавлены `POST /api/v1/staff/cash/entries` для прихода/расхода и `POST /api/v1/staff/cash/entries/{entry_id}/reverse` для сторно.
