@@ -41,6 +41,8 @@ from middlewares.main_middleware import DbSessionMiddleware
 from admin_module.api import router
 from admin_module.admin_pages import router as admin_pages_router
 from admin_module.webapp_views import router as webapp_views_router
+from auth.routes import router as auth_router
+from auth.forecast_routes import router as forecast_router, web_router as web_forecast_router, revenue_router, students_router, overview_router, cash_router, sales_router, audit_router, schedule_router, catalog_router, client_router, settings_router, checkin_router, freeze_router
 from redis.asyncio import Redis
 from aiogram.fsm.storage.redis import RedisStorage
 
@@ -160,6 +162,21 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 app.include_router(router)
 app.include_router(webapp_views_router)
 app.include_router(admin_pages_router)
+app.include_router(auth_router)
+app.include_router(forecast_router)
+app.include_router(web_forecast_router)
+app.include_router(revenue_router)
+app.include_router(students_router)
+app.include_router(overview_router)
+app.include_router(cash_router)
+app.include_router(sales_router)
+app.include_router(audit_router)
+app.include_router(schedule_router)
+app.include_router(catalog_router)
+app.include_router(client_router)
+app.include_router(settings_router)
+app.include_router(checkin_router)
+app.include_router(freeze_router)
 setup_admin(app, engine)
 
 dp = Dispatcher(storage=storage)
