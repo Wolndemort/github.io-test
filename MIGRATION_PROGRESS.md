@@ -945,6 +945,22 @@ Verification for Stage 50:
 - Seeded staging-only synthetic client fixture: `user_id=990000001`, club 1, one student, same test email; added seed/cleanup helpers. Native flags enabled only in staging for client Web smoke; fixture must be removed after verification.
 - Restricted pages enforce `analytics_view`/`qr_checkin`; no settings mutation was exposed.
 
+## 2026-08-20 — production-readiness package: isolation, backup and rollback
+
+- Добавлены cross-club contract checks для native client auth и read-only client routes: actor scope проверяется до выдачи web session/данных.
+- Добавлены safety checks staging fixture helpers и проверка, что они не могут ссылаться на live/ALTER.
+- Добавлены contract checks backup/restore: custom PostgreSQL dump, `pg_restore --list`, lock/retention, restore только в отдельную test DB.
+- Добавлена проверка обратимой nullable email migration с корректным parent revision.
+- `RELEASE_READINESS.md` обновлён: зафиксированы текущие `433` → `437` tests и backup/rollback procedure; production gates остаются закрыты.
+- Targeted suite: `10 passed`; полный suite: `437 passed`; `git diff --check` чист.
+- Все изменения только в `web-migration/phase-0-auth`; live SpeedyCRM, ALTER и `master` не затронуты.
+
+### Следующий пакет
+
+- Выполнить human diff review и проверить фактические backup/restore prerequisites на отдельной test DB, без live restore.
+- Подготовить финальный migration compatibility checklist и список rollback commands.
+- После этого — финальный UI/translation polish и отдельное решение о production rollout.
+
 ## 2026-08-20 — controlled staging client fixture cycle
 
 - На сервере выполнен только staging-only цикл `seed_staging_client.sh` → fixture создан (`user/student INSERT 1`) → `cleanup_staging_client.sh` → обе записи удалены (`DELETE 1`).
