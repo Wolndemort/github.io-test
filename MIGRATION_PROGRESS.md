@@ -1848,3 +1848,10 @@ Verification for Stage 50:
 - Унифицирован client student scope для cabinet, history, freeze, subscriptions и summary: primary parent и `StudentParent` linked parent теперь видят одинаковые записи.
 - QR pass уже использовал linked scope; теперь остальные client read pages согласованы с ним.
 - Добавлен regression contract; полный suite: `486 passed`.
+## 2026-08-20 — left off-canvas navigation
+
+- Верхняя навигация Web переработана: все client/staff/dynamic links теперь собираются в единый левый выезжающий drawer.
+- Добавлены backdrop, Escape/close/link-close, блокировка прокрутки фона, читаемые интервалы ссылок и отдельный footer для языка/выхода.
+- Белый фон, чёрная типографика и единые controls сохранены; горизонтальное слипание ссылок устранено.
+- Проверки: `node --check static/web/components.js`, `git diff --check`, `491 passed`.
+- Изменения пока локальные; staging deploy и authenticated visual sweep — следующий шаг.

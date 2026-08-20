@@ -97,6 +97,10 @@ No merge to `master` or production rollout is authorized by this report.
 
 ## Continuation checkpoint
 
+### 2026-08-20 — navigation visual checkpoint
+
+The Web navigation now uses a left off-canvas drawer instead of an inline menu. All static and dynamically-added role/settings links are spaced readable links inside the drawer; language and logout are separated into its footer. The overlay, Escape key, close action and navigation links close the drawer safely. Local validation passed: JavaScript syntax check, whitespace check and 491 pytest tests. Authenticated staging visual confirmation remains to be recorded after deployment.
+
 The full recovery context is maintained in `WEB_MIGRATION_HANDOFF.md`. Subscriptions and freezes are backed by existing database/backend services and are wired into Web reads/mutations; scheduler notifications remain backend/Telegram delivery, while Web exposes settings/status. Web now has a text-only owner/staff broadcast composer, client saved-payment-method revoke, receipt delivery and owner/staff invitations. Media-copy remains pending; refunds require a provider-backed YooKassa integration and explicit policy, not a status-only mutation. Staging and forbidden-target boundaries are documented and must be preserved.
 
 ## Remaining after CRM functional migration

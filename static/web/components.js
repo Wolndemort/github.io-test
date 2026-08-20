@@ -97,20 +97,30 @@ document.addEventListener("DOMContentLoaded", () => {
   const post = (url, body) => SpeedyCRMWeb.json(url, {method: "POST", headers: {"Content-Type": "application/json", "X-CSRF-Token": csrf()}, body: JSON.stringify({...body, idempotency_key: crypto.randomUUID()})});
   const form = (html, handler) => { const wrapper = document.createElement("div"); wrapper.className = "web-card"; wrapper.innerHTML = html; const target = wrapper.querySelector("form"); target.addEventListener("submit", event => { const title = wrapper.querySelector("h2")?.textContent || ""; if (/(Cash|Sell|Activate|Freeze|Cancel|Reverse|Archive|deactivat)/i.test(title) && !window.confirm(`Confirm: ${title}?`)) event.preventDefault(); }, {capture: true}); target.addEventListener("submit", async event => { if (event.defaultPrevented) return; const button = target.querySelector("button[type=submit], button"); const label = button?.textContent; if (button) { button.disabled = true; button.textContent = "Saving…"; target.setAttribute("aria-busy", "true"); } try { await handler(event); } finally { if (button) { button.disabled = false; button.textContent = label; } target.removeAttribute("aria-busy"); } }); return wrapper; };
   setTimeout(() => {
-    document.querySelectorAll(".web-links").forEach(container => {
-      if (container.querySelector(".web-menu")) return;
-      const menu = document.createElement("details"); menu.className = "web-menu";
-      const summary = document.createElement("summary"); summary.textContent = "Menu";
-      const panel = document.createElement("div"); panel.className = "web-menu-panel";
-      [...container.querySelectorAll(":scope > a")].forEach(link => panel.appendChild(link));
-      menu.append(summary, panel); container.prepend(menu);
-    });
     if (location.pathname.startsWith("/client/") && !document.querySelector('.web-links a[href="/client/pass"]')) { const passLink = document.createElement("a"); passLink.href = "/client/pass"; passLink.textContent = "QR pass"; document.querySelector(".web-links")?.prepend(passLink); }
     if (location.pathname.startsWith("/staff/") && !document.querySelector('.web-links a[href="/staff/profile"]')) { const profileLink = document.createElement("a"); profileLink.href = "/staff/profile"; profileLink.textContent = "Profile"; document.querySelector(".web-links")?.prepend(profileLink); }
     if (location.pathname.startsWith("/staff/") && !document.querySelector('.web-links a[href="/staff/broadcast"]')) { const broadcastLink = document.createElement("a"); broadcastLink.href = "/staff/broadcast"; broadcastLink.textContent = "Broadcast"; document.querySelector(".web-links")?.prepend(broadcastLink); }
     if (location.pathname.startsWith("/staff/settings/") && !document.querySelector('.web-links a[href="/staff/settings/menu"]')) { const menuLink = document.createElement("a"); menuLink.href = "/staff/settings/menu"; menuLink.textContent = "Menu"; document.querySelector(".web-links")?.prepend(menuLink); }
     if (location.pathname.startsWith("/staff/settings/") && !document.querySelector('.web-links a[href="/staff/settings/schedulers"]')) { const schedulerLink = document.createElement("a"); schedulerLink.href = "/staff/settings/schedulers"; schedulerLink.textContent = "Schedulers"; document.querySelector(".web-links")?.prepend(schedulerLink); }
     if (location.pathname.startsWith("/staff/settings/") && !document.querySelector('.web-links a[href="/staff/settings/turnstile"]')) { const turnstileLink = document.createElement("a"); turnstileLink.href = "/staff/settings/turnstile"; turnstileLink.textContent = "Turnstile"; document.querySelector(".web-links")?.prepend(turnstileLink); }
+    document.querySelectorAll(".web-links").forEach(container => {
+      if (document.querySelector(".web-drawer")) return;
+      const nav = container.closest(".web-nav");
+      const links = [...container.querySelectorAll(":scope > a")];
+      const extras = [...container.children].filter(el => !el.matches("a"));
+      const toggle = document.createElement("button"); toggle.type = "button"; toggle.className = "web-menu-toggle"; toggle.setAttribute("aria-label", "Open navigation"); toggle.setAttribute("aria-expanded", "false"); toggle.textContent = "Menu";
+      const backdrop = document.createElement("div"); backdrop.className = "web-backdrop"; backdrop.hidden = true;
+      const drawer = document.createElement("aside"); drawer.className = "web-drawer"; drawer.setAttribute("aria-label", "Navigation");
+      const close = document.createElement("button"); close.type = "button"; close.className = "web-drawer-close"; close.setAttribute("aria-label", "Close navigation"); close.textContent = "×";
+      const list = document.createElement("div"); list.className = "web-drawer-links";
+      links.forEach(link => { list.appendChild(link); link.addEventListener("click", closeDrawer); });
+      const footer = document.createElement("div"); footer.className = "web-drawer-footer"; extras.forEach(el => footer.appendChild(el));
+      drawer.append(close, list, footer); document.body.append(backdrop, drawer); nav?.insertBefore(toggle, nav.querySelector(".web-kicker"));
+      function openDrawer() { drawer.classList.add("is-open"); backdrop.hidden = false; document.body.classList.add("web-drawer-open"); toggle.setAttribute("aria-expanded", "true"); }
+      function closeDrawer() { drawer.classList.remove("is-open"); backdrop.hidden = true; document.body.classList.remove("web-drawer-open"); toggle.setAttribute("aria-expanded", "false"); }
+      toggle.addEventListener("click", openDrawer); close.addEventListener("click", closeDrawer); backdrop.addEventListener("click", closeDrawer); document.addEventListener("keydown", e => { if (e.key === "Escape") closeDrawer(); });
+      container.remove();
+    });
     const clientEndpoints = {"/client/history":"/api/v1/client/history/data", "/client/freeze":"/api/v1/client/freeze/data", "/client/subscriptions":"/api/v1/client/subscriptions/data", "/client/purchases":"/api/v1/client/purchases/data", "/client/products":"/api/v1/client/products/data", "/client/discounts":"/api/v1/client/discounts/data", "/client/tariffs":"/api/v1/client/tariffs/data", "/client/notifications":"/api/v1/client/notifications/data", "/client/club":"/api/v1/client/club/data"};
     const clientTarget = document.querySelector("#client-data"); const clientEndpoint = clientEndpoints[location.pathname];
     const escapeHtml = value => String(value ?? "—").replace(/[&<>"']/g, char => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;", "'":"&#39;"}[char]));

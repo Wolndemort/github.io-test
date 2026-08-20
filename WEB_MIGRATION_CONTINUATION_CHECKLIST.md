@@ -141,6 +141,15 @@
 
 ## Safe continuation commands
 
+## 2026-08-20 checkpoint — navigation visual package
+
+- [x] Replace inline details menu with a left off-canvas drawer.
+- [x] Include dynamically-added Profile/Broadcast/Menu/Schedulers/Turnstile links in the drawer.
+- [x] Add backdrop, Escape, close button and close-on-navigation behavior.
+- [x] Keep language and logout readable in the drawer footer.
+- [x] Run `node --check`, `git diff --check` and full suite (`491 passed`).
+- [ ] Deploy only to isolated staging and complete authenticated desktop/mobile visual sweep.
+
 ```powershell
 cd C:\Users\79615\PycharmProjects\aaaa
 git status --short --branch
