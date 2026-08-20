@@ -897,6 +897,6 @@ Verification for Stage 50:
 - Следующий блок: client WebApp с отдельным Telegram test account, привязанным к staging club; затем cross-club denial. Текущий staging account — staff/owner, поэтому client cabinet им проверять нельзя.
 - Найден auth gap client Web: Telegram exchange разрешал только owner/staff. Добавлен scoped client fallback по `User.club_id` или `Student.club_id + parent_id` после staff-проверки; чужой club не проходит. Добавлен contract test; staging deploy и client browser smoke — следующий шаг.
 - Client auth fix deployed only to staging: targeted tests `8 passed`, `/ready` 200, `bots_active: 1`. В staging club 1 сейчас `0` student parents; данные client-контуров есть в club 2 (`76` parents), поэтому нужен отдельный staging client test account/Telegram ID и выбранный club для browser smoke.
-- Client Telegram smoke признан необязательным для цели миграции. Начат Web-native auth: добавлен `WEB_NATIVE_AUTH_CONTRACT.md` с SMS OTP контрактом, Redis/session/CSRF правилами и feature-flag rollout. Telegram остаётся fallback; native auth пока не включён.
+- Client Telegram smoke признан необязательным для цели миграции. Native auth переведён с SMS на Email OTP: обновлён контракт с Redis/session/CSRF правилами и feature-flag rollout. Telegram остаётся fallback; native auth пока не включён.
 - Restricted pages enforce `analytics_view`/`qr_checkin`; no settings mutation was exposed.
 - Added settings page tests; remaining: continue the next 3–4 migration blocks.

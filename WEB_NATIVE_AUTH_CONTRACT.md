@@ -4,24 +4,24 @@
 
 Allow staff and clients to enter Web without Telegram. Telegram exchange remains available as a transition fallback until the native flow is proven.
 
-## First provider: SMS OTP
+## First provider: Email OTP
 
-The first native provider is phone-number OTP because existing client records already contain parent phone data. The provider is abstracted behind an SMS adapter; provider credentials are server-only and never returned to Web clients.
+The first native provider is email OTP. It is inexpensive for staging and avoids SMS-provider dependency. Email delivery is abstracted behind a mail adapter; SMTP credentials are server-only and never returned to Web clients.
 
 ### Request OTP
 
 `POST /auth/native/request`
 
 ```json
-{"phone":"+79991234567","club_id":1}
+{"email":"user@example.com","club_id":1}
 ```
 
 Rules:
 
 - feature flag `WEB_NATIVE_AUTH_ENABLED` must be explicitly enabled;
-- normalize phone to E.164 before lookup;
+- normalize and lowercase the email before lookup;
 - never reveal whether a phone exists;
-- rate-limit by phone, IP, and club;
+- rate-limit by email, IP, and club;
 - store only a hash of the OTP in Redis with a short TTL;
 - one active code per phone/club;
 - audit request without storing the code;
@@ -32,7 +32,7 @@ Rules:
 `POST /auth/native/verify`
 
 ```json
-{"phone":"+79991234567","club_id":1,"code":"123456"}
+{"email":"user@example.com","club_id":1,"code":"123456"}
 ```
 
 Rules:
@@ -50,4 +50,4 @@ Rules:
 
 ## Current blocker
 
-An SMS provider and a test phone route are required before enabling the flag. No provider token belongs in the repository or chat.
+A verified email field and an SMTP/mail provider are required before enabling the flag. No SMTP password belongs in the repository or chat.
