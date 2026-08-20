@@ -8,7 +8,7 @@ from fastapi.responses import HTMLResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from database.db import AuditEntry, CartOrder, CartItem, CashEntry, Club, ClubProduct, Discount, DiscountAssignment, PaymentOrder, Student, StudentParent, VisitLog, User, add_abon, purchase_student_freeze, get_session
+from database.db import AuditEntry, CartOrder, CartItem, CashEntry, Club, ClubProduct, ClubStaff, Discount, DiscountAssignment, PaymentOrder, Student, StudentParent, VisitLog, User, add_abon, purchase_student_freeze, get_session
 from services.input_normalization import normalize_ru_phone
 from services.audit import audit_event
 from services.schedule_utils import normalize_schedule_block
@@ -857,6 +857,42 @@ async def update_club_settings_web(request: Request, context: AuthContext | None
     club.club_settings = settings; await session.commit()
     audit_event("web_club_settings_updated", club_id=actor.club_id, actor_user_id=actor.user_id, action="update", object_type="club_settings", location="web/staff/settings")
     return {"ok": True, "club_id": actor.club_id, "updated_sections": [x for x in allowed - {"idempotency_key"} if x in payload], "read_only": False}
+
+
+@settings_router.post("/staff")
+async def create_staff_web(request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):
+    actor = require_web_context(context)
+    if os.getenv("WEB_STAFF_MUTATIONS_ENABLED", "0") != "1": raise HTTPException(status_code=404, detail={"code": "feature_disabled"})
+    if actor.actor_type != "owner": raise HTTPException(status_code=403, detail={"code": "owner_required"})
+    await require_csrf(request.app.state.redis_client, request); payload = await request.json(); key = str(payload.get("idempotency_key") or "").strip(); role = str(payload.get("role") or "cashier").strip().lower(); name = str(payload.get("full_name") or "").strip()
+    if set(payload) - {"telegram_id", "full_name", "role", "permissions", "idempotency_key"} or not key or len(key) > 100 or role not in {"cashier", "coach", "manager"} or not 2 <= len(name) <= 150: raise HTTPException(status_code=400, detail={"code": "invalid_staff"})
+    try: telegram_id = int(payload.get("telegram_id"))
+    except (TypeError, ValueError): raise HTTPException(status_code=400, detail={"code": "invalid_staff_id"})
+    permissions = payload.get("permissions") or {}
+    if not isinstance(permissions, dict) or set(permissions) - {"allow", "deny"} or any(not isinstance(x, str) or len(x) > 50 for x in permissions.get("allow", []) + permissions.get("deny", [])): raise HTTPException(status_code=400, detail={"code": "invalid_staff_permissions"})
+    if not await request.app.state.redis_client.set(f"web:staff-create:{actor.club_id}:{telegram_id}:{key}", "1", ex=900, nx=True): return {"ok": True, "idempotent_replay": True, "club_id": actor.club_id, "telegram_id": telegram_id}
+    existing = await session.scalar(select(ClubStaff).where(ClubStaff.club_id == actor.club_id, ClubStaff.telegram_id == telegram_id).with_for_update())
+    if existing: raise HTTPException(status_code=409, detail={"code": "staff_exists"})
+    staff = ClubStaff(club_id=actor.club_id, telegram_id=telegram_id, full_name=name, role=role, permissions=permissions, is_active=True); session.add(staff); await session.commit(); audit_event("web_staff_created", club_id=actor.club_id, actor_user_id=actor.user_id, action="create", object_type="club_staff", object_id=staff.id, location="web/staff/settings/staff")
+    return {"ok": True, "club_id": actor.club_id, "staff_id": staff.id, "read_only": False}
+
+
+@settings_router.patch("/staff/{staff_id}")
+async def update_staff_web(staff_id: int, request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):
+    actor = require_web_context(context)
+    if os.getenv("WEB_STAFF_MUTATIONS_ENABLED", "0") != "1": raise HTTPException(status_code=404, detail={"code": "feature_disabled"})
+    if actor.actor_type != "owner": raise HTTPException(status_code=403, detail={"code": "owner_required"})
+    await require_csrf(request.app.state.redis_client, request); payload = await request.json(); key = str(payload.get("idempotency_key") or "").strip()
+    if set(payload) - {"full_name", "role", "permissions", "is_active", "idempotency_key"} or not key or len(key) > 100: raise HTTPException(status_code=400, detail={"code": "invalid_staff_update"})
+    if not await request.app.state.redis_client.set(f"web:staff-update:{actor.club_id}:{staff_id}:{key}", "1", ex=900, nx=True): return {"ok": True, "idempotent_replay": True, "club_id": actor.club_id, "staff_id": staff_id}
+    staff = await session.scalar(select(ClubStaff).where(ClubStaff.id == staff_id, ClubStaff.club_id == actor.club_id).with_for_update())
+    if not staff: raise HTTPException(status_code=404, detail={"code": "staff_not_found"})
+    if "full_name" in payload: staff.full_name = str(payload["full_name"] or "").strip()[:150]
+    if "role" in payload and str(payload["role"]).lower() in {"cashier", "coach", "manager"}: staff.role = str(payload["role"]).lower()
+    if "permissions" in payload and isinstance(payload["permissions"], dict): staff.permissions = payload["permissions"]
+    if "is_active" in payload: staff.is_active = bool(payload["is_active"])
+    await session.commit(); audit_event("web_staff_updated", club_id=actor.club_id, actor_user_id=actor.user_id, action="update", object_type="club_staff", object_id=staff_id, location="web/staff/settings/staff")
+    return {"ok": True, "club_id": actor.club_id, "staff_id": staff_id, "read_only": False}
 
 
 @checkin_router.get("/data")

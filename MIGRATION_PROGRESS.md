@@ -945,6 +945,20 @@ Verification for Stage 50:
 - Seeded staging-only synthetic client fixture: `user_id=990000001`, club 1, one student, same test email; added seed/cleanup helpers. Native flags enabled only in staging for client Web smoke; fixture must be removed after verification.
 - Restricted pages enforce `analytics_view`/`qr_checkin`; no settings mutation was exposed.
 
+## 2026-08-20 — functional Web operations: staff management
+
+- Добавлены `POST /api/v1/staff/settings/staff` и `PATCH /api/v1/staff/settings/staff/{staff_id}`.
+- Staff management доступен только owner, использует `WEB_STAFF_MUTATIONS_ENABLED`, CSRF, allowlisted role/permissions, club scope, idempotency, row lock update, transaction и audit.
+- Поддержаны роли `cashier`, `coach`, `manager`; Telegram ID, full name, allow/deny permissions и active state валидируются без передачи секретов.
+- Исправлен trailing whitespace; полный suite: `457 passed`; `git diff --check` чист.
+- Telegram, live, ALTER и `master` не затронуты.
+
+### Следующий пакет
+
+- Добавить UI staff management и настройки меню/интеграций.
+- Перенести online payment intent и webhook verification.
+- После этого провести staging functional smoke всех включаемых flags с cleanup.
+
 ## 2026-08-20 — functional Web operations: tariffs and discount assignments
 
 - Добавлен `PATCH /api/v1/staff/catalog/tariffs/{discipline}` с allowlisted tariff fields, count/days/price validation, club row lock, idempotency, `tariffs_manage`, CSRF, feature flag `WEB_PRICING_MUTATIONS_ENABLED`, transaction и audit.
