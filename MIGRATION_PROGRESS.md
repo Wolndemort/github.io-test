@@ -945,6 +945,20 @@ Verification for Stage 50:
 - Seeded staging-only synthetic client fixture: `user_id=990000001`, club 1, one student, same test email; added seed/cleanup helpers. Native flags enabled only in staging for client Web smoke; fixture must be removed after verification.
 - Restricted pages enforce `analytics_view`/`qr_checkin`; no settings mutation was exposed.
 
+## 2026-08-20 — security regression package
+
+- Добавлены contract tests для logout: server-side session revocation и очистка session/CSRF cookies.
+- Добавлена проверка, что CSRF принимается только для существующей серверной сессии.
+- Добавлен OTP edge-case test: неизвестный и удалённый/истёкший OTP не может быть использован.
+- Targeted suite: `8 passed`; полный suite: `430 passed`; `git diff --check` чист.
+- Изменения только в ветке `web-migration/phase-0-auth`; `master`, live SpeedyCRM и ALTER не затронуты.
+
+### Следующий пакет
+
+- Подготовить staging-only client/staff email fixtures для browser smoke и проверить cross-club denial.
+- После smoke удалить fixtures, отключить staging flags и записать результат.
+- Затем перейти к backup/rollback/migration compatibility review перед production approval.
+
 ## 2026-08-20 — контрольная точка перед следующим пакетом
 
 - Ветка: `web-migration/phase-0-auth`; рабочее дерево чистое, `master` не изменялся и production deploy не выполнялся.

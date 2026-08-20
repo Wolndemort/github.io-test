@@ -46,3 +46,12 @@ async def test_otp_request_limit_applies_to_email_and_ip_club():
     for _ in range(3):
         assert await allow_otp_request(redis, "user@example.com", 2, "127.0.0.1") is True
     assert await allow_otp_request(redis, "user@example.com", 2, "127.0.0.1") is False
+
+
+@pytest.mark.asyncio
+async def test_unknown_or_expired_otp_cannot_be_consumed():
+    redis = FakeRedis()
+    assert await consume_otp(redis, "missing@example.com", 2, "123456") is False
+    await issue_otp(redis, "user@example.com", 2)
+    await redis.delete("web_native_otp:login:2:user@example.com")
+    assert await consume_otp(redis, "user@example.com", 2, "123456") is False
