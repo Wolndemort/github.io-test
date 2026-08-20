@@ -945,6 +945,20 @@ Verification for Stage 50:
 - Seeded staging-only synthetic client fixture: `user_id=990000001`, club 1, one student, same test email; added seed/cleanup helpers. Native flags enabled only in staging for client Web smoke; fixture must be removed after verification.
 - Restricted pages enforce `analytics_view`/`qr_checkin`; no settings mutation was exposed.
 
+## 2026-08-20 — functional operations UI: sales, freeze and check-in
+
+- В общий Web UI добавлены формы cash subscription sale, paid freeze, manual check-in с опциональным открытием turnstile и cancel visit.
+- Все формы используют общий CSRF cookie/header и `crypto.randomUUID()` idempotency key; server-side feature flags и permissions остаются обязательными.
+- Добавлены UI contract assertions для всех новых endpoint’ов; JavaScript проверен `node --check`.
+- Targeted UI suite: `3 passed`; полный suite: `451 passed`; `git diff --check` чист.
+- Telegram, live, ALTER и `master` не затронуты.
+
+### Следующий пакет
+
+- Провести staging browser smoke функциональных форм с временными flags и synthetic data, затем cleanup.
+- После smoke перейти к online payment intent/webhook provider verification.
+- Затем перенести управление скидками/тарифами и остальные административные mutations.
+
 ## 2026-08-20 — functional operations UI package
 
 - В общий `static/web/components.js` добавлены operation panels для существующих Cash/Sales страниц.
