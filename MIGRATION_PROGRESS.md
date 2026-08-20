@@ -944,4 +944,20 @@ Verification for Stage 50:
 - Role/scope package verified: targeted `4 passed`, full suite `426 passed`. No production deploy or master merge.
 - Seeded staging-only synthetic client fixture: `user_id=990000001`, club 1, one student, same test email; added seed/cleanup helpers. Native flags enabled only in staging for client Web smoke; fixture must be removed after verification.
 - Restricted pages enforce `analytics_view`/`qr_checkin`; no settings mutation was exposed.
+
+## 2026-08-20 — контрольная точка перед следующим пакетом
+
+- Ветка: `web-migration/phase-0-auth`; рабочее дерево чистое, `master` не изменялся и production deploy не выполнялся.
+- Выполнен полный локальный regression suite: `426 passed`.
+- `git diff --check` пройден без ошибок.
+- Staging остаётся изолированным и SSH-only: API доступен через tunnel на `127.0.0.1:18000`; live `/root/github.io-test` и ALTER `/root/alter` не затрагивались.
+- Native Email OTP подтверждён в staging: Yandex Postbox send, verify, server-side session, `auth_source=email`, role/club scope и logout; добавлены общий email-profile UI и EN/RU переключатель.
+- Временные тестовые данные удалены, production flags не включались.
+
+### Следующие шаги
+
+1. Закрыть browser/security сценарии для client/staff/owner: logout/revocation, invalid/expired OTP, rate limit и cross-club denial.
+2. Протестировать native email binding для staff/client ролей на staging-only данных; после smoke удалить тестовые записи и выключить flags.
+3. Провести review staging data и подготовить backup/rollback/migration compatibility checklist.
+4. Затем — общий UI/переводы и финальный production-readiness review. Merge в `master` и production deploy только после явного подтверждения.
 - Added settings page tests; remaining: continue the next 3–4 migration blocks.
