@@ -945,6 +945,19 @@ Verification for Stage 50:
 - Seeded staging-only synthetic client fixture: `user_id=990000001`, club 1, one student, same test email; added seed/cleanup helpers. Native flags enabled only in staging for client Web smoke; fixture must be removed after verification.
 - Restricted pages enforce `analytics_view`/`qr_checkin`; no settings mutation was exposed.
 
+## 2026-08-20 — staging fixture and client isolation package
+
+- Добавлены contract tests для staging seed/cleanup helpers: они используют только `speedycrm_staging_db` и `/root/speedycrm-staging`, не содержат ссылок на live/ALTER и работают с зарезервированным synthetic ID `990000001`.
+- Добавлены проверки client read-only routes: actor context обязателен, выборка привязана к `actor.club_id`, ответы помечены `read_only`.
+- Targeted suite: `10 passed`; полный suite: `433 passed`; `git diff --check` чист.
+- Изменения только в `web-migration/phase-0-auth`; `master`, live SpeedyCRM и ALTER не затронуты.
+
+### Следующий пакет
+
+- На staging выполнить controlled client fixture smoke при необходимости: seed → native login → client pages → cleanup.
+- Проверить cross-club denial отдельным тестовым actor/club без использования live credentials.
+- После этого перейти к backup/rollback/migration compatibility review.
+
 ## 2026-08-20 — security regression package
 
 - Добавлены contract tests для logout: server-side session revocation и очистка session/CSRF cookies.
