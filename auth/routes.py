@@ -4,7 +4,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from database.db import Club, ClubStaff, get_session
+from database.db import Club, ClubStaff, Student, User, get_session
 from middlewares.db_saas_midleware import SUPER_ADMIN_IDS
 from admin_module.webapp_verify import verify_telegram_data
 from services.staff_permissions import permissions_for_staff
@@ -72,10 +72,16 @@ async def telegram_exchange(
             ClubStaff.telegram_id == user_id,
             ClubStaff.is_active.is_(True),
         ))
-        if not staff:
+        client_user = await session.scalar(select(User).where(User.user_id == user_id, User.club_id == club.id))
+        client_student = await session.scalar(select(Student).where(Student.club_id == club.id, Student.parent_id == user_id))
+        if not staff and not client_user and not client_student:
             raise HTTPException(status_code=403, detail={"code": "staff_access_required", "message": "Нет доступа к staff Web"})
-        role, permissions = staff.role, frozenset(permissions_for_staff(staff))
-        actor_type = "staff"
+        if staff:
+            role, permissions = staff.role, frozenset(permissions_for_staff(staff))
+            actor_type = "staff"
+        else:
+            role, permissions = "client", frozenset()
+            actor_type = "client"
 
     context = AuthContext(user_id, club.id, actor_type, role, permissions, "telegram")
     audit_event("web_auth_exchange", club_id=club.id, actor_user_id=user_id, actor_role=role, action="login", location="web/auth/telegram/exchange", auth_source="telegram")

@@ -895,5 +895,6 @@ Verification for Stage 50:
 - Пользователь подтвердил полный staff browser smoke в staging: все кнопки/разделы работают, WebApp закрывается и открывается повторно корректно. Logout/revocation и client/cross-club сценарии остаются следующими проверками.
 - Реальный staging logout smoke подтверждён скриншотами: после Logout открывается `/auth/login` без staff-контента, повторное открытие через меню staging-бота выполняет новый exchange и возвращает в Staff Web. Staff session/revocation gate закрыт.
 - Следующий блок: client WebApp с отдельным Telegram test account, привязанным к staging club; затем cross-club denial. Текущий staging account — staff/owner, поэтому client cabinet им проверять нельзя.
+- Найден auth gap client Web: Telegram exchange разрешал только owner/staff. Добавлен scoped client fallback по `User.club_id` или `Student.club_id + parent_id` после staff-проверки; чужой club не проходит. Добавлен contract test; staging deploy и client browser smoke — следующий шаг.
 - Restricted pages enforce `analytics_view`/`qr_checkin`; no settings mutation was exposed.
 - Added settings page tests; remaining: continue the next 3–4 migration blocks.
