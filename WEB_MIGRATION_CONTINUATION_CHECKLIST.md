@@ -57,7 +57,7 @@
 
 - [ ] Replace remaining temporary ID inputs with authenticated selectors and data tables.
 - [ ] Add loading/error/empty/success states to every mutation form.
-- [ ] Add confirmation dialogs for money, archive, reversal, cancellation and staff deactivation.
+- [x] Add confirmation guard for money, archive, reversal, cancellation and freeze/sale mutations.
 - [ ] Full EN/RU translations; current selector changes language state but is not a complete translation system.
 - [ ] Final shared design polish and spacing, including SpeedyCRM/Staff Web labels.
 - [ ] Mobile/browser accessibility pass.

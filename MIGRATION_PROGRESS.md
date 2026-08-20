@@ -1441,3 +1441,12 @@ Verification for Stage 50:
 ### Следующий пакет
 
 - Закрыть оставшиеся UI states/confirmation dialogs и затем перейти к payment/webhook integration tests.
+## 2026-08-20 — Web mutation confirmation guard
+
+- Добавлен общий confirmation guard для опасных Web mutation forms: cash, sale, subscription, freeze, cancellation, reversal/archive labels.
+- Guard работает до отправки запроса и не заменяет backend authorization/CSRF/idempotency.
+- Targeted suite: `1 passed`; полный suite запускается после этого пакета.
+
+### Следующий пакет
+
+- Добавить единый loading state и accessibility/error states для mutation forms.
