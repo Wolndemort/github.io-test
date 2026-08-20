@@ -36,6 +36,14 @@ curl -fsS http://127.0.0.1:18000/ready
 
 Стиль: белый фон, чёрный основной текст/controls, серый только для secondary text, единые поля/кнопки/cards, drawer слева, без горизонтального overflow.
 
+## 2026-08-20 — audit of missing staff pages
+
+- Backend Web routes существуют: `/staff/forecast`, `/staff/students`, `/staff/overview`, `/staff/revenue`, `/staff/audit` и их API data endpoints.
+- Они не были действительно удалены, но меню показывало их только как `Forecast`/`Students`, поэтому русские разделы «Прогноз» и «Атлеты» визуально терялись.
+- Отдельной страницы «Последние операции» в Web нет. Telegram `admin_sales` содержит список операций, фильтры по периоду/типу/способу, итоги, детали и операции над записью; Web `/staff/sales` пока показывает только read-only сводку и mutation-панели.
+- `/staff/audit` — это журнал технических действий, не замена финансовому списку последних операций.
+- Следующий функциональный пакет: добавить в drawer явные русские пункты «Атлеты», «Прогноз», «Последние операции», расширить их страницы до Telegram-паритета и включить ссылки на детали клиента/операции.
+
 ## 2026-08-20 — visual system pass started
 
 - Общий Web UI переведён на белоснежный фон, чёрный контрастный ink, единые rounded controls, inputs/selects/textareas/buttons, focus/hover/disabled states.

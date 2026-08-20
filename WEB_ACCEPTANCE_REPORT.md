@@ -103,6 +103,10 @@ Work only in `C:\Users\79615\PycharmProjects\aaaa` on `web-migration/phase-0-aut
 
 The next acceptance block is not styling-only: first compare every Telegram CRM menu item and operation with Web, identify missing pages, then implement Russian localization and audit every button/form plus loading, empty, error and success states. Priority areas are admin/owner cabinet, club settings, schedulers, disciplines, notifications, broadcast, turnstile, clients, subscriptions, freezes, sales, cash and audit. The visual target remains white background, black typography/controls, consistent fields/buttons/cards and left off-canvas navigation.
 
+### Staff page gap confirmed
+
+The staff forecast, athlete list and overview routes are present in the Web backend, but the navigation labels were English and therefore did not match the Telegram menu. A separate Web “Recent operations” page is genuinely missing. Telegram’s `admin_sales` is richer than the current Web sales summary and must be ported as a distinct financial operations page; Web Audit must remain a separate technical event log.
+
 ### 2026-08-20 — navigation visual checkpoint
 
 The Web navigation now uses a left off-canvas drawer instead of an inline menu. All static and dynamically-added role/settings links are spaced readable links inside the drawer; language and logout are separated into its footer. The overlay, Escape key, close action and navigation links close the drawer safely. Local validation passed: JavaScript syntax check, whitespace check and 491 pytest tests. Authenticated staging visual confirmation remains to be recorded after deployment.

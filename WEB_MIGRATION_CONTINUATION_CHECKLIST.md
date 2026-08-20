@@ -153,6 +153,9 @@
 - [ ] Build Telegram-to-Web page/operation matrix; mark missing pages before adding new styling.
 - [ ] Audit every button and form in admin, club settings, schedulers, notifications, broadcast, turnstile, clients, subscriptions, freezes, sales, cash and audit.
 - [ ] Record each result and update all three progress/report files before committing.
+- [ ] Add explicit drawer entries for `Атлеты` (`/staff/students`), `Прогноз` (`/staff/forecast`) and `Последние операции` (new Web page).
+- [ ] Port Telegram `admin_sales` operation list: period/type/payment filters, totals, buyer/athlete, order details, receipt/payment method actions and audit-safe delete policy.
+- [ ] Keep `Audit` separate: it is the technical audit log, not the financial recent-operations page.
 
 ## 2026-08-20 checkpoint — navigation visual package
 
