@@ -11,3 +11,4 @@ def test_staff_management_is_owner_only_allowlisted_idempotent_and_audited():
     ui = Path("static/web/components.js").read_text(encoding="utf-8")
     assert "/api/v1/staff/settings/staff/${Number(f.get(\"staff_id\"))}" in ui
     assert 'permissions: {[f.get("mode")]' in ui
+    assert 'Staff update unavailable or disabled.' in ui

@@ -1421,3 +1421,13 @@ Verification for Stage 50:
 3. Провести review staging data и подготовить backup/rollback/migration compatibility checklist.
 4. Затем — общий UI/переводы и финальный production-readiness review. Merge в `master` и production deploy только после явного подтверждения.
 - Added settings page tests; remaining: continue the next 3–4 migration blocks.
+## 2026-08-20 — Web product sale UI selectors
+
+- Завершена Web UI часть cash product sale: вместо временных ID добавлены селекторы товара, покупателя и скидок.
+- Добавлен `GET /api/v1/staff/sales/buyers` с `cash_sale` permission и club scope; товары и скидки загружаются через существующие scoped endpoints.
+- Сохранены серверные проверки остатков, скидок, CSRF и idempotency; добавлен UI contract test.
+- Targeted suite: `4 passed`; полный suite: `465 passed`; `git diff --check` чист.
+
+### Следующий пакет
+
+- Перенести subscription/freeze UI на authenticated student/tariff selectors.

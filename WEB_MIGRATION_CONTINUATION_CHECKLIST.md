@@ -44,10 +44,10 @@
 - [x] Discipline configuration mutation with safe schedule block allowlist.
 - [x] Camera/turnstile configuration controls without exposing device secrets.
 - [x] Notification preference mutation for safe boolean flags.
-- [x] Staff list UI, staff create/update backend and permissions editor.
+- [x] Staff list UI, create/update backend, permissions editor and edit form.
 - [x] Client profile name editing; staff profile/user admin extensions remain.
 - [x] Discount assignment list/removal backend; UI selector polish remains.
-- [ ] Product sale UI with product picker, buyer picker and discount picker.
+- [x] Product sale UI with scoped product, buyer and discount pickers.
 - [ ] Subscription/freeze UI with tariff/student selectors.
 - [ ] Online payment provider integration smoke with mocked provider; then approved real staging test.
 - [ ] Webhook integration tests for success, wrong amount, wrong metadata, duplicate and provider retry.

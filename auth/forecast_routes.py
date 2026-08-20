@@ -44,6 +44,14 @@ settings_router = APIRouter(prefix="/api/v1/staff/settings", tags=["Web Settings
 checkin_router = APIRouter(prefix="/api/v1/staff/checkin", tags=["Web Checkin"])
 freeze_router = APIRouter(prefix="/api/v1/staff/freeze", tags=["Web Freeze"])
 
+@sales_router.get("/buyers")
+async def sale_buyers_data(request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):
+    actor = require_web_context(context)
+    if actor.actor_type == "staff" and "cash_sale" not in actor.permissions:
+        raise HTTPException(status_code=403, detail={"code": "permission_denied"})
+    buyers = list((await session.execute(select(User).where(User.club_id == actor.club_id).order_by(User.full_name, User.user_id).limit(200))).scalars().all())
+    return {"club_id": actor.club_id, "buyers": [{"id": user.user_id, "name": user.full_name or f"User {user.user_id}"} for user in buyers], "read_only": True}
+
 
 def _date_range(value: str | None, fallback: date) -> tuple[date, date]:
     start = date.fromisoformat(value) if value else fallback
