@@ -1789,3 +1789,7 @@ Verification for Stage 50:
 ## 2026-08-20 — settings state fix staged
 
 - Settings form-state fix deployed only to `/root/speedycrm-staging`; API/DB/Redis/nginx rebuilt with isolated compose.
+
+## 2026-08-20 — client scope fix staged
+
+- Client ownership security fix for freeze/student scope deployed only to `/root/speedycrm-staging`; containers rebuilt with isolated compose.

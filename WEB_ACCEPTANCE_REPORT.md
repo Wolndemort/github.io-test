@@ -66,6 +66,7 @@ Scheduler flags and Turnstile configuration now have Web controls; real relay pu
 - Admin mutation route audit passed at contract level for cash, sales, catalog, schedule, freeze, payment, settings, staff and check-in operations.
 - Settings form state corrected: current GET values now populate controls before PATCH, preventing blank-form resets.
 - Client ownership audit fixed freeze scope and added regression contracts; current suite: `485 passed`.
+- Client scope fix is deployed to isolated staging; no real client mutation was executed during deployment.
 - Settings state fix is deployed to isolated staging; authenticated button-by-button settings smoke remains part of the ongoing audit.
 - Hardware result is limited to the explicitly approved staging/work-area relay test; production/master were not involved.
 - Manual authenticated owner/client Email OTP/API smoke: previously passed and recorded in `MIGRATION_PROGRESS.md` (including owner session, `auth_source=email`, club scope and logout).
