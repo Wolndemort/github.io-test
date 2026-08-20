@@ -902,5 +902,6 @@ Verification for Stage 50:
 - Email schema проверена: полный suite `414 passed`; staging обновлён миграцией, `users.email` доступно, `/ready` 200, `bots_active: 1`. Native Email OTP всё ещё выключен до mail adapter/provider.
 - Реализован feature-gated Email OTP core: `/auth/native/request` и `/auth/native/verify`, Redis hash/TTL/attempt limit, SMTP adapter, server-side session/CSRF и club-scoped actor resolution. Добавлен contract test; flag `WEB_NATIVE_AUTH_ENABLED=0`, поэтому flow не активен.
 - После исправления порядка деклараций моделей полный suite: `415 passed`, `git diff --check` без ошибок. Email OTP endpoints остаются выключенными флагом.
+- Email OTP core собран в staging: `/auth/native/request` возвращает 404 при default-disabled flag, `/auth/login` 200, `/ready` 200, `bots_active: 1`. Telegram flow не изменён.
 - Restricted pages enforce `analytics_view`/`qr_checkin`; no settings mutation was exposed.
 - Added settings page tests; remaining: continue the next 3–4 migration blocks.
