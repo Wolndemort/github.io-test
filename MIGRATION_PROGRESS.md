@@ -1613,3 +1613,12 @@ Verification for Stage 50:
 - Camera settings теперь имеют enabled/name/base_url mutation fields и используют `/api/v1/staff/settings/camera`.
 - Menu settings получили отдельный `/api/v1/staff/settings/menu` read endpoint и Web page/link.
 - Полный suite после settings package: `481 passed`; `git diff --check` чист.
+## 2026-08-20 — staff management selector editor
+
+- Staff management получил selector сотрудников с текущим club-scoped списком, role/active editing и optional allow/deny permission payload.
+- Сохранены owner-only backend gate, CSRF, idempotency, row lock, transaction и audit.
+- Добавлен staff selector editor contract test.
+## 2026-08-20 — staff management selector verified
+
+- Staff management selector editor targeted tests passed; полный suite: `482 passed`; `git diff --check` чист.
+- Manual staff IDs remain only in backward-compatible temporary forms; selector editor is the primary path for the page.
