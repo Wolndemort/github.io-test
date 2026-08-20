@@ -1779,3 +1779,7 @@ Verification for Stage 50:
 
 - Исправлен риск сброса настроек: Web settings forms теперь подгружают текущие GET-значения перед PATCH, включая checkbox/text fields для branding, limits, features, menu, camera, turnstile, schedulers, notifications и integrations.
 - Node syntax check и полный suite: `483 passed`.
+
+## 2026-08-20 — settings state fix staged
+
+- Settings form-state fix deployed only to `/root/speedycrm-staging`; API/DB/Redis/nginx rebuilt with isolated compose.
