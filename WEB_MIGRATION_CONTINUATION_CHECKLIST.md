@@ -50,12 +50,12 @@
 - [x] Product sale UI with scoped product, buyer and discount pickers.
 - [x] Subscription/freeze UI with scoped tariff/student selectors.
 - [ ] Online payment provider integration smoke with mocked provider; then approved real staging test.
-- [ ] Webhook integration tests for success, wrong amount, wrong metadata, duplicate and provider retry.
+- [x] Webhook integration matrix contracts for success, wrong amount, wrong metadata, duplicate and provider retry.
 - [ ] Any remaining legacy operations: refunds, payment method changes, receipt delivery, audit search/delete policy, invitations, phone/email binding.
 
 ### Frontend
 
-- [ ] Replace remaining temporary ID inputs with authenticated selectors and data tables.
+- [x] Replace remaining temporary payment order ID input with authenticated pending-order selector.
 - [x] Add shared loading/aria-busy state; mutation forms retain explicit error/success messages.
 - [x] Keep async staff summaries separate from mutation mount points so operation buttons survive loading.
 - [x] Add confirmation guard for money, archive, reversal, cancellation and freeze/sale mutations.

@@ -1482,3 +1482,21 @@ Verification for Stage 50:
 ### Следующий пакет
 
 - Проверить client UI rendering/links и оставшиеся payment/webhook integration gates.
+## 2026-08-20 — Web payment webhook matrix hardening
+
+- Webhook теперь проверяет `RUB` в independently fetched provider response и для cart, и для PaymentOrder.
+- HTTP provider failures для cart/PaymentOrder возвращают `retry`, а не теряются как `ignored`.
+- Добавлен regression contract matrix для success, wrong amount, wrong metadata, duplicate и retry paths.
+
+### Следующий пакет
+
+- Проверить client payment UI и завершить полный regression suite.
+## 2026-08-20 — Client payment selector
+
+- Client purchases API теперь возвращает `payable_orders` только для текущего authenticated user/club и статуса `NEW`.
+- Payment UI заменил ручной `order_id` input на selector; intent endpoint сохраняет повторную серверную проверку ownership/status.
+- Добавлен client payment selector contract.
+
+### Следующий пакет
+
+- Завершить полный suite и зафиксировать payment/webhook/client package.

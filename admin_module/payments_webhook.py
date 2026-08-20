@@ -110,9 +110,11 @@ async def yookassa_webhook(request: Request, session: AsyncSession = Depends(get
         try:
             async with httpx.AsyncClient(auth=(pay.get("yookassa_shop_id"), pay.get("yookassa_secret_key")), timeout=10) as client:
                 vr = await client.get(f"https://api.yookassa.ru/v3/payments/{payment_id}")
+            if vr.status_code != 200:
+                return {"status": "retry"}
             vp = vr.json()
             amount = int(Decimal(str(vp.get("amount", {}).get("value"))) * 100)
-            if vr.status_code != 200 or vp.get("status") != "succeeded" or vp.get("metadata", {}).get("order_id") != order_id or amount != cart.amount_kopecks:
+            if vp.get("status") != "succeeded" or vp.get("metadata", {}).get("order_id") != order_id or vp.get("amount", {}).get("currency") != "RUB" or amount != cart.amount_kopecks:
                 return {"status": "ignored"}
         except (httpx.HTTPError, InvalidOperation, TypeError, ValueError):
             return {"status": "retry"}
@@ -200,7 +202,7 @@ async def yookassa_webhook(request: Request, session: AsyncSession = Depends(get
         async with httpx.AsyncClient(auth=(shop_id, secret_key), timeout=10.0) as client:
             verify_response = await client.get(f"https://api.yookassa.ru/v3/payments/{payment_id}")
         if verify_response.status_code != 200:
-            return {"status": "ignored"}
+            return {"status": "retry"}
         verified_payment = verify_response.json()
         if verified_payment.get("status") != "succeeded" or verified_payment.get("metadata", {}).get("order_id") != str(order.id):
             return {"status": "ignored"}
