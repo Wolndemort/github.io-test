@@ -13,7 +13,7 @@ from fastapi.responses import HTMLResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from database.db import AuditEntry, CartOrder, CartItem, CashEntry, Club, ClubProduct, ClubStaff, Discount, DiscountAssignment, PaymentOrder, Student, StudentParent, VisitLog, User, add_abon, purchase_student_freeze, get_session
+from database.db import AuditEntry, CartOrder, CartItem, CashEntry, Club, ClubProduct, ClubStaff, Discount, DiscountAssignment, PaymentOrder, Subscription, Student, StudentParent, VisitLog, User, add_abon, purchase_student_freeze, get_session
 from services.input_normalization import normalize_ru_phone
 from services.audit import audit_event
 from services.schedule_utils import normalize_schedule_block
@@ -684,6 +684,22 @@ async def create_cash_subscription_sale_web(request: Request, context: AuthConte
     audit_event("web_cash_subscription_sale", club_id=actor.club_id, actor_user_id=actor.user_id, action="sale", object_type="payment_order", object_id=order_id, location="web/staff/sales", amount_kopecks=total, method="cash", student_id=student.id, lesson_count=count, days_to_add=days)
     return {"ok": True, "club_id": actor.club_id, "order_id": order_id, "student_id": student.id, "amount_kopecks": total, "read_only": False}
 
+
+@client_router.get("/payment-methods")
+async def client_payment_methods(request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):
+    actor = require_web_context(context)
+    rows = (await session.scalars(select(Subscription).where(Subscription.user_id == actor.user_id, Subscription.club_id == actor.club_id, Subscription.rebill_id.is_not(None), Subscription.is_active.is_(True)))).all()
+    return {"club_id": actor.club_id, "payment_methods": [{"id": s.id, "type": "bank_card", "masked": "••••"} for s in rows], "read_only": True}
+
+@client_router.delete("/payment-methods/{subscription_id}")
+async def delete_client_payment_method(subscription_id: int, request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):
+    actor = require_web_context(context); await require_csrf(request.app.state.redis_client, request)
+    row = await session.scalar(select(Subscription).where(Subscription.id == subscription_id, Subscription.user_id == actor.user_id, Subscription.club_id == actor.club_id, Subscription.rebill_id.is_not(None)).with_for_update())
+    if not row: raise HTTPException(status_code=404, detail={"code": "payment_method_not_found"})
+    row.rebill_id = None
+    await session.commit()
+    audit_event("web_payment_method_deleted", club_id=actor.club_id, actor_user_id=actor.user_id, action="delete", object_type="subscription_card", object_id=subscription_id, location="web/client/payment-methods")
+    return {"ok": True, "club_id": actor.club_id, "subscription_id": subscription_id}
 
 @client_router.post("/freeze/purchase")
 async def purchase_freeze_web(request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):

@@ -1739,3 +1739,9 @@ Verification for Stage 50:
 
 - Текстовая Web-рассылка развернута только в `speedycrm-staging`; `/health=200`, `/staff/broadcast=401` без сессии, POST API route присутствует.
 - Реальный broadcast не отправлялся: внешняя рассылка требует отдельного подтверждения и безопасного тестового recipient scope.
+
+## 2026-08-20 — Web payment method management
+
+- Добавлены client Web endpoints `/api/v1/client/payment-methods` и DELETE для отвязки saved card token (`Subscription.rebill_id`) только текущего user/club.
+- Удаление использует CSRF, row lock, club scope, audit; UI добавлен в client profile. Сырые payment tokens и masked card data не раскрываются.
+- Refunds/receipt delivery/invitations ещё не реализованы в Web; локальный suite после пакета: `483 passed`.

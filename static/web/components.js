@@ -152,5 +152,9 @@ if (location.pathname === "/staff/discounts") { const target = document.querySel
       const profile = document.querySelector("#profile");
       if (profile) { const panel = document.createElement("div"); panel.className = "web-card"; panel.id = "passkeys"; panel.textContent = "Загрузка passkeys…"; profile.parentElement.appendChild(panel); SpeedyCRMWeb.mountPasskeys("passkeys"); }
     }
+    if (location.pathname === "/client/me") {
+      const profile = document.querySelector("#profile");
+      if (profile) { const panel = document.createElement("div"); panel.className = "web-card"; panel.innerHTML = "<h2>Payment methods</h2><div data-payment-methods>Loading…</div>"; profile.parentElement.appendChild(panel); SpeedyCRMWeb.json("/api/v1/client/payment-methods").then(data => { const target = panel.querySelector("[data-payment-methods]"); target.innerHTML = data.payment_methods.length ? data.payment_methods.map(method => `<p>${method.type} ${method.masked} <button type=\"button\" data-remove-card=\"${method.id}\">Remove</button></p>`).join("") : "<p>No saved payment methods.</p>"; target.querySelectorAll("[data-remove-card]").forEach(button => button.onclick = async () => { if (!window.confirm("Remove saved payment method?")) return; await SpeedyCRMWeb.json(`/api/v1/client/payment-methods/${button.dataset.removeCard}`, {method: "DELETE", headers: {"X-CSRF-Token": csrf()}}); button.parentElement.remove(); }); }).catch(() => { panel.querySelector("[data-payment-methods]").textContent = "Payment methods unavailable."; }); }
+    }
   }, 0);
 });
