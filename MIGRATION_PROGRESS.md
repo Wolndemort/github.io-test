@@ -1551,3 +1551,17 @@ Verification for Stage 50:
 - После QR pass выполнен полный regression suite: `476 passed`; `git diff --check` чист.
 - A–Z report обновлён в `WEB_ACCEPTANCE_REPORT.md`.
 - Authenticated browser acceptance и реальный staging payment остаются явно pending до approved staging fixture; master/production не трогались.
+## 2026-08-20 — acceptance report corrected from prior authenticated smoke
+
+- Уточнено по фактическому staging smoke: owner Email OTP/auth/session/logout и client/owner API requests уже проверялись вручную; authentication gate не считается pending.
+- Ранее обнаруженная проблема была в UI: отдельные Web pages оставались пустыми после корректных запросов/ответов.
+- Поэтому pending acceptance теперь только визуальный page-by-page browser re-check после mount/render fixes; этот статус отражён в `WEB_ACCEPTANCE_REPORT.md`.
+## 2026-08-20 — client pages now render functional data tables
+
+- Исправлен UI gap: client collection pages теперь показывают returned records в таблицах, а не только число записей.
+- Renderer использует endpoint mapping, collection discovery, safe HTML escaping, loading/error/empty states; mutation forms остаются отдельными mount points.
+- Добавлен client data render contract test.
+## 2026-08-20 — client functional renderer verified
+
+- Targeted client renderer tests: `8 passed`; полный suite после renderer: `477 passed`; `git diff --check` чист.
+- Acceptance report обновлён: следующий ручной шаг — повторно открыть authenticated client/owner страницы и проверить визуально данные/кнопки, а не API auth.

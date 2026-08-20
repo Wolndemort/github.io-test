@@ -6,11 +6,13 @@ Production/master: не изменялись.
 
 ## Статус
 
-Web-контур проверен локальными contract/unit/regression тестами и staging unauthenticated smoke. Полный локальный suite на предыдущем пакете: `475 passed`; после добавления QR pass требуется финальный повтор suite перед закрытием этой точки.
+Web-контур проверен локальными contract/unit/regression тестами, staging unauthenticated smoke и ранее выполненным authenticated Email OTP/owner smoke. После добавления QR pass полный локальный suite: `476 passed`.
 
-Формулировка «всё работает идеально» пока не используется: authenticated browser smoke вручную требует отдельного staging test account/Telegram bot или approved Email OTP mailbox. Без этого нельзя достоверно подтвердить фактическое отображение данных конкретного клиента в браузере.
+Authenticated owner login, client/owner API requests, session, logout/re-auth и club/user scope ранее проверялись вручную на staging. Поэтому auth smoke не является pending. Реальный оставшийся риск — UI rendering: часть страниц в том smoke была пустой после получения данных; нужен повторный browser pass именно на отображение каждой страницы и кнопок после текущих исправлений.
 
-Последний полный suite после QR pass: `476 passed`, `git diff --check` чист.
+Последний полный suite после client data renderer: `477 passed`, `git diff --check` чист.
+
+Последний UI gap был не в API: client pages показывали данные недостаточно функционально — общий renderer выводил только счётчик. Добавлен общий data-table renderer; после него нужен повторный browser pass кнопок и mutation flows.
 
 ## A–Z функциональная матрица
 
@@ -39,13 +41,14 @@ Web-контур проверен локальными contract/unit/regression 
 - Staging unauthenticated smoke: `/health=200`, `/ready=200`, `/auth/login=200`, `/auth/me=401`; all protected route checks returned `401` without a session.
 - Staging flags/data: no production flags enabled and no test data created by the smoke.
 - Real staging payment: not executed; requires approved provider test account/credentials.
-- Manual authenticated browser/Email OTP smoke: pending separate test account/mailbox; it must verify client data, refresh, logout, QR pass, freeze, purchases and cross-club denial.
+- Manual authenticated owner/client Email OTP/API smoke: previously passed and recorded in `MIGRATION_PROGRESS.md` (including owner session, `auth_source=email`, club scope and logout).
+- Manual visual browser re-check: pending for every client page, QR pass, freeze, purchases and each mutation button because earlier pages could render empty.
 
 ## Acceptance scenarios still required before any merge decision
 
-1. Authenticate a synthetic staging client through approved Web login.
-2. Verify cabinet students, subscriptions, visits, payments, discounts, QR pass and client profile all belong to the authenticated club/user.
-3. Refresh browser, reopen every client menu item, submit one safe mutation in staging, and verify success/error/loading states.
+1. Reopen the already-tested authenticated client/owner sessions (or repeat Email OTP if the fixture was cleaned).
+2. Verify cabinet students, subscriptions, visits, payments, discounts, QR pass and client profile visibly render and belong to the authenticated club/user.
+3. Refresh browser, reopen every client menu item, submit one safe mutation in staging, and verify success/error/loading states rather than only HTTP responses.
 4. Authenticate owner/staff roles and check settings, schedule, cash, catalog, sales, check-in and turnstile permission boundaries.
 5. Attempt cross-club IDs and expired/invalid sessions; confirm denial without data leakage.
 6. Run mocked provider payment success/failure matrix, then separately approved real staging payment and webhook retry.

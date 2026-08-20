@@ -40,7 +40,8 @@
 ### Functional backend
 
 - [ ] Verify and complete all legacy operations against Web AuthContext, not Telegram `init_data`.
-- [ ] Complete authenticated browser acceptance matrix and record results in `WEB_ACCEPTANCE_REPORT.md`.
+- [x] Authenticated owner/client Email OTP/API smoke previously completed and recorded; visual page-by-page browser re-check remains.
+- [x] Client collection pages render functional returned records/tables with empty/error states.
 - [x] Schedule editing UI and backend contract smoke.
 - [x] Discipline configuration mutation with safe schedule block allowlist.
 - [x] Camera/turnstile configuration controls without exposing device secrets.
