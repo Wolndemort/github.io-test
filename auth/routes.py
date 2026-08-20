@@ -95,7 +95,10 @@ async def native_request(payload: NativeOtpRequest, request: Request, session: A
     user = await session.scalar(select(User).where(User.club_id == payload.club_id, User.email == email)) if club else None
     if user:
         code = await issue_otp(request.app.state.redis_client, email, payload.club_id)
-        await deliver_email_otp(email, code)
+        try:
+            await deliver_email_otp(email, code)
+        except Exception:
+            raise HTTPException(status_code=503, detail={"code": "email_delivery_unavailable"})
     return {"ok": True, "message": "If the account exists, a code was sent."}
 
 

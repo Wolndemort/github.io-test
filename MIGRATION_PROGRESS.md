@@ -912,5 +912,9 @@ Verification for Stage 50:
 - Staging SMTP secret file найден, permissions `600`, имена всех 6 SMTP-переменных присутствуют без раскрытия значений; staging API перезапущен, `/ready` 200, `bots_active: 1`. Email flags ещё не включены.
 - Подготовлен helper `scripts/enable_staging_email_test.sh` для staging-only email теста пользователя `1271717628`; он меняет только staging DB, включает только staging flags и перезапускает только staging API. Выполнение ожидает завершения проверки команды без shell-quoting ошибок.
 - SMTP test enabled only in staging after explicit approval; compose now loads `.staging-mail.env`, env names present without values exposed, and `/auth/native/request` for `omarovadam405@gmail.com` returned 200. Verify code must be entered locally via `scripts/staging_native_verify.ps1`.
+- Диагностика показала, что первый helper не передал heredoc в `docker exec` без `-i`: email фактически не записался, поэтому generic 200 был без отправки. Исправлено добавлением `docker exec -i`; письмо повторяется после подтверждения записи в staging DB.
+- После исправления записи email SMTP request дошёл до delivery adapter, но вернул 500 `SMTP is not configured`; добавлен безопасный `scripts/check_staging_smtp.sh`, который показывает только set/empty переменных внутри staging API.
+- Следующая диагностика показала реальную причину: staging SMTP host — `smtp.gmail.com:587`, контейнер получает `Network is unreachable`. Credentials загружены; требуется сетевой маршрут/разрешение outbound SMTP, не изменение auth-кода.
+- После сетевого теста (`host timeout`, `container OSError`) native flags удалены из staging secret file и API перезапущен, `/ready` 200. SMTP delivery failure теперь будет безопасным `503 email_delivery_unavailable`, без внутренних traceback.
 - Restricted pages enforce `analytics_view`/`qr_checkin`; no settings mutation was exposed.
 - Added settings page tests; remaining: continue the next 3–4 migration blocks.
