@@ -45,7 +45,11 @@ window.SpeedyCRMWeb = {
     const target = document.getElementById(targetId);
     if (!target) return;
     const me = await this.json("/auth/me");
-    target.innerHTML = `<h2>Email login</h2><p>${me.email ? `Verified: ${me.email}` : "Add an email to enable passwordless Web login."}</p><form data-email-bind><input type="email" name="email" required placeholder="you@example.com"><button>Send code</button></form><div data-email-result role="status"></div>`;
+    if (me.email) {
+      target.innerHTML = `<h2>Email login</h2><p>Verified: ${me.email}</p><p>Passwordless Web login is enabled for this account.</p>`;
+      return;
+    }
+    target.innerHTML = `<h2>Email login</h2><p>Add an email to enable passwordless Web login.</p><form data-email-bind><input type="email" name="email" required placeholder="you@example.com"><button>Send code</button></form><div data-email-result role="status"></div>`;
     const csrf = () => decodeURIComponent((document.cookie.match(/(?:^|; )speedycrm_csrf_token=([^;]*)/) || [])[1] || "");
     const form = target.querySelector("[data-email-bind]");
     form.addEventListener("submit", async (event) => {

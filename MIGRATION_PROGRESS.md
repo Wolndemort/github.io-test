@@ -930,5 +930,6 @@ Verification for Stage 50:
 - Следующее: добавить UI входа/привязки email в общий Web shell, протестировать staff/client роли через email и после этого обновить production gates. Production flags остаются выключенными.
 - Добавлен общий `/auth/email-profile` и navigation link для всех ролей; UI выполняет CSRF-защищённую request/verify привязку email через общий backend. Добавлен page contract test.
 - UI email profile проверен локально; full suite `419 passed`. Staging flags остаются включёнными только для дальнейшего Email owner smoke, production flags не менялись.
+- Первый UI smoke email profile подтверждён скриншотом: account/email page открывается, verified email отображается. Убран дублирующийся текст формы для уже подтверждённого email; теперь verified account показывает только статус и passwordless availability.
 - Restricted pages enforce `analytics_view`/`qr_checkin`; no settings mutation was exposed.
 - Added settings page tests; remaining: continue the next 3–4 migration blocks.
