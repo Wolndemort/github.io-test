@@ -1471,7 +1471,7 @@ async def client_history_data(request: Request, context: AuthContext | None = De
 async def client_freeze_data(request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):
     actor = require_web_context(context)
     students = await client_scoped_students(actor, session)
-    return {"club_id": actor.club_id, "students": [{"id": s.id, "name": s.name, "is_frozen": bool(s.is_frozen), "frozen_until": s.frozen_until.isoformat() if getattr(s, "frozen_until", None) else None} for s in students], "read_only": True}
+    return {"club_id": actor.club_id, "students": [{"id": s.id, "name": s.name, "is_frozen": bool(s.is_frozen), "frozen_at": getattr(s, "frozen_at", None).isoformat() if getattr(s, "frozen_at", None) else None, "frozen_until": (getattr(s, "frozen_at", None) + timedelta(days=int(getattr(s, "frozen_days", None) or 0))).isoformat() if getattr(s, "frozen_at", None) and getattr(s, "frozen_days", None) else None} for s in students], "read_only": True}
 
 
 @client_router.get("/subscriptions/data")

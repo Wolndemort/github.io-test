@@ -26,3 +26,7 @@ def test_client_purchases_merge_cart_and_confirmed_payment_orders():
 def test_client_profile_response_is_user_and_club_scoped_with_real_fields():
     assert 'User.user_id == actor.user_id, User.club_id == actor.club_id' in SOURCE
     assert 'response.update({"full_name": user.full_name, "email": user.email})' in SOURCE
+
+
+def test_client_freeze_data_exposes_derived_frozen_until():
+    assert 'timedelta(days=int(getattr(s, "frozen_days", None) or 0))' in SOURCE

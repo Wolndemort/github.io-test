@@ -4,6 +4,11 @@
 
 - Client purchases/profile/scope audit package deployed only to `/root/speedycrm-staging`; isolated API/DB/Redis/nginx containers rebuilt.
 
+## 2026-08-20 — client freeze display audit
+
+- Исправлено отображение периода заморозки: Web теперь рассчитывает `frozen_until` из `frozen_at + frozen_days`, сохраняя backward compatibility для старых записей.
+- Добавлен regression contract; полный suite: `489 passed`.
+
 ## Current state
 
 - Project: `C:\Users\79615\PycharmProjects\aaaa`
