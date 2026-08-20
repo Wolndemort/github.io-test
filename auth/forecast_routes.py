@@ -52,6 +52,17 @@ async def sale_buyers_data(request: Request, context: AuthContext | None = Depen
     buyers = list((await session.execute(select(User).where(User.club_id == actor.club_id).order_by(User.full_name, User.user_id).limit(200))).scalars().all())
     return {"club_id": actor.club_id, "buyers": [{"id": user.user_id, "name": user.full_name or f"User {user.user_id}"} for user in buyers], "read_only": True}
 
+@sales_router.get("/options")
+async def sale_options_data(request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):
+    actor = require_web_context(context)
+    if actor.actor_type == "staff" and "cash_sale" not in actor.permissions:
+        raise HTTPException(status_code=403, detail={"code": "permission_denied"})
+    students = list((await session.execute(select(Student).where(Student.club_id == actor.club_id).order_by(Student.name).limit(200))).scalars().all())
+    club = await session.scalar(select(Club).where(Club.id == actor.club_id))
+    settings = club.club_settings if club and isinstance(club.club_settings, dict) else {}
+    disciplines = settings.get("disciplines", {}) if isinstance(settings.get("disciplines", {}), dict) else {}
+    return {"club_id": actor.club_id, "students": [{"id": s.id, "name": s.name, "discipline": s.discipline} for s in students], "tariffs": {name: block.get("tariffs", []) for name, block in disciplines.items() if isinstance(block, dict)}, "read_only": True}
+
 
 def _date_range(value: str | None, fallback: date) -> tuple[date, date]:
     start = date.fromisoformat(value) if value else fallback

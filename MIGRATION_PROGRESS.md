@@ -1431,3 +1431,13 @@ Verification for Stage 50:
 ### Следующий пакет
 
 - Перенести subscription/freeze UI на authenticated student/tariff selectors.
+## 2026-08-20 — Web subscription and freeze selectors
+
+- Завершена Web UI часть продажи абонемента и заморозки: временные student/tariff ID заменены на selectors.
+- Добавлен `GET /api/v1/staff/sales/options` с club scope и `cash_sale` permission; он отдаёт студентов и тарифы только текущего клуба.
+- Freeze UI загружает студентов текущего authenticated client из cabinet endpoint.
+- Targeted suite: `4 passed`; полный suite: `466 passed`; `git diff --check` чист.
+
+### Следующий пакет
+
+- Закрыть оставшиеся UI states/confirmation dialogs и затем перейти к payment/webhook integration tests.

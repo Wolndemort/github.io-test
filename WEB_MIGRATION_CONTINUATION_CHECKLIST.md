@@ -48,14 +48,14 @@
 - [x] Client profile name editing; staff profile/user admin extensions remain.
 - [x] Discount assignment list/removal backend; UI selector polish remains.
 - [x] Product sale UI with scoped product, buyer and discount pickers.
-- [ ] Subscription/freeze UI with tariff/student selectors.
+- [x] Subscription/freeze UI with scoped tariff/student selectors.
 - [ ] Online payment provider integration smoke with mocked provider; then approved real staging test.
 - [ ] Webhook integration tests for success, wrong amount, wrong metadata, duplicate and provider retry.
 - [ ] Any remaining legacy operations: refunds, payment method changes, receipt delivery, audit search/delete policy, invitations, phone/email binding.
 
 ### Frontend
 
-- [ ] Replace temporary ID inputs with authenticated selectors and data tables.
+- [ ] Replace remaining temporary ID inputs with authenticated selectors and data tables.
 - [ ] Add loading/error/empty/success states to every mutation form.
 - [ ] Add confirmation dialogs for money, archive, reversal, cancellation and staff deactivation.
 - [ ] Full EN/RU translations; current selector changes language state but is not a complete translation system.
