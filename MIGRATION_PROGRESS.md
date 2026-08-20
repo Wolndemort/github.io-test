@@ -1463,3 +1463,12 @@ Verification for Stage 50:
 
 - После confirmation/loading изменений полный regression suite: `468 passed`.
 - `git diff --check` чист; ветка `web-migration/phase-0-auth` рабочая и без незакоммиченных изменений.
+## 2026-08-20 — Web operation mount race fixed
+
+- Исправлена гонка загрузки на staff Cash/Sales/Check-in: summary теперь обновляет отдельный контейнер и не удаляет operation forms.
+- Проверено наличие check-in manual action с `open_turnstile`, cancel visit, CSRF, permission и idempotency.
+- Добавлен contract test на сохранение кнопок после async load.
+
+### Следующий пакет
+
+- Проверить оставшиеся client pages, navigation links, settings visibility и accessibility сценарии.
