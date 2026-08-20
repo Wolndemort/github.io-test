@@ -1721,3 +1721,9 @@ Verification for Stage 50:
 - Authenticated owner в staging на iOS Safari 17.6.1 успешно зарегистрировал passkey через `/staff/profile`.
 - Устройство появилось в списке и было успешно отозвано; staging logs подтверждают `register/options=200` и `register/complete=200`.
 - Биометрия/сырой Face ID на сервер не передавались; сохраняются только credential metadata/public key. Telegram BiometricManager flow не изменён.
+
+## 2026-08-20 — continuation handoff checkpoint
+
+- Зафиксирован полный recovery-контекст в `WEB_MIGRATION_HANDOFF.md`: ветка, staging directory/compose/containers, URL, migration head, owner club 2, enabled staging-only flags и список запрещённых live/ALTER/master targets.
+- DB/backend review: `subscriptions` и student expiry/balance используются client Web reads и staff cash subscription activation; freeze fields и `process_student_freeze`/`purchase_student_freeze` используются Web purchase/read paths; scheduler notifications остаются backend-driven, Web управляет flags/status, Telegram остаётся delivery channel.
+- Broadcast composer/send в Web пока не перенесён; также остаются refunds, payment-method changes, receipt delivery, invitations и полный visual sweep.

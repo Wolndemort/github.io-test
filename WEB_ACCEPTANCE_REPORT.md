@@ -75,6 +75,10 @@ Scheduler flags and Turnstile configuration now have Web controls; real relay pu
 
 No merge to `master` or production rollout is authorized by this report.
 
+## Continuation checkpoint
+
+The full recovery context is maintained in `WEB_MIGRATION_HANDOFF.md`. Subscriptions and freezes are backed by existing database/backend services and are wired into Web reads/mutations; scheduler notifications remain backend/Telegram delivery, while Web exposes settings/status. Web broadcast composition/send is not yet implemented. Staging and forbidden-target boundaries are documented and must be preserved.
+
 ## Remaining after CRM functional migration
 
 1. Deploy migration and complete authenticated browser WebAuthn registration/assertion/revoke smoke for client/staff.
