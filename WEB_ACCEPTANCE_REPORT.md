@@ -76,6 +76,7 @@ Scheduler flags and Turnstile configuration now have Web controls; real relay pu
 - Admin Products/Discounts secondary mutation buttons now have submit handlers; suite: `489 passed`.
 - Cash and check-in secondary forms are explicitly bound for reversal/cancel operations.
 - Role/scope contract audit passed for broadcast, payment method, receipt, invitation, freeze, profile and payment operations; suite: `490 passed`.
+- Fixed `405` empty settings data for Notifications/Disciplines; broadcast remains correctly blocked until isolated staging bot token is configured; suite: `491 passed`.
 - Settings state fix is deployed to isolated staging; authenticated button-by-button settings smoke remains part of the ongoing audit.
 - Hardware result is limited to the explicitly approved staging/work-area relay test; production/master were not involved.
 - Manual authenticated owner/client Email OTP/API smoke: previously passed and recorded in `MIGRATION_PROGRESS.md` (including owner session, `auth_source=email`, club scope and logout).

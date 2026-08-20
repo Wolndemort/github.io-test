@@ -38,3 +38,8 @@ def test_legacy_web_operations_keep_scope_and_audit_contracts():
     assert 'web_student_invite_created' in SOURCE
     assert 'web:broadcast:' in SOURCE
     assert 'actor.club_id' in SOURCE
+
+
+def test_settings_read_pages_have_get_endpoints_for_notifications_and_disciplines():
+    assert '@settings_router.get("/notifications")' in SOURCE
+    assert '@settings_router.get("/disciplines")' in SOURCE

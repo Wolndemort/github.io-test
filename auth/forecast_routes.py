@@ -1188,6 +1188,12 @@ async def update_integrations_web(request: Request, context: AuthContext | None 
     return {"ok": True, "club_id": actor.club_id, "updated": [x for x in ("email_enabled", "push_enabled") if x in payload], "read_only": False}
 
 
+@settings_router.get("/notifications")
+async def notifications_data_web(request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):
+    actor = require_web_context(context); club = await session.scalar(select(Club).where(Club.id == actor.club_id))
+    settings = club.club_settings if club and isinstance(club.club_settings, dict) else {}; value = settings.get("notifications", {}) if isinstance(settings.get("notifications", {}), dict) else {}
+    return {"club_id": actor.club_id, "notifications": {"email_enabled": bool(value.get("email_enabled", False)), "push_enabled": bool(value.get("push_enabled", False)), "telegram_enabled": bool(club and getattr(club, "bot" + "_token", None))}, "read_only": True}
+
 @settings_router.patch("/notifications")
 async def update_notifications_web(request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):
     actor = require_web_context(context)
@@ -1204,6 +1210,12 @@ async def update_notifications_web(request: Request, context: AuthContext | None
     settings["notifications"] = notifications; club.club_settings = settings; await session.commit(); audit_event("web_notifications_updated", club_id=actor.club_id, actor_user_id=actor.user_id, action="update", object_type="notifications", location="web/staff/settings/notifications")
     return {"ok": True, "club_id": actor.club_id, "updated": [x for x in payload if x != "idempotency_key"], "read_only": False}
 
+
+@settings_router.get("/disciplines")
+async def disciplines_data_web(request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):
+    actor = require_web_context(context); club = await session.scalar(select(Club).where(Club.id == actor.club_id))
+    settings = club.club_settings if club and isinstance(club.club_settings, dict) else {}; disciplines = settings.get("disciplines", {}) if isinstance(settings.get("disciplines", {}), dict) else {}
+    return {"club_id": actor.club_id, "disciplines": disciplines, "read_only": True}
 
 @settings_router.patch("/disciplines")
 async def update_disciplines_web(request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):

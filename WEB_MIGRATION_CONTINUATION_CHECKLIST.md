@@ -79,6 +79,8 @@
 - [x] Audit multi-form admin panels; secondary Products/Discounts buttons now submit through their backend contracts.
 - [x] Verify cash and check-in secondary forms have explicit handlers (reversal/cancel).
 - [x] Audit owner/staff/client role and feature-gate contracts for legacy Web operations; regression assertions added.
+- [x] Add GET data endpoints for notifications and disciplines after staging `405` log review.
+- [ ] Configure a separate approved staging bot token before real broadcast smoke; never reuse live token.
 - [x] Deploy settings state fix to isolated staging.
 - [ ] Any remaining legacy operations: refunds, payment method changes, receipt delivery, audit search/delete policy, invitations.
 - [x] Add client Web saved payment method list and safe revoke using subscription row lock/club scope/audit.

@@ -1,5 +1,11 @@
 # Web migration progress
 
+## 2026-08-20 — settings GET endpoints fixed
+
+- Staging logs выявили: `/settings/notifications` и `/settings/disciplines` имели только PATCH, UI GET получал `405` и показывал пустые данные.
+- Добавлены scoped GET endpoints; broadcast `503` диагностирован отдельно: staging club 2 не имеет bot token по isolation policy, live token не используется.
+- Полный suite: `491 passed`.
+
 ## 2026-08-20 — admin multi-form button audit
 
 - Исправлены secondary forms в Products/Discounts panels: stock adjust, archive и discount update теперь имеют собственный submit handler, CSRF/idempotency и error state.
