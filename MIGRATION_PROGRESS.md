@@ -1693,3 +1693,9 @@ Verification for Stage 50:
 - По ручному smoke найден 404: вложенный router создавал двойной `/auth/auth/webauthn` prefix.
 - Исправлено на рабочие `/auth/webauthn/*`; staging пересобран, `/auth/webauthn/credentials=401` без сессии, `/health=200`.
 - Полный suite после исправления: `483 passed`.
+
+## 2026-08-20 — WebAuthn options serialization fixed
+
+- По логам staging найден `UnicodeDecodeError` в `/auth/webauthn/register/options`: FastAPI encoder пытался декодировать binary challenge как UTF-8.
+- Добавлена безопасная recursive base64url-сериализация WebAuthn options; staging пересобран.
+- Полный suite: `483 passed`; секреты, cookies и OTP в отчёт не выводились.

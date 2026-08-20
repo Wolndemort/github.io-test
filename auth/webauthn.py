@@ -9,7 +9,6 @@ import os
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -35,6 +34,18 @@ def b64(value: bytes) -> str:
 
 def unb64(value: str) -> bytes:
     return base64.urlsafe_b64decode(value + "=" * (-len(value) % 4))
+
+def webauthn_json(value):
+    """Convert fido2 Mapping values without decoding binary values as UTF-8."""
+    if isinstance(value, bytes):
+        return b64(value)
+    if isinstance(value, dict):
+        return {str(k): webauthn_json(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [webauthn_json(v) for v in value]
+    if hasattr(value, "value"):
+        return webauthn_json(value.value)
+    return value
 
 def server() -> Fido2Server:
     rp_id = os.getenv("WEBAUTHN_RP_ID", "localhost")
@@ -65,7 +76,7 @@ async def register_options(request: Request, context: AuthContext | None = Depen
     existing = (await session.scalars(select(WebCredential).where(WebCredential.user_id == actor.user_id, WebCredential.club_id == actor.club_id))).all()
     options, state = server().register_begin(user, [AttestedCredentialData(c.public_key) for c in existing] if existing else None)
     await save(request.app.state.redis_client, f"webauthn:register:{actor.user_id}:{actor.club_id}", state)
-    return jsonable_encoder(options)
+    return webauthn_json(dict(options))
 
 @router.post("/register/complete")
 async def register_complete(payload: FinishPayload, request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):
@@ -86,7 +97,7 @@ async def authenticate_options(request: Request, context: AuthContext | None = D
     if not creds: raise HTTPException(status_code=404, detail={"code": "no_credentials"})
     options, state = server().authenticate_begin([AttestedCredentialData(c.public_key) for c in creds])
     await save(request.app.state.redis_client, f"webauthn:auth:{actor.user_id}:{actor.club_id}", state)
-    return jsonable_encoder(options)
+    return webauthn_json(dict(options))
 
 @router.post("/authenticate/complete")
 async def authenticate_complete(payload: FinishPayload, request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):

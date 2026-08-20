@@ -55,6 +55,7 @@ Scheduler flags and Turnstile configuration now have Web controls; real relay pu
 - Owner Email OTP fixture restored in isolated staging only: owner is in club 2 and the approved test email is bound; authenticated browser/Face ID smoke remains pending.
 - Owner smoke found and fixed missing `/staff/profile` page; route is now deployed and unauthenticated access correctly returns `401`.
 - Owner smoke found and fixed WebAuthn double-prefix 404; authenticated endpoint path is now deployed and correctly auth-gated (`401` without session).
+- Latest WebAuthn log issue fixed: binary challenge options are now serialized as base64url instead of UTF-8; staging rebuilt, browser retry required.
 - Hardware result is limited to the explicitly approved staging/work-area relay test; production/master were not involved.
 - Manual authenticated owner/client Email OTP/API smoke: previously passed and recorded in `MIGRATION_PROGRESS.md` (including owner session, `auth_source=email`, club scope and logout).
 - Manual visual browser re-check: pending for every client page, QR pass, freeze, purchases and each mutation button because earlier pages could render empty.
