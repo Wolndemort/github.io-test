@@ -5,7 +5,7 @@ DB_CONTAINER=speedycrm_staging_db
 MAIL_ENV=/root/speedycrm-staging/.staging-mail.env
 
 test -s "$MAIL_ENV"
-docker exec "$DB_CONTAINER" psql -U postgres -d crm_db <<'SQL'
+docker exec -i "$DB_CONTAINER" psql -U postgres -d crm_db <<'SQL'
 UPDATE users SET email = 'omarovadam405@gmail.com' WHERE user_id = 1271717628;
 SQL
 
