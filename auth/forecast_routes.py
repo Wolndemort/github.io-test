@@ -14,6 +14,8 @@ from services.audit import audit_event
 from services.schedule_utils import normalize_schedule_block
 from services.gate_control import process_athlete_gate_pass
 from services.discounts import active_discounts, apply_discounts
+from services.yookassa_client import YooKassaClient
+from config import PROXY_URL
 from services.analytics import (
     build_expiry_series,
     build_revenue_series,
@@ -656,6 +658,25 @@ async def purchase_freeze_web(request: Request, context: AuthContext | None = De
     await session.commit()
     audit_event("web_cash_freeze_sale", club_id=actor.club_id, actor_user_id=actor.user_id, action="sale", object_type="payment_order", object_id=order_id, location="web/client/freeze", amount_kopecks=total, method="cash", student_id=student.id, days=days)
     return {"ok": True, "club_id": actor.club_id, "order_id": order_id, "student_id": student.id, "amount_kopecks": total, "read_only": False}
+
+
+@client_router.post("/payments/{order_id}/intent")
+async def create_payment_intent_web(order_id: str, request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):
+    actor = require_web_context(context)
+    if os.getenv("WEB_ONLINE_PAYMENTS_ENABLED", "0") != "1": raise HTTPException(status_code=404, detail={"code": "feature_disabled"})
+    await require_csrf(request.app.state.redis_client, request)
+    order = await session.scalar(select(CartOrder).where(CartOrder.id == order_id, CartOrder.club_id == actor.club_id, CartOrder.user_id == actor.user_id).with_for_update())
+    if not order: raise HTTPException(status_code=404, detail={"code": "order_not_found"})
+    if order.status != "NEW": raise HTTPException(status_code=409, detail={"code": "order_not_payable"})
+    club = await session.scalar(select(Club).where(Club.id == actor.club_id)); settings = dict(club.club_settings or {}) if club else {}; payments = dict(settings.get("payments", {}) or {})
+    shop_id = str(payments.get("yookassa_shop_id") or ""); secret = str(payments.get("yookassa_secret_key") or "")
+    if not shop_id or not secret: raise HTTPException(status_code=503, detail={"code": "payment_provider_unavailable"})
+    user = await session.scalar(select(User).where(User.user_id == actor.user_id, User.club_id == actor.club_id))
+    result = await YooKassaClient(shop_id, secret, proxy_url=PROXY_URL).init_payment(order.id, int(order.amount_kopecks), actor.user_id, str(settings.get("bot_username") or "speedycrm_bot"), user_email=user.email if user else None)
+    if not result.get("Success"): raise HTTPException(status_code=502, detail={"code": "payment_provider_error"})
+    order.provider_payment_id = str(result.get("PaymentId")); await session.commit()
+    audit_event("web_payment_intent_created", club_id=actor.club_id, actor_user_id=actor.user_id, action="create", object_type="cart_order", object_id=order.id, location="web/client/payments", amount_kopecks=order.amount_kopecks, method="online")
+    return {"ok": True, "club_id": actor.club_id, "order_id": order.id, "payment_id": order.provider_payment_id, "payment_url": result.get("PaymentURL"), "read_only": False}
 
 
 @catalog_router.get("/discounts")

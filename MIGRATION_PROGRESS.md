@@ -945,6 +945,21 @@ Verification for Stage 50:
 - Seeded staging-only synthetic client fixture: `user_id=990000001`, club 1, one student, same test email; added seed/cleanup helpers. Native flags enabled only in staging for client Web smoke; fixture must be removed after verification.
 - Restricted pages enforce `analytics_view`/`qr_checkin`; no settings mutation was exposed.
 
+## 2026-08-20 — online payment intent foundation
+
+- Добавлен `POST /api/v1/client/payments/{order_id}/intent`.
+- Endpoint использует `WEB_ONLINE_PAYMENTS_ENABLED`, CSRF, actor/club-scoped order lookup с row lock, принимает только order ID, проверяет статус `NEW`, берёт сумму из БД и вызывает существующий YooKassa client.
+- Provider credentials читаются только server-side из club settings; Web payload их не принимает и не возвращает.
+- Provider payment ID сохраняется для существующего webhook flow; добавлен audit event и provider error handling.
+- Targeted suite: `5 passed`; полный suite: `459 passed`; `git diff --check` чист.
+- Telegram, live, ALTER и `master` не затронуты.
+
+### Следующий пакет
+
+- Добавить Web UI payment redirect и отдельные webhook duplicate/status tests.
+- Добавить UI staff edit/integrations flags.
+- Выполнить staging functional smoke с временными flags и тестовыми order/fixtures.
+
 ## 2026-08-20 — functional Web UI: staff management and integrations
 
 - Добавлена отдельная `/staff/settings/staff` page с формой создания staff через Web API.
