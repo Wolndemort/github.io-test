@@ -1768,3 +1768,9 @@ Verification for Stage 50:
 - Static client/staff/settings menu links in `static/web/components.js` were matched against registered FastAPI routes.
 - All static links resolve; audit/student detail links are dynamic parameterized routes and are covered by backend.
 - Main menu audit passed without a static 404 mismatch; next scope is admin cabinet and club settings button-by-button.
+
+## 2026-08-20 — admin mutation route audit
+
+- Web mutation calls сверены с FastAPI routes для cash, schedule, catalog, sales, freeze, payments, settings, staff, check-in, audit и client profile.
+- Все найденные вызовы имеют backend route; mutation-контуры используют CSRF/idempotency, actor permission и club scope.
+- Следующий аудит: payload selectors/data ownership и error/loading/confirmation behavior на каждой странице.
