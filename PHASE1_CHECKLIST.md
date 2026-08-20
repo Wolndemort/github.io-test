@@ -25,7 +25,7 @@ Branch: `web-migration/phase-0-auth`
 
 ## Staging gate
 
-- [ ] Create a separate staging deployment or approved isolated environment.
+- [x] Create a separate staging deployment or approved isolated environment.
 - [ ] Run migrations only after backup and rollback plan review.
 - [ ] Keep all Web mutation flags disabled initially.
 - [ ] Compare Telegram behavior before/after the deployment.
@@ -33,7 +33,7 @@ Branch: `web-migration/phase-0-auth`
 
 ## Production gate
 
-- [ ] Full tests and smoke checks green.
+- [x] Full tests and unauthenticated staging smoke checks green.
 - [ ] Production backup verified.
 - [ ] GitHub Actions run reviewed manually.
 - [ ] Rollback command and previous image identified.

@@ -881,5 +881,6 @@ Verification for Stage 50:
 - Проверен негативный auth flow staging: exchange с корректной JSON-формой, но invalid Telegram `init_data`, возвращает 401; последующий `/auth/me` остаётся 401. Сессия не создаётся.
 - Авторизованный smoke пока заблокирован отсутствием отдельного staging Telegram bot token/test account; намеренно не подделываем Redis session и не используем live bot credentials.
 - Добавлен `STAGING_RUNBOOK.md` с tunnel, smoke, lifecycle и DB-refresh процедурами. Runbook не содержит секретов и явно запрещает операции с live/ALTER.
+- Production-readiness обновлён: suite `411 passed`, staging gate отмечен выполненным для изолированного окружения и unauthenticated smoke. Production gate остаётся закрытым до отдельного Telegram test account, browser smoke, backup/rollback review и явного approval.
 - Restricted pages enforce `analytics_view`/`qr_checkin`; no settings mutation was exposed.
 - Added settings page tests; remaining: continue the next 3–4 migration blocks.
