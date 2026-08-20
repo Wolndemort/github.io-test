@@ -945,6 +945,20 @@ Verification for Stage 50:
 - Seeded staging-only synthetic client fixture: `user_id=990000001`, club 1, one student, same test email; added seed/cleanup helpers. Native flags enabled only in staging for client Web smoke; fixture must be removed after verification.
 - Restricted pages enforce `analytics_view`/`qr_checkin`; no settings mutation was exposed.
 
+## 2026-08-20 — final staging auth smoke
+
+- Запущен воспроизводимый `scripts/staging_smoke.ps1` через SSH tunnel.
+- Проверены `/health=200`, `/ready=200`, `/auth/login=200`, `/auth/me=401` без сессии.
+- Все 32 защищённых staff/client Web routes корректно вернули `401` без авторизации.
+- Это закрывает automated auth-gating smoke; authenticated Telegram staff smoke был подтверждён ранее вручную в отдельном staging bot.
+- Production Telegram path не менялся; live, ALTER и `master` не затронуты.
+
+### Следующий пакет
+
+- Провести финальную human review изменённых файлов и подтвердить rollback image/commit.
+- Оставить UI spacing/полные переводы на отдельный финальный дизайн-этап.
+- После explicit approval решить merge в `master`; до этого production flags и deploy остаются закрыты.
+
 ## 2026-08-20 — migration compatibility gate
 
 - Свежий staging dump восстановлен в отдельную `crm_migration_check_20260820`.

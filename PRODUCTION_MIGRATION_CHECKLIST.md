@@ -8,6 +8,7 @@ Branch: `web-migration/phase-0-auth`
 - [x] Telegram WebApp fallback remains available.
 - [x] Native Email OTP verified in isolated staging through Yandex Postbox.
 - [x] Staff browser smoke and controlled staging client fixture cycle.
+- [x] Reproducible staging unauthenticated smoke: health/ready/auth entry plus 32 protected staff/client routes.
 - [x] Cross-club and read-only route contract coverage.
 - [x] Reversible nullable email migration contract.
 - [x] Backup script verification contract and isolated restore-check procedure.
