@@ -68,6 +68,18 @@ Authorized browser smoke requires a separate staging Telegram bot token and test
 
 Create `/root/speedycrm-staging/.staging-mail.env` on the server using the same variable names as `.staging-mail.env.example`. Keep `WEB_NATIVE_AUTH_ENABLED=0` and `WEB_NATIVE_EMAIL_BINDING_ENABLED=0` until the SMTP test is explicitly approved. The file is optional and is never committed.
 
+For the isolated test user only, run the server-side helper after explicit approval:
+
+```bash
+bash /root/speedycrm-staging/scripts/enable_staging_email_test.sh
+```
+
+After requesting a code, verify locally without sending the code to chat:
+
+```powershell
+.\scripts\staging_native_verify.ps1
+```
+
 When the separate token is present in `/root/speedycrm-staging/.staging-secrets`, configure only the staging database with the server-side helper:
 
 ```bash

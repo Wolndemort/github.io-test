@@ -910,5 +910,7 @@ Verification for Stage 50:
 - SMTP reference block verified: targeted `3 passed`, full suite `417 passed`. Настройки SMTP в staging пока не добавлялись и native Email OTP не включался.
 - Подготовлен отдельный optional `/root/speedycrm-staging/.staging-mail.env`, подключаемый только staging Compose; шаблон `.staging-mail.env.example` и runbook добавлены. Реальные SMTP secrets не копируются из ALTER и не попадают в git; native flags остаются `0`.
 - Staging SMTP secret file найден, permissions `600`, имена всех 6 SMTP-переменных присутствуют без раскрытия значений; staging API перезапущен, `/ready` 200, `bots_active: 1`. Email flags ещё не включены.
+- Подготовлен helper `scripts/enable_staging_email_test.sh` для staging-only email теста пользователя `1271717628`; он меняет только staging DB, включает только staging flags и перезапускает только staging API. Выполнение ожидает завершения проверки команды без shell-quoting ошибок.
+- SMTP test enabled only in staging after explicit approval; compose now loads `.staging-mail.env`, env names present without values exposed, and `/auth/native/request` for `omarovadam405@gmail.com` returned 200. Verify code must be entered locally via `scripts/staging_native_verify.ps1`.
 - Restricted pages enforce `analytics_view`/`qr_checkin`; no settings mutation was exposed.
 - Added settings page tests; remaining: continue the next 3–4 migration blocks.
