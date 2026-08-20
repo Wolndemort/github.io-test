@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -22,6 +22,17 @@ from .web_session import (
 )
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
+
+
+@router.get("/web-entry", response_class=HTMLResponse)
+async def auth_web_entry(club_id: int):
+    """Telegram WebApp entry point; initData is exchanged server-side."""
+    return HTMLResponse(f'''<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>SpeedyCRM Web</title><script src="https://telegram.org/js/telegram-web-app.js"></script></head><body><main><p id="status">Connecting…</p></main><script>
+const status=document.getElementById("status");
+const tg=window.Telegram&&window.Telegram.WebApp;
+if(!tg||!tg.initData){{status.textContent="Open this page from the staging Telegram bot.";}}
+else{{tg.ready();fetch("/auth/telegram/exchange",{{method:"POST",headers:{{"Content-Type":"application/json"}},body:JSON.stringify({{init_data:tg.initData,club_id:{club_id}}})}}).then(async r=>{{if(!r.ok)throw new Error(await r.text());return r.json();}}).then(d=>location.replace(d.redirect||"/staff")).catch(e=>{{status.textContent="Authentication failed.";console.error(e);}});}}
+</script></body></html>''')
 
 
 class TelegramExchangePayload(BaseModel):

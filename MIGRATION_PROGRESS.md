@@ -887,5 +887,7 @@ Verification for Stage 50:
 - Следующий production-readiness блок: получить реальный `init_data` от staging bot/test account. Для полноценного Telegram WebApp browser smoke потребуется безопасный HTTPS staging entry или ручная передача одноразового init_data без публикации token.
 - Добавлен локальный `scripts/staging_exchange.ps1`: принимает одноразовый `init_data` только через локальный prompt, вызывает staging через tunnel и не сохраняет значение. Club ID staging: `1`.
 - Для SSH-only staging выставлен `COOKIE_SECURE=0` только в `docker-compose.staging.yml`: tunnel локально использует HTTP, а production cookie policy не изменялась. Staging API перезапущен, `/ready` 200, `bots_active: 1`.
+- По согласованному варианту 1 подготовлен отдельный HTTPS staging entry `https://staging.speedycrm.ru:18443`: DNS уже указывает на сервер, wildcard-сертификат действителен, отдельный nginx не использует live 80/443 и подключён к staging network. Это временно публичная точка только для Telegram WebApp smoke.
+- Добавлен `/auth/web-entry?club_id=1`: отдельная Telegram WebApp entry-страница получает `Telegram.WebApp.initData`, отправляет его на штатный exchange и не отображает/сохраняет init data. Добавлен contract test.
 - Restricted pages enforce `analytics_view`/`qr_checkin`; no settings mutation was exposed.
 - Added settings page tests; remaining: continue the next 3–4 migration blocks.
