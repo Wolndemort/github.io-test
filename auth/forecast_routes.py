@@ -690,7 +690,6 @@ async def web_sales_page(context: AuthContext | None = Depends(web_context)):
     return HTMLResponse('''<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Sales · SpeedyCRM</title><link rel="stylesheet" href="/static/web/design.css"><script src="/static/web/components.js"></script></head><body><div class="web-shell"><div class="web-container"><div id="navigation"></div><section class="web-hero"><span class="web-kicker">Staff / Sales</span><h1>Sales,<br>clearly.</h1><p>Подтверждённые продажи клуба в read-only режиме.</p></section><section class="web-grid" id="sales">Загрузка…</section></div></div><script>document.querySelector("#navigation").innerHTML=SpeedyCRMWeb.navigation("Staff web / Sales");SpeedyCRMWeb.json("/api/v1/staff/sales/data").then(data=>{document.querySelector('#sales').innerHTML=`<article class="web-card"><h2>Orders</h2><div class="web-value">${data.sales_count}</div></article><article class="web-card"><h2>Total</h2><div class="web-value">${data.amount_kopecks/100}</div></article>`}).catch(()=>{document.querySelector('#sales').innerHTML=SpeedyCRMWeb.error("Не удалось загрузить продажи")});</script></body></html>''')
 
 
-@web_router.get("/staff/audit", response_class=HTMLResponse)
 @web_router.get("/staff/students/{student_id}/hub", response_class=HTMLResponse)
 async def web_student_hub_page(student_id: int, context: AuthContext | None = Depends(web_context)):
     actor=require_web_context(context)

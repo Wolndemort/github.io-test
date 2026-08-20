@@ -871,5 +871,7 @@ Verification for Stage 50:
 - Tunnel: `ssh -N -L 18000:127.0.0.1:18000 -i C:\Users\79615\.ssh\alter_agent root@77.73.131.175`
 - Smoke через tunnel: `/health` 200, `/ready` 200, `/auth/login` 200; `/auth/me` и `/staff` без сессии корректно возвращают 401. Сторонние `/api/*` пути не являются текущим web-контрактом и не использовались как критерий.
 - Осталось: browser smoke через tunnel, auth/read-only проверка и отдельное решение по mutations; production rollout запрещён.
+- Найден и исправлен дефект web route: `/staff/audit` был продублирован на student hub handler и до auth отдавал 422 вместо 401. Дублирующий decorator удалён, добавлен regression test; targeted suite: `4 passed`.
+- Следующий шаг: собрать этот фикс в staging и повторить smoke `/staff/audit`, затем продолжить авторизованный browser smoke.
 - Restricted pages enforce `analytics_view`/`qr_checkin`; no settings mutation was exposed.
 - Added settings page tests; remaining: continue the next 3–4 migration blocks.
