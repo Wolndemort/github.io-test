@@ -77,7 +77,7 @@ No merge to `master` or production rollout is authorized by this report.
 
 ## Continuation checkpoint
 
-The full recovery context is maintained in `WEB_MIGRATION_HANDOFF.md`. Subscriptions and freezes are backed by existing database/backend services and are wired into Web reads/mutations; scheduler notifications remain backend/Telegram delivery, while Web exposes settings/status. Web broadcast composition/send is not yet implemented. Staging and forbidden-target boundaries are documented and must be preserved.
+The full recovery context is maintained in `WEB_MIGRATION_HANDOFF.md`. Subscriptions and freezes are backed by existing database/backend services and are wired into Web reads/mutations; scheduler notifications remain backend/Telegram delivery, while Web exposes settings/status. Web now has a text-only owner/staff broadcast composer; media-copy and remaining legacy payment/invitation policies are still pending. Staging and forbidden-target boundaries are documented and must be preserved.
 
 ## Remaining after CRM functional migration
 

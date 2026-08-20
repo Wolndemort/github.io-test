@@ -1727,3 +1727,10 @@ Verification for Stage 50:
 - Зафиксирован полный recovery-контекст в `WEB_MIGRATION_HANDOFF.md`: ветка, staging directory/compose/containers, URL, migration head, owner club 2, enabled staging-only flags и список запрещённых live/ALTER/master targets.
 - DB/backend review: `subscriptions` и student expiry/balance используются client Web reads и staff cash subscription activation; freeze fields и `process_student_freeze`/`purchase_student_freeze` используются Web purchase/read paths; scheduler notifications остаются backend-driven, Web управляет flags/status, Telegram остаётся delivery channel.
 - Broadcast composer/send в Web пока не перенесён; также остаются refunds, payment-method changes, receipt delivery, invitations и полный visual sweep.
+
+## 2026-08-20 — Web broadcast package
+
+- Добавлена owner/staff Web-страница `/staff/broadcast` и API `/api/v1/staff/forecast/broadcast` для текстовой рассылки через Telegram-бота текущего клуба.
+- Контур защищён AuthContext, `broadcast` permission, feature flag, CSRF, club scope, Redis idempotency, лимитом 4096 символов и audit; recipients собираются из users + linked student parents текущего клуба.
+- Media-copy пока сознательно не добавлен в Web; сначала проверяется text-only staging smoke.
+- После пакета локальный suite: `483 passed`.

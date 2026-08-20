@@ -6,6 +6,7 @@ import hmac
 import io
 from datetime import date, timedelta
 import re
+import asyncio
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
@@ -30,6 +31,7 @@ from services.analytics import (
     calculate_revenue_periods,
 )
 from services.analytics import calculate_admin_dashboard
+from services.bot_registry import bots_dict
 from .context import AuthContext
 from .routes import web_context
 from .web_session import require_csrf, require_web_context
@@ -48,6 +50,43 @@ client_router = APIRouter(prefix="/api/v1/client", tags=["Web Client"])
 settings_router = APIRouter(prefix="/api/v1/staff/settings", tags=["Web Settings"])
 checkin_router = APIRouter(prefix="/api/v1/staff/checkin", tags=["Web Checkin"])
 freeze_router = APIRouter(prefix="/api/v1/staff/freeze", tags=["Web Freeze"])
+
+@router.post("/broadcast")
+async def web_broadcast(request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):
+    actor = require_web_context(context)
+    if actor.actor_type == "staff" and "broadcast" not in actor.permissions:
+        raise HTTPException(status_code=403, detail={"code": "permission_denied"})
+    if actor.actor_type not in {"owner", "staff"}:
+        raise HTTPException(status_code=403, detail={"code": "staff_access_required"})
+    await require_csrf(request.app.state.redis_client, request)
+    payload = await request.json()
+    text = str(payload.get("text") or "").strip()
+    key = str(payload.get("idempotency_key") or "").strip()
+    if not 1 <= len(text) <= 4096 or not key or len(key) > 100:
+        raise HTTPException(status_code=400, detail={"code": "invalid_broadcast"})
+    club = await session.scalar(select(Club).where(Club.id == actor.club_id))
+    settings = club.club_settings if club and isinstance(club.club_settings, dict) else {}
+    if not settings.get("features", {}).get("broadcast", True):
+        raise HTTPException(status_code=404, detail={"code": "feature_disabled"})
+    if not club or not club.bot_token or club.bot_token not in bots_dict:
+        raise HTTPException(status_code=503, detail={"code": "club_bot_unavailable"})
+    if not await request.app.state.redis_client.set(f"web:broadcast:{actor.club_id}:{key}", "1", ex=900, nx=True):
+        return {"ok": True, "idempotent_replay": True, "club_id": actor.club_id}
+    user_ids = {int(x) for x in (await session.scalars(select(User.user_id).where(User.club_id == actor.club_id))).all() if x}
+    linked = await session.execute(select(StudentParent.parent_id).join(Student, StudentParent.student_id == Student.id).where(Student.club_id == actor.club_id))
+    user_ids.update(int(x) for x in linked.scalars().all() if x)
+    bot = bots_dict[club.bot_token]
+    delivered = 0
+    failed = 0
+    for user_id in sorted(user_ids):
+        try:
+            await bot.send_message(chat_id=user_id, text=text)
+            delivered += 1
+            await asyncio.sleep(0.05)
+        except Exception:
+            failed += 1
+    audit_event("web_broadcast_sent", club_id=actor.club_id, actor_user_id=actor.user_id, actor_role=actor.role, action="broadcast", object_type="club", object_id=actor.club_id, location="web/staff/broadcast", recipients=len(user_ids), delivered=delivered, failed=failed)
+    return {"ok": True, "club_id": actor.club_id, "recipients": len(user_ids), "delivered": delivered, "failed": failed}
 
 @sales_router.get("/buyers")
 async def sale_buyers_data(request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):
@@ -1619,6 +1658,13 @@ async def web_staff_profile_page(context: AuthContext | None = Depends(web_conte
     if actor.actor_type not in {"owner", "staff"}:
         raise HTTPException(status_code=403, detail={"code": "staff_access_required"})
     return HTMLResponse('''<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Staff profile · SpeedyCRM</title><link rel="stylesheet" href="/static/web/design.css"><script src="/static/web/components.js"></script></head><body><div class="web-shell"><div class="web-container"><div id="navigation"></div><section class="web-hero"><span class="web-kicker">Staff / Profile</span><h1>Access,<br>visible.</h1><p>Профиль owner/staff и passkey-устройства.</p></section><section class="web-card" id="profile">Загрузка…</section></div></div><script>document.querySelector("#navigation").innerHTML=SpeedyCRMWeb.navigation("Staff web / Profile");SpeedyCRMWeb.json("/auth/me").then(data=>{document.querySelector("#profile").innerHTML=`<h2>${data.role}</h2><p>Club ${data.club_id} · ${data.permissions.length} permissions</p>`}).catch(()=>{document.querySelector("#profile").innerHTML=SpeedyCRMWeb.error("Не удалось загрузить профиль")});</script></body></html>''')
+
+@web_router.get("/staff/broadcast", response_class=HTMLResponse)
+async def web_broadcast_page(context: AuthContext | None = Depends(web_context)):
+    actor = require_web_context(context)
+    if actor.actor_type not in {"owner", "staff"} or (actor.actor_type == "staff" and "broadcast" not in actor.permissions):
+        raise HTTPException(status_code=403, detail={"code": "permission_denied"})
+    return HTMLResponse('''<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Broadcast · SpeedyCRM</title><link rel="stylesheet" href="/static/web/design.css"><script src="/static/web/components.js"></script></head><body><div class="web-shell"><div class="web-container"><div id="navigation"></div><section class="web-hero"><span class="web-kicker">Staff / Broadcast</span><h1>Message,<br>delivered.</h1><p>Текстовая рассылка пользователям текущего клуба через Telegram-бота.</p></section><section class="web-card"><form id="broadcast"><label>Сообщение<textarea name="text" minlength="1" maxlength="4096" rows="8" required></textarea></label><button type="submit">Send broadcast</button></form><p id="result" role="status"></p></section></div></div><script>document.querySelector("#navigation").innerHTML=SpeedyCRMWeb.navigation("Staff web / Broadcast");const csrf=()=>decodeURIComponent((document.cookie.match(/(?:^|; )speedycrm_csrf_token=([^;]*)/)||[])[1]||"");document.querySelector("#broadcast").addEventListener("submit",async e=>{e.preventDefault();const result=document.querySelector("#result"),text=new FormData(e.target).get("text");try{const r=await SpeedyCRMWeb.json("/api/v1/staff/forecast/broadcast",{method:"POST",headers:{"Content-Type":"application/json","X-CSRF-Token":csrf()},body:JSON.stringify({text,idempotency_key:crypto.randomUUID()})});result.textContent=`Delivered ${r.delivered}/${r.recipients}; failed ${r.failed}.`;e.target.reset()}catch(_){result.textContent="Рассылка недоступна или запрещена."}});</script></body></html>''')
 
 @web_router.get("/staff/passkey-debug", response_class=HTMLResponse)
 async def web_passkey_debug_page(context: AuthContext | None = Depends(web_context)):

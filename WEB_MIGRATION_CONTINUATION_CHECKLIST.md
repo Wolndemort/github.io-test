@@ -60,6 +60,8 @@
 - [x] Subscription/freeze UI with scoped tariff/student selectors.
 - [x] Online payment provider integration smoke with mocked provider; approved real staging payment test remains pending.
 - [x] Webhook integration matrix contracts for success, wrong amount, wrong metadata, duplicate and provider retry.
+- [x] Add text-only Web owner/staff broadcast composer with club scope, permission, CSRF, idempotency and audit.
+- [ ] Add media-copy mode and verify text broadcast on isolated staging.
 - [ ] Any remaining legacy operations: refunds, payment method changes, receipt delivery, audit search/delete policy, invitations.
 - [x] Client phone binding UI wired to the existing rate-limited Web endpoint; email binding UI already present.
 - [x] Client QR pass UI/API with authenticated parent/club scope and Telegram-compatible hourly HMAC payload.
