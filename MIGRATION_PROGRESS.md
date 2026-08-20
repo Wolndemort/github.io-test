@@ -1603,3 +1603,13 @@ Verification for Stage 50:
 - Cash reversal selector, audit table/detail links и student hub links добавлены.
 - Исправлена backward-compatible serialization cash entries для minimal test fixtures.
 - Полный suite: `481 passed`; `git diff --check` чист.
+## 2026-08-20 — settings menu/camera UI audit
+
+- Добавлена отдельная Web Menu settings page/link.
+- Зафиксирован gap Camera mutation form для следующего micro-patch; backend `PATCH /api/v1/staff/settings/camera` уже готов и защищён.
+- Settings route/UI contract test добавлен.
+## 2026-08-20 — staff settings controls verified
+
+- Camera settings теперь имеют enabled/name/base_url mutation fields и используют `/api/v1/staff/settings/camera`.
+- Menu settings получили отдельный `/api/v1/staff/settings/menu` read endpoint и Web page/link.
+- Полный suite после settings package: `481 passed`; `git diff --check` чист.

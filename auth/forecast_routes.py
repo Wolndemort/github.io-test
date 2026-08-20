@@ -890,6 +890,13 @@ async def features_data(request: Request, context: AuthContext | None = Depends(
     features = settings.get("features", {}) if isinstance(settings.get("features", {}), dict) else {}
     return {"club_id": actor.club_id, "features": {str(k): bool(v) for k, v in features.items()}, "read_only": True}
 
+@settings_router.get("/menu")
+async def menu_data(request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):
+    actor = require_web_context(context)
+    club = await session.scalar(select(Club).where(Club.id == actor.club_id)); settings = club.club_settings if club and isinstance(club.club_settings, dict) else {}
+    menu = settings.get("menu", {}) if isinstance(settings.get("menu", {}), dict) else {}
+    return {"club_id": actor.club_id, "menu": {str(k): bool(v) for k, v in menu.items()}, "read_only": True}
+
 
 @settings_router.get("/limits")
 async def limits_data(request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):
@@ -1665,6 +1672,11 @@ async def web_integrations_page(context: AuthContext | None = Depends(web_contex
 async def web_notifications_page(context: AuthContext | None = Depends(web_context)):
     require_web_context(context)
     return await _settings_page(context, "Notifications", "/api/v1/staff/settings/notifications")
+
+@web_router.get("/staff/settings/menu", response_class=HTMLResponse)
+async def web_menu_settings_page(context: AuthContext | None = Depends(web_context)):
+    require_web_context(context)
+    return await _settings_page(context, "Menu", "/api/v1/staff/settings/menu")
 
 @web_router.get("/staff/settings/disciplines", response_class=HTMLResponse)
 async def web_disciplines_page(context: AuthContext | None = Depends(web_context)):

@@ -44,6 +44,7 @@
 - [x] Client collection pages render functional returned records/tables with empty/error states.
 - [x] Staff Products/Discounts/Tariffs pages expose functional mutation forms wired to scoped APIs.
 - [x] Staff Cash reversal, Audit detail links and Student hub navigation are functional.
+- [x] Camera mutation and Menu flags settings pages are wired to scoped APIs.
 - [x] Schedule editing UI and backend contract smoke.
 - [x] Discipline configuration mutation with safe schedule block allowlist.
 - [x] Camera/turnstile configuration controls without exposing device secrets.
