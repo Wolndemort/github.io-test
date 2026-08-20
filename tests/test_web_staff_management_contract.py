@@ -8,3 +8,6 @@ def test_staff_management_is_owner_only_allowlisted_idempotent_and_audited():
         assert value in block
     assert '@settings_router.get("/staff/data")' in source
     assert '"permissions": s.permissions or {}' in source
+    ui = Path("static/web/components.js").read_text(encoding="utf-8")
+    assert "/api/v1/staff/settings/staff/${Number(f.get(\"staff_id\"))}" in ui
+    assert 'permissions: {[f.get("mode")]' in ui

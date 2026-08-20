@@ -943,7 +943,11 @@ async def update_staff_web(staff_id: int, request: Request, context: AuthContext
     if not staff: raise HTTPException(status_code=404, detail={"code": "staff_not_found"})
     if "full_name" in payload: staff.full_name = str(payload["full_name"] or "").strip()[:150]
     if "role" in payload and str(payload["role"]).lower() in {"cashier", "coach", "manager"}: staff.role = str(payload["role"]).lower()
-    if "permissions" in payload and isinstance(payload["permissions"], dict): staff.permissions = payload["permissions"]
+    if "permissions" in payload:
+        permissions = payload["permissions"]
+        if not isinstance(permissions, dict) or set(permissions) - {"allow", "deny"} or any(not isinstance(x, str) or len(x) > 50 for x in permissions.get("allow", []) + permissions.get("deny", [])):
+            raise HTTPException(status_code=400, detail={"code": "invalid_staff_permissions"})
+        staff.permissions = {"allow": list(dict.fromkeys(permissions.get("allow", []))), "deny": list(dict.fromkeys(permissions.get("deny", [])))}
     if "is_active" in payload: staff.is_active = bool(payload["is_active"])
     await session.commit(); audit_event("web_staff_updated", club_id=actor.club_id, actor_user_id=actor.user_id, action="update", object_type="club_staff", object_id=staff_id, location="web/staff/settings/staff")
     return {"ok": True, "club_id": actor.club_id, "staff_id": staff_id, "read_only": False}

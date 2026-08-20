@@ -945,6 +945,14 @@ Verification for Stage 50:
 - Seeded staging-only synthetic client fixture: `user_id=990000001`, club 1, one student, same test email; added seed/cleanup helpers. Native flags enabled only in staging for client Web smoke; fixture must be removed after verification.
 - Restricted pages enforce `analytics_view`/`qr_checkin`; no settings mutation was exposed.
 
+## 2026-08-20 — staff permissions editor
+
+- Staff update backend теперь принимает только allowlisted `permissions.allow`/`permissions.deny` string lists с ограничением длины и дедупликацией.
+- Staff management UI получил permissions editor: allow/deny permission для выбранного staff ID через защищённый PATCH endpoint.
+- Continuation checklist обновлён: staff list/create/update/permissions editor отмечены выполненными.
+- JavaScript `node --check` успешен; полный suite: `462 passed`; `git diff --check` чист.
+- Telegram, live, ALTER и `master` не затронуты.
+
 ## 2026-08-20 — staff management list UI
 
 - Добавлен `GET /api/v1/staff/settings/staff/data` с club-scoped staff list и permissions state.
