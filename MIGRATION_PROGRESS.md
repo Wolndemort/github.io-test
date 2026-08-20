@@ -1649,3 +1649,8 @@ Verification for Stage 50:
 - Результат relay: `success`; student ID не использовался, посещение/CRM mutation не создавались.
 - Перед pulse проверены только redacted config flags (`enabled`, configured URL presence); секреты в отчёт не записывались.
 - Production/live/ALTER/master не затрагивались.
+## 2026-08-20 — remaining scope clarified after real turnstile test
+
+- Реальный staging turnstile pulse подтверждён; Telegram Face ID/biometric flow остаётся рабочим legacy path.
+- Уточнено remaining: native browser WebAuthn/passkeys (credential ID/public key only), refunds/payment-method/receipt/invitation legacy policies, translations/polish, authenticated visual re-check, payment provider test и final rollout gates.
+- Native WebAuthn не помечается готовым до end-to-end registration/assertion/revoke tests.

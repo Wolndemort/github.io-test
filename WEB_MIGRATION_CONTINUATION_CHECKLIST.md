@@ -48,6 +48,7 @@
 - [x] Staff management editor uses authenticated staff selector for role, active state and permissions.
 - [x] Scheduler flags and safe Turnstile configuration controls are wired to Web APIs; real relay hardware smoke remains staging-only.
 - [x] Real staging turnstile pulse smoke passed after isolated staging restore; no student/visit record was created.
+- [ ] Native browser Face ID via WebAuthn/passkeys: store credential ID/public key only; keep Telegram BiometricManager flow unchanged.
 - [x] Schedule editing UI and backend contract smoke.
 - [x] Discipline configuration mutation with safe schedule block allowlist.
 - [x] Camera/turnstile configuration controls without exposing device secrets.

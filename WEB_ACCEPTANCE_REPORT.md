@@ -38,6 +38,7 @@ Scheduler flags and Turnstile configuration now have Web controls; real relay pu
 | Staff/client settings | готов | settings permissions, safe fields, no secrets in UI |
 | Check-in/manual turnstile/cancel | готов по backend/UI contracts | common gate service, permission, club scope tests |
 | QR scanner/FaceID staff pass | legacy path preserved; native Web parity needs authenticated smoke | Telegram WebApp tests, no native Web claim yet |
+| Native browser Face ID/passkey | pending by design | requires WebAuthn registration/assertion/revoke flow; no biometric template reaches server |
 | Payment webhook | hardened | success, wrong amount/metadata, duplicate, retry, currency matrix |
 | Audit | read/search/detail ready; deletion intentionally absent in Web | policy contract test |
 
@@ -65,3 +66,11 @@ Scheduler flags and Turnstile configuration now have Web controls; real relay pu
 7. Record screenshots/HTTP status/results here, then rerun full suite and perform human diff review.
 
 No merge to `master` or production rollout is authorized by this report.
+
+## Remaining after CRM functional migration
+
+1. Native browser WebAuthn/passkeys for client/staff, with credential revoke and device management.
+2. Remaining legacy UI policies: refunds, payment-method changes, receipt delivery, invitations and any explicitly approved audit retention action.
+3. Full EN/RU translations and final visual/mobile accessibility polish.
+4. Authenticated page-by-page browser re-check after the latest UI package; real staging payment provider test.
+5. Final Telegram regression, human diff review, backup/rollback review and explicit merge approval.
