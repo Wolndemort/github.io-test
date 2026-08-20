@@ -940,6 +940,42 @@ async def update_integrations_web(request: Request, context: AuthContext | None 
     return {"ok": True, "club_id": actor.club_id, "updated": [x for x in ("email_enabled", "push_enabled") if x in payload], "read_only": False}
 
 
+@settings_router.patch("/notifications")
+async def update_notifications_web(request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):
+    actor = require_web_context(context)
+    if os.getenv("WEB_SETTINGS_MUTATIONS_ENABLED", "0") != "1": raise HTTPException(status_code=404, detail={"code": "feature_disabled"})
+    if actor.actor_type != "owner" and "settings_manage" not in actor.permissions: raise HTTPException(status_code=403, detail={"code": "permission_denied"})
+    await require_csrf(request.app.state.redis_client, request); payload = await request.json(); key = str(payload.get("idempotency_key") or "").strip(); allowed = {"email_enabled", "push_enabled", "telegram_enabled", "idempotency_key"}
+    if set(payload) - allowed or not key or len(key) > 100 or any(not isinstance(payload.get(k), bool) for k in allowed - {"idempotency_key"} if k in payload): raise HTTPException(status_code=400, detail={"code": "invalid_notification_flags"})
+    if not await request.app.state.redis_client.set(f"web:notifications:{actor.club_id}:{key}", "1", ex=900, nx=True): return {"ok": True, "idempotent_replay": True, "club_id": actor.club_id}
+    club = await session.scalar(select(Club).where(Club.id == actor.club_id).with_for_update())
+    if not club: raise HTTPException(status_code=404, detail={"code": "club_not_found"})
+    settings = dict(club.club_settings or {}); notifications = dict(settings.get("notifications", {}) or {})
+    for field in allowed - {"idempotency_key"}:
+        if field in payload and field != "telegram_enabled": notifications[field] = payload[field]
+    settings["notifications"] = notifications; club.club_settings = settings; await session.commit(); audit_event("web_notifications_updated", club_id=actor.club_id, actor_user_id=actor.user_id, action="update", object_type="notifications", location="web/staff/settings/notifications")
+    return {"ok": True, "club_id": actor.club_id, "updated": [x for x in payload if x != "idempotency_key"], "read_only": False}
+
+
+@settings_router.patch("/disciplines")
+async def update_disciplines_web(request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):
+    actor = require_web_context(context)
+    if os.getenv("WEB_SETTINGS_MUTATIONS_ENABLED", "0") != "1": raise HTTPException(status_code=404, detail={"code": "feature_disabled"})
+    if actor.actor_type != "owner" and "settings_manage" not in actor.permissions: raise HTTPException(status_code=403, detail={"code": "permission_denied"})
+    await require_csrf(request.app.state.redis_client, request); payload = await request.json(); key = str(payload.get("idempotency_key") or "").strip(); disciplines = payload.get("disciplines")
+    if set(payload) - {"disciplines", "idempotency_key"} or not key or len(key) > 100 or not isinstance(disciplines, dict) or not 30 >= len(disciplines) >= 1: raise HTTPException(status_code=400, detail={"code": "invalid_disciplines"})
+    for code, block in disciplines.items():
+        if not isinstance(code, str) or not 50 >= len(code) >= 1 or not isinstance(block, dict) or set(block) - {"name", "type", "schedule"}: raise HTTPException(status_code=400, detail={"code": "invalid_discipline_fields"})
+        if "name" in block and not 1 <= len(str(block["name"])) <= 120: raise HTTPException(status_code=400, detail={"code": "invalid_discipline_name"})
+        if "type" in block and block["type"] not in {"lessons", "unlimited"}: raise HTTPException(status_code=400, detail={"code": "invalid_discipline_type"})
+        if "schedule" in block and not isinstance(block["schedule"], dict): raise HTTPException(status_code=400, detail={"code": "invalid_discipline_schedule"})
+    if not await request.app.state.redis_client.set(f"web:disciplines:{actor.club_id}:{key}", "1", ex=900, nx=True): return {"ok": True, "idempotent_replay": True, "club_id": actor.club_id}
+    club = await session.scalar(select(Club).where(Club.id == actor.club_id).with_for_update())
+    if not club: raise HTTPException(status_code=404, detail={"code": "club_not_found"})
+    settings = dict(club.club_settings or {}); settings["disciplines"] = disciplines; club.club_settings = settings; await session.commit(); audit_event("web_disciplines_updated", club_id=actor.club_id, actor_user_id=actor.user_id, action="update", object_type="disciplines", location="web/staff/settings/disciplines")
+    return {"ok": True, "club_id": actor.club_id, "discipline_count": len(disciplines), "read_only": False}
+
+
 @checkin_router.get("/data")
 async def checkin_data(request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session), limit: int = Query(default=50, ge=1, le=100)):
     actor = require_web_context(context)

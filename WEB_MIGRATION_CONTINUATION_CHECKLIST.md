@@ -41,9 +41,9 @@
 
 - [ ] Verify and complete all legacy operations against Web AuthContext, not Telegram `init_data`.
 - [ ] Schedule editing UI and backend smoke.
-- [ ] Discipline configuration and schedule exceptions.
+- [x] Discipline configuration mutation with safe schedule block allowlist.
 - [ ] Camera/turnstile configuration controls without exposing device secrets.
-- [ ] Notification preferences and notification delivery settings.
+- [x] Notification preference mutation for safe boolean flags.
 - [ ] Staff list/edit UI, staff permissions UI and user/client profile editing.
 - [ ] Discount assignment removal/list UI.
 - [ ] Product sale UI with product picker, buyer picker and discount picker.

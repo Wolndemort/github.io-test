@@ -945,6 +945,21 @@ Verification for Stage 50:
 - Seeded staging-only synthetic client fixture: `user_id=990000001`, club 1, one student, same test email; added seed/cleanup helpers. Native flags enabled only in staging for client Web smoke; fixture must be removed after verification.
 - Restricted pages enforce `analytics_view`/`qr_checkin`; no settings mutation was exposed.
 
+## 2026-08-20 — club discipline and notifications operations
+
+- Добавлен `PATCH /api/v1/staff/settings/notifications` для safe boolean notification flags; `telegram_enabled` не записывается через Web, только отображается из server state.
+- Добавлен `PATCH /api/v1/staff/settings/disciplines` для allowlisted discipline/type/schedule configuration.
+- Оба endpoint используют `WEB_SETTINGS_MUTATIONS_ENABLED`, owner/`settings_manage`, CSRF, strict allowlist/validation, club row lock, idempotency, transaction и audit.
+- Continuation checklist обновлён: discipline configuration и notification preferences отмечены выполненными.
+- Targeted suite: `3 passed`; полный suite: `461 passed`; `git diff --check` чист.
+- Telegram, live, ALTER и `master` не затронуты.
+
+### Следующий пакет
+
+- Добавить camera/turnstile safe controls без device credentials.
+- Проверить staging functional smoke settings/staff/catalog/sales с временными flags и cleanup.
+- Затем продолжить оставшиеся UI polish, invitations, user profile и payment integration gates.
+
 ## 2026-08-20 — continuation handoff checkpoint
 
 - Создан `WEB_MIGRATION_CONTINUATION_CHECKLIST.md` для продолжения работы после лагов/перезапуска чата.
