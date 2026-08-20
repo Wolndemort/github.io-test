@@ -905,5 +905,6 @@ Verification for Stage 50:
 - Email OTP core собран в staging: `/auth/native/request` возвращает 404 при default-disabled flag, `/auth/login` 200, `/ready` 200, `bots_active: 1`. Telegram flow не изменён.
 - Добавлен общий role-agnostic email binding для client/staff/owner: `/auth/native/email/request` и `/auth/native/email/verify`, только из AuthContext с CSRF, club scope и отдельным `WEB_NATIVE_EMAIL_BINDING_ENABLED=0`. Добавлен contract test; пока не включён.
 - После исправления порядка web_context полный suite: `416 passed`. Email binding остаётся disabled по умолчанию; роли client/staff/owner используют общий backend/AuthContext.
+- Role-agnostic email binding собран в staging с default-disabled flags; staging `/ready` 200, Telegram `/auth/login` 200, `bots_active: 1`. Native endpoint не включался.
 - Restricted pages enforce `analytics_view`/`qr_checkin`; no settings mutation was exposed.
 - Added settings page tests; remaining: continue the next 3–4 migration blocks.
