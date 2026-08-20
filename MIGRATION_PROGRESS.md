@@ -1565,3 +1565,27 @@ Verification for Stage 50:
 
 - Targeted client renderer tests: `8 passed`; полный suite после renderer: `477 passed`; `git diff --check` чист.
 - Acceptance report обновлён: следующий ручной шаг — повторно открыть authenticated client/owner страницы и проверить визуально данные/кнопки, а не API auth.
+## 2026-08-20 — staff product management UI
+
+- Staff Products page теперь имеет функциональные формы create product, stock adjustment и archive.
+- Product selectors загружаются из club-scoped catalog endpoint; mutations используют CSRF, idempotency и backend feature/permission gates.
+- Добавлен product management UI contract test.
+
+### Следующий пакет
+
+- Добавить функциональные staff discount/tariff management forms и затем полный suite.
+## 2026-08-20 — staff discount and tariff management UI
+
+- Discounts page теперь поддерживает create/update forms с scope/kind/value selectors.
+- Tariffs page теперь поддерживает discipline selector и JSON allowlisted tariff update payload.
+- Все mutations используют общий CSRF/idempotency helper и серверные pricing permission/flag gates.
+- Добавлен pricing management UI contract test.
+
+### Следующий пакет
+
+- Полный suite и acceptance report после staff catalog UI.
+## 2026-08-20 — staff catalog management verified
+
+- Staff catalog UI package targeted tests: `5 passed`; полный suite: `479 passed`; `git diff --check` чист.
+- Products: create/stock/archive; Discounts: create/update; Tariffs: discipline selector/JSON update.
+- Acceptance report обновлён; visual authenticated pass остаётся для подтверждения фактического браузерного поведения.

@@ -42,6 +42,7 @@
 - [ ] Verify and complete all legacy operations against Web AuthContext, not Telegram `init_data`.
 - [x] Authenticated owner/client Email OTP/API smoke previously completed and recorded; visual page-by-page browser re-check remains.
 - [x] Client collection pages render functional returned records/tables with empty/error states.
+- [x] Staff Products/Discounts/Tariffs pages expose functional mutation forms wired to scoped APIs.
 - [x] Schedule editing UI and backend contract smoke.
 - [x] Discipline configuration mutation with safe schedule block allowlist.
 - [x] Camera/turnstile configuration controls without exposing device secrets.
