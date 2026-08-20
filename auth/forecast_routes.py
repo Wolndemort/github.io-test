@@ -1105,6 +1105,21 @@ async def client_me(request: Request, context: AuthContext | None = Depends(web_
     return {"user_id": actor.user_id, "club_id": actor.club_id, "actor_type": actor.actor_type, "auth_source": actor.auth_source, "read_only": True}
 
 
+@client_router.patch("/me")
+async def update_client_profile_web(request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):
+    actor = require_web_context(context)
+    if os.getenv("WEB_PROFILE_MUTATIONS_ENABLED", "0") != "1": raise HTTPException(status_code=404, detail={"code": "feature_disabled"})
+    await require_csrf(request.app.state.redis_client, request); payload = await request.json(); key = str(payload.get("idempotency_key") or "").strip()
+    if set(payload) - {"full_name", "idempotency_key"} or not key or len(key) > 100: raise HTTPException(status_code=400, detail={"code": "invalid_profile_fields"})
+    name = str(payload.get("full_name") or "").strip()
+    if not 2 <= len(name) <= 150: raise HTTPException(status_code=400, detail={"code": "invalid_profile_name"})
+    if not await request.app.state.redis_client.set(f"web:profile:{actor.club_id}:{actor.user_id}:{key}", "1", ex=900, nx=True): return {"ok": True, "idempotent_replay": True, "club_id": actor.club_id, "user_id": actor.user_id}
+    user = await session.scalar(select(User).where(User.user_id == actor.user_id, User.club_id == actor.club_id).with_for_update())
+    if not user: raise HTTPException(status_code=404, detail={"code": "user_not_found"})
+    user.full_name = name; await session.commit(); audit_event("web_profile_updated", club_id=actor.club_id, actor_user_id=actor.user_id, action="update", object_type="user", object_id=actor.user_id, location="web/client/me")
+    return {"ok": True, "club_id": actor.club_id, "user_id": actor.user_id, "full_name": user.full_name, "read_only": False}
+
+
 @client_router.get("/legal/data")
 async def client_legal_data(request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):
     actor = require_web_context(context)

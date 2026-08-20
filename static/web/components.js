@@ -115,5 +115,9 @@ document.addEventListener("DOMContentLoaded", () => {
       const target = document.querySelector("#staff-list");
       if (target) target.parentElement.appendChild(form('<h2>Update permissions</h2><form><input name="staff_id" type="number" min="1" placeholder="Staff ID" required><input name="permission" placeholder="Permission name" required><select name="mode"><option value="allow">Allow</option><option value="deny">Deny</option></select><button>Save permission</button></form><p data-operation-result role="status"></p>', async event => { event.preventDefault(); const f = new FormData(event.target), result = event.currentTarget.querySelector("[data-operation-result]"); try { const data = await SpeedyCRMWeb.json(`/api/v1/staff/settings/staff/${Number(f.get("staff_id"))}`, {method: "PATCH", headers: {"Content-Type": "application/json", "X-CSRF-Token": csrf()}, body: JSON.stringify({permissions: {[f.get("mode")]: [String(f.get("permission"))]}, idempotency_key: crypto.randomUUID()})}); result.textContent = `Staff ${data.staff_id} permissions saved.`; } catch (_) { result.textContent = "Permission update unavailable or disabled."; } }));
     }
+    if (location.pathname === "/client/me") {
+      const target = document.querySelector("#profile");
+      if (target) target.parentElement.appendChild(form('<h2>Edit profile</h2><form><input name="full_name" minlength="2" maxlength="150" placeholder="Full name" required><button>Save profile</button></form><p data-operation-result role="status"></p>', async event => { event.preventDefault(); const f = new FormData(event.target), result = event.currentTarget.querySelector("[data-operation-result]"); try { await post("/api/v1/client/me", {full_name: f.get("full_name")}); result.textContent = "Profile saved."; } catch (_) { result.textContent = "Profile editing unavailable or disabled."; } }));
+    }
   }, 0);
 });

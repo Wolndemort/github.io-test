@@ -945,6 +945,15 @@ Verification for Stage 50:
 - Seeded staging-only synthetic client fixture: `user_id=990000001`, club 1, one student, same test email; added seed/cleanup helpers. Native flags enabled only in staging for client Web smoke; fixture must be removed after verification.
 - Restricted pages enforce `analytics_view`/`qr_checkin`; no settings mutation was exposed.
 
+## 2026-08-20 — client profile editing
+
+- Добавлен `PATCH /api/v1/client/me` и форма редактирования имени в `/client/me`.
+- Profile mutation принимает только `full_name`, использует `WEB_PROFILE_MUTATIONS_ENABLED`, CSRF, self/user+club scope, row lock, idempotency, transaction и audit.
+- Email намеренно не изменяется этим endpoint: для него остаётся отдельный Email OTP binding flow.
+- Continuation checklist обновлён: client profile editing отмечен выполненным.
+- JavaScript `node --check` успешен; полный suite: `463 passed`; `git diff --check` чист.
+- Telegram, live, ALTER и `master` не затронуты.
+
 ## 2026-08-20 — staff permissions editor
 
 - Staff update backend теперь принимает только allowlisted `permissions.allow`/`permissions.deny` string lists с ограничением длины и дедупликацией.
