@@ -1709,3 +1709,9 @@ Verification for Stage 50:
 
 - Добавлена защищённая staging-страница `/staff/passkey-debug`: credential не сохраняется, на экране показывается точная ошибка Safari/WebAuthn.
 - Staging пересобран; полный suite: `483 passed`.
+
+## 2026-08-20 — base64url decoder fixed
+
+- Диагностика показала `InvalidCharacterError` до вызова Face ID: JS использовал неверный фиксированный padding `==`.
+- Исправлен base64url decoder в profile UI и diagnostic page; staging пересобран.
+- Полный suite: `483 passed`.
