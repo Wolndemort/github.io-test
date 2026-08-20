@@ -52,9 +52,9 @@ async def consume_otp(redis: Redis, email: str, club_id: int, code: str, purpose
 
 def send_email_otp(recipient: str, code: str) -> None:
     host = os.getenv("SMTP_HOST")
-    user = os.getenv("SMTP_USER")
+    user = os.getenv("SMTP_USERNAME", os.getenv("SMTP_USER"))
     password = os.getenv("SMTP_PASSWORD")
-    sender = os.getenv("SMTP_FROM", user or "")
+    sender = os.getenv("SMTP_FROM_EMAIL", os.getenv("SMTP_FROM", user or ""))
     if not host or not sender:
         raise RuntimeError("SMTP is not configured")
     message = EmailMessage()
@@ -63,7 +63,8 @@ def send_email_otp(recipient: str, code: str) -> None:
     message["To"] = recipient
     message.set_content(f"Your SpeedyCRM login code is {code}. It expires in 10 minutes.")
     with smtplib.SMTP(host, int(os.getenv("SMTP_PORT", "587")), timeout=10) as smtp:
-        smtp.starttls()
+        if os.getenv("SMTP_USE_TLS", "1") == "1":
+            smtp.starttls()
         if user and password:
             smtp.login(user, password)
         smtp.send_message(message)

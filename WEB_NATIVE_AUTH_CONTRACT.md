@@ -50,4 +50,4 @@ Rules:
 
 ## Current blocker
 
-A verified email field and an SMTP/mail provider are required before enabling the flag. No SMTP password belongs in the repository or chat.
+A verified email field and an SMTP/mail provider are required before enabling the flag. The adapter follows the existing ALTER reference naming (`SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM_EMAIL`, `SMTP_USE_TLS`), but credentials are separate per deployment and are never copied from ALTER or placed in the repository/chat.

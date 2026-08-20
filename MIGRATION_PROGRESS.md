@@ -906,5 +906,7 @@ Verification for Stage 50:
 - Добавлен общий role-agnostic email binding для client/staff/owner: `/auth/native/email/request` и `/auth/native/email/verify`, только из AuthContext с CSRF, club scope и отдельным `WEB_NATIVE_EMAIL_BINDING_ENABLED=0`. Добавлен contract test; пока не включён.
 - После исправления порядка web_context полный suite: `416 passed`. Email binding остаётся disabled по умолчанию; роли client/staff/owner используют общий backend/AuthContext.
 - Role-agnostic email binding собран в staging с default-disabled flags; staging `/ready` 200, Telegram `/auth/login` 200, `bots_active: 1`. Native endpoint не включался.
+- SMTP adapter сверён read-only с ALTER: перенесены только совместимые имена/поведение (`SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM_EMAIL`, `SMTP_USE_TLS`), credentials ALTER не копировались. Добавлен adapter contract test; native flags остаются disabled.
+- SMTP reference block verified: targeted `3 passed`, full suite `417 passed`. Настройки SMTP в staging пока не добавлялись и native Email OTP не включался.
 - Restricted pages enforce `analytics_view`/`qr_checkin`; no settings mutation was exposed.
 - Added settings page tests; remaining: continue the next 3–4 migration blocks.
