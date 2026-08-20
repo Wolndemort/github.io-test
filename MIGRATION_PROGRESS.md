@@ -925,5 +925,6 @@ Verification for Stage 50:
 - Postbox diagnostic: `ses` endpoint отвечает `ResponseParserError`, `sesv2` не предоставляет `GetSendQuota` в этом API. Письма не отправлялись; native flags остаются выключены. Нужно сверить именно SendEmail API/адрес отправителя по Postbox docs, а не делать повторные blind sends.
 - Подготовлен одноразовый `scripts/send_postbox_probe.py` для реального `sesv2.SendEmail` на staging test email; secrets не печатаются, приложение/native flags не включаются.
 - Реальный Postbox probe успешно отправил письмо (`sesv2.SendEmail: send=ok`). Adapter переключён с несовместимого `ses` на `sesv2`; следующий шаг — staging rebuild и один Email OTP request.
+- Adapter переключён на `sesv2`, staging rebuilt; с native flags только в staging `/auth/native/request` вернул 200 для `omarovadam405@gmail.com`. Письмо отправлено через Yandex Postbox HTTPS; следующий шаг — локально ввести код и проверить `/auth/me` с `auth_source=email`.
 - Restricted pages enforce `analytics_view`/`qr_checkin`; no settings mutation was exposed.
 - Added settings page tests; remaining: continue the next 3–4 migration blocks.
