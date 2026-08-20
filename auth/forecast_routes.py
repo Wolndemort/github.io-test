@@ -866,6 +866,32 @@ async def camera_data(request: Request, context: AuthContext | None = Depends(we
     camera = settings.get("camera", {}) if isinstance(settings.get("camera", {}), dict) else {}
     return {"club_id": actor.club_id, "camera": {"enabled": bool(camera.get("enabled", False)), "name": str(camera.get("name", "camera1"))[:100]}, "read_only": True}
 
+@settings_router.get("/turnstile")
+async def turnstile_data(request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):
+    actor = require_web_context(context)
+    if actor.actor_type == "staff" and "qr_checkin" not in actor.permissions: raise HTTPException(status_code=403, detail={"code": "permission_denied"})
+    club = await session.scalar(select(Club).where(Club.id == actor.club_id)); settings = club.club_settings if club and isinstance(club.club_settings, dict) else {}; cfg = settings.get("turnstile", {}) if isinstance(settings.get("turnstile", {}), dict) else {}
+    return {"club_id": actor.club_id, "turnstile": {"enabled": bool(cfg.get("enabled", False)), "type": str(cfg.get("type", "dingtian_http")), "base_url": str(cfg.get("base_url", ""))[:300], "camera_src": str(cfg.get("camera_src", "camera1"))[:100], "relay_index": int(cfg.get("relay_index", 0) or 0), "pulse_time_seconds": int(cfg.get("pulse_time_seconds", 1) or 1), "timeout_seconds": int(cfg.get("timeout_seconds", 5) or 5), "configured": bool(cfg.get("password"))}, "read_only": True}
+
+@settings_router.patch("/turnstile")
+async def update_turnstile_web(request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):
+    actor = require_web_context(context)
+    if os.getenv("WEB_SETTINGS_MUTATIONS_ENABLED", "0") != "1": raise HTTPException(status_code=404, detail={"code": "feature_disabled"})
+    if actor.actor_type != "owner" and "settings_manage" not in actor.permissions: raise HTTPException(status_code=403, detail={"code": "permission_denied"})
+    await require_csrf(request.app.state.redis_client, request); payload = await request.json(); allowed = {"enabled", "base_url", "camera_src", "relay_index", "pulse_time_seconds", "timeout_seconds", "idempotency_key"}
+    if set(payload) - allowed or not isinstance(payload.get("enabled"), bool): raise HTTPException(status_code=400, detail={"code": "invalid_turnstile_fields"})
+    key = str(payload.get("idempotency_key") or "").strip()
+    if not key or len(key) > 100: raise HTTPException(status_code=400, detail={"code": "invalid_idempotency_key"})
+    if not await request.app.state.redis_client.set(f"web:turnstile:{actor.club_id}:{key}", "1", ex=900, nx=True): return {"ok": True, "idempotent_replay": True, "club_id": actor.club_id}
+    club = await session.scalar(select(Club).where(Club.id == actor.club_id).with_for_update())
+    if not club: raise HTTPException(status_code=404, detail={"code": "club_not_found"})
+    settings = dict(club.club_settings or {}); current = dict(settings.get("turnstile", {}) or {})
+    for field in ("enabled", "base_url", "camera_src", "relay_index", "pulse_time_seconds", "timeout_seconds"):
+        if field in payload: current[field] = payload[field]
+    if len(str(current.get("base_url", ""))) > 300 or len(str(current.get("camera_src", ""))) > 100 or int(current.get("relay_index", 0)) < 0 or not 1 <= int(current.get("pulse_time_seconds", 1)) <= 10 or not 1 <= int(current.get("timeout_seconds", 5)) <= 30: raise HTTPException(status_code=400, detail={"code": "invalid_turnstile_config"})
+    settings["turnstile"] = current; club.club_settings = settings; await session.commit(); audit_event("web_turnstile_updated", club_id=actor.club_id, actor_user_id=actor.user_id, action="update", object_type="turnstile", location="web/staff/settings/turnstile", enabled=bool(current.get("enabled")))
+    return {"ok": True, "club_id": actor.club_id, "configured": bool(current.get("password")), "read_only": False}
+
 
 @settings_router.patch("/camera")
 async def update_camera_web(request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):
@@ -896,6 +922,28 @@ async def menu_data(request: Request, context: AuthContext | None = Depends(web_
     club = await session.scalar(select(Club).where(Club.id == actor.club_id)); settings = club.club_settings if club and isinstance(club.club_settings, dict) else {}
     menu = settings.get("menu", {}) if isinstance(settings.get("menu", {}), dict) else {}
     return {"club_id": actor.club_id, "menu": {str(k): bool(v) for k, v in menu.items()}, "read_only": True}
+
+@settings_router.get("/schedulers")
+async def scheduler_settings_data(request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):
+    actor = require_web_context(context)
+    club = await session.scalar(select(Club).where(Club.id == actor.club_id)); settings = club.club_settings if club and isinstance(club.club_settings, dict) else {}; features = settings.get("features", {}) if isinstance(settings.get("features", {}), dict) else {}
+    keys = ("birthday_missing_reminders", "subscription_expiry_reminders", "birthday_greetings", "absence_reminders", "work_schedule_reminders", "stock_reminders")
+    return {"club_id": actor.club_id, "schedulers": {key: bool(features.get(key, True)) for key in keys}, "read_only": True}
+
+@settings_router.patch("/schedulers")
+async def update_scheduler_settings_web(request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):
+    actor = require_web_context(context)
+    if os.getenv("WEB_SETTINGS_MUTATIONS_ENABLED", "0") != "1": raise HTTPException(status_code=404, detail={"code": "feature_disabled"})
+    if actor.actor_type != "owner" and "settings_manage" not in actor.permissions: raise HTTPException(status_code=403, detail={"code": "permission_denied"})
+    await require_csrf(request.app.state.redis_client, request); payload = await request.json(); keys = {"birthday_missing_reminders", "subscription_expiry_reminders", "birthday_greetings", "absence_reminders", "work_schedule_reminders", "stock_reminders", "idempotency_key"}
+    if set(payload) - keys or not payload.get("idempotency_key") or any(not isinstance(payload[key], bool) for key in keys - {"idempotency_key"} if key in payload): raise HTTPException(status_code=400, detail={"code": "invalid_scheduler_flags"})
+    key = str(payload["idempotency_key"]).strip()
+    if not await request.app.state.redis_client.set(f"web:schedulers:{actor.club_id}:{key}", "1", ex=900, nx=True): return {"ok": True, "idempotent_replay": True, "club_id": actor.club_id}
+    club = await session.scalar(select(Club).where(Club.id == actor.club_id).with_for_update()); settings = dict(club.club_settings or {}) if club else {}; features = dict(settings.get("features", {}) or {})
+    for field in keys - {"idempotency_key"}:
+        if field in payload: features[field] = payload[field]
+    settings["features"] = features; club.club_settings = settings; await session.commit(); audit_event("web_scheduler_settings_updated", club_id=actor.club_id, actor_user_id=actor.user_id, action="update", object_type="scheduler_settings", location="web/staff/settings/schedulers", updated=[x for x in payload if x != "idempotency_key"])
+    return {"ok": True, "club_id": actor.club_id, "read_only": False}
 
 
 @settings_router.get("/limits")
@@ -1645,6 +1693,10 @@ async def web_legal_page(context: AuthContext | None = Depends(web_context)):
 async def web_camera_page(context: AuthContext | None = Depends(web_context)):
     return await _settings_page(context, "Camera", "/api/v1/staff/settings/camera", "qr_checkin")
 
+@web_router.get("/staff/settings/turnstile", response_class=HTMLResponse)
+async def web_turnstile_page(context: AuthContext | None = Depends(web_context)):
+    return await _settings_page(context, "Turnstile", "/api/v1/staff/settings/turnstile", "qr_checkin")
+
 
 @web_router.get("/staff/settings/features", response_class=HTMLResponse)
 async def web_features_page(context: AuthContext | None = Depends(web_context)):
@@ -1672,6 +1724,11 @@ async def web_integrations_page(context: AuthContext | None = Depends(web_contex
 async def web_notifications_page(context: AuthContext | None = Depends(web_context)):
     require_web_context(context)
     return await _settings_page(context, "Notifications", "/api/v1/staff/settings/notifications")
+
+@web_router.get("/staff/settings/schedulers", response_class=HTMLResponse)
+async def web_schedulers_page(context: AuthContext | None = Depends(web_context)):
+    require_web_context(context)
+    return await _settings_page(context, "Schedulers", "/api/v1/staff/settings/schedulers")
 
 @web_router.get("/staff/settings/menu", response_class=HTMLResponse)
 async def web_menu_settings_page(context: AuthContext | None = Depends(web_context)):

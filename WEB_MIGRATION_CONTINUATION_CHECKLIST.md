@@ -46,6 +46,7 @@
 - [x] Staff Cash reversal, Audit detail links and Student hub navigation are functional.
 - [x] Camera mutation and Menu flags settings pages are wired to scoped APIs.
 - [x] Staff management editor uses authenticated staff selector for role, active state and permissions.
+- [x] Scheduler flags and safe Turnstile configuration controls are wired to Web APIs; real relay hardware smoke remains staging-only.
 - [x] Schedule editing UI and backend contract smoke.
 - [x] Discipline configuration mutation with safe schedule block allowlist.
 - [x] Camera/turnstile configuration controls without exposing device secrets.

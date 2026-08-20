@@ -1622,3 +1622,13 @@ Verification for Stage 50:
 
 - Staff management selector editor targeted tests passed; полный suite: `482 passed`; `git diff --check` чист.
 - Manual staff IDs remain only in backward-compatible temporary forms; selector editor is the primary path for the page.
+## 2026-08-20 — scheduler and turnstile Web controls
+
+- Добавлены scoped scheduler GET/PATCH controls для всех legacy scheduler flags: birthdays, expiry, absence, work schedule и stock reminders.
+- Добавлены Turnstile GET/PATCH controls без отображения password/secret; сохраняются enabled, base URL, camera source, relay/pulse/timeout настройки.
+- Добавлены Web pages/links и contract test; hardware open smoke требует реального staging relay и не выполняется локально.
+## 2026-08-20 — scheduler/turnstile package verified
+
+- Full suite after scheduler/turnstile controls: `483 passed`; `git diff --check` чист.
+- Scheduler flags correspond to legacy Telegram scheduler menu and remain owner/settings permission guarded.
+- Turnstile Web controls redact password and never accept secrets from read-only responses; real relay pulse requires staging hardware smoke.
