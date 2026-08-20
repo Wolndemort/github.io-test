@@ -916,5 +916,6 @@ Verification for Stage 50:
 - После исправления записи email SMTP request дошёл до delivery adapter, но вернул 500 `SMTP is not configured`; добавлен безопасный `scripts/check_staging_smtp.sh`, который показывает только set/empty переменных внутри staging API.
 - Следующая диагностика показала реальную причину: staging SMTP host — `smtp.gmail.com:587`, контейнер получает `Network is unreachable`. Credentials загружены; требуется сетевой маршрут/разрешение outbound SMTP, не изменение auth-кода.
 - После сетевого теста (`host timeout`, `container OSError`) native flags удалены из staging secret file и API перезапущен, `/ready` 200. SMTP delivery failure теперь будет безопасным `503 email_delivery_unavailable`, без внутренних traceback.
+- Проверен firewall: UFW inactive, `iptables OUTPUT ACCEPT`, host default route присутствует. Дополнительное allow-правило для 587 не требуется; timeout/Network unreachable к Gmail находится вне локального firewall. Native flags остаются выключены.
 - Restricted pages enforce `analytics_view`/`qr_checkin`; no settings mutation was exposed.
 - Added settings page tests; remaining: continue the next 3–4 migration blocks.
