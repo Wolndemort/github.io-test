@@ -945,6 +945,20 @@ Verification for Stage 50:
 - Seeded staging-only synthetic client fixture: `user_id=990000001`, club 1, one student, same test email; added seed/cleanup helpers. Native flags enabled only in staging for client Web smoke; fixture must be removed after verification.
 - Restricted pages enforce `analytics_view`/`qr_checkin`; no settings mutation was exposed.
 
+## 2026-08-20 — online payment UI and webhook safety
+
+- В client purchases UI добавлена форма payment redirect через `POST /api/v1/client/payments/{order_id}/intent`.
+- UI не принимает сумму/club/payment credentials; открывает только server-returned provider URL.
+- Добавлен webhook contract test: accepted event/status, provider metadata/order binding, provider amount check, row lock и duplicate confirmed-state guard.
+- JavaScript проверен `node --check`; targeted suite: `4 passed`; полный suite: `460 passed`; `git diff --check` чист.
+- Telegram, live, ALTER и `master` не затронуты.
+
+### Следующий пакет
+
+- В staging включить только online payment flag на тестовой order без реального provider charge либо замокать provider на integration test.
+- Добавить UI редактирования staff и integration boolean flags.
+- Провести полный staging functional smoke и cleanup перед следующими mutations.
+
 ## 2026-08-20 — online payment intent foundation
 
 - Добавлен `POST /api/v1/client/payments/{order_id}/intent`.

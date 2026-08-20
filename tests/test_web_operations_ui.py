@@ -11,4 +11,6 @@ def test_operations_ui_uses_csrf_idempotency_and_web_endpoints():
     assert "/api/v1/staff/checkin/manual" in source
     assert "/api/v1/staff/checkin/cancel" in source
     assert "/api/v1/client/freeze/purchase" in source
+    assert "/api/v1/client/payments/" in source
+    assert "Continue to payment" in source
     assert "Operation unavailable or disabled" in source

@@ -101,5 +101,9 @@ document.addEventListener("DOMContentLoaded", () => {
       const target = document.querySelector("#client-data");
       if (target) target.parentElement.appendChild(form('<h2>Purchase freeze</h2><form><input name="student_id" type="number" min="1" placeholder="Student ID" required><input name="days" type="number" min="1" max="365" placeholder="Days" required><button>Freeze</button></form><p data-operation-result role="status"></p>', async event => { event.preventDefault(); const f = new FormData(event.target), result = event.currentTarget.querySelector("[data-operation-result]"); try { const data = await post("/api/v1/client/freeze/purchase", {student_id: Number(f.get("student_id")), days: Number(f.get("days")), discount_ids: []}); result.textContent = `Freeze ${data.order_id} saved.`; } catch (_) { result.textContent = "Freeze unavailable or disabled."; } }));
     }
+    if (location.pathname === "/client/purchases") {
+      const target = document.querySelector("#client-data");
+      if (target) target.parentElement.appendChild(form('<h2>Pay online</h2><form><input name="order_id" placeholder="Pending order ID" required><button>Open payment</button></form><p data-operation-result role="status"></p>', async event => { event.preventDefault(); const f = new FormData(event.target), result = event.currentTarget.querySelector("[data-operation-result]"); try { const data = await post(`/api/v1/client/payments/${encodeURIComponent(f.get("order_id"))}/intent`, {}); result.innerHTML = `<a href="${data.payment_url}" target="_blank" rel="noopener">Continue to payment</a>`; } catch (_) { result.textContent = "Payment unavailable or order is not payable."; } }));
+    }
   }, 0);
 });
