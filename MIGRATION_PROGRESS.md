@@ -945,6 +945,15 @@ Verification for Stage 50:
 - Seeded staging-only synthetic client fixture: `user_id=990000001`, club 1, one student, same test email; added seed/cleanup helpers. Native flags enabled only in staging for client Web smoke; fixture must be removed after verification.
 - Restricted pages enforce `analytics_view`/`qr_checkin`; no settings mutation was exposed.
 
+## 2026-08-20 — discount assignment list and removal
+
+- Добавлен `GET /api/v1/staff/catalog/discounts/{discount_id}/assignments`.
+- Добавлен `DELETE /api/v1/staff/catalog/discounts/{discount_id}/assignments/{assignment_id}`; удаляется только assignment, не сама скидка.
+- Removal использует `WEB_PRICING_MUTATIONS_ENABLED`, `tariffs_manage`, CSRF, строгий payload, club/discount/assignment scope, row lock, idempotency, transaction и audit.
+- Continuation checklist обновлён: assignment list/removal backend отмечен выполненным, UI selectors остаются.
+- Targeted suite: `3 passed`; полный suite: `464 passed`; `git diff --check` чист.
+- Telegram, live, ALTER и `master` не затронуты.
+
 ## 2026-08-20 — client profile editing
 
 - Добавлен `PATCH /api/v1/client/me` и форма редактирования имени в `/client/me`.

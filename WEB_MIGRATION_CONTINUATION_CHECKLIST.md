@@ -46,7 +46,7 @@
 - [x] Notification preference mutation for safe boolean flags.
 - [x] Staff list UI, staff create/update backend and permissions editor.
 - [x] Client profile name editing; staff profile/user admin extensions remain.
-- [ ] Discount assignment removal/list UI.
+- [x] Discount assignment list/removal backend; UI selector polish remains.
 - [ ] Product sale UI with product picker, buyer picker and discount picker.
 - [ ] Subscription/freeze UI with tariff/student selectors.
 - [ ] Online payment provider integration smoke with mocked provider; then approved real staging test.

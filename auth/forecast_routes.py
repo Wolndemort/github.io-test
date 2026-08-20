@@ -802,6 +802,30 @@ async def assign_discount_web(discount_id: int, request: Request, context: AuthC
     return {"ok": True, "club_id": actor.club_id, "discount_id": discount_id, "assignment_id": assignment.id, "read_only": False}
 
 
+@catalog_router.get("/discounts/{discount_id}/assignments")
+async def discount_assignments_web(discount_id: int, request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):
+    actor = require_web_context(context)
+    if actor.actor_type == "staff" and "tariffs_manage" not in actor.permissions: raise HTTPException(status_code=403, detail={"code": "permission_denied"})
+    discount = await session.scalar(select(Discount).where(Discount.id == discount_id, Discount.club_id == actor.club_id))
+    if not discount: raise HTTPException(status_code=404, detail={"code": "discount_not_found"})
+    rows = list((await session.execute(select(DiscountAssignment).where(DiscountAssignment.discount_id == discount_id, DiscountAssignment.club_id == actor.club_id).order_by(DiscountAssignment.id))).scalars().all())
+    return {"club_id": actor.club_id, "discount_id": discount_id, "assignments": [{"id": row.id, "user_id": row.user_id, "student_id": row.student_id} for row in rows], "read_only": True}
+
+
+@catalog_router.delete("/discounts/{discount_id}/assignments/{assignment_id}")
+async def remove_discount_assignment_web(discount_id: int, assignment_id: int, request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):
+    actor = require_web_context(context)
+    if os.getenv("WEB_PRICING_MUTATIONS_ENABLED", "0") != "1": raise HTTPException(status_code=404, detail={"code": "feature_disabled"})
+    if actor.actor_type == "staff" and "tariffs_manage" not in actor.permissions: raise HTTPException(status_code=403, detail={"code": "permission_denied"})
+    await require_csrf(request.app.state.redis_client, request); payload = await request.json(); key = str(payload.get("idempotency_key") or "").strip()
+    if set(payload) - {"idempotency_key"} or not key or len(key) > 100: raise HTTPException(status_code=400, detail={"code": "invalid_assignment_removal"})
+    if not await request.app.state.redis_client.set(f"web:discount-unassign:{actor.club_id}:{assignment_id}:{key}", "1", ex=900, nx=True): return {"ok": True, "idempotent_replay": True, "club_id": actor.club_id, "assignment_id": assignment_id}
+    assignment = await session.scalar(select(DiscountAssignment).where(DiscountAssignment.id == assignment_id, DiscountAssignment.discount_id == discount_id, DiscountAssignment.club_id == actor.club_id).with_for_update())
+    if not assignment: raise HTTPException(status_code=404, detail={"code": "assignment_not_found"})
+    await session.delete(assignment); await session.commit(); audit_event("web_discount_unassigned", club_id=actor.club_id, actor_user_id=actor.user_id, action="unassign", object_type="discount", object_id=discount_id, location="web/staff/discounts", assignment_id=assignment_id)
+    return {"ok": True, "club_id": actor.club_id, "discount_id": discount_id, "assignment_id": assignment_id, "read_only": False}
+
+
 @settings_router.get("/legal")
 async def legal_data(request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):
     actor = require_web_context(context)
