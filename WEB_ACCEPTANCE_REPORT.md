@@ -61,6 +61,7 @@ Scheduler flags and Turnstile configuration now have Web controls; real relay pu
 - Diagnostic result `InvalidCharacterError` fixed: base64url padding is now calculated correctly before passing challenge/user ID to Safari.
 - Text broadcast package is deployed to isolated staging; unauthenticated page gate returns `401`. No real broadcast was sent.
 - Saved payment method package is deployed to isolated staging; no real card token mutation was executed during smoke.
+- Receipts/invitations package is deployed to isolated staging; no external message or invitation was sent during deployment.
 - Hardware result is limited to the explicitly approved staging/work-area relay test; production/master were not involved.
 - Manual authenticated owner/client Email OTP/API smoke: previously passed and recorded in `MIGRATION_PROGRESS.md` (including owner session, `auth_source=email`, club scope and logout).
 - Manual visual browser re-check: owner passkey/profile flow passed; remaining page-by-page client/staff mutation visual sweep is still pending.

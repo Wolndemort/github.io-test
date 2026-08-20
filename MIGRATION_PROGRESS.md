@@ -1757,3 +1757,8 @@ Verification for Stage 50:
 - Оба контура имеют AuthContext, club/user scope, CSRF, idempotency и audit; реальное сообщение/приглашение в smoke не отправлялось.
 - Refund provider API в текущем `YooKassaClient` отсутствует; возврат не имитируется сменой статуса. Нужна отдельная согласованная YooKassa refund integration/policy.
 - После пакета: `483 passed`.
+
+## 2026-08-20 — receipts/invitations staged
+
+- Current Web package deployed only to `/root/speedycrm-staging`; API/DB/Redis/nginx containers recreated with isolated compose.
+- No real receipt, invitation or broadcast was sent during deployment; only build/auth-gate checks are allowed without explicit external-recipient approval.

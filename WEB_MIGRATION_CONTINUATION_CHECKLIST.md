@@ -64,6 +64,7 @@
 - [ ] Add media-copy mode and verify text broadcast on isolated staging.
 - [x] Deploy text broadcast package to isolated staging and verify auth gate without sending a real message.
 - [x] Deploy saved payment method package to isolated staging; authenticated mutation smoke remains pending.
+- [x] Deploy receipts/invitations package to isolated staging without sending external messages.
 - [ ] Any remaining legacy operations: refunds, payment method changes, receipt delivery, audit search/delete policy, invitations.
 - [x] Add client Web saved payment method list and safe revoke using subscription row lock/club scope/audit.
 - [ ] Add refunds, receipt delivery and Web invitations.
