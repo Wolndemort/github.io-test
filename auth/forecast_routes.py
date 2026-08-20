@@ -142,6 +142,42 @@ async def student_detail_data(student_id: int, request: Request, context: AuthCo
     return {"club_id": actor.club_id, "student": {"id": student.id, "name": student.name, "discipline": student.discipline, "expire_date": student.expire_date.isoformat() if student.expire_date else None, "balance_lessons": student.balance_lessons or 0, "is_frozen": bool(student.is_frozen)}, "read_only": True}
 
 
+@students_router.patch("/{student_id}")
+async def update_student_data(student_id: int, request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):
+    actor = require_web_context(context)
+    if os.getenv("WEB_STUDENT_MUTATIONS_ENABLED", "0") != "1":
+        raise HTTPException(status_code=404, detail={"code": "feature_disabled"})
+    if actor.actor_type == "staff" and "analytics_view" not in actor.permissions:
+        raise HTTPException(status_code=403, detail={"code": "permission_denied"})
+    await require_csrf(request.app.state.redis_client, request)
+    payload = await request.json()
+    key = str(payload.get("idempotency_key") or "").strip()
+    if not key or len(key) > 100:
+        raise HTTPException(status_code=400, detail={"code": "invalid_idempotency_key"})
+    accepted = await request.app.state.redis_client.set(f"web:update-student:{actor.club_id}:{student_id}:{key}", "1", ex=300, nx=True)
+    if not accepted:
+        return {"ok": True, "idempotent_replay": True, "club_id": actor.club_id, "student_id": student_id}
+    student = await session.scalar(select(Student).where(Student.id == student_id, Student.club_id == actor.club_id).with_for_update())
+    if not student:
+        raise HTTPException(status_code=404, detail={"code": "student_not_found"})
+    allowed = {"name", "discipline"}
+    if set(payload) - allowed - {"idempotency_key"}:
+        raise HTTPException(status_code=400, detail={"code": "invalid_student_fields"})
+    if "name" in payload:
+        name = str(payload["name"] or "").strip()
+        if not 2 <= len(name) <= 120:
+            raise HTTPException(status_code=400, detail={"code": "invalid_student_name"})
+        student.name = name
+    if "discipline" in payload:
+        discipline = str(payload["discipline"] or "").strip()
+        if not 1 <= len(discipline) <= 50:
+            raise HTTPException(status_code=400, detail={"code": "invalid_student_discipline"})
+        student.discipline = discipline
+    await session.commit()
+    audit_event("web_student_updated", club_id=actor.club_id, actor_user_id=actor.user_id, action="update", object_type="student", object_id=student_id, location="web/staff/students")
+    return {"ok": True, "club_id": actor.club_id, "student_id": student_id, "read_only": False}
+
+
 @students_router.get("/{student_id}/visits")
 async def student_visits_data(student_id: int, request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session), limit: int = Query(default=50, ge=1, le=100)):
     actor = require_web_context(context)

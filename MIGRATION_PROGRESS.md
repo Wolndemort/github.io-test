@@ -945,6 +945,21 @@ Verification for Stage 50:
 - Seeded staging-only synthetic client fixture: `user_id=990000001`, club 1, one student, same test email; added seed/cleanup helpers. Native flags enabled only in staging for client Web smoke; fixture must be removed after verification.
 - Restricted pages enforce `analytics_view`/`qr_checkin`; no settings mutation was exposed.
 
+## 2026-08-20 — start full functional Web migration
+
+- Цель расширена: переносим в Web весь операционный функционал, а не только read-only страницы.
+- Добавлен Web endpoint `PATCH /api/v1/staff/students/{student_id}` для редактирования имени/дисциплины ученика.
+- Endpoint использует Web `AuthContext`, `analytics_view` для staff, CSRF, club-scoped lookup с row lock, allowlist полей, idempotency key, feature flag `WEB_STUDENT_MUTATIONS_ENABLED` и audit event.
+- Добавлены regression tests для успешного обновления, feature gate, idempotent retry, foreign club и unsafe fields.
+- Targeted suite: `14 passed`; полный suite: `442 passed`; `git diff --check` чист.
+- Изменения только в `web-migration/phase-0-auth`; Telegram, live SpeedyCRM, ALTER и `master` не затронуты.
+
+### Следующий функциональный пакет
+
+- Добавить UI редактирования ученика к существующей staff student detail page.
+- Перенести Web операции посещений: manual check-in, отмена/корректировка и история.
+- Подключить turnstile open/close через общий AuthContext и `manual_checkin`/`qr_checkin` permissions.
+
 ## 2026-08-20 — final diff and rollback review
 
 - Просмотрен `git diff master...HEAD`: `117` файлов только в web/auth/staging/docs/tests/migration support контуре.
