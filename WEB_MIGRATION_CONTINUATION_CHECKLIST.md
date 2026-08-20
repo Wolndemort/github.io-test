@@ -141,6 +141,19 @@
 
 ## Safe continuation commands
 
+## Tomorrow recovery checklist
+
+- [ ] Confirm `aaaa` and branch `web-migration/phase-0-auth`; do not checkout `master`.
+- [ ] Confirm only staging target: `/root/speedycrm-staging`, compose project `speedycrm-staging`.
+- [ ] Do not touch `/root/github.io-test`, `/root/alter`, `gym_db`, production/live or ALTER containers.
+- [ ] Open SSH tunnel and separately verify `health`, `ready`, `docker compose ... ps`.
+- [ ] Rebuild only with `docker compose -p speedycrm-staging -f docker-compose.staging.yml up -d --build`.
+- [ ] Verify local `node --check static/web/components.js`, `git diff --check`, `.\venv\Scripts\python.exe -m pytest -q`.
+- [ ] Audit Russian localization across all existing Web pages and states.
+- [ ] Build Telegram-to-Web page/operation matrix; mark missing pages before adding new styling.
+- [ ] Audit every button and form in admin, club settings, schedulers, notifications, broadcast, turnstile, clients, subscriptions, freezes, sales, cash and audit.
+- [ ] Record each result and update all three progress/report files before committing.
+
 ## 2026-08-20 checkpoint — navigation visual package
 
 - [x] Replace inline details menu with a left off-canvas drawer.

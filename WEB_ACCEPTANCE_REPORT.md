@@ -97,6 +97,12 @@ No merge to `master` or production rollout is authorized by this report.
 
 ## Continuation checkpoint
 
+### Recovery instructions for next session
+
+Work only in `C:\Users\79615\PycharmProjects\aaaa` on `web-migration/phase-0-auth`. Staging is `root@77.73.131.175:/root/speedycrm-staging`, compose project `speedycrm-staging`, URL `https://staging.speedycrm.ru:18443`. Never touch `master`, production/live, `/root/github.io-test`, `/root/alter`, `gym_db` or ALTER containers. Rebuild only with `docker compose -p speedycrm-staging -f docker-compose.staging.yml up -d --build`; do not use `down --volumes`.
+
+The next acceptance block is not styling-only: first compare every Telegram CRM menu item and operation with Web, identify missing pages, then implement Russian localization and audit every button/form plus loading, empty, error and success states. Priority areas are admin/owner cabinet, club settings, schedulers, disciplines, notifications, broadcast, turnstile, clients, subscriptions, freezes, sales, cash and audit. The visual target remains white background, black typography/controls, consistent fields/buttons/cards and left off-canvas navigation.
+
 ### 2026-08-20 — navigation visual checkpoint
 
 The Web navigation now uses a left off-canvas drawer instead of an inline menu. All static and dynamically-added role/settings links are spaced readable links inside the drawer; language and logout are separated into its footer. The overlay, Escape key, close action and navigation links close the drawer safely. Local validation passed: JavaScript syntax check, whitespace check and 491 pytest tests. Authenticated staging visual confirmation remains to be recorded after deployment.

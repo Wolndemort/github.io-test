@@ -220,6 +220,12 @@ The product is API-first. Web, mobile and Telegram are clients of the same domai
 
 ## ALTER reference
 
+## Latest recovery note — 2026-08-20
+
+Continue only in `C:\Users\79615\PycharmProjects\aaaa` on branch `web-migration/phase-0-auth`. Latest local visual commit is `b93715f`; local validation is `491 passed`. The current work package is the shared monochrome style plus the left off-canvas navigation drawer. Before continuing, verify staging connectivity and containers; the last SSH deployment command timed out and must not be assumed healthy. Staging alone is `/root/speedycrm-staging` with compose project `speedycrm-staging`. Do not touch `master`, live, `/root/github.io-test`, `/root/alter`, `gym_db` or ALTER containers.
+
+Next objective is a complete Telegram CRM → Web inventory, Russian localization and page-by-page functional audit. Telegram currently contains materially richer/informative pages, and some Web pages/operations are still missing; identify them from the actual menu and backend routes before more visual polishing. Every package must update the progress, continuation checklist and acceptance report.
+
 ## Continuation checkpoint — 2026-08-20
 
 Current local project: `C:\Users\79615\PycharmProjects\aaaa`, branch `web-migration/phase-0-auth`.

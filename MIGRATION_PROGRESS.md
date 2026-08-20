@@ -1,5 +1,41 @@
 # Web migration progress
 
+## Recovery checkpoint — continue from here
+
+Работаем только в `C:\Users\79615\PycharmProjects\aaaa`, ветка `web-migration/phase-0-auth`.
+
+Безусловно не трогать: `master`, production/live, `/root/github.io-test`, `/root/alter`, `gym_db` и любые ALTER-контейнеры. Все изменения сначала локально, затем только в `/root/speedycrm-staging` и compose-проекте `speedycrm-staging`.
+
+Подключение к staging:
+
+```powershell
+ssh -N -L 18000:127.0.0.1:18000 -i C:\Users\79615\.ssh\alter_agent root@77.73.131.175
+```
+
+Проверка и пересборка выполняются во втором окне:
+
+```powershell
+ssh root@77.73.131.175
+cd /root/speedycrm-staging
+docker compose -p speedycrm-staging -f docker-compose.staging.yml ps
+docker compose -p speedycrm-staging -f docker-compose.staging.yml up -d --build
+curl -fsS http://127.0.0.1:18000/health
+curl -fsS http://127.0.0.1:18000/ready
+```
+
+Не использовать `down --volumes`; не запускать compose без `-p speedycrm-staging` и `-f docker-compose.staging.yml`. После каждого пакета обновлять этот файл, `WEB_MIGRATION_CONTINUATION_CHECKLIST.md` и `WEB_ACCEPTANCE_REPORT.md`.
+
+Текущая стадия: общий monochrome visual system и левый off-canvas drawer закоммичены в `b93715f`; локально `491 passed`. Staging health после последней отправки нужно проверить отдельно — предыдущая SSH-команда упёрлась в timeout.
+
+Следующий пакет:
+
+1. Сделать полную русскую локализацию Web: navigation, headings, labels, buttons, errors, empty/loading states, confirmations и accessibility labels; язык должен переключаться без склеивания текста.
+2. Составить таблицу Telegram CRM → Web и найти отсутствующие страницы/операции, начиная с главного меню, кабинета admin/owner, настроек клуба, планировщиков, дисциплин, уведомлений, broadcast, турникетов, клиентов, абонементов, заморозок, продаж, кассы и аудита.
+3. Для каждой страницы проверить GET/data, каждую кнопку/form submit, loading/empty/error/success, права owner/staff/client и club isolation.
+4. Сначала закрыть функциональные расхождения, затем визуально выровнять все страницы под общий стиль; после каждого блока тесты, staging smoke и запись результата в документы.
+
+Стиль: белый фон, чёрный основной текст/controls, серый только для secondary text, единые поля/кнопки/cards, drawer слева, без горизонтального overflow.
+
 ## 2026-08-20 — visual system pass started
 
 - Общий Web UI переведён на белоснежный фон, чёрный контрастный ink, единые rounded controls, inputs/selects/textareas/buttons, focus/hover/disabled states.
