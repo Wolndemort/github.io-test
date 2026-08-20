@@ -1,4 +1,5 @@
 import os
+import uuid
 from datetime import date, timedelta
 import re
 
@@ -12,6 +13,7 @@ from services.input_normalization import normalize_ru_phone
 from services.audit import audit_event
 from services.schedule_utils import normalize_schedule_block
 from services.gate_control import process_athlete_gate_pass
+from services.discounts import active_discounts, apply_discounts
 from services.analytics import (
     build_expiry_series,
     build_revenue_series,
@@ -464,6 +466,56 @@ async def adjust_product_stock_web(product_id: int, request: Request, context: A
     await session.commit()
     audit_event("web_product_stock_adjusted", club_id=actor.club_id, actor_user_id=actor.user_id, action="update", object_type="club_product", object_id=product_id, location="web/staff/products", quantity=delta, reason=reason)
     return {"ok": True, "club_id": actor.club_id, "product_id": product_id, "stock": new_stock, "read_only": False}
+
+
+@sales_router.post("/cash-product")
+async def create_cash_product_sale_web(request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):
+    actor = require_web_context(context)
+    if os.getenv("WEB_PRODUCT_SALES_ENABLED", "0") != "1":
+        raise HTTPException(status_code=404, detail={"code": "feature_disabled"})
+    if actor.actor_type == "staff" and "cash_sale" not in actor.permissions:
+        raise HTTPException(status_code=403, detail={"code": "permission_denied"})
+    await require_csrf(request.app.state.redis_client, request)
+    payload = await request.json()
+    if set(payload) - {"items", "buyer_user_id", "idempotency_key"} or not isinstance(payload.get("items"), list) or not 1 <= len(payload["items"]) <= 50:
+        raise HTTPException(status_code=400, detail={"code": "invalid_sale_fields"})
+    key = str(payload.get("idempotency_key") or "").strip()
+    if not key or len(key) > 100:
+        raise HTTPException(status_code=400, detail={"code": "invalid_idempotency_key"})
+    accepted = await request.app.state.redis_client.set(f"web:product-sale:{actor.club_id}:{key}", "1", ex=900, nx=True)
+    if not accepted:
+        return {"ok": True, "idempotent_replay": True, "club_id": actor.club_id}
+    buyer_id = int(payload.get("buyer_user_id") or actor.user_id)
+    buyer = await session.scalar(select(User).where(User.user_id == buyer_id, User.club_id == actor.club_id))
+    if not buyer:
+        raise HTTPException(status_code=404, detail={"code": "buyer_not_found"})
+    product_ids = []
+    for item in payload["items"]:
+        if not isinstance(item, dict) or set(item) - {"product_id", "quantity", "discount_ids"}:
+            raise HTTPException(status_code=400, detail={"code": "invalid_sale_item"})
+        try: product_ids.append(int(item["product_id"]))
+        except (TypeError, ValueError): raise HTTPException(status_code=400, detail={"code": "invalid_product_id"})
+    products = list((await session.execute(select(ClubProduct).where(ClubProduct.id.in_(product_ids), ClubProduct.club_id == actor.club_id, ClubProduct.is_active.is_(True)).with_for_update())).scalars().all())
+    by_id = {p.id: p for p in products}; normalized = []; original_total = total = 0; applied = []
+    for item in payload["items"]:
+        product = by_id.get(int(item["product_id"]))
+        qty = int(item.get("quantity", 1))
+        if not product or not 1 <= qty <= 99 or product.stock < qty:
+            raise HTTPException(status_code=409, detail={"code": "insufficient_stock"})
+        discount_ids = [int(x) for x in (item.get("discount_ids") or [])]
+        discounts = await active_discounts(session, actor.club_id, buyer_id, "products", ids=discount_ids or None)
+        line_original = product.price_kopecks * qty; line_total, line_applied = apply_discounts(line_original, discounts)
+        original_total += line_original; total += line_total; applied.extend(line_applied); normalized.append((product, qty))
+    order_id = f"WEB_CASH_{uuid.uuid4().hex[:16].upper()}"
+    primary = applied[0][0] if applied else None
+    order = CartOrder(id=order_id, club_id=actor.club_id, user_id=buyer_id, amount_kopecks=total, original_amount_kopecks=original_total, discount_id=primary.id if primary else None, discount_name=primary.name if primary else None, discount_amount_kopecks=original_total - total or None, status="CONFIRMED", provider_payment_id=f"CASH:{order_id}")
+    session.add(order); await session.flush()
+    for product, qty in normalized:
+        product.stock -= qty
+        session.add(CartItem(cart_order_id=order_id, product_id=product.id, item_type="product", title=product.name, quantity=qty, unit_price_kopecks=product.price_kopecks, payload={"category": product.category}))
+    await session.commit()
+    audit_event("web_cash_product_sale", club_id=actor.club_id, actor_user_id=actor.user_id, action="sale", object_type="cart_order", object_id=order_id, location="web/staff/sales", amount_kopecks=total, method="cash", buyer_user_id=buyer_id)
+    return {"ok": True, "club_id": actor.club_id, "order_id": order_id, "amount_kopecks": total, "read_only": False}
 
 
 @catalog_router.get("/discounts")

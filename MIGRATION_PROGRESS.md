@@ -945,6 +945,20 @@ Verification for Stage 50:
 - Seeded staging-only synthetic client fixture: `user_id=990000001`, club 1, one student, same test email; added seed/cleanup helpers. Native flags enabled only in staging for client Web smoke; fixture must be removed after verification.
 - Restricted pages enforce `analytics_view`/`qr_checkin`; no settings mutation was exposed.
 
+## 2026-08-20 — functional Web operations: cash product sale
+
+- Добавлен `POST /api/v1/staff/sales/cash-product` для продажи товаров за наличные через Web.
+- Реализованы buyer club scope, `cash_sale`, CSRF, `WEB_PRODUCT_SALES_ENABLED`, allowlist items, idempotency, row lock товаров, проверка остатков, назначенные product discounts, создание `CartOrder`/`CartItem` со статусом `CONFIRMED`, списание stock в transaction и audit.
+- Online payment flow намеренно не смешан с cash sale; YooKassa/СБП подключаются отдельным adapter-пакетом с webhook/idempotency tests.
+- Добавлен contract test money/inventory/discount safety-контура.
+- Targeted suite: `4 passed`; полный suite: `448 passed`; `git diff --check` чист.
+- Telegram, live, ALTER и `master` не затронуты.
+
+### Следующий пакет
+
+- Добавить Web UI для кассы, stock adjustment и cash product sale.
+- Перенести продажу абонемента/заморозки и затем online payment intent/webhook flow.
+
 ## 2026-08-20 — functional Web operations: inventory adjustment
 
 - Добавлен `POST /api/v1/staff/catalog/products/{product_id}/stock` для безопасной корректировки остатков.
