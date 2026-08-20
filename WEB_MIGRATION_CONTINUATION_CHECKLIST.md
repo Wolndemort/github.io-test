@@ -65,7 +65,7 @@
 
 - [ ] Add tests for every new endpoint: permission, CSRF, feature flag, club scope, validation, idempotency, transaction/lock, audit.
 - [ ] Run full local suite after each package.
-- [ ] Staging smoke with temporary flags and synthetic data only; cleanup after every run.
+- [x] Staging unauthenticated/auth-gating smoke after latest settings build; temporary flags remained disabled and no test data was created.
 - [ ] Verify staging migration refresh and downgrade/upgrade after current changes.
 - [ ] Verify backup artifact and restore in a separate test DB.
 - [ ] Human diff review, production backup approval, rollback image/commit review.

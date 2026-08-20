@@ -945,6 +945,14 @@ Verification for Stage 50:
 - Seeded staging-only synthetic client fixture: `user_id=990000001`, club 1, one student, same test email; added seed/cleanup helpers. Native flags enabled only in staging for client Web smoke; fixture must be removed after verification.
 - Restricted pages enforce `analytics_view`/`qr_checkin`; no settings mutation was exposed.
 
+## 2026-08-20 — staging smoke after settings package
+
+- В isolated staging обновлены только `auth/forecast_routes.py` и `static/web/components.js`, API пересобран через staging compose.
+- После короткого restart window readiness восстановилась: `/ready=200`.
+- Перезапущен локальный SSH tunnel; `scripts/staging_smoke.ps1` прошёл: health/ready/auth entry корректны, 32 protected staff/client routes вернули `401` без сессии.
+- Temporary flags не включались, synthetic data не создавались; staging остаётся изолированным.
+- Continuation checklist обновлён; live, ALTER и `master` не затронуты.
+
 ## 2026-08-20 — camera and turnstile safe settings
 
 - Добавлен `PATCH /api/v1/staff/settings/camera` для enabled/name/base_url.
