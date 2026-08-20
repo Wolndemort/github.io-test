@@ -945,6 +945,19 @@ Verification for Stage 50:
 - Seeded staging-only synthetic client fixture: `user_id=990000001`, club 1, one student, same test email; added seed/cleanup helpers. Native flags enabled only in staging for client Web smoke; fixture must be removed after verification.
 - Restricted pages enforce `analytics_view`/`qr_checkin`; no settings mutation was exposed.
 
+## 2026-08-20 — final diff and rollback review
+
+- Просмотрен `git diff master...HEAD`: `117` файлов только в web/auth/staging/docs/tests/migration support контуре.
+- Проверен `.github/workflows/deploy.yml`: production deploy запускается только для `master`/`main` или ручного workflow; текущая migration branch не запускает deploy.
+- Зафиксированы commits: base `master`=`57ef297fa156cd28ca59b3c8600c8b167ecad142`, staging HEAD=`eafffef12189665c0bbda32274704fe7ff82aa89`.
+- Добавлен `ROLLBACK_RUNBOOK.md` с guarded rollback procedure; команды rollback не выполнялись.
+- Добавлены workflow gate tests; production backup/deploy остаются только после явного approval.
+
+### Следующий пакет
+
+- Прогнать полный suite после workflow/runbook tests.
+- Финальный human decision: оставить ветку для дальнейшего UI polish или запросить merge approval.
+
 ## 2026-08-20 — final staging auth smoke
 
 - Запущен воспроизводимый `scripts/staging_smoke.ps1` через SSH tunnel.
