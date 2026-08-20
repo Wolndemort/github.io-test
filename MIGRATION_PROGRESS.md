@@ -945,6 +945,21 @@ Verification for Stage 50:
 - Seeded staging-only synthetic client fixture: `user_id=990000001`, club 1, one student, same test email; added seed/cleanup helpers. Native flags enabled only in staging for client Web smoke; fixture must be removed after verification.
 - Restricted pages enforce `analytics_view`/`qr_checkin`; no settings mutation was exposed.
 
+## 2026-08-20 — functional Web operations: student update and manual check-in
+
+- Web student update mutation уже добавлен и покрыт полным safety-контуром.
+- Добавлен `POST /api/v1/staff/checkin/manual` с переиспользованием существующего `process_athlete_gate_pass`, включая открытие turnstile по `open_turnstile`.
+- Check-in endpoint использует `WEB_CHECKIN_MUTATIONS_ENABLED`, `manual_checkin`, CSRF, allowlist payload, authenticated `club_id`, idempotency key, общий row-lock/transaction gate service и audit.
+- Добавлен contract test полного mutation safety-контракта.
+- Targeted suite: `11 passed`; полный suite: `443 passed`; `git diff --check` чист.
+- Telegram flow и существующий Admin backend не изменялись; live, ALTER и `master` не затронуты.
+
+### Следующий пакет
+
+- Добавить Web UI для student edit и manual check-in с CSRF/idempotency.
+- Реализовать посещение/отмену посещения как отдельную audit-операцию с permission и feature flag.
+- Затем перейти к кассе и продажам по тому же safety-контракту.
+
 ## 2026-08-20 — start full functional Web migration
 
 - Цель расширена: переносим в Web весь операционный функционал, а не только read-only страницы.

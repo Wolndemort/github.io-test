@@ -11,6 +11,7 @@ from database.db import AuditEntry, CartOrder, CashEntry, Club, ClubProduct, Dis
 from services.input_normalization import normalize_ru_phone
 from services.audit import audit_event
 from services.schedule_utils import normalize_schedule_block
+from services.gate_control import process_athlete_gate_pass
 from services.analytics import (
     build_expiry_series,
     build_revenue_series,
@@ -468,6 +469,38 @@ async def checkin_data(request: Request, context: AuthContext | None = Depends(w
         raise HTTPException(status_code=403, detail={"code": "permission_denied", "message": "Нет права просмотра проходов"})
     visits = list((await session.execute(select(VisitLog).where(VisitLog.club_id == actor.club_id).order_by(VisitLog.visited_at.desc()).limit(limit))).scalars().all())
     return {"club_id": actor.club_id, "visits": [{"student_id": v.student_id, "visited_at": v.visited_at.isoformat() if v.visited_at else None, "source": v.source} for v in visits], "read_only": True}
+
+
+@checkin_router.post("/manual")
+async def manual_checkin(request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):
+    actor = require_web_context(context)
+    if os.getenv("WEB_CHECKIN_MUTATIONS_ENABLED", "0") != "1":
+        raise HTTPException(status_code=404, detail={"code": "feature_disabled"})
+    if actor.actor_type == "staff" and "manual_checkin" not in actor.permissions:
+        raise HTTPException(status_code=403, detail={"code": "permission_denied"})
+    await require_csrf(request.app.state.redis_client, request)
+    payload = await request.json()
+    allowed = {"student_id", "open_turnstile", "idempotency_key"}
+    if set(payload) - allowed:
+        raise HTTPException(status_code=400, detail={"code": "invalid_checkin_fields"})
+    try:
+        student_id = int(payload.get("student_id"))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail={"code": "invalid_student_id"})
+    key = str(payload.get("idempotency_key") or "").strip()
+    if not key or len(key) > 100:
+        raise HTTPException(status_code=400, detail={"code": "invalid_idempotency_key"})
+    accepted = await request.app.state.redis_client.set(f"web:checkin:{actor.club_id}:{student_id}:{key}", "1", ex=60, nx=True)
+    if not accepted:
+        return {"ok": True, "idempotent_replay": True, "club_id": actor.club_id, "student_id": student_id}
+    club = await session.scalar(select(Club).where(Club.id == actor.club_id))
+    if not club:
+        raise HTTPException(status_code=404, detail={"code": "club_not_found"})
+    result = await process_athlete_gate_pass(student_id, session, club.club_settings or {}, expected_club_id=actor.club_id, redis=request.app.state.redis_client, open_turnstile=bool(payload.get("open_turnstile", False)))
+    if not result.get("success"):
+        raise HTTPException(status_code=409, detail={"code": "checkin_rejected", "message": result.get("message", "Check-in rejected")})
+    audit_event("web_manual_checkin", club_id=actor.club_id, actor_user_id=actor.user_id, action="checkin", object_type="student", object_id=student_id, location="web/staff/checkin", open_turnstile=bool(payload.get("open_turnstile", False)))
+    return {"ok": True, "club_id": actor.club_id, "student_id": student_id, "result": result, "read_only": False}
 
 
 @freeze_router.get("/data")
