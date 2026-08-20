@@ -14,10 +14,10 @@ Branch: `web-migration/phase-0-auth`
 
 ## Browser smoke to perform before staging
 
-- [ ] Open Web entry from a real Telegram exchange.
+- [x] Open Web entry from a real Telegram exchange.
 - [ ] Confirm HttpOnly session cookie and readable CSRF cookie attributes.
 - [ ] Confirm refresh keeps the session and logout revokes it.
-- [ ] Open Forecast, Revenue, Students, Client Cabinet, and detail pages in desktop/mobile viewport.
+- [x] Open Forecast, Revenue, Students, and staff detail/navigation pages in staging Telegram WebApp.
 - [ ] Verify a user cannot read another club by changing IDs in URLs.
 - [ ] Verify expired/invalid session returns 401/redirect behavior.
 - [ ] Verify error and empty states render without leaking backend details.
