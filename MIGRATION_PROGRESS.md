@@ -1459,3 +1459,7 @@ Verification for Stage 50:
 ### Следующий пакет
 
 - Продолжить оставшиеся integration/security gates: payment provider/webhook tests и legacy operation audit.
+## 2026-08-20 — verified current Web UI package
+
+- После confirmation/loading изменений полный regression suite: `468 passed`.
+- `git diff --check` чист; ветка `web-migration/phase-0-auth` рабочая и без незакоммиченных изменений.
