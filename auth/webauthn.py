@@ -14,7 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from fido2.server import Fido2Server
 from fido2.webauthn import (AttestedCredentialData, PublicKeyCredentialRpEntity,
-                            PublicKeyCredentialUserEntity)
+                            PublicKeyCredentialUserEntity, UserVerificationRequirement)
 
 from database.db import WebCredential, get_session
 from .context import AuthContext
@@ -74,7 +74,8 @@ async def register_options(request: Request, context: AuthContext | None = Depen
     guard(); actor = require_web_context(context); await require_csrf(request.app.state.redis_client, request)
     user = PublicKeyCredentialUserEntity(id=str(actor.user_id).encode(), name=str(actor.user_id), display_name=str(actor.user_id))
     existing = (await session.scalars(select(WebCredential).where(WebCredential.user_id == actor.user_id, WebCredential.club_id == actor.club_id))).all()
-    options, state = server().register_begin(user, [AttestedCredentialData(c.public_key) for c in existing] if existing else None)
+    options, state = server().register_begin(user, [AttestedCredentialData(c.public_key) for c in existing] if existing else None, user_verification=UserVerificationRequirement.PREFERRED)
+    options["publicKey"]["pubKeyCredParams"] = [item for item in options["publicKey"]["pubKeyCredParams"] if item["alg"] in {-7, -257}]
     await save(request.app.state.redis_client, f"webauthn:register:{actor.user_id}:{actor.club_id}", state)
     return webauthn_json(dict(options))
 

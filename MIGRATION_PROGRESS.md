@@ -1699,3 +1699,8 @@ Verification for Stage 50:
 - По логам staging найден `UnicodeDecodeError` в `/auth/webauthn/register/options`: FastAPI encoder пытался декодировать binary challenge как UTF-8.
 - Добавлена безопасная recursive base64url-сериализация WebAuthn options; staging пересобран.
 - Полный suite: `483 passed`; секреты, cookies и OTP в отчёт не выводились.
+
+## 2026-08-20 — Safari compatibility passkey options
+
+- Для iOS/Safari 17.6.1 registration options ограничены совместимыми алгоритмами ES256/RS256 и явно запрошена user verification `preferred`.
+- Staging пересобран после изменения; локальный suite: `483 passed`.

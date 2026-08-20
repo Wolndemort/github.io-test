@@ -85,6 +85,7 @@
 - [x] Add and deploy staff Profile route so passkey controls are reachable from the authenticated navigation.
 - [x] Fix and deploy WebAuthn nested-router prefix; verify `/auth/webauthn/credentials` auth gate.
 - [x] Fix and deploy binary WebAuthn options serialization after staging log review.
+- [x] Deploy Safari-compatible WebAuthn algorithm/user-verification options.
 - [ ] Add tests for every remaining legacy operation: refunds, payment-method changes, receipt delivery and invitations.
 - [x] Staging unauthenticated/auth-gating smoke after latest settings build; temporary flags remained disabled and no test data was created.
 - [x] Verify staging rebuild and migration upgrade after current changes; staging is at `a1b2c3d4e5f6`.
