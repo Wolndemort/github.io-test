@@ -945,6 +945,19 @@ Verification for Stage 50:
 - Seeded staging-only synthetic client fixture: `user_id=990000001`, club 1, one student, same test email; added seed/cleanup helpers. Native flags enabled only in staging for client Web smoke; fixture must be removed after verification.
 - Restricted pages enforce `analytics_view`/`qr_checkin`; no settings mutation was exposed.
 
+## 2026-08-20 — functional Web operations: paid freeze
+
+- Добавлен `POST /api/v1/client/freeze/purchase` для платной заморозки.
+- Операция использует `WEB_FREEZE_MUTATIONS_ENABLED`, CSRF, permission для staff, allowlist, days/price validation, club-scoped student row lock, скидки, общий `purchase_student_freeze`, `PaymentOrder(CASH_FREEZE)`, idempotency, transaction и audit.
+- Targeted suite: `3 passed`; полный suite: `450 passed`; `git diff --check` чист.
+- Telegram, live, ALTER и `master` не затронуты.
+
+### Следующий пакет
+
+- Добавить UI для продаж, кассы, склада, абонементов и заморозки.
+- Подключить online payment intent/webhook с provider verification и повторной обработкой.
+- Затем перенести управление скидками/тарифами и остальные административные mutations.
+
 ## 2026-08-20 — functional Web operations: cash subscription sale
 
 - Добавлен `POST /api/v1/staff/sales/cash-subscription` для продажи абонемента за наличные.

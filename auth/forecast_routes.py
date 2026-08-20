@@ -8,7 +8,7 @@ from fastapi.responses import HTMLResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from database.db import AuditEntry, CartOrder, CartItem, CashEntry, Club, ClubProduct, Discount, DiscountAssignment, PaymentOrder, Student, StudentParent, VisitLog, User, add_abon, get_session
+from database.db import AuditEntry, CartOrder, CartItem, CashEntry, Club, ClubProduct, Discount, DiscountAssignment, PaymentOrder, Student, StudentParent, VisitLog, User, add_abon, purchase_student_freeze, get_session
 from services.input_normalization import normalize_ru_phone
 from services.audit import audit_event
 from services.schedule_utils import normalize_schedule_block
@@ -559,6 +559,44 @@ async def create_cash_subscription_sale_web(request: Request, context: AuthConte
     session.add(PaymentOrder(id=order_id, user_id=student.parent_id or actor.user_id, student_id=student.id, club_id=actor.club_id, discipline=discipline, amount_kopecks=total, original_amount_kopecks=original, discount_id=primary.id if primary else None, discount_name=primary.name if primary else None, discount_amount_kopecks=original - total or None, status="CONFIRMED", type="CASH_SUBSCRIPTION", provider_payment_id=f"CASH:{order_id}", lesson_count=count, days_to_add=days))
     await session.commit()
     audit_event("web_cash_subscription_sale", club_id=actor.club_id, actor_user_id=actor.user_id, action="sale", object_type="payment_order", object_id=order_id, location="web/staff/sales", amount_kopecks=total, method="cash", student_id=student.id, lesson_count=count, days_to_add=days)
+    return {"ok": True, "club_id": actor.club_id, "order_id": order_id, "student_id": student.id, "amount_kopecks": total, "read_only": False}
+
+
+@client_router.post("/freeze/purchase")
+async def purchase_freeze_web(request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):
+    actor = require_web_context(context)
+    if os.getenv("WEB_FREEZE_MUTATIONS_ENABLED", "0") != "1":
+        raise HTTPException(status_code=404, detail={"code": "feature_disabled"})
+    if actor.actor_type == "staff" and "cash_sale" not in actor.permissions:
+        raise HTTPException(status_code=403, detail={"code": "permission_denied"})
+    await require_csrf(request.app.state.redis_client, request)
+    payload = await request.json()
+    if set(payload) - {"student_id", "days", "discount_ids", "idempotency_key"}:
+        raise HTTPException(status_code=400, detail={"code": "invalid_freeze_fields"})
+    key = str(payload.get("idempotency_key") or "").strip()
+    try: student_id = int(payload.get("student_id")); days = int(payload.get("days"))
+    except (TypeError, ValueError): raise HTTPException(status_code=400, detail={"code": "invalid_freeze_request"})
+    if not key or len(key) > 100 or not 1 <= days <= 365:
+        raise HTTPException(status_code=400, detail={"code": "invalid_freeze_request"})
+    accepted = await request.app.state.redis_client.set(f"web:freeze:{actor.club_id}:{student_id}:{key}", "1", ex=900, nx=True)
+    if not accepted:
+        return {"ok": True, "idempotent_replay": True, "club_id": actor.club_id, "student_id": student_id}
+    student = await session.scalar(select(Student).where(Student.id == student_id, Student.club_id == actor.club_id).with_for_update())
+    if not student:
+        raise HTTPException(status_code=404, detail={"code": "student_not_found"})
+    settings = dict((await session.scalar(select(Club).where(Club.id == actor.club_id))).club_settings or {})
+    original = int(float(settings.get("limits", {}).get("freeze_price_per_day", 0) or 0) * days * 100)
+    if original <= 0:
+        raise HTTPException(status_code=409, detail={"code": "freeze_not_configured"})
+    discounts = await active_discounts(session, actor.club_id, student.parent_id, "freeze", student.id, [int(x) for x in (payload.get("discount_ids") or [])] or None)
+    total, applied = apply_discounts(original, discounts); primary = applied[0][0] if applied else None
+    result = await purchase_student_freeze(student.id, actor.club_id, days, session)
+    if not result:
+        raise HTTPException(status_code=409, detail={"code": "freeze_rejected"})
+    order_id = f"CASH_FREEZE_{uuid.uuid4().hex[:16].upper()}"
+    session.add(PaymentOrder(id=order_id, user_id=student.parent_id or actor.user_id, student_id=student.id, club_id=actor.club_id, discipline=student.discipline, amount_kopecks=total, original_amount_kopecks=original, discount_id=primary.id if primary else None, discount_name=primary.name if primary else None, discount_amount_kopecks=original - total or None, status="CONFIRMED", type="CASH_FREEZE", provider_payment_id=f"CASH:{order_id}", lesson_count=0, days_to_add=days))
+    await session.commit()
+    audit_event("web_cash_freeze_sale", club_id=actor.club_id, actor_user_id=actor.user_id, action="sale", object_type="payment_order", object_id=order_id, location="web/client/freeze", amount_kopecks=total, method="cash", student_id=student.id, days=days)
     return {"ok": True, "club_id": actor.club_id, "order_id": order_id, "student_id": student.id, "amount_kopecks": total, "read_only": False}
 
 
