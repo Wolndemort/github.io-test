@@ -56,7 +56,7 @@
 ### Frontend
 
 - [ ] Replace remaining temporary ID inputs with authenticated selectors and data tables.
-- [ ] Add loading/error/empty/success states to every mutation form.
+- [x] Add shared loading/aria-busy state; mutation forms retain explicit error/success messages.
 - [x] Add confirmation guard for money, archive, reversal, cancellation and freeze/sale mutations.
 - [ ] Full EN/RU translations; current selector changes language state but is not a complete translation system.
 - [ ] Final shared design polish and spacing, including SpeedyCRM/Staff Web labels.

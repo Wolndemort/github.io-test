@@ -1450,3 +1450,12 @@ Verification for Stage 50:
 ### Следующий пакет
 
 - Добавить единый loading state и accessibility/error states для mutation forms.
+## 2026-08-20 — Shared Web mutation loading state
+
+- Общий helper mutation forms теперь блокирует submit-кнопку, показывает `Saving…`, выставляет `aria-busy` и гарантированно восстанавливает состояние через `finally`.
+- Existing handlers сохраняют свои success/error messages; backend safety gates не изменены.
+- Targeted suite: `1 passed`; `git diff --check` чист.
+
+### Следующий пакет
+
+- Продолжить оставшиеся integration/security gates: payment provider/webhook tests и legacy operation audit.
