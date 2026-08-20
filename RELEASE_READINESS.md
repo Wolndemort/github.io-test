@@ -22,6 +22,7 @@ Branch: `web-migration/phase-0-auth`
 ## Not safe for production yet
 
 - No authorized real-browser smoke has been completed in staging: separate staging Telegram bot/test account is still required.
+- Native Web auth is not enabled yet; SMS provider/test route is required before removing Telegram as the primary entry.
 - The visual UI is still a functional shell/POC, not final product polish.
 - Money, inventory, payment, purchase, freeze, pricing, and audit-delete mutations are deferred.
 - The current branch is committed but has not been merged or pushed to `master`.
