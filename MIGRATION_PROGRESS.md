@@ -939,5 +939,6 @@ Verification for Stage 50:
 - В общий navigation добавлен переключатель `EN/RU` с сохранением выбора в localStorage и `document.lang`; полноценный перевод текстов и финальный дизайн оставлены отдельным последним этапом.
 - Security/language пакет проверен: full suite `422 passed`, `git diff --check` clean. Staging remains isolated and production branch untouched.
 - Current branch deployed to SSH-only staging: `/ready` 200, public staging nginx exited, API/DB/Redis healthy. EN/RU switcher and OTP rate-limit code are present; native flags remain disabled.
+- Added executable OTP security tests for single-use/attempt bounds, TTL and email+IP/club rate limits; updated release readiness. Next: complete role/cross-club matrix and data anonymization review before any production approval.
 - Restricted pages enforce `analytics_view`/`qr_checkin`; no settings mutation was exposed.
 - Added settings page tests; remaining: continue the next 3–4 migration blocks.
