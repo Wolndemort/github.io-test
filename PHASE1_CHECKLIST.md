@@ -20,6 +20,7 @@ Branch: `web-migration/phase-0-auth`
 - [x] Confirm refresh keeps the session and logout revokes it in staging staff WebApp.
 - [x] Open Forecast, Revenue, Students, and staff detail/navigation pages in staging Telegram WebApp.
 - [ ] Verify a user cannot read another club by changing IDs in URLs.
+- [x] Automated native auth role/club contract matrix covers owner, staff, client and selected-club scope.
 - [ ] Verify expired/invalid session returns 401/redirect behavior.
 - [ ] Verify error and empty states render without leaking backend details.
 - [x] Automated contract smoke covers assets, auth, branding, CSRF wiring, and default-disabled mutations.

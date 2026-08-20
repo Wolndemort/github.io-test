@@ -940,5 +940,7 @@ Verification for Stage 50:
 - Security/language пакет проверен: full suite `422 passed`, `git diff --check` clean. Staging remains isolated and production branch untouched.
 - Current branch deployed to SSH-only staging: `/ready` 200, public staging nginx exited, API/DB/Redis healthy. EN/RU switcher and OTP rate-limit code are present; native flags remain disabled.
 - Added executable OTP security tests for single-use/attempt bounds, TTL and email+IP/club rate limits; updated release readiness. Next: complete role/cross-club matrix and data anonymization review before any production approval.
+- Added native role/cross-club contract matrix for owner, staff and client actors; selected club scope is required for both Telegram fallback and Email native auth. Browser cross-club scenario remains pending a non-owner client fixture.
+- Role/scope package verified: targeted `4 passed`, full suite `426 passed`. No production deploy or master merge.
 - Restricted pages enforce `analytics_view`/`qr_checkin`; no settings mutation was exposed.
 - Added settings page tests; remaining: continue the next 3–4 migration blocks.
