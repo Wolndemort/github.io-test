@@ -1774,3 +1774,8 @@ Verification for Stage 50:
 - Web mutation calls сверены с FastAPI routes для cash, schedule, catalog, sales, freeze, payments, settings, staff, check-in, audit и client profile.
 - Все найденные вызовы имеют backend route; mutation-контуры используют CSRF/idempotency, actor permission и club scope.
 - Следующий аудит: payload selectors/data ownership и error/loading/confirmation behavior на каждой странице.
+
+## 2026-08-20 — settings form state audit
+
+- Исправлен риск сброса настроек: Web settings forms теперь подгружают текущие GET-значения перед PATCH, включая checkbox/text fields для branding, limits, features, menu, camera, turnstile, schedulers, notifications и integrations.
+- Node syntax check и полный suite: `483 passed`.

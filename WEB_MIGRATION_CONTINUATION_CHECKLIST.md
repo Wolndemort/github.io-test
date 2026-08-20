@@ -67,6 +67,7 @@
 - [x] Deploy receipts/invitations package to isolated staging without sending external messages.
 - [x] Audit static client/staff/settings navigation links against registered FastAPI routes; dynamic detail links verified as parameterized routes.
 - [x] Audit admin mutation calls against registered backend routes and confirm CSRF/idempotency/scope contract coverage.
+- [x] Audit settings form state; populate current GET values before any mutation to prevent accidental resets.
 - [ ] Any remaining legacy operations: refunds, payment method changes, receipt delivery, audit search/delete policy, invitations.
 - [x] Add client Web saved payment method list and safe revoke using subscription row lock/club scope/audit.
 - [ ] Add refunds, receipt delivery and Web invitations.
