@@ -1472,3 +1472,13 @@ Verification for Stage 50:
 ### Следующий пакет
 
 - Проверить оставшиеся client pages, navigation links, settings visibility и accessibility сценарии.
+## 2026-08-20 — Web schedule editing UI
+
+- Добавлена Web-форма редактирования расписания: дисциплина, день, время, длительность, capacity и group.
+- Форма использует существующий scoped `/api/v1/staff/schedule` endpoint, CSRF/idempotency и `schedule_edit` permission.
+- Summary вынесен в отдельный mount point, чтобы async загрузка не удаляла форму.
+- Добавлен schedule UI contract test.
+
+### Следующий пакет
+
+- Проверить client UI rendering/links и оставшиеся payment/webhook integration gates.

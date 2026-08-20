@@ -40,7 +40,7 @@
 ### Functional backend
 
 - [ ] Verify and complete all legacy operations against Web AuthContext, not Telegram `init_data`.
-- [ ] Schedule editing UI and backend smoke.
+- [x] Schedule editing UI and backend contract smoke.
 - [x] Discipline configuration mutation with safe schedule block allowlist.
 - [x] Camera/turnstile configuration controls without exposing device secrets.
 - [x] Notification preference mutation for safe boolean flags.
