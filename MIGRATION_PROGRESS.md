@@ -945,6 +945,18 @@ Verification for Stage 50:
 - Seeded staging-only synthetic client fixture: `user_id=990000001`, club 1, one student, same test email; added seed/cleanup helpers. Native flags enabled only in staging for client Web smoke; fixture must be removed after verification.
 - Restricted pages enforce `analytics_view`/`qr_checkin`; no settings mutation was exposed.
 
+## 2026-08-20 — controlled staging client fixture cycle
+
+- На сервере выполнен только staging-only цикл `seed_staging_client.sh` → fixture создан (`user/student INSERT 1`) → `cleanup_staging_client.sh` → обе записи удалены (`DELETE 1`).
+- После controlled cycle staging API был перезапущен helper-скриптами; первый запрос попал в короткое окно рестарта (`000`), повторная readiness-проверка успешна: `/ready=200`.
+- Live `/root/github.io-test`, ALTER `/root/alter` и production branch не использовались.
+- Полноценный client browser smoke с отдельным Telegram client account пока не выполнялся; native client smoke возможен через Email OTP при временном staging flag.
+
+### Следующий пакет
+
+- Провести cross-club denial на staging через изолированный тестовый actor/fixture либо локальный route-level сценарий.
+- Подготовить backup/rollback/migration compatibility review и закрыть production-readiness checklist.
+
 ## 2026-08-20 — staging fixture and client isolation package
 
 - Добавлены contract tests для staging seed/cleanup helpers: они используют только `speedycrm_staging_db` и `/root/speedycrm-staging`, не содержат ссылок на live/ALTER и работают с зарезервированным synthetic ID `990000001`.
