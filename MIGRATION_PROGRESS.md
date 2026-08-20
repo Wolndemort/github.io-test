@@ -860,5 +860,15 @@ Verification for Stage 50:
   - `/staff/settings/camera`
   - `/staff/settings/features`
 - Pages use one shared settings helper and the common Web shell.
+
+### 2026-08-20 — Stage 60
+
+- Создан изолированный staging SpeedyCRM в `/root/speedycrm-staging`, Compose-проект `speedycrm-staging`, отдельная сеть и volumes.
+- API слушает только `127.0.0.1:18000`; публичный nginx/domain не добавлялся.
+- База восстановлена из live `gym_db` в отдельный volume; в staging обнулены 2 `clubs.bot_token`, live database не изменялась.
+- `/health` и `/ready` возвращают 200, DB/Redis ok, `bots_active: 0`, staging API healthy.
+- Live-контейнеры продолжили работать; `/root/alter` не использовался. Ветка `web-migration/phase-0-auth`, production deploy не выполнялся.
+- Tunnel: `ssh -N -L 18000:127.0.0.1:18000 -i C:\Users\79615\.ssh\alter_agent root@77.73.131.175`
+- Осталось: browser smoke через tunnel, auth/read-only проверка и отдельное решение по mutations; production rollout запрещён.
 - Restricted pages enforce `analytics_view`/`qr_checkin`; no settings mutation was exposed.
 - Added settings page tests; remaining: continue the next 3–4 migration blocks.

@@ -1,0 +1,68 @@
+services:
+  db:
+    image: postgres:15-alpine
+    container_name: speedycrm_staging_db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: crm_db
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d crm_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    volumes:
+      - speedycrm_staging_pg_data:/var/lib/postgresql/data
+    networks: [speedycrm_staging]
+
+  redis:
+    image: redis:7-alpine
+    container_name: speedycrm_staging_redis
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    networks: [speedycrm_staging]
+
+  api:
+    build: .
+    container_name: speedycrm_staging_api
+    command: sh -c "alembic upgrade heads && uvicorn main:app --host 0.0.0.0 --port 8000"
+    env_file: [.env]
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      DATABASE_URL: postgresql+asyncpg://postgres:${DB_PASSWORD}@db:5432/crm_db
+      PYTHONPATH: /app
+      BOT_TOKEN: ""
+      MONITOR_BOT_TOKEN: ""
+      MONITOR_CHAT_ID: ""
+      MONITOR_HEALTH_URL: ""
+      MONITOR_PROJECT_DIR: /root/speedycrm-staging
+      SENTRY_ENVIRONMENT: staging
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:18000:8000"
+    volumes:
+      - speedycrm_staging_logs:/app/logs
+      - speedycrm_staging_uploads:/app/static/uploads
+    networks: [speedycrm_staging]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/ready', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+volumes:
+  speedycrm_staging_pg_data:
+  speedycrm_staging_logs:
+  speedycrm_staging_uploads:
+
+networks:
+  speedycrm_staging:
+    name: speedycrm_staging_network
