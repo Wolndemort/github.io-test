@@ -667,6 +667,45 @@ async def discounts_data(request: Request, context: AuthContext | None = Depends
     return {"club_id": actor.club_id, "discounts": [{"id": d.id, "name": d.name, "kind": d.kind, "value": d.value, "scope": d.scope} for d in discounts], "read_only": True}
 
 
+@catalog_router.post("/discounts")
+async def create_discount_web(request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):
+    actor = require_web_context(context)
+    if os.getenv("WEB_PRICING_MUTATIONS_ENABLED", "0") != "1": raise HTTPException(status_code=404, detail={"code": "feature_disabled"})
+    if actor.actor_type == "staff" and "tariffs_manage" not in actor.permissions: raise HTTPException(status_code=403, detail={"code": "permission_denied"})
+    await require_csrf(request.app.state.redis_client, request); payload = await request.json()
+    allowed = {"name", "kind", "value", "scope", "priority", "comment", "idempotency_key"}
+    if set(payload) - allowed: raise HTTPException(status_code=400, detail={"code": "invalid_discount_fields"})
+    key = str(payload.get("idempotency_key") or "").strip(); name = str(payload.get("name") or "").strip(); kind = str(payload.get("kind") or "").strip().lower(); scope = str(payload.get("scope") or "all").strip().lower()
+    try: value = int(payload.get("value")); priority = int(payload.get("priority", 100))
+    except (TypeError, ValueError): raise HTTPException(status_code=400, detail={"code": "invalid_discount_numbers"})
+    if not key or len(key) > 100 or not 2 <= len(name) <= 120 or kind not in {"percent", "fixed"} or scope not in {"all", "products", "subscriptions", "freeze"} or priority < 0 or (kind == "percent" and not 1 <= value <= 100) or (kind == "fixed" and not 1 <= value <= 100_000_000): raise HTTPException(status_code=400, detail={"code": "invalid_discount"})
+    if not await request.app.state.redis_client.set(f"web:discount-create:{actor.club_id}:{key}", "1", ex=900, nx=True): return {"ok": True, "idempotent_replay": True, "club_id": actor.club_id}
+    discount = Discount(club_id=actor.club_id, name=name, kind=kind, value=value, scope=scope, priority=priority, comment=str(payload.get("comment") or "")[:500], is_active=True); session.add(discount); await session.commit()
+    audit_event("web_discount_created", club_id=actor.club_id, actor_user_id=actor.user_id, action="create", object_type="discount", object_id=discount.id, location="web/staff/discounts")
+    return {"ok": True, "club_id": actor.club_id, "discount_id": discount.id, "read_only": False}
+
+
+@catalog_router.patch("/discounts/{discount_id}")
+async def update_discount_web(discount_id: int, request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):
+    actor = require_web_context(context)
+    if os.getenv("WEB_PRICING_MUTATIONS_ENABLED", "0") != "1": raise HTTPException(status_code=404, detail={"code": "feature_disabled"})
+    if actor.actor_type == "staff" and "tariffs_manage" not in actor.permissions: raise HTTPException(status_code=403, detail={"code": "permission_denied"})
+    await require_csrf(request.app.state.redis_client, request); payload = await request.json(); key = str(payload.get("idempotency_key") or "").strip()
+    if set(payload) - {"name", "value", "priority", "comment", "is_active", "idempotency_key"} or not key or len(key) > 100: raise HTTPException(status_code=400, detail={"code": "invalid_discount_update"})
+    if not await request.app.state.redis_client.set(f"web:discount-update:{actor.club_id}:{discount_id}:{key}", "1", ex=900, nx=True): return {"ok": True, "idempotent_replay": True, "club_id": actor.club_id, "discount_id": discount_id}
+    discount = await session.scalar(select(Discount).where(Discount.id == discount_id, Discount.club_id == actor.club_id).with_for_update())
+    if not discount: raise HTTPException(status_code=404, detail={"code": "discount_not_found"})
+    if "name" in payload: discount.name = str(payload["name"] or "").strip()[:120]
+    if "value" in payload:
+        discount.value = int(payload["value"])
+        if discount.value < 1 or (discount.kind == "percent" and discount.value > 100): raise HTTPException(status_code=400, detail={"code": "invalid_discount_value"})
+    if "priority" in payload: discount.priority = max(0, int(payload["priority"]))
+    if "comment" in payload: discount.comment = str(payload["comment"] or "")[:500]
+    if "is_active" in payload: discount.is_active = bool(payload["is_active"])
+    await session.commit(); audit_event("web_discount_updated", club_id=actor.club_id, actor_user_id=actor.user_id, action="update", object_type="discount", object_id=discount_id, location="web/staff/discounts")
+    return {"ok": True, "club_id": actor.club_id, "discount_id": discount_id, "read_only": False}
+
+
 @catalog_router.get("/discounts/{discount_id}")
 async def discount_detail_data(discount_id: int, request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):
     actor = require_web_context(context)
@@ -749,6 +788,31 @@ async def integrations_data(request: Request, context: AuthContext | None = Depe
     payments = settings.get("payments", {}) if isinstance(settings.get("payments", {}), dict) else {}
     notifications = settings.get("notifications", {}) if isinstance(settings.get("notifications", {}), dict) else {}
     return {"club_id": actor.club_id, "integrations": {"telegram": bool(club and club.bot_token), "yookassa_configured": bool(payments.get("yookassa_shop_id") and payments.get("yookassa_secret_key")), "email_enabled": bool(notifications.get("email_enabled", False)), "push_enabled": bool(notifications.get("push_enabled", False))}, "read_only": True}
+
+
+@settings_router.patch("/club")
+async def update_club_settings_web(request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):
+    actor = require_web_context(context)
+    if os.getenv("WEB_SETTINGS_MUTATIONS_ENABLED", "0") != "1": raise HTTPException(status_code=404, detail={"code": "feature_disabled"})
+    if actor.actor_type not in {"owner"} and not ({"settings_manage"} & actor.permissions): raise HTTPException(status_code=403, detail={"code": "permission_denied"})
+    await require_csrf(request.app.state.redis_client, request); payload = await request.json()
+    allowed = {"branding", "limits", "features", "menu", "idempotency_key"}
+    if set(payload) - allowed: raise HTTPException(status_code=400, detail={"code": "invalid_settings_fields"})
+    key = str(payload.get("idempotency_key") or "").strip()
+    if not key or len(key) > 100: raise HTTPException(status_code=400, detail={"code": "invalid_idempotency_key"})
+    if not await request.app.state.redis_client.set(f"web:club-settings:{actor.club_id}:{key}", "1", ex=900, nx=True): return {"ok": True, "idempotent_replay": True, "club_id": actor.club_id}
+    club = await session.scalar(select(Club).where(Club.id == actor.club_id).with_for_update())
+    if not club: raise HTTPException(status_code=404, detail={"code": "club_not_found"})
+    settings = dict(club.club_settings or {})
+    for section in ("branding", "limits", "features", "menu"):
+        if section in payload:
+            if not isinstance(payload[section], dict) or len(payload[section]) > 50: raise HTTPException(status_code=400, detail={"code": "invalid_settings_section"})
+            settings["ui" if section == "branding" else section] = dict(payload[section])
+    if "branding" in payload:
+        if any(len(str(v)) > 500 for v in payload["branding"].values()): raise HTTPException(status_code=400, detail={"code": "invalid_branding"})
+    club.club_settings = settings; await session.commit()
+    audit_event("web_club_settings_updated", club_id=actor.club_id, actor_user_id=actor.user_id, action="update", object_type="club_settings", location="web/staff/settings")
+    return {"ok": True, "club_id": actor.club_id, "updated_sections": [x for x in allowed - {"idempotency_key"} if x in payload], "read_only": False}
 
 
 @checkin_router.get("/data")
