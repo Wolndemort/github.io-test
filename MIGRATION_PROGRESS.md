@@ -942,5 +942,6 @@ Verification for Stage 50:
 - Added executable OTP security tests for single-use/attempt bounds, TTL and email+IP/club rate limits; updated release readiness. Next: complete role/cross-club matrix and data anonymization review before any production approval.
 - Added native role/cross-club contract matrix for owner, staff and client actors; selected club scope is required for both Telegram fallback and Email native auth. Browser cross-club scenario remains pending a non-owner client fixture.
 - Role/scope package verified: targeted `4 passed`, full suite `426 passed`. No production deploy or master merge.
+- Seeded staging-only synthetic client fixture: `user_id=990000001`, club 1, one student, same test email; added seed/cleanup helpers. Native flags enabled only in staging for client Web smoke; fixture must be removed after verification.
 - Restricted pages enforce `analytics_view`/`qr_checkin`; no settings mutation was exposed.
 - Added settings page tests; remaining: continue the next 3–4 migration blocks.
