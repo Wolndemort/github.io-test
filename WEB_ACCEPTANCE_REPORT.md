@@ -10,9 +10,10 @@ Web-контур проверен локальными contract/unit/regression 
 
 Authenticated owner login, client/owner API requests, session, logout/re-auth и club/user scope ранее проверялись вручную на staging. Поэтому auth smoke не является pending. Реальный оставшийся риск — UI rendering: часть страниц в том smoke была пустой после получения данных; нужен повторный browser pass именно на отображение каждой страницы и кнопок после текущих исправлений.
 
-Последний полный suite после staff catalog management UI: `479 passed`, `git diff --check` чист.
+Последний полный suite после staff cash/audit/students UI: `481 passed`, `git diff --check` чист.
 
 Staff Products/Discounts/Tariffs теперь имеют mutation forms; их visual browser pass входит в следующий authenticated acceptance cycle.
+Cash reversal selector, audit detail links и staff student hub links добавлены и покрыты contracts.
 
 Последний UI gap был не в API: client pages показывали данные недостаточно функционально — общий renderer выводил только счётчик. Добавлен общий data-table renderer; после него нужен повторный browser pass кнопок и mutation flows.
 

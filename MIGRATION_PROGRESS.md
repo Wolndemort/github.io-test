@@ -1589,3 +1589,17 @@ Verification for Stage 50:
 - Staff catalog UI package targeted tests: `5 passed`; полный suite: `479 passed`; `git diff --check` чист.
 - Products: create/stock/archive; Discounts: create/update; Tariffs: discipline selector/JSON update.
 - Acceptance report обновлён; visual authenticated pass остаётся для подтверждения фактического браузерного поведения.
+## 2026-08-20 — staff cash reversal and audit details UI
+
+- Cash data теперь возвращает club-scoped entries без секретов; Cash page получил reversible-entry selector и reversal form.
+- Audit page теперь отображает события таблицей со ссылками на scoped detail pages.
+- Добавлен staff cash/audit UI contract test.
+## 2026-08-20 — staff students and hubs UI
+
+- Staff Students list теперь выводит links на student profile hubs; каждый hub ведёт к profile/visits/payments/discounts scoped endpoints.
+- Добавлен staff students UI contract test.
+## 2026-08-20 — staff cash/audit/students package verified
+
+- Cash reversal selector, audit table/detail links и student hub links добавлены.
+- Исправлена backward-compatible serialization cash entries для minimal test fixtures.
+- Полный suite: `481 passed`; `git diff --check` чист.

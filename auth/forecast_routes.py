@@ -265,7 +265,7 @@ async def cash_data(request: Request, context: AuthContext | None = Depends(web_
     entries = list((await session.execute(select(CashEntry).where(CashEntry.club_id == actor.club_id))).scalars().all())
     income = sum(int(getattr(entry, "amount_kopecks", 0) or 0) for entry in entries if entry.entry_type == "income")
     expense = sum(int(getattr(entry, "amount_kopecks", 0) or 0) for entry in entries if entry.entry_type == "expense")
-    return {"club_id": actor.club_id, "income_kopecks": income, "expense_kopecks": expense, "balance_kopecks": income - expense, "read_only": True}
+    return {"club_id": actor.club_id, "income_kopecks": income, "expense_kopecks": expense, "balance_kopecks": income - expense, "entries": [{"id": getattr(entry, "id", None), "entry_type": entry.entry_type, "amount_kopecks": entry.amount_kopecks, "description": getattr(entry, "description", ""), "reversed_entry_id": getattr(entry, "reversed_entry_id", None)} for entry in entries], "read_only": True}
 
 
 @cash_router.post("/entries")
