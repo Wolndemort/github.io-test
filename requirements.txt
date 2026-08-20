@@ -24,6 +24,7 @@ opencv-python-headless
 jinja2>=3.1.0
 python-multipart>=0.0.9
 cryptography>=42.0.0
+fido2==2.2.1
 boto3>=1.35.0
 httpx
 openpyxl>=3.1.0

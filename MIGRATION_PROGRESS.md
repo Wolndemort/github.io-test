@@ -1654,3 +1654,11 @@ Verification for Stage 50:
 - Реальный staging turnstile pulse подтверждён; Telegram Face ID/biometric flow остаётся рабочим legacy path.
 - Уточнено remaining: native browser WebAuthn/passkeys (credential ID/public key only), refunds/payment-method/receipt/invitation legacy policies, translations/polish, authenticated visual re-check, payment provider test и final rollout gates.
 - Native WebAuthn не помечается готовым до end-to-end registration/assertion/revoke tests.
+
+## 2026-08-20 — WebAuthn/passkey API package
+
+- Добавлена feature-gated WebAuthn-модель `web_credentials` и Alembic migration `a1b2c3d4e5f6`.
+- Реализованы registration options/complete, authentication options/complete, список устройств и revoke; challenge хранится в Redis 300 секунд и удаляется после чтения.
+- В БД сохраняются только credential ID, публичный ключ, sign counter, label и timestamps; биометрический шаблон/сырые Face ID данные сервер не получает.
+- Добавлен `fido2==2.2.1`; локальный полный suite: `483 passed`.
+- Не закрыто: browser UI/native hardware smoke, staging migration deployment, remaining legacy refunds/payment-method/receipt/invitation policies. `master`, live и другие проекты не затрагивались.

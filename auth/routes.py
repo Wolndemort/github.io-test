@@ -25,8 +25,10 @@ from .web_session import (
     validate_csrf,
 )
 from .native_auth import allow_otp_request, consume_otp, deliver_email_otp, issue_otp, normalize_email
+from .webauthn import router as webauthn_router
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
+router.include_router(webauthn_router)
 logger = logging.getLogger(__name__)
 
 

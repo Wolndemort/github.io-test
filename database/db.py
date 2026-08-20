@@ -46,6 +46,20 @@ class User(Base):
         """Readable label for SQLAdmin relationship/AJAX selectors."""
         return self.full_name or str(self.user_id)
 
+
+class WebCredential(Base):
+    """WebAuthn credential metadata; biometric templates never enter the database."""
+    __tablename__ = "web_credentials"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.user_id", ondelete="CASCADE"), index=True)
+    club_id: Mapped[int] = mapped_column(ForeignKey("clubs.id", ondelete="CASCADE"), index=True)
+    credential_id: Mapped[bytes] = mapped_column(nullable=False, unique=True)
+    public_key: Mapped[bytes] = mapped_column(nullable=False)
+    sign_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    device_label: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, server_default="now()")
+    last_used_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
 class Discount(Base):
     __tablename__ = "discounts"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
