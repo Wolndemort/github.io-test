@@ -945,6 +945,20 @@ Verification for Stage 50:
 - Seeded staging-only synthetic client fixture: `user_id=990000001`, club 1, one student, same test email; added seed/cleanup helpers. Native flags enabled only in staging for client Web smoke; fixture must be removed after verification.
 - Restricted pages enforce `analytics_view`/`qr_checkin`; no settings mutation was exposed.
 
+## 2026-08-20 — functional Web operations: catalog management
+
+- Добавлены Web mutations каталога: `POST /api/v1/staff/catalog/products`, `PATCH /api/v1/staff/catalog/products/{product_id}`, `DELETE /api/v1/staff/catalog/products/{product_id}`.
+- Создание, редактирование и архивирование товара используют `WEB_CATALOG_MUTATIONS_ENABLED`, `products_manage`, CSRF, allowlist, club scope, idempotency, row lock для update/archive, transaction и audit.
+- Архивирование — soft-delete (`is_active=False`), физическое удаление товара через Web не разрешено.
+- Добавлен общий catalog mutation contract test.
+- Targeted suite: `3 passed`; полный suite: `452 passed`; `git diff --check` чист.
+- Telegram, live, ALTER и `master` не затронуты.
+
+### Следующий пакет
+
+- Перенести настройки клуба: branding, limits, features, integrations и пользовательские меню с role/owner permissions.
+- Затем перенести скидки и тарифы с audit/idempotency и UI.
+
 ## 2026-08-20 — functional operations UI: sales, freeze and check-in
 
 - В общий Web UI добавлены формы cash subscription sale, paid freeze, manual check-in с опциональным открытием turnstile и cancel visit.

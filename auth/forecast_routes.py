@@ -423,6 +423,64 @@ async def products_data(request: Request, context: AuthContext | None = Depends(
     return {"club_id": actor.club_id, "products": [{"id": p.id, "name": p.name, "category": p.category, "price_kopecks": p.price_kopecks, "stock": p.stock} for p in products], "read_only": True}
 
 
+@catalog_router.post("/products")
+async def create_product_web(request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):
+    actor = require_web_context(context)
+    if os.getenv("WEB_CATALOG_MUTATIONS_ENABLED", "0") != "1": raise HTTPException(status_code=404, detail={"code": "feature_disabled"})
+    if actor.actor_type == "staff" and "products_manage" not in actor.permissions: raise HTTPException(status_code=403, detail={"code": "permission_denied"})
+    await require_csrf(request.app.state.redis_client, request); payload = await request.json()
+    if set(payload) - {"name", "category", "price_kopecks", "stock", "details", "idempotency_key"}: raise HTTPException(status_code=400, detail={"code": "invalid_product_fields"})
+    key = str(payload.get("idempotency_key") or "").strip(); name = str(payload.get("name") or "").strip(); category = str(payload.get("category") or "other").strip(); details = str(payload.get("details") or "").strip()
+    try: price = int(payload.get("price_kopecks")); stock = int(payload.get("stock", 0))
+    except (TypeError, ValueError): raise HTTPException(status_code=400, detail={"code": "invalid_product_numbers"})
+    if not key or len(key) > 100 or not 2 <= len(name) <= 120 or len(category) > 30 or len(details) > 1000 or price < 0 or stock < 0: raise HTTPException(status_code=400, detail={"code": "invalid_product"})
+    if not await request.app.state.redis_client.set(f"web:product-create:{actor.club_id}:{key}", "1", ex=900, nx=True): return {"ok": True, "idempotent_replay": True, "club_id": actor.club_id}
+    product = ClubProduct(club_id=actor.club_id, name=name, category=category, price_kopecks=price, stock=stock, details=details, is_active=True); session.add(product); await session.commit()
+    audit_event("web_product_created", club_id=actor.club_id, actor_user_id=actor.user_id, action="create", object_type="club_product", object_id=product.id, location="web/staff/products")
+    return {"ok": True, "club_id": actor.club_id, "product_id": product.id, "read_only": False}
+
+
+@catalog_router.patch("/products/{product_id}")
+async def update_product_web(product_id: int, request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):
+    actor = require_web_context(context)
+    if os.getenv("WEB_CATALOG_MUTATIONS_ENABLED", "0") != "1": raise HTTPException(status_code=404, detail={"code": "feature_disabled"})
+    if actor.actor_type == "staff" and "products_manage" not in actor.permissions: raise HTTPException(status_code=403, detail={"code": "permission_denied"})
+    await require_csrf(request.app.state.redis_client, request); payload = await request.json()
+    if set(payload) - {"name", "category", "price_kopecks", "details", "idempotency_key"}: raise HTTPException(status_code=400, detail={"code": "invalid_product_fields"})
+    key = str(payload.get("idempotency_key") or "").strip()
+    if not key or len(key) > 100: raise HTTPException(status_code=400, detail={"code": "invalid_idempotency_key"})
+    if not await request.app.state.redis_client.set(f"web:product-update:{actor.club_id}:{product_id}:{key}", "1", ex=900, nx=True): return {"ok": True, "idempotent_replay": True, "club_id": actor.club_id, "product_id": product_id}
+    product = await session.scalar(select(ClubProduct).where(ClubProduct.id == product_id, ClubProduct.club_id == actor.club_id).with_for_update())
+    if not product: raise HTTPException(status_code=404, detail={"code": "product_not_found"})
+    if "name" in payload:
+        name = str(payload["name"] or "").strip()
+        if not 2 <= len(name) <= 120: raise HTTPException(status_code=400, detail={"code": "invalid_product_name"})
+        product.name = name
+    if "category" in payload: product.category = str(payload["category"] or "other").strip()[:30]
+    if "details" in payload: product.details = str(payload["details"] or "").strip()[:1000]
+    if "price_kopecks" in payload:
+        try: product.price_kopecks = int(payload["price_kopecks"])
+        except (TypeError, ValueError): raise HTTPException(status_code=400, detail={"code": "invalid_product_price"})
+        if product.price_kopecks < 0: raise HTTPException(status_code=400, detail={"code": "invalid_product_price"})
+    await session.commit(); audit_event("web_product_updated", club_id=actor.club_id, actor_user_id=actor.user_id, action="update", object_type="club_product", object_id=product_id, location="web/staff/products")
+    return {"ok": True, "club_id": actor.club_id, "product_id": product_id, "read_only": False}
+
+
+@catalog_router.delete("/products/{product_id}")
+async def archive_product_web(product_id: int, request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):
+    actor = require_web_context(context)
+    if os.getenv("WEB_CATALOG_MUTATIONS_ENABLED", "0") != "1": raise HTTPException(status_code=404, detail={"code": "feature_disabled"})
+    if actor.actor_type == "staff" and "products_manage" not in actor.permissions: raise HTTPException(status_code=403, detail={"code": "permission_denied"})
+    await require_csrf(request.app.state.redis_client, request); payload = await request.json()
+    reason = str(payload.get("reason") or "").strip(); key = str(payload.get("idempotency_key") or "").strip()
+    if set(payload) - {"reason", "idempotency_key"} or not 3 <= len(reason) <= 500 or not key or len(key) > 100: raise HTTPException(status_code=400, detail={"code": "invalid_archive_request"})
+    if not await request.app.state.redis_client.set(f"web:product-archive:{actor.club_id}:{product_id}:{key}", "1", ex=900, nx=True): return {"ok": True, "idempotent_replay": True, "club_id": actor.club_id, "product_id": product_id}
+    product = await session.scalar(select(ClubProduct).where(ClubProduct.id == product_id, ClubProduct.club_id == actor.club_id).with_for_update())
+    if not product: raise HTTPException(status_code=404, detail={"code": "product_not_found"})
+    product.is_active = False; await session.commit(); audit_event("web_product_archived", club_id=actor.club_id, actor_user_id=actor.user_id, action="archive", object_type="club_product", object_id=product_id, location="web/staff/products", reason=reason)
+    return {"ok": True, "club_id": actor.club_id, "product_id": product_id, "archived": True, "read_only": False}
+
+
 @catalog_router.get("/products/{product_id}")
 async def product_detail_data(product_id: int, request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):
     actor = require_web_context(context)
