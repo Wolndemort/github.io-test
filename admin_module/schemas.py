@@ -13,6 +13,7 @@ class AdminFreezePayload(BaseModel):
     club_id: int
     student_id: int
     action: str
+    date_to: str | None = None
 
 
 class StudentInvitePayload(BaseModel):

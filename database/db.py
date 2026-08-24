@@ -88,6 +88,8 @@ class Student(Base):
     # Фактическая длительность текущей заморозки. Нужна для платных пакетов,
     # которые могут отличаться от стандартного шага клуба.
     frozen_days: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    # Снимок срока заморозки на момент покупки абонемента.
+    freeze_days_entitlement: Mapped[int] = mapped_column(Integer, default=7, server_default="7", nullable=False)
     balance_lessons: Mapped[int] = mapped_column(default=0)
     birthday: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     last_visit: Mapped[Optional[datetime]] = mapped_column(DateTime)
@@ -587,6 +589,9 @@ async def add_abon(
         # 🌟 КРИТИЧЕСКИЙ ФИКС: Если передана новая дисциплина — обновляем её у студента
         if discipline:
             student.discipline = discipline
+
+        configured_freeze_days = int((club_settings.get("limits", {}) or {}).get("freeze_days_step", 7) or 7)
+        student.freeze_days_entitlement = max(1, min(365, configured_freeze_days))
 
         # 2. Расчет даты продления
         if days_to_add is None:

@@ -1332,6 +1332,7 @@ async def admin_create_student(
             "can_freeze": new_student.can_freeze or 0,
             "is_frozen": int(new_student.is_frozen or 0),
             "frozen_days": new_student.frozen_days or "",
+            "freeze_days_entitlement": new_student.freeze_days_entitlement or 7,
             "discipline": new_student.discipline or "",
             "parent_phone": new_student.parent_phone or "",
             "parent_phone_secondary": new_student.parent_phone_secondary or "",

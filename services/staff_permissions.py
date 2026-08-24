@@ -3,7 +3,7 @@ from __future__ import annotations
 ROLE_PERMISSIONS = {
     "cashier": {"cash_sale", "products_view", "products_manage", "forecast_view"},
     "coach": {"schedule_view", "schedule_edit", "qr_checkin", "manual_checkin"},
-    "manager": {"cash_sale", "products_view", "products_manage", "cash_view", "schedule_view", "schedule_edit", "tariffs_manage", "qr_checkin", "manual_checkin", "forecast_view", "analytics_view"},
+    "manager": {"cash_sale", "products_view", "products_manage", "cash_view", "athletes_view", "athletes_manage", "schedule_view", "schedule_edit", "tariffs_manage", "qr_checkin", "manual_checkin", "forecast_view", "analytics_view"},
 }
 
 

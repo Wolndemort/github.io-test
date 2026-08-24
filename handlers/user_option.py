@@ -564,10 +564,10 @@ async def finalize_freeze_action(
         return await callback.answer("❌ Ошибка формата ID", show_alert=True)
 
     # Достаем шаг заморозки из конфига клуба
-    freeze_days = club_settings.get("limits", {}).get("freeze_days_step", 7)
     student = await session.get(Student, student_id)
     if not student or student.club_id != club.id:
         return await callback.answer("❌ Атлет не найден.", show_alert=True)
+    freeze_days = getattr(student, "freeze_days_entitlement", None) or club_settings.get("limits", {}).get("freeze_days_step", 7)
     linked = await session.scalar(select(StudentParent.student_id).where(
         StudentParent.student_id == student_id,
         StudentParent.parent_id == callback.from_user.id,

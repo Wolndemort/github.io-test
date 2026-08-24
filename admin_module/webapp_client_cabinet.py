@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from html import escape
 
 from fastapi import Depends, HTTPException, Query, Request
@@ -18,7 +18,7 @@ from admin_module.schemas import (
     AdminFreezePayload,
 )
 from admin_module.webapp_verify import verify_telegram_data
-from admin_module.webapp_shared import verify_webapp_admin
+from admin_module.webapp_shared import verify_webapp_admin, verify_webapp_admin_or_manager
 from config import PROXY_URL
 from database.db import Club, ClubStaff, PaymentOrder, CartOrder, CartItem, Student, StudentParent, Subscription, User, VisitLog, get_session, get_student_parent_ids, process_student_freeze
 from services.audit import audit_event
@@ -246,7 +246,7 @@ async def admin_freeze_page(request: Request, club_id: int, init_data: str | Non
     if not init_data:
         return _auth_gate_html("webapp/admin-freeze", club_id=club_id)
     club = await db.get(Club, club_id)
-    await verify_webapp_admin(club, init_data)
+    await verify_webapp_admin_or_manager(club, init_data, db)
     students = (await db.execute(select(Student).where(Student.club_id == club_id).order_by(Student.name))).scalars().all()
     freeze_days = int((club.club_settings or {}).get("limits", {}).get("freeze_days_step", 7))
     return templates.TemplateResponse("admin_freeze.html", {"request": request, "club": club, "club_id": club_id, "students": students, "freeze_days": freeze_days})
@@ -255,13 +255,31 @@ async def admin_freeze_page(request: Request, club_id: int, init_data: str | Non
 @router.post("/webapp/admin-freeze")
 async def admin_freeze_submit(payload: AdminFreezePayload, db: AsyncSession = Depends(get_session)):
     club = await db.get(Club, payload.club_id)
-    tg_user = await verify_webapp_admin(club, payload.init_data)
+    tg_user = await verify_webapp_admin_or_manager(club, payload.init_data, db)
     student = await db.get(Student, payload.student_id, with_for_update=True)
     if not student or student.club_id != club.id:
         raise HTTPException(status_code=404, detail="Атлет не найден")
     action = payload.action.strip().casefold()
     settings = club.club_settings or {}
     if action == "freeze":
+        if payload.date_to:
+            if not settings.get("features", {}).get("freeze", True):
+                raise HTTPException(status_code=400, detail="Заморозка отключена в настройках клуба")
+            if student.is_frozen or not student.expire_date or student.expire_date < datetime.utcnow():
+                raise HTTPException(status_code=409, detail="Нельзя заморозить: проверьте абонемент или текущий статус")
+            try:
+                end_date = date.fromisoformat(payload.date_to)
+            except ValueError:
+                raise HTTPException(status_code=400, detail="Укажите корректную дату окончания заморозки")
+            days = (end_date - datetime.utcnow().date()).days
+            if days < 1 or days > 365:
+                raise HTTPException(status_code=400, detail="Срок заморозки должен быть от 1 до 365 дней")
+            student.expire_date += timedelta(days=days)
+            student.is_frozen = 1
+            student.frozen_at = datetime.utcnow()
+            student.frozen_days = days
+            await db.commit()
+            return {"ok": True, "message": f"{student.name}: заморожен на {days} дней"}
         days = int(settings.get("limits", {}).get("freeze_days_step", 7))
         result = await process_student_freeze(student.id, club.id, settings, db, days)
         if result == "disabled":
