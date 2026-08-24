@@ -279,6 +279,17 @@ async def admin_freeze_submit(payload: AdminFreezePayload, db: AsyncSession = De
             student.frozen_at = datetime.utcnow()
             student.frozen_days = days
             await db.commit()
+            try:
+                bot = Bot(club.bot_token)
+                text = f"❄️ <b>Абонемент заморожен администратором</b>\n\nАтлет: <b>{escape(student.name)}</b>\nСрок: <b>{days} дн.</b>\nДата окончания: <b>{student.expire_date.strftime('%d.%m.%Y')}</b>"
+                if club.owner_id and club.owner_id != int(tg_user["id"]):
+                    await bot.send_message(club.owner_id, text, parse_mode="HTML")
+                for parent_id in await get_student_parent_ids(student.id, db):
+                    if parent_id != int(tg_user["id"]):
+                        await bot.send_message(parent_id, text, parse_mode="HTML")
+                await bot.session.close()
+            except Exception:
+                pass
             return {"ok": True, "message": f"{student.name}: заморожен на {days} дней"}
         days = int(settings.get("limits", {}).get("freeze_days_step", 7))
         result = await process_student_freeze(student.id, club.id, settings, db, days)
