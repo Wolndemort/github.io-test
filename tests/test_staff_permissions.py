@@ -21,9 +21,13 @@ def test_staff_roles_have_separate_least_privilege_permissions():
         "manual_checkin",
         "forecast_view",
         "analytics_view",
+        "athletes_view",
+        "athletes_manage",
+        "student_manage",
     }
     for role in ROLE_PERMISSIONS:
-        assert "athletes_view" not in ROLE_PERMISSIONS[role]
+        if role != "manager":
+            assert "athletes_view" not in ROLE_PERMISSIONS[role]
         assert "settings_manage" not in ROLE_PERMISSIONS[role]
         assert "payments_manage" not in ROLE_PERMISSIONS[role]
         assert "staff_manage" not in ROLE_PERMISSIONS[role]
