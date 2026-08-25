@@ -748,6 +748,40 @@ async def cash_register_page(request: Request, session: AsyncSession = Depends(g
     )
 
 
+@router.get("/webapp/admin-visits", response_class=HTMLResponse)
+async def admin_visits_page(request: Request, club_id: int = Query(...), init_data: str | None = Query(default=None), date_from: str | None = Query(default=None), date_to: str | None = Query(default=None), student: str | None = Query(default=None), session: AsyncSession = Depends(get_session)):
+    club = await session.get(Club, club_id)
+    if not init_data:
+        return telegram_init_gate('/webapp/admin-visits', club_id, 'Откройте посещения из Telegram')
+    await verify_webapp_admin(club, init_data)
+    students = list((await session.execute(select(Student).where(Student.club_id == club_id).order_by(Student.name))).scalars().all())
+    name_query = (student or '').strip().casefold()
+    by_id = {item.id: item for item in students}
+    timeout = int(((club.club_settings or {}).get('limits', {}) or {}).get('session_timeout_minutes', 150) or 150)
+    visits = list((await session.execute(select(VisitLog).where(VisitLog.club_id == club_id).order_by(VisitLog.visited_at.asc()))).scalars().all())
+    grouped = {}
+    for visit in visits:
+        item = by_id.get(visit.student_id)
+        if item and (not name_query or name_query in item.name.casefold()) and visit.visited_at:
+            grouped.setdefault(item.id, []).append(visit.visited_at.replace(tzinfo=None))
+    start = moscow_date_boundary(date_from) if date_from else None
+    end = moscow_date_boundary(date_to) + timedelta(days=1) if date_to else None
+    rows = []
+    for student_id, timestamps in grouped.items():
+        current = []
+        for value in timestamps + [None]:
+            if value is not None and (not current or value - current[-1] <= timedelta(minutes=timeout)):
+                current.append(value)
+                continue
+            if current:
+                session_start_display = current[0] + timedelta(hours=3)
+                if (not start or session_start_display >= start) and (not end or session_start_display < end):
+                    rows.append({'student_name': by_id[student_id].name, 'started_at': current[0], 'ended_at': current[-1], 'checkins': len(current)})
+            current = [value] if value is not None else []
+    rows.sort(key=lambda row: row['started_at'], reverse=True)
+    return templates.TemplateResponse('admin_visits.html', {'request': request, 'club': club, 'club_id': club_id, 'rows': rows, 'filters': {'date_from': date_from or '', 'date_to': date_to or '', 'student': student or ''}, 'timeout_minutes': timeout, 'init_data': init_data})
+
+
 @router.get("/webapp/admin-audit", response_class=HTMLResponse)
 async def admin_audit_page(
     request: Request,
