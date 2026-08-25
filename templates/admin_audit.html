@@ -31,6 +31,7 @@
   <div class="nav">
     <a href="/webapp/admin-legal?club_id={{ club_id }}&init_data={{ request.query_params.get('init_data', '')|urlencode }}">📄 Юридические документы</a>
     <a href="/admin?club_id={{ club_id }}&init_data={{ request.query_params.get('init_data', '')|urlencode }}">← В панель</a>
+    <a href="/webapp/admin-visits?club_id={{ club_id }}&init_data={{ request.query_params.get('init_data', '')|urlencode }}">👣 Посещения</a>
     <button class="secondary" type="button" id="closeWebApp">Закрыть</button>
   </div>
   <div class="card">
