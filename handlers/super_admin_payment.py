@@ -15,7 +15,12 @@ logger = logging.getLogger(__name__)
 router = Router()
 
 # Забираем токен ЮKassa из переменных окружения (.env)
-SUBSCRIPTION_PRICES = {30: 150000, 365: 1500000}
+SUBSCRIPTION_PRICES = {
+    30: 700000,
+    90: 2000000,
+    180: 4000000,
+    365: 8000000,
+}
 
 
 # =========================================================================
@@ -28,14 +33,29 @@ async def show_pay_menu(callback: types.CallbackQuery):
     builder = InlineKeyboardBuilder()
     # Зашиваем количество дней в callback_data
     builder.row(types.InlineKeyboardButton(
-        text="🌙 1 месяц (30 дн.) — 1 500 ₽", callback_data="buy_sub_30")
+        text="🌙 1 месяц (30 дн.) — 7 000 ₽", callback_data="buy_sub_30")
+    )
+    builder.row(types.InlineKeyboardButton(
+        text="🌱 3 месяца (90 дн.) — 20 000 ₽", callback_data="buy_sub_90")
+    )
+    builder.row(types.InlineKeyboardButton(
+        text="🔥 6 месяцев (180 дн.) — 40 000 ₽", callback_data="buy_sub_180")
     )
     if SUPER_YOOKASSA_SBP_ENABLED:
         builder.row(types.InlineKeyboardButton(
-            text="↔️ Оплатить 30 дней через СБП", callback_data="buy_sub_sbp_30")
+            text="↔️ 1 месяц через СБП", callback_data="buy_sub_sbp_30")
+        )
+        builder.row(types.InlineKeyboardButton(
+            text="↔️ 3 месяца через СБП", callback_data="buy_sub_sbp_90")
+        )
+        builder.row(types.InlineKeyboardButton(
+            text="↔️ 6 месяцев через СБП", callback_data="buy_sub_sbp_180")
+        )
+        builder.row(types.InlineKeyboardButton(
+            text="↔️ 1 год через СБП", callback_data="buy_sub_sbp_365")
         )
     builder.row(types.InlineKeyboardButton(
-        text="☀️ 1 год (365 дн.) — 15 000 ₽", callback_data="buy_sub_365")
+        text="☀️ 1 год (365 дн.) — 80 000 ₽", callback_data="buy_sub_365")
     )
     builder.row(types.InlineKeyboardButton(
         text="⬅️ Назад в админку", callback_data="admin")
