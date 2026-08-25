@@ -272,7 +272,7 @@ async def process_kids_limit(
         from database.db import Subscription
         sub_res = await session.execute(
             select(Subscription)
-            .where(Subscription.user_id == callback.from_user.id)
+            .where(Subscription.user_id == callback.from_user.id, Subscription.club_id == club.id)
             .where(Subscription.rebill_id.is_not(None))
             .limit(1)
         )

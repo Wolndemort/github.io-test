@@ -251,7 +251,7 @@ async def process_token(message: types.Message, state: FSMContext, session: Asyn
             name=club_name,
             bot_token=bot_token,
             owner_id=owner_id,
-            club_settings=DEFAULT_CLUB_SETTINGS.copy(),
+            club_settings=copy.deepcopy(DEFAULT_CLUB_SETTINGS),
             subscription_expire_at=datetime.now() + timedelta(days=30)
         )
 

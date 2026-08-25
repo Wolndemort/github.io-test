@@ -10,6 +10,7 @@ from datetime import datetime, date, timezone
 from sqlalchemy import Date
 from loguru import logger
 import asyncio
+import copy
 import gzip
 import io
 from datetime import timedelta
@@ -360,7 +361,7 @@ async def register_new_club(
             name=name,
             bot_token=bot_token,
             owner_id=owner_id,
-            club_settings=DEFAULT_CLUB_SETTINGS.copy(),  # Копируем эталон
+            club_settings=copy.deepcopy(DEFAULT_CLUB_SETTINGS),  # Независимый конфиг клуба
             subscription_expire_at=datetime.now() + timedelta(days=30)
         )
         session.add(new_club)
