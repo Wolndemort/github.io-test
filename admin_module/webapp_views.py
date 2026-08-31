@@ -719,7 +719,7 @@ async def change_admin_tariff(payload: TariffChangePayload, request: Request, se
 async def admin_motivation_page(request: Request, club_id: int = Query(...), init_data: str | None = Query(None), session: AsyncSession = Depends(get_session)):
     club = await session.get(Club, club_id)
     tg_user = await verify_webapp_staff(club, init_data, session, "schedule_view")
-    if int(tg_user.get("id", 0)) != int(club.owner_id or 0) and int(tg_user.get("id", 0)) not in SUPER_ADMIN_IDS:
+    if int(tg_user.get("id", 0)) != int(getattr(club, "owner_id", 0) or 0) and int(tg_user.get("id", 0)) not in SUPER_ADMIN_IDS:
         raise HTTPException(403, "Раздел мотивации доступен только администратору")
     staff = (await session.execute(select(ClubStaff).where(ClubStaff.club_id == club_id, ClubStaff.is_active.is_(True)).order_by(ClubStaff.full_name))).scalars().all()
     today = date.today(); start = today.replace(day=1); end = today.replace(day=calendar.monthrange(today.year, today.month)[1])
@@ -738,7 +738,7 @@ async def admin_motivation_page(request: Request, club_id: int = Query(...), ini
 async def adjust_admin_motivation(payload: dict, session: AsyncSession = Depends(get_session)):
     club = await session.get(Club, int(payload.get("club_id", 0)))
     tg_user = await verify_webapp_staff(club, payload.get("init_data"), session, "schedule_view")
-    if int(tg_user.get("id", 0)) != int(club.owner_id or 0) and int(tg_user.get("id", 0)) not in SUPER_ADMIN_IDS:
+    if int(tg_user.get("id", 0)) != int(getattr(club, "owner_id", 0) or 0) and int(tg_user.get("id", 0)) not in SUPER_ADMIN_IDS:
         raise HTTPException(403, "Только администратор может корректировать мотивацию")
     staff = await session.get(ClubStaff, int(payload.get("staff_id", 0)))
     if not staff or staff.club_id != club.id:
@@ -767,7 +767,7 @@ async def webapp_admin_schedule_page(
     if not init_data:
         return telegram_init_gate('/webapp/admin-schedule', club_id, 'РћС‚РєСЂРѕР№С‚Рµ Р°РґРјРёРЅСЃРєРѕРµ СЂР°СЃРїРёСЃР°РЅРёРµ РёР· Telegram')
     tg_user = await verify_webapp_staff(club, init_data, session, "schedule_view")
-    is_admin = int(tg_user.get("id", 0)) == int(club.owner_id or 0) or int(tg_user.get("id", 0)) in SUPER_ADMIN_IDS
+    is_admin = int(tg_user.get("id", 0)) == int(getattr(club, "owner_id", 0) or 0) or int(tg_user.get("id", 0)) in SUPER_ADMIN_IDS
     staff = (await session.execute(select(ClubStaff).where(ClubStaff.club_id == club_id, ClubStaff.is_active.is_(True)).order_by(ClubStaff.full_name))).scalars().all()
     staff_data = [{"id": x.id, "name": x.full_name or f"Тренер #{x.id}"} for x in staff]
     return templates.TemplateResponse("admin_schedule.html", {"request": request, "club": club, "club_id": club_id, "disciplines": (club.club_settings or {}).get("disciplines", {}), "staff": staff_data, "can_assign_coach": is_admin})
@@ -776,7 +776,7 @@ async def webapp_admin_schedule_page(
 async def change_admin_schedule(payload: ScheduleChangePayload, session: AsyncSession = Depends(get_session)):
     club = (await session.execute(select(Club).where(Club.id == payload.club_id).with_for_update())).scalar_one_or_none()
     tg_user = await verify_webapp_staff(club, payload.init_data, session, "schedule_edit")
-    is_admin = int(tg_user.get("id", 0)) == int(club.owner_id or 0) or int(tg_user.get("id", 0)) in SUPER_ADMIN_IDS
+    is_admin = int(tg_user.get("id", 0)) == int(getattr(club, "owner_id", 0) or 0) or int(tg_user.get("id", 0)) in SUPER_ADMIN_IDS
     settings = dict(club.club_settings or {})
     disciplines = dict(settings.get("disciplines", {}))
     block = dict(disciplines.get(payload.discipline, {}))
