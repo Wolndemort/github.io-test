@@ -104,7 +104,7 @@ button,.copy-btn{background:#fff!important;color:#090909!important;font-weight:7
 </div>
 
 <div id="list"></div>
-{% if can_assign_coach %}<div class="card controls"><label>Тренер<select id="coachStaff"><option value="">Не назначен</option>{% for x in staff %}<option value="{{ x.id }}">{{ x.name }}</option>{% endfor %}</select></label></div>{% endif %}
+{% if can_assign_coach %}<div class="card controls"><label>Тренеры на этом часовом занятии<select id="coachStaff" multiple size="4">{% for x in staff %}<option value="{{ x.id }}">{{ x.name }}</option>{% endfor %}</select></label><small>Можно выбрать несколько тренеров.</small></div>{% endif %}
 
 <div class="card controls">
   <div class="row">
@@ -221,7 +221,7 @@ function edit(i) {
   idx = i;
   timeInput.value = x.time || '';
   coachInput.value = x.coach || '';
-  if (coachStaffInput) coachStaffInput.value = x.coach_staff_id || '';
+  if (coachStaffInput) [...coachStaffInput.options].forEach(option => option.selected = (x.coach_staff_ids || (x.coach_staff_id ? [x.coach_staff_id] : [])).includes(Number(option.value)));
   saveBtn.textContent = 'Сохранить';
 }
 
@@ -234,7 +234,7 @@ async function send(action, extra = {}) {
     day: daySelect.value,
     index: idx,
     lesson: action === 'copy_day' ? null : { time: timeInput.value, coach: coachStaffInput?.selectedOptions?.[0]?.textContent || coachInput.value, max_slots: 0 },
-    coach_staff_id: coachStaffInput && coachStaffInput.value ? Number(coachStaffInput.value) : null,
+    coach_staff_ids: coachStaffInput ? [...coachStaffInput.selectedOptions].map(option => Number(option.value)) : null,
     ...extra,
   };
   const r = await fetch('/webapp/admin-schedule/change', {

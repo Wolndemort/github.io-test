@@ -264,7 +264,31 @@ class MotivationAdjustment(Base):
     staff_id: Mapped[int] = mapped_column(ForeignKey("club_staff.id", ondelete="CASCADE"), index=True)
     amount_kopecks: Mapped[int] = mapped_column(Integer)
     reason: Mapped[str] = mapped_column(String(500), default="")
+    idempotency_key: Mapped[Optional[str]] = mapped_column(String(80), nullable=True, unique=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, server_default="now()", index=True)
+
+
+class MotivationRate(Base):
+    __tablename__ = "motivation_rates"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    club_id: Mapped[int] = mapped_column(ForeignKey("clubs.id", ondelete="CASCADE"), index=True)
+    staff_id: Mapped[int] = mapped_column(ForeignKey("club_staff.id", ondelete="CASCADE"), index=True)
+    discipline: Mapped[str] = mapped_column(String(50))
+    rate_kopecks: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, server_default="now()")
+
+
+class MotivationAccrual(Base):
+    __tablename__ = "motivation_accruals"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    club_id: Mapped[int] = mapped_column(ForeignKey("clubs.id", ondelete="CASCADE"), index=True)
+    staff_id: Mapped[int] = mapped_column(ForeignKey("club_staff.id", ondelete="CASCADE"), index=True)
+    occurrence_key: Mapped[str] = mapped_column(String(180), unique=True, index=True)
+    occurrence_date: Mapped[date] = mapped_column(Date, index=True)
+    start_time: Mapped[str] = mapped_column(String(5))
+    discipline: Mapped[str] = mapped_column(String(50))
+    rate_kopecks: Mapped[int] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, server_default="now()")
 
 
 class CartOrder(Base):
