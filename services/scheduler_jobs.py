@@ -525,6 +525,12 @@ async def saas_daily_morning_check():
     async with AsyncSessionLocal() as session:
         result = await session.execute(select(Student))
         students = result.scalars().all()
+        visit_result = await session.execute(select(VisitLog).where(VisitLog.club_id.in_({student.club_id for student in students}))) if students else None
+        latest_visits = {}
+        if visit_result:
+            for visit in visit_result.scalars().all():
+                if visit.visited_at and (visit.student_id not in latest_visits or visit.visited_at > latest_visits[visit.student_id]):
+                    latest_visits[visit.student_id] = visit.visited_at
 
         periods = reporting_periods()
         now_datetime = periods["now"]
@@ -638,8 +644,9 @@ async def saas_daily_morning_check():
                         await _notification_forget(birthday_key)
                         logger.error(f"Не удалось отправить ДР сообщение атлету {student.id}: {e}")
 
-            if student.last_visit and not student.is_frozen:
-                last_visit = student.last_visit.replace(tzinfo=None)
+            last_visit_value = latest_visits.get(student.id, student.last_visit)
+            if last_visit_value and not student.is_frozen:
+                last_visit = last_visit_value.replace(tzinfo=None)
                 days_absent = max(0, (now_datetime - last_visit).days)
                 absence_threshold = max((value for value in (5, 10, 15, 20) if days_absent >= value), default=0)
                 # Совместимость с историческим контрактом: прежний порог был days_absent >= 10.

@@ -1545,7 +1545,8 @@ async def get_revenue_stats(
     top_products = [{"name": title, "quantity": int(quantity or 0), "amount": round((amount or 0) / 100, 2)}
                     for title, quantity, amount in sorted((await session.execute(product_top_query)).all(), key=lambda row: row[1] or 0, reverse=True)[:10]]
 
-    student_metrics = calculate_student_metrics(students, now=now_local)
+    visit_logs = list((await session.execute(select(VisitLog).where(VisitLog.club_id == club_id))).scalars().all())
+    student_metrics = calculate_student_metrics(students, now=now_local, visit_logs=visit_logs)
     total_athletes = student_metrics["total_athletes"]
     total_parents = student_metrics["total_parents"]
     active_passes = student_metrics["active_passes"]
