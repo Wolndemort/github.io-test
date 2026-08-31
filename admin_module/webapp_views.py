@@ -32,7 +32,7 @@ from admin_module.api import (
 from admin_module.utils import verify_webapp_admin, verify_webapp_staff
 from admin_module.webapp_shared import get_club_id_from_host, telegram_init_gate, webapp_auth_gate, verify_webapp_admin
 from admin_module.webapp_verify import verify_telegram_data
-from database.db import Club, ClubProduct, ClubStaff, Discount, DiscountAssignment, MotivationAccrual, MotivationAdjustment, MotivationRate, PaymentOrder, Student, User, get_session, get_student_parent_ids
+from database.db import Club, ClubProduct, ClubStaff, Discount, DiscountAssignment, MotivationAccrual, MotivationAdjustment, MotivationRate, MotivationIndividual, PaymentOrder, Student, User, VisitLog, get_session, get_student_parent_ids
 from database.db import CartItem, CartOrder
 from services.audit import audit_event
 from services.legal_documents import legal_context
@@ -89,6 +89,24 @@ def _motivation_occurrences(settings, start, end):
                         result.append({"date": current, "staff_id": int(staff_id), "discipline": discipline, "time": lesson.get("time", "")})
                 current += timedelta(days=7)
     return result
+
+def _attendee_count(visit_rows, occurrence):
+    try:
+        hour, minute = (int(x) for x in occurrence["time"].split(":", 1))
+    except (ValueError, AttributeError):
+        return 0
+    slot_minutes = hour * 60 + minute
+    students = set()
+    for visit, discipline in visit_rows:
+        if str(discipline or "") != str(occurrence["discipline"]):
+            continue
+        visited = visit.visited_at
+        if not visited or visited.date() != occurrence["date"]:
+            continue
+        distance = abs((visited.hour * 60 + visited.minute) - slot_minutes)
+        if distance <= 60:
+            students.add(visit.student_id)
+    return len(students)
 
 def _product_financials(product):
     """Potential figures for the current stock, all represented in kopecks."""
@@ -732,6 +750,7 @@ async def admin_motivation_page(request: Request, club_id: int = Query(...), dat
     if end < start or (end - start).days > 366:
         raise HTTPException(400, "Допустимый диапазон — от 1 до 366 дней")
     occurrences = _motivation_occurrences(club.club_settings or {}, start, end)
+    visit_rows = (await session.execute(select(VisitLog, Student.discipline).join(Student, Student.id == VisitLog.student_id).where(VisitLog.club_id == club_id, VisitLog.visited_at >= datetime.combine(start, datetime.min.time()), VisitLog.visited_at < datetime.combine(end + timedelta(days=1), datetime.min.time())))).all()
     adjustments = (await session.execute(select(MotivationAdjustment).where(MotivationAdjustment.club_id == club_id))).scalars().all()
     rates = (await session.execute(select(MotivationRate).where(MotivationRate.club_id == club_id))).scalars().all()
     rate_by_key = {(x.staff_id, x.discipline): int(x.rate_kopecks or 0) for x in rates}
@@ -742,8 +761,12 @@ async def admin_motivation_page(request: Request, club_id: int = Query(...), dat
             continue
         key = f"{club_id}:{occurrence['date'].isoformat()}:{occurrence['time']}:{occurrence['discipline']}:{occurrence['staff_id']}"
         if key not in existing_keys:
-            rate = rate_by_key.get((occurrence["staff_id"], occurrence["discipline"]), 0)
-            session.add(MotivationAccrual(club_id=club_id, staff_id=occurrence["staff_id"], occurrence_key=key, occurrence_date=occurrence["date"], start_time=occurrence["time"], discipline=occurrence["discipline"], rate_kopecks=rate))
+            rate_row = next((x for x in rates if x.staff_id == occurrence["staff_id"] and x.discipline == occurrence["discipline"]), None)
+            rate = int(rate_row.rate_kopecks if rate_row else 0)
+            students = _attendee_count(visit_rows, occurrence)
+            threshold = int(rate_row.bonus_threshold if rate_row else 5)
+            bonus = max(0, students - threshold) * int(rate_row.bonus_per_student_kopecks if rate_row else 0)
+            session.add(MotivationAccrual(club_id=club_id, staff_id=occurrence["staff_id"], occurrence_key=key, occurrence_date=occurrence["date"], start_time=occurrence["time"], discipline=occurrence["discipline"], rate_kopecks=rate, student_count=students, bonus_kopecks=bonus))
     await session.commit()
     existing = (await session.execute(select(MotivationAccrual).where(MotivationAccrual.club_id == club_id, MotivationAccrual.occurrence_date >= start, MotivationAccrual.occurrence_date <= min(end, today)))).scalars().all()
     rows = []
@@ -751,7 +774,7 @@ async def admin_motivation_page(request: Request, club_id: int = Query(...), dat
         own = [x for x in occurrences if x["staff_id"] == coach.id]
         completed = [x for x in own if x["date"] <= today]; future = [x for x in own if x["date"] > today]
         correction = sum(x.amount_kopecks for x in adjustments if x.staff_id == coach.id)
-        earned = sum(x.rate_kopecks for x in existing if x.staff_id == coach.id)
+        earned = sum(x.rate_kopecks + x.bonus_kopecks for x in existing if x.staff_id == coach.id)
         future_pay = sum(rate_by_key.get((coach.id, x["discipline"]), 0) for x in future)
         rows.append({"id": coach.id, "name": coach.full_name or f"Тренер #{coach.id}", "rate": coach.rate_per_training_kopecks or 0, "completed": len(completed), "forecast_count": len(future), "earned": earned + correction, "forecast": future_pay + earned + correction, "correction": correction})
     return templates.TemplateResponse("admin_motivation.html", {"request": request, "club_id": club_id, "date_from": start.isoformat(), "date_to": end.isoformat(), "month": f"{start:%d.%m.%Y} — {end:%d.%m.%Y}", "staff": rows})
@@ -766,7 +789,7 @@ async def adjust_admin_motivation(payload: dict, session: AsyncSession = Depends
     if not staff or staff.club_id != club.id:
         raise HTTPException(404, "Тренер не найден")
     try:
-        amount = int(payload.get("amount_kopecks", 0)); rate = int(payload.get("rate_per_training_kopecks", staff.rate_per_training_kopecks or 0))
+        amount = int(payload.get("amount_kopecks", 0)); rate = int(payload.get("rate_per_training_kopecks", staff.rate_per_training_kopecks or 0)); bonus = max(0, int(payload.get("bonus_per_student_kopecks", 0))); threshold = max(1, min(100, int(payload.get("bonus_threshold", 5))))
     except (TypeError, ValueError):
         raise HTTPException(400, "Некорректная сумма")
     reason = str(payload.get("reason", "")).strip()
@@ -784,14 +807,56 @@ async def adjust_admin_motivation(payload: dict, session: AsyncSession = Depends
         rate_row = (await session.execute(select(MotivationRate).where(MotivationRate.club_id == club.id, MotivationRate.staff_id == staff.id, MotivationRate.discipline == discipline))).scalar_one_or_none()
         if rate_row:
             rate_row.rate_kopecks = max(0, rate)
+            rate_row.bonus_threshold = threshold
+            rate_row.bonus_per_student_kopecks = bonus
         else:
-            session.add(MotivationRate(club_id=club.id, staff_id=staff.id, discipline=discipline, rate_kopecks=max(0, rate)))
+            session.add(MotivationRate(club_id=club.id, staff_id=staff.id, discipline=discipline, rate_kopecks=max(0, rate), bonus_threshold=threshold, bonus_per_student_kopecks=bonus))
     else:
         staff.rate_per_training_kopecks = max(0, rate)
     if amount:
         session.add(MotivationAdjustment(club_id=club.id, staff_id=staff.id, amount_kopecks=amount, reason=reason[:500], idempotency_key=idempotency_key))
     await session.commit()
     return {"success": True}
+
+@router.post("/webapp/admin-motivation/individual")
+async def add_individual_motivation(payload: dict, session: AsyncSession = Depends(get_session)):
+    club = await session.get(Club, int(payload.get("club_id", 0)))
+    tg_user = await verify_webapp_staff(club, payload.get("init_data"), session, "schedule_view")
+    if int(tg_user.get("id", 0)) != int(getattr(club, "owner_id", 0) or 0) and int(tg_user.get("id", 0)) not in SUPER_ADMIN_IDS:
+        raise HTTPException(403, "Только администратор")
+    key = str(payload.get("idempotency_key", "")).strip()[:100]
+    if not key:
+        raise HTTPException(400, "Нужен idempotency_key")
+    if await session.scalar(select(MotivationIndividual).where(MotivationIndividual.idempotency_key == key)):
+        return {"success": True, "duplicate": True}
+    try:
+        training_date = datetime.strptime(str(payload.get("training_date")), "%Y-%m-%d").date()
+        rate = int(payload.get("rate_kopecks", 0)); duration = int(payload.get("duration_minutes", 60))
+    except (TypeError, ValueError):
+        raise HTTPException(400, "Некорректные дата, ставка или длительность")
+    if rate < 0 or duration < 15 or duration > 240:
+        raise HTTPException(400, "Длительность должна быть от 15 до 240 минут")
+    staff = await session.get(ClubStaff, int(payload.get("staff_id", 0)))
+    if not staff or staff.club_id != club.id or not staff.is_active:
+        raise HTTPException(404, "Тренер не найден")
+    session.add(MotivationIndividual(club_id=club.id, staff_id=staff.id, training_date=training_date, start_time=str(payload.get("start_time", "00:00"))[:5], duration_minutes=duration, rate_kopecks=rate, idempotency_key=key, note=str(payload.get("note", ""))[:500]))
+    await session.commit()
+    return {"success": True}
+
+@router.get("/webapp/admin-motivation/export")
+async def export_admin_motivation(club_id: int = Query(...), date_from: str | None = Query(None), date_to: str | None = Query(None), init_data: str | None = Query(None), session: AsyncSession = Depends(get_session)):
+    club = await session.get(Club, club_id); tg_user = await verify_webapp_staff(club, init_data, session, "schedule_view")
+    if int(tg_user.get("id", 0)) != int(getattr(club, "owner_id", 0) or 0) and int(tg_user.get("id", 0)) not in SUPER_ADMIN_IDS: raise HTTPException(403, "Только администратор")
+    today = date.today(); start = datetime.strptime(date_from, "%Y-%m-%d").date() if date_from else today.replace(day=1); end = datetime.strptime(date_to, "%Y-%m-%d").date() if date_to else today
+    if end < start or (end - start).days > 366: raise HTTPException(400, "Недопустимый диапазон")
+    rows = (await session.execute(select(MotivationAccrual, ClubStaff.full_name).join(ClubStaff, ClubStaff.id == MotivationAccrual.staff_id).where(MotivationAccrual.club_id == club_id, MotivationAccrual.occurrence_date.between(start, end)).order_by(MotivationAccrual.occurrence_date))).all()
+    individuals = (await session.execute(select(MotivationIndividual, ClubStaff.full_name).join(ClubStaff, ClubStaff.id == MotivationIndividual.staff_id).where(MotivationIndividual.club_id == club_id, MotivationIndividual.training_date.between(start, end)))).all()
+    from openpyxl import Workbook
+    output = BytesIO(); book = Workbook(); sheet = book.active; sheet.title = "Мотивация"; sheet.append(["Дата", "Тренер", "Дисциплина", "Ученики", "База", "Бонус", "Итого"])
+    for item, name in rows: sheet.append([item.occurrence_date, name, item.discipline, item.student_count, item.rate_kopecks / 100, item.bonus_kopecks / 100, (item.rate_kopecks + item.bonus_kopecks) / 100])
+    for item, name in individuals: sheet.append([item.training_date, name, "Индивидуальная", "", "", "", item.rate_kopecks / 100])
+    book.save(output); output.seek(0)
+    return StreamingResponse(output, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", headers={"Content-Disposition": f'attachment; filename="motivation_{club_id}_{start}_{end}.xlsx"'})
 
 @router.get("/webapp/admin-schedule", response_class=HTMLResponse)
 async def webapp_admin_schedule_page(

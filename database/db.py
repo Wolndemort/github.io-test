@@ -275,6 +275,8 @@ class MotivationRate(Base):
     staff_id: Mapped[int] = mapped_column(ForeignKey("club_staff.id", ondelete="CASCADE"), index=True)
     discipline: Mapped[str] = mapped_column(String(50))
     rate_kopecks: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    bonus_threshold: Mapped[int] = mapped_column(Integer, default=5, server_default="5")
+    bonus_per_student_kopecks: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, server_default="now()")
 
 
@@ -288,6 +290,22 @@ class MotivationAccrual(Base):
     start_time: Mapped[str] = mapped_column(String(5))
     discipline: Mapped[str] = mapped_column(String(50))
     rate_kopecks: Mapped[int] = mapped_column(Integer)
+    student_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    bonus_kopecks: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, server_default="now()")
+
+
+class MotivationIndividual(Base):
+    __tablename__ = "motivation_individuals"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    club_id: Mapped[int] = mapped_column(ForeignKey("clubs.id", ondelete="CASCADE"), index=True)
+    staff_id: Mapped[int] = mapped_column(ForeignKey("club_staff.id", ondelete="CASCADE"), index=True)
+    training_date: Mapped[date] = mapped_column(Date, index=True)
+    start_time: Mapped[str] = mapped_column(String(5))
+    duration_minutes: Mapped[int] = mapped_column(Integer, default=60, server_default="60")
+    rate_kopecks: Mapped[int] = mapped_column(Integer)
+    idempotency_key: Mapped[str] = mapped_column(String(100), unique=True, index=True)
+    note: Mapped[str] = mapped_column(String(500), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, server_default="now()")
 
 
