@@ -73,6 +73,25 @@ def _build_category_list(products):
         labels.setdefault(_normalize_category(raw), raw)
     return [labels[key] for key in sorted(labels)]
 
+def _product_financials(product):
+    """Potential figures for the current stock, all represented in kopecks."""
+    stock = max(0, int(product.stock or 0))
+    sale_price = max(0, int(product.price_kopecks or 0))
+    purchase_price = max(0, int(product.purchase_price_kopecks or 0))
+    return {
+        "stock_value_kopecks": sale_price * stock,
+        "potential_profit_kopecks": (sale_price - purchase_price) * stock,
+    }
+
+def _product_totals(products):
+    totals = {"stock_value_kopecks": 0, "potential_profit_kopecks": 0, "purchase_value_kopecks": 0}
+    for product in products:
+        figures = _product_financials(product)
+        totals["stock_value_kopecks"] += figures["stock_value_kopecks"]
+        totals["potential_profit_kopecks"] += figures["potential_profit_kopecks"]
+        totals["purchase_value_kopecks"] += max(0, int(product.purchase_price_kopecks or 0)) * max(0, int(product.stock or 0))
+    return totals
+
 @router.get("/webapp/shop", response_class=HTMLResponse)
 async def client_shop(request: Request, club_id: int = Query(...), init_data: str | None = Query(None), session: AsyncSession = Depends(get_session)):
     club = await session.get(Club, club_id)
@@ -108,8 +127,8 @@ async def admin_products_page(request: Request, club_id: int = Query(...), init_
         staff_obj = (await session.execute(select(ClubStaff).where(ClubStaff.club_id == club.id, ClubStaff.telegram_id == user_id, ClubStaff.is_active.is_(True)))).scalar_one_or_none()
         can_manage_products = staff_can(staff_obj, "products_manage")
     products = (await session.execute(select(ClubProduct).where(ClubProduct.club_id == club_id).order_by(ClubProduct.id.desc()))).scalars().all()
-    product_data = [{"id": p.id, "name": p.name, "category": p.category, "price_kopecks": p.price_kopecks, "stock": p.stock, "is_active": p.is_active, "image_url": p.image_url, "details": p.details} for p in products]
-    return templates.TemplateResponse("admin_products.html", {"request": request, "club": club, "club_id": club_id, "products": product_data, "can_manage_products": can_manage_products})
+    product_data = [{"id": p.id, "name": p.name, "category": p.category, "price_kopecks": p.price_kopecks, "purchase_price_kopecks": p.purchase_price_kopecks, "stock": p.stock, "is_active": p.is_active, "image_url": p.image_url, "details": p.details, **_product_financials(p)} for p in products]
+    return templates.TemplateResponse("admin_products.html", {"request": request, "club": club, "club_id": club_id, "products": product_data, "totals": _product_totals(products), "can_manage_products": can_manage_products})
 
 @router.get("/webapp/admin-product-sale", response_class=HTMLResponse)
 async def admin_product_sale_page(request: Request, club_id: int = Query(...), init_data: str | None = Query(None), session: AsyncSession = Depends(get_session)):
@@ -295,9 +314,10 @@ async def delete_cash_product_sale(order_id: str, payload: CashSaleDeletePayload
 @router.post("/webapp/admin-products")
 async def create_product(payload: ProductPayload, session: AsyncSession = Depends(get_session)):
     club = await session.get(Club, payload.club_id); tg_user = await verify_webapp_staff(club, payload.init_data, session, "products_manage")
-    if not payload.name.strip() or payload.price_kopecks <= 0 or payload.stock < 0: raise HTTPException(400, "РќРµРєРѕСЂСЂРµРєС‚РЅС‹Рµ РґР°РЅРЅС‹Рµ С‚РѕРІР°СЂР°")
+    purchase_price = payload.price_kopecks if payload.purchase_price_kopecks is None else payload.purchase_price_kopecks
+    if not payload.name.strip() or payload.price_kopecks <= 0 or purchase_price < 0 or payload.stock < 0: raise HTTPException(400, "РќРµРєРѕСЂСЂРµРєС‚РЅС‹Рµ РґР°РЅРЅС‹Рµ С‚РѕРІР°СЂР°")
     category = await _canonical_product_category(session, payload.club_id, payload.category)
-    p = ClubProduct(club_id=payload.club_id, name=payload.name.strip()[:120], image_url=(payload.image_url or "")[:500] or None, category=category, price_kopecks=payload.price_kopecks, stock=payload.stock, is_active=payload.is_active, details=(payload.details or "").strip()[:1000] or None)
+    p = ClubProduct(club_id=payload.club_id, name=payload.name.strip()[:120], image_url=(payload.image_url or "")[:500] or None, category=category, price_kopecks=payload.price_kopecks, purchase_price_kopecks=purchase_price, stock=payload.stock, is_active=payload.is_active, details=(payload.details or "").strip()[:1000] or None)
     session.add(p); await session.commit()
     audit_event(
         "product_created",
@@ -374,10 +394,11 @@ async def update_product(product_id: int, payload: ProductPayload, session: Asyn
     club = await session.get(Club, payload.club_id); tg_user = await verify_webapp_staff(club, payload.init_data, session, "products_manage")
     p = await session.get(ClubProduct, product_id)
     if not p or p.club_id != payload.club_id: raise HTTPException(404, "РўРѕРІР°СЂ РЅРµ РЅР°Р№РґРµРЅ")
-    if not payload.name.strip() or payload.price_kopecks <= 0 or payload.stock < 0: raise HTTPException(400, "РќРµРєРѕСЂСЂРµРєС‚РЅС‹Рµ РґР°РЅРЅС‹Рµ С‚РѕРІР°СЂР°")
-    before = {"name": p.name, "image_url": p.image_url, "category": p.category, "price_kopecks": p.price_kopecks, "stock": p.stock, "is_active": p.is_active, "details": p.details}
+    purchase_price = p.purchase_price_kopecks if payload.purchase_price_kopecks is None else payload.purchase_price_kopecks
+    if not payload.name.strip() or payload.price_kopecks <= 0 or purchase_price < 0 or payload.stock < 0: raise HTTPException(400, "РќРµРєРѕСЂСЂРµРєС‚РЅС‹Рµ РґР°РЅРЅС‹Рµ С‚РѕРІР°СЂР°")
+    before = {"name": p.name, "image_url": p.image_url, "category": p.category, "price_kopecks": p.price_kopecks, "purchase_price_kopecks": p.purchase_price_kopecks, "stock": p.stock, "is_active": p.is_active, "details": p.details}
     category = await _canonical_product_category(session, payload.club_id, payload.category, exclude_id=p.id)
-    p.name=payload.name.strip()[:120]; p.image_url=(payload.image_url or "")[:500] or None; p.category=category; p.price_kopecks=payload.price_kopecks; p.stock=payload.stock; p.is_active=payload.is_active; p.details=(payload.details or "").strip()[:1000] or None
+    p.name=payload.name.strip()[:120]; p.image_url=(payload.image_url or "")[:500] or None; p.category=category; p.price_kopecks=payload.price_kopecks; p.purchase_price_kopecks=purchase_price; p.stock=payload.stock; p.is_active=payload.is_active; p.details=(payload.details or "").strip()[:1000] or None
     await session.commit()
     audit_event(
         "product_updated",

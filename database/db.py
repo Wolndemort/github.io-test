@@ -249,6 +249,7 @@ class ClubProduct(Base):
     image_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     category: Mapped[str] = mapped_column(String(30), default="other")
     price_kopecks: Mapped[int] = mapped_column(Integer)
+    purchase_price_kopecks: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     stock: Mapped[int] = mapped_column(Integer, default=0)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     details: Mapped[Optional[str]] = mapped_column(String(1000), nullable=True)

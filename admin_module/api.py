@@ -178,6 +178,7 @@ class ProductPayload(BaseModel):
     name: str
     category: str = "other"
     price_kopecks: int
+    purchase_price_kopecks: int | None = None
     stock: int = 0
     is_active: bool = True
     image_url: str | None = None
