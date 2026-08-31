@@ -277,6 +277,8 @@ class MotivationRate(Base):
     rate_kopecks: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     bonus_threshold: Mapped[int] = mapped_column(Integer, default=5, server_default="5")
     bonus_per_student_kopecks: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    weekday_rate_kopecks: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    weekend_rate_kopecks: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, server_default="now()")
 
 

@@ -108,6 +108,12 @@ def _attendee_count(visit_rows, occurrence):
             students.add(visit.student_id)
     return len(students)
 
+def _scheduled_rate(rate_row, training_date):
+    if not rate_row:
+        return 0
+    specific = rate_row.weekend_rate_kopecks if training_date.weekday() >= 5 else rate_row.weekday_rate_kopecks
+    return int(specific or rate_row.rate_kopecks or 0)
+
 def _product_financials(product):
     """Potential figures for the current stock, all represented in kopecks."""
     stock = max(0, int(product.stock or 0))
@@ -753,7 +759,7 @@ async def admin_motivation_page(request: Request, club_id: int = Query(...), dat
     visit_rows = (await session.execute(select(VisitLog, Student.discipline).join(Student, Student.id == VisitLog.student_id).where(VisitLog.club_id == club_id, VisitLog.visited_at >= datetime.combine(start, datetime.min.time()), VisitLog.visited_at < datetime.combine(end + timedelta(days=1), datetime.min.time())))).all()
     adjustments = (await session.execute(select(MotivationAdjustment).where(MotivationAdjustment.club_id == club_id))).scalars().all()
     rates = (await session.execute(select(MotivationRate).where(MotivationRate.club_id == club_id))).scalars().all()
-    rate_by_key = {(x.staff_id, x.discipline): int(x.rate_kopecks or 0) for x in rates}
+    rate_by_key = {(x.staff_id, x.discipline): x for x in rates}
     existing = (await session.execute(select(MotivationAccrual).where(MotivationAccrual.club_id == club_id, MotivationAccrual.occurrence_date >= start, MotivationAccrual.occurrence_date <= min(end, today)))).scalars().all()
     existing_keys = {x.occurrence_key for x in existing}
     for occurrence in occurrences:
@@ -762,7 +768,7 @@ async def admin_motivation_page(request: Request, club_id: int = Query(...), dat
         key = f"{club_id}:{occurrence['date'].isoformat()}:{occurrence['time']}:{occurrence['discipline']}:{occurrence['staff_id']}"
         if key not in existing_keys:
             rate_row = next((x for x in rates if x.staff_id == occurrence["staff_id"] and x.discipline == occurrence["discipline"]), None)
-            rate = int(rate_row.rate_kopecks if rate_row else 0)
+            rate = _scheduled_rate(rate_row, occurrence["date"])
             students = _attendee_count(visit_rows, occurrence)
             threshold = int(rate_row.bonus_threshold if rate_row else 5)
             bonus = max(0, students - threshold) * int(rate_row.bonus_per_student_kopecks if rate_row else 0)
@@ -775,7 +781,7 @@ async def admin_motivation_page(request: Request, club_id: int = Query(...), dat
         completed = [x for x in own if x["date"] <= today]; future = [x for x in own if x["date"] > today]
         correction = sum(x.amount_kopecks for x in adjustments if x.staff_id == coach.id)
         earned = sum(x.rate_kopecks + x.bonus_kopecks for x in existing if x.staff_id == coach.id)
-        future_pay = sum(rate_by_key.get((coach.id, x["discipline"]), 0) for x in future)
+        future_pay = sum(_scheduled_rate(rate_by_key.get((coach.id, x["discipline"])), x["date"]) for x in future)
         rows.append({"id": coach.id, "name": coach.full_name or f"Тренер #{coach.id}", "rate": coach.rate_per_training_kopecks or 0, "completed": len(completed), "forecast_count": len(future), "earned": earned + correction, "forecast": future_pay + earned + correction, "correction": correction})
     return templates.TemplateResponse("admin_motivation.html", {"request": request, "club_id": club_id, "date_from": start.isoformat(), "date_to": end.isoformat(), "month": f"{start:%d.%m.%Y} — {end:%d.%m.%Y}", "staff": rows})
 
@@ -809,8 +815,10 @@ async def adjust_admin_motivation(payload: dict, session: AsyncSession = Depends
             rate_row.rate_kopecks = max(0, rate)
             rate_row.bonus_threshold = threshold
             rate_row.bonus_per_student_kopecks = bonus
+            rate_row.weekday_rate_kopecks = max(0, int(payload.get("weekday_rate_kopecks", rate)))
+            rate_row.weekend_rate_kopecks = max(0, int(payload.get("weekend_rate_kopecks", rate)))
         else:
-            session.add(MotivationRate(club_id=club.id, staff_id=staff.id, discipline=discipline, rate_kopecks=max(0, rate), bonus_threshold=threshold, bonus_per_student_kopecks=bonus))
+            session.add(MotivationRate(club_id=club.id, staff_id=staff.id, discipline=discipline, rate_kopecks=max(0, rate), bonus_threshold=threshold, bonus_per_student_kopecks=bonus, weekday_rate_kopecks=max(0, int(payload.get("weekday_rate_kopecks", rate))), weekend_rate_kopecks=max(0, int(payload.get("weekend_rate_kopecks", rate)))))
     else:
         staff.rate_per_training_kopecks = max(0, rate)
     if amount:
