@@ -156,7 +156,6 @@
             {% if '*' in staff_permissions %}<a class="btn soft mono-action" href="/webapp/admin-freeze?club_id={{ club_id }}">❄️ Заморозка абонементов</a>{% endif %}
             {% if '*' in staff_permissions or 'analytics_view' in staff_permissions %}<a class="btn soft mono-action" href="/webapp/admin-visits?club_id={{ club_id }}">👣 Посещения</a>{% endif %}
             {% if '*' in staff_permissions %}<a class="btn soft mono-action" href="/webapp/admin-audit?club_id={{ club_id }}">🔎 Аудит</a>{% endif %}
-            {% if '*' in staff_permissions %}<a class="btn soft mono-action" href="/webapp/admin-motivation?club_id={{ club_id }}">Мотивация тренеров</a>{% endif %}
             {% endif %}
             {% if not is_staff_mode %}
             <a class="btn soft mono-action" href="/webapp/client-cabinet/create-student?club_id={{ club_id }}">Создать атлета</a>

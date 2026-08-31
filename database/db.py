@@ -158,7 +158,6 @@ class ClubStaff(Base):
     full_name: Mapped[Optional[str]] = mapped_column(String(150), nullable=True)
     role: Mapped[str] = mapped_column(String(32), default="cashier")
     permissions: Mapped[dict] = mapped_column(JSONB, default=dict)
-    rate_per_training_kopecks: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="1")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, server_default="now()")
 
@@ -255,16 +254,6 @@ class ClubProduct(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     details: Mapped[Optional[str]] = mapped_column(String(1000), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-
-
-class MotivationAdjustment(Base):
-    __tablename__ = "motivation_adjustments"
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    club_id: Mapped[int] = mapped_column(ForeignKey("clubs.id", ondelete="CASCADE"), index=True)
-    staff_id: Mapped[int] = mapped_column(ForeignKey("club_staff.id", ondelete="CASCADE"), index=True)
-    amount_kopecks: Mapped[int] = mapped_column(Integer)
-    reason: Mapped[str] = mapped_column(String(500), default="")
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, server_default="now()", index=True)
 
 
 class CartOrder(Base):

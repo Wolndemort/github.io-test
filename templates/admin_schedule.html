@@ -104,7 +104,6 @@ button,.copy-btn{background:#fff!important;color:#090909!important;font-weight:7
 </div>
 
 <div id="list"></div>
-{% if can_assign_coach %}<div class="card controls"><label>Тренер<select id="coachStaff"><option value="">Не назначен</option>{% for x in staff %}<option value="{{ x.id }}">{{ x.name }}</option>{% endfor %}</select></label></div>{% endif %}
 
 <div class="card controls">
   <div class="row">
@@ -120,7 +119,6 @@ tg.ready();
 tg.expand();
 
 const data = {{ disciplines|tojson }};
-const canAssignCoach = {{ can_assign_coach|tojson }};
 const days = {
   mon: 'Пн',
   tue: 'Вт',
@@ -138,7 +136,6 @@ const daySelect = document.getElementById('day');
 const list = document.getElementById('list');
 const timeInput = document.getElementById('time');
 const coachInput = document.getElementById('coach');
-const coachStaffInput = document.getElementById('coachStaff');
 const saveBtn = document.getElementById('saveBtn');
 const copyFrom = document.getElementById('copyFrom');
 const copyBtn = document.getElementById('copyBtn');
@@ -221,7 +218,6 @@ function edit(i) {
   idx = i;
   timeInput.value = x.time || '';
   coachInput.value = x.coach || '';
-  if (coachStaffInput) coachStaffInput.value = x.coach_staff_id || '';
   saveBtn.textContent = 'Сохранить';
 }
 
@@ -233,8 +229,7 @@ async function send(action, extra = {}) {
     discipline: disciplineSelect.value,
     day: daySelect.value,
     index: idx,
-    lesson: action === 'copy_day' ? null : { time: timeInput.value, coach: coachStaffInput?.selectedOptions?.[0]?.textContent || coachInput.value, max_slots: 0 },
-    coach_staff_id: coachStaffInput && coachStaffInput.value ? Number(coachStaffInput.value) : null,
+    lesson: action === 'copy_day' ? null : { time: timeInput.value, coach: coachInput.value, max_slots: 0 },
     ...extra,
   };
   const r = await fetch('/webapp/admin-schedule/change', {
