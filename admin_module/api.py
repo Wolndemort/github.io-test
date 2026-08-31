@@ -169,6 +169,7 @@ class ScheduleChangePayload(BaseModel):
     day: str
     index: int | None = None
     lesson: dict | None = None
+    coach_staff_id: int | None = None
     source_day: str | None = None
     source_discipline: str | None = None
 

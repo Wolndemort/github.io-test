@@ -28,12 +28,18 @@ def normalize_schedule_block(schedule_data) -> dict[str, list[dict]]:
                 taken_slots = int(raw_taken if raw_taken is not None else 0)
             except (ValueError, TypeError):
                 taken_slots = 0
-            lessons.append({
+            normalized_lesson = {
                 "time": str(lesson.get("time", "00:00"))[:5],
                 "coach": str(lesson.get("coach", lesson.get("info", "")))[:100],
                 "max_slots": max(0, max_slots),
                 "taken_slots": max(0, taken_slots),
-            })
+            }
+            if lesson.get("coach_staff_id") is not None:
+                try:
+                    normalized_lesson["coach_staff_id"] = int(lesson["coach_staff_id"])
+                except (TypeError, ValueError):
+                    pass
+            lessons.append(normalized_lesson)
         lessons.sort(key=lambda x: x["time"])
         normalized[day] = lessons
     return normalized

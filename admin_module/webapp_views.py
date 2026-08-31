@@ -1,9 +1,10 @@
 ﻿from __future__ import annotations
 
 import copy
+import calendar
 import os
 import uuid
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from html import escape
 
 import httpx
@@ -31,7 +32,7 @@ from admin_module.api import (
 from admin_module.utils import verify_webapp_admin, verify_webapp_staff
 from admin_module.webapp_shared import get_club_id_from_host, telegram_init_gate, webapp_auth_gate, verify_webapp_admin
 from admin_module.webapp_verify import verify_telegram_data
-from database.db import Club, ClubProduct, ClubStaff, Discount, DiscountAssignment, PaymentOrder, Student, User, get_session, get_student_parent_ids
+from database.db import Club, ClubProduct, ClubStaff, Discount, DiscountAssignment, MotivationAdjustment, PaymentOrder, Student, User, get_session, get_student_parent_ids
 from database.db import CartItem, CartOrder
 from services.audit import audit_event
 from services.legal_documents import legal_context
@@ -72,6 +73,21 @@ def _build_category_list(products):
         raw = (getattr(product, "category", None) or "other").strip() or "other"
         labels.setdefault(_normalize_category(raw), raw)
     return [labels[key] for key in sorted(labels)]
+
+_MOTIVATION_WEEKDAYS = {"mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5, "sun": 6}
+
+def _motivation_occurrences(settings, start, end):
+    result = []
+    for discipline, block in (settings.get("disciplines", {}) or {}).items():
+        for day, lessons in normalize_schedule_block((block or {}).get("schedule", {})).items():
+            weekday = _MOTIVATION_WEEKDAYS[day]
+            current = start + timedelta(days=(weekday - start.weekday()) % 7)
+            while current <= end:
+                for lesson in lessons:
+                    if lesson.get("coach_staff_id"):
+                        result.append({"date": current, "staff_id": int(lesson["coach_staff_id"]), "discipline": discipline, "time": lesson.get("time", "")})
+                current += timedelta(days=7)
+    return result
 
 def _product_financials(product):
     """Potential figures for the current stock, all represented in kopecks."""
@@ -699,6 +715,47 @@ async def change_admin_tariff(payload: TariffChangePayload, request: Request, se
     )
     return {"success": True}
 
+@router.get("/webapp/admin-motivation", response_class=HTMLResponse)
+async def admin_motivation_page(request: Request, club_id: int = Query(...), init_data: str | None = Query(None), session: AsyncSession = Depends(get_session)):
+    club = await session.get(Club, club_id)
+    tg_user = await verify_webapp_staff(club, init_data, session, "schedule_view")
+    if int(tg_user.get("id", 0)) != int(club.owner_id or 0) and int(tg_user.get("id", 0)) not in SUPER_ADMIN_IDS:
+        raise HTTPException(403, "Раздел мотивации доступен только администратору")
+    staff = (await session.execute(select(ClubStaff).where(ClubStaff.club_id == club_id, ClubStaff.is_active.is_(True)).order_by(ClubStaff.full_name))).scalars().all()
+    today = date.today(); start = today.replace(day=1); end = today.replace(day=calendar.monthrange(today.year, today.month)[1])
+    occurrences = _motivation_occurrences(club.club_settings or {}, start, end)
+    adjustments = (await session.execute(select(MotivationAdjustment).where(MotivationAdjustment.club_id == club_id))).scalars().all()
+    rows = []
+    for coach in staff:
+        own = [x for x in occurrences if x["staff_id"] == coach.id]
+        completed = [x for x in own if x["date"] <= today]; future = [x for x in own if x["date"] > today]
+        correction = sum(x.amount_kopecks for x in adjustments if x.staff_id == coach.id)
+        rate = int(coach.rate_per_training_kopecks or 0)
+        rows.append({"id": coach.id, "name": coach.full_name or f"Тренер #{coach.id}", "rate": rate, "completed": len(completed), "forecast_count": len(future), "earned": len(completed) * rate + correction, "forecast": len(future) * rate + correction, "correction": correction})
+    return templates.TemplateResponse("admin_motivation.html", {"request": request, "club_id": club_id, "month": today.strftime("%m.%Y"), "staff": rows})
+
+@router.post("/webapp/admin-motivation/adjust")
+async def adjust_admin_motivation(payload: dict, session: AsyncSession = Depends(get_session)):
+    club = await session.get(Club, int(payload.get("club_id", 0)))
+    tg_user = await verify_webapp_staff(club, payload.get("init_data"), session, "schedule_view")
+    if int(tg_user.get("id", 0)) != int(club.owner_id or 0) and int(tg_user.get("id", 0)) not in SUPER_ADMIN_IDS:
+        raise HTTPException(403, "Только администратор может корректировать мотивацию")
+    staff = await session.get(ClubStaff, int(payload.get("staff_id", 0)))
+    if not staff or staff.club_id != club.id:
+        raise HTTPException(404, "Тренер не найден")
+    try:
+        amount = int(payload.get("amount_kopecks", 0)); rate = int(payload.get("rate_per_training_kopecks", staff.rate_per_training_kopecks or 0))
+    except (TypeError, ValueError):
+        raise HTTPException(400, "Некорректная сумма")
+    reason = str(payload.get("reason", "")).strip()
+    if not reason:
+        raise HTTPException(400, "Укажите причину корректировки")
+    staff.rate_per_training_kopecks = max(0, rate)
+    if amount:
+        session.add(MotivationAdjustment(club_id=club.id, staff_id=staff.id, amount_kopecks=amount, reason=reason[:500]))
+    await session.commit()
+    return {"success": True}
+
 @router.get("/webapp/admin-schedule", response_class=HTMLResponse)
 async def webapp_admin_schedule_page(
         request: Request,
@@ -709,13 +766,17 @@ async def webapp_admin_schedule_page(
     club = (await session.execute(select(Club).where(Club.id == club_id))).scalar_one_or_none()
     if not init_data:
         return telegram_init_gate('/webapp/admin-schedule', club_id, 'РћС‚РєСЂРѕР№С‚Рµ Р°РґРјРёРЅСЃРєРѕРµ СЂР°СЃРїРёСЃР°РЅРёРµ РёР· Telegram')
-    await verify_webapp_staff(club, init_data, session, "schedule_view")
-    return templates.TemplateResponse("admin_schedule.html", {"request": request, "club": club, "club_id": club_id, "disciplines": (club.club_settings or {}).get("disciplines", {})})
+    tg_user = await verify_webapp_staff(club, init_data, session, "schedule_view")
+    is_admin = int(tg_user.get("id", 0)) == int(club.owner_id or 0) or int(tg_user.get("id", 0)) in SUPER_ADMIN_IDS
+    staff = (await session.execute(select(ClubStaff).where(ClubStaff.club_id == club_id, ClubStaff.is_active.is_(True)).order_by(ClubStaff.full_name))).scalars().all()
+    staff_data = [{"id": x.id, "name": x.full_name or f"Тренер #{x.id}"} for x in staff]
+    return templates.TemplateResponse("admin_schedule.html", {"request": request, "club": club, "club_id": club_id, "disciplines": (club.club_settings or {}).get("disciplines", {}), "staff": staff_data, "can_assign_coach": is_admin})
 
 @router.post("/webapp/admin-schedule/change")
 async def change_admin_schedule(payload: ScheduleChangePayload, session: AsyncSession = Depends(get_session)):
     club = (await session.execute(select(Club).where(Club.id == payload.club_id).with_for_update())).scalar_one_or_none()
     tg_user = await verify_webapp_staff(club, payload.init_data, session, "schedule_edit")
+    is_admin = int(tg_user.get("id", 0)) == int(club.owner_id or 0) or int(tg_user.get("id", 0)) in SUPER_ADMIN_IDS
     settings = dict(club.club_settings or {})
     disciplines = dict(settings.get("disciplines", {}))
     block = dict(disciplines.get(payload.discipline, {}))
@@ -780,6 +841,16 @@ async def change_admin_schedule(payload: ScheduleChangePayload, session: AsyncSe
             "coach": str(lesson.get("coach", lesson.get("info", "")))[:100],
             "max_slots": max(0, min(999, parsed_max_slots)),
         }
+        if payload.coach_staff_id is not None:
+            if not is_admin:
+                raise HTTPException(403, "Назначать тренера может только администратор")
+            assigned = await session.get(ClubStaff, payload.coach_staff_id)
+            if not assigned or assigned.club_id != club.id or not assigned.is_active:
+                raise HTTPException(400, "Выберите действующего тренера клуба")
+            item["coach_staff_id"] = assigned.id
+            item["coach"] = assigned.full_name or f"Тренер #{assigned.id}"
+        elif payload.action == "update" and payload.index is not None and payload.index < len(lessons):
+            item["coach_staff_id"] = lessons[payload.index].get("coach_staff_id")
         hour_minute = str(item["time"]).split(":")
         if len(hour_minute) != 2 or not all(part.isdigit() for part in hour_minute) or not (0 <= int(hour_minute[0]) <= 23 and 0 <= int(hour_minute[1]) <= 59):
             raise HTTPException(400, "Время должно быть в формате ЧЧ:ММ")
