@@ -34,6 +34,18 @@ def normalize_schedule_block(schedule_data) -> dict[str, list[dict]]:
                 "max_slots": max(0, max_slots),
                 "taken_slots": max(0, taken_slots),
             }
+            raw_coach_ids = lesson.get("coach_staff_ids")
+            if isinstance(raw_coach_ids, (list, tuple)):
+                coach_ids = []
+                for coach_id in raw_coach_ids[:5]:
+                    try:
+                        coach_id = int(coach_id)
+                    except (TypeError, ValueError):
+                        continue
+                    if coach_id > 0 and coach_id not in coach_ids:
+                        coach_ids.append(coach_id)
+                if coach_ids:
+                    normalized_lesson["coach_staff_ids"] = coach_ids
             if lesson.get("coach_staff_id") is not None:
                 try:
                     normalized_lesson["coach_staff_id"] = int(lesson["coach_staff_id"])

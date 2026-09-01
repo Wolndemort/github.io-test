@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 from datetime import datetime
 
 from aiogram import Router, F, types
@@ -14,6 +15,7 @@ from database.db import Club, Student, PaymentOrder
 from handlers.states import AdminTariffStates, AdminScheduleStates
 from services.audit import audit_event
 from services.staff_permissions import permissions_for_staff
+from services.motivation_schedule import remember_schedule_change
 from loguru import logger
 
 router = Router()
@@ -459,9 +461,11 @@ async def admin_delete_schedule_lesson(callback: types.CallbackQuery, state: FSM
     s_data = await state.get_data()
     club_id = s_data.get("club_id")
     try:
+        previous_disciplines = copy.deepcopy(club_settings.get("disciplines", {}))
         lessons_list = club_settings["disciplines"][disc_id]["schedule"][day]
         if 0 <= lesson_idx < len(lessons_list):
             lessons_list.pop(lesson_idx)
+            remember_schedule_change(club_settings, previous_disciplines, club_settings.get("disciplines", {}))
             await admin_schedule_choose_day(callback, state, club_settings, manual_day=day, is_owner=is_owner, is_super_admin=is_super_admin, staff=staff)
             await save_club_settings(session, redis, bot.token, club_id, club_settings)
             audit_event("schedule_lesson_deleted", club_id=club_id, action="delete", object_type="schedule_lesson", object_id=f"{disc_id}:{day}:{lesson_idx}", location="bot/schedule", actor_user_id=callback.from_user.id, actor_role="staff", actor_name=callback.from_user.full_name, discipline=disc_id, day=day)
@@ -514,11 +518,13 @@ async def admin_finalize_schedule(message: types.Message, state: FSMContext, clu
     time_text = s_data["new_time"]
     coach_text = s_data["new_coach"]
     new_lesson = {"time": time_text, "coach": coach_text, "max_slots": max_slots, "taken_slots": 0}
+    previous_disciplines = copy.deepcopy(club_settings.get("disciplines", {}))
     discipline_block = club_settings["disciplines"][disc_id]
     if "schedule" not in discipline_block or isinstance(discipline_block["schedule"], str):
         club_settings["disciplines"][disc_id]["schedule"] = {"mon": [], "tue": [], "wed": [], "thu": [], "fri": [], "sat": [], "sun": []}
     club_settings["disciplines"][disc_id]["schedule"][day].append(new_lesson)
     club_settings["disciplines"][disc_id]["schedule"][day].sort(key=lambda x: x["time"])
+    remember_schedule_change(club_settings, previous_disciplines, club_settings.get("disciplines", {}))
     await save_club_settings(session, redis, bot.token, club_id, club_settings)
     await state.clear()
     audit_event("schedule_lesson_created", club_id=club_id, action="create", object_type="schedule_lesson", object_id=f"{disc_id}:{day}:{time_text}", location="bot/schedule", actor_user_id=message.from_user.id, actor_role="staff", actor_name=message.from_user.full_name, discipline=disc_id, day=day, time=time_text, info=coach_text, max_slots=max_slots)
