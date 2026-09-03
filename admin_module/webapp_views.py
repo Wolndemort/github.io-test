@@ -980,7 +980,7 @@ async def change_admin_schedule(payload: ScheduleChangePayload, session: AsyncSe
             raise HTTPException(400, "Длительность должна быть от 15 до 240 минут")
         item = {
             "time": str(lesson.get("time", "00:00"))[:5],
-            "coach": str(lesson.get("coach", lesson.get("info", "")))[:100],
+            "coach": str(lesson.get("info", lesson.get("coach", "")))[:100],
             "max_slots": max(0, min(999, parsed_max_slots)),
             "duration_minutes": parsed_duration,
         }
@@ -997,8 +997,18 @@ async def change_admin_schedule(payload: ScheduleChangePayload, session: AsyncSe
             names = {x.id: x.full_name or f"Тренер #{x.id}" for x in assigned_staff}
             item["coach_staff_ids"] = selected_staff_ids
             item["coach_staff_id"] = selected_staff_ids[0] if selected_staff_ids else None
-            item["coach"] = ", ".join(names[x] for x in selected_staff_ids)
+            # `coach` is the free-form lesson information/comment. The
+            # assigned trainers live only in coach_staff_ids and must not
+            # overwrite that comment.
+            previous_lesson = lessons[payload.index] if payload.action == "update" and payload.index is not None and 0 <= payload.index < len(lessons) else {}
+            previous_comment = str(previous_lesson.get("coach", "")).strip()
+            assigned_names = {str(names[x]).strip().casefold() for x in selected_staff_ids}
+            if previous_comment.casefold() in assigned_names or previous_comment.casefold() == ", ".join(names[x] for x in selected_staff_ids).casefold():
+                item["coach"] = ""
         elif payload.action == "update" and payload.index is not None and payload.index < len(lessons):
+            previous_lesson = lessons[payload.index]
+            if previous_lesson.get("coach_staff_ids"):
+                item["coach_staff_ids"] = list(previous_lesson["coach_staff_ids"])
             item["coach_staff_id"] = lessons[payload.index].get("coach_staff_id")
         hour_minute = str(item["time"]).split(":")
         if len(hour_minute) != 2 or not all(part.isdigit() for part in hour_minute) or not (0 <= int(hour_minute[0]) <= 23 and 0 <= int(hour_minute[1]) <= 59):
@@ -1112,6 +1122,8 @@ async def webapp_schedule_page(
 
     settings = club.club_settings if isinstance(club.club_settings, dict) else {}
     disciplines_data = settings.get("disciplines", {})
+    staff_rows = (await session.execute(select(ClubStaff).where(ClubStaff.club_id == club_id))).scalars().all()
+    staff_names = {item.id: item.full_name or f"Тренер #{item.id}" for item in staff_rows}
 
     day_names = {
         "mon": "РџРѕРЅРµРґРµР»СЊРЅРёРє", "tue": "Р’С‚РѕСЂРЅРёРє", "wed": "РЎСЂРµРґР°",
@@ -1160,6 +1172,7 @@ async def webapp_schedule_page(
                     parsed_lessons.append({
                         "time": str(lesson.get("time", "00:00")),
                         "coach": str(lesson.get("coach", "РРЅСЃС‚СЂСѓРєС‚РѕСЂ")),
+                        "trainers": ", ".join(staff_names.get(int(staff_id), f"Тренер #{staff_id}") for staff_id in (lesson.get("coach_staff_ids") or ([lesson["coach_staff_id"]] if lesson.get("coach_staff_id") else []))),
                         "duration_minutes": int(lesson.get("duration_minutes", 60)),
                         "max_slots": max_slots,
                         "free_slots": max(0, max_slots - taken_slots)

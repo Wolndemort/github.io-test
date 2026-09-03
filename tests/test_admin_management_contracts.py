@@ -428,6 +428,7 @@ def test_schedule_webapp_bottom_bar_is_collapsible():
 def test_admin_schedule_webapp_supports_copy_from_day_and_dark_contrast():
     page = Path("templates/admin_schedule.html").read_text(encoding="utf-8")
     api = Path("admin_module/webapp_views.py").read_text(encoding="utf-8")
+    public_page = Path("templates/schedule.html").read_text(encoding="utf-8")
     assert "copy_day" in page
     assert "copy_from" in page
     assert "copyFrom" in page
@@ -441,6 +442,10 @@ def test_admin_schedule_webapp_supports_copy_from_day_and_dark_contrast():
     assert "Нельзя копировать дисциплину в саму себя" in api
     assert "В исходном дне нет занятий" in api
     assert "В исходной дисциплине нет занятий" in api
+    assert "coach: coachInput.value" in page
+    assert 'item["coach"] = ", ".join' not in api
+    assert '"coach_staff_ids"' in api
+    assert "lesson.trainers" in public_page
 
 
 @pytest.mark.asyncio
