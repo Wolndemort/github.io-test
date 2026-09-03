@@ -1280,8 +1280,12 @@ async def process_user_contact(
             if student.parent_id is None and matched_primary:
                 student.parent_id = user_id
             existing_link = await session.get(StudentParent, {"student_id": student.id, "parent_id": user_id})
-            if not existing_link:
-                session.add(StudentParent(student_id=student.id, parent_id=user_id, is_primary=matched_primary, phone=normalized_phone))
+            is_primary_parent = student.parent_id == user_id
+            if existing_link:
+                existing_link.is_primary = is_primary_parent
+                existing_link.phone = normalized_phone
+            else:
+                session.add(StudentParent(student_id=student.id, parent_id=user_id, is_primary=is_primary_parent, phone=normalized_phone))
             session.add(student)
 
         await session.commit()

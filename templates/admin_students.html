@@ -242,32 +242,53 @@ function attachInviteButton(form) {
   });
 }
 
+const studentEditFields = ['name', 'birthday', 'balance_lessons', 'expire_date', 'can_freeze', 'is_frozen', 'frozen_days', 'parent_phone', 'parent_phone_secondary', 'discipline', 'comment'];
+const studentNumericFields = new Set(['balance_lessons', 'can_freeze', 'is_frozen']);
+function readStudentEditValues(form) {
+  const f = new FormData(form);
+  const values = {};
+  studentEditFields.forEach(name => {
+    const raw = f.get(name);
+    if (name === 'frozen_days') values[name] = raw ? Number(raw) : null;
+    else if (studentNumericFields.has(name)) values[name] = Number(raw || 0);
+    else values[name] = String(raw ?? '');
+  });
+  return values;
+}
+function studentEditValueKey(name, value) {
+  return value === null || value === undefined ? '' : String(value);
+}
+
 function bindEdit(form) {
   ensureSecondParentPhone(form);
   attachInviteButton(form);
+  let initialValues = readStudentEditValues(form);
   form.addEventListener('submit', async e => {
     e.preventDefault();
     const saveButton = form.querySelector('button[type="submit"]');
     const originalButtonText = saveButton.textContent;
     saveButton.disabled = true;
     saveButton.textContent = 'Сохраняем...';
-    const f = new FormData(form);
+    const values = readStudentEditValues(form);
+    const msg = form.querySelector('.msg');
     const payload = {
       init_data: initData,
       club_id: clubId,
-      name: f.get('name'),
-      birthday: f.get('birthday'),
-      balance_lessons: Number(f.get('balance_lessons')),
-      expire_date: f.get('expire_date'),
-      can_freeze: Number(f.get('can_freeze')),
-      is_frozen: Number(f.get('is_frozen')),
-      frozen_days: f.get('frozen_days') ? Number(f.get('frozen_days')) : null,
-      parent_phone: f.get('parent_phone'),
-      parent_phone_secondary: f.get('parent_phone_secondary'),
-      discipline: f.get('discipline')
-      ,comment: f.get('comment')
+      expected_balance_lessons: initialValues.balance_lessons,
+      expected_expire_date: initialValues.expire_date,
+      expected_parent_phone: initialValues.parent_phone,
+      expected_parent_phone_secondary: initialValues.parent_phone_secondary,
     };
-    const msg = form.querySelector('.msg');
+    const changedFields = studentEditFields.filter(name =>
+      studentEditValueKey(name, values[name]) !== studentEditValueKey(name, initialValues[name])
+    );
+    changedFields.forEach(name => { payload[name] = values[name]; });
+    if (!changedFields.length) {
+      msg.textContent = 'Изменений нет';
+      saveButton.disabled = false;
+      saveButton.textContent = originalButtonText;
+      return;
+    }
     try {
       const r = await fetch('/admin/students/' + form.dataset.id, {
         method: 'PATCH',
@@ -275,6 +296,7 @@ function bindEdit(form) {
         body: JSON.stringify(payload)
       });
       if (r.ok) {
+        initialValues = values;
         attachInviteButton(form);
         msg.textContent = 'Сохранено';
       } else {

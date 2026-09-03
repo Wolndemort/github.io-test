@@ -971,6 +971,35 @@ async def admin_update_student(
     tg_user = await verify_webapp_staff(owner_club, payload.init_data, db, "athletes_manage")
     if not tg_user:
         raise HTTPException(status_code=403, detail="Доступ запрещён")
+    # Protect payments and parent links from stale admin tabs. The UI sends
+    # snapshots with every edit; stale/legacy requests are rejected.
+    snapshot_fields = {
+        "expected_balance_lessons",
+        "expected_expire_date",
+        "expected_parent_phone",
+        "expected_parent_phone_secondary",
+    }
+    provided_fields = getattr(payload, "model_fields_set", getattr(payload, "__fields_set__", set()))
+    if not snapshot_fields.issubset(provided_fields):
+        raise HTTPException(status_code=409, detail="Обновите страницу перед сохранением атлета.")
+    if payload.expected_balance_lessons is not None and payload.expected_balance_lessons != (student.balance_lessons or 0):
+        raise HTTPException(status_code=409, detail="Атлет уже изменён. Обновите страницу и повторите сохранение.")
+    if payload.expected_expire_date is not None:
+        try:
+            expected_expire = parse_user_date_any(payload.expected_expire_date) if payload.expected_expire_date.strip() else None
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Некорректный снимок даты окончания")
+        actual_expire = student.expire_date.date() if student.expire_date else None
+        if expected_expire != actual_expire:
+            raise HTTPException(status_code=409, detail="Атлет уже изменён. Обновите страницу и повторите сохранение.")
+    for expected_phone, actual_phone in (
+        (payload.expected_parent_phone, student.parent_phone),
+        (payload.expected_parent_phone_secondary, student.parent_phone_secondary),
+    ):
+        if expected_phone is not None:
+            normalized_expected = normalize_ru_phone(expected_phone) if expected_phone.strip() else None
+            if normalized_expected != actual_phone:
+                raise HTTPException(status_code=409, detail="Атлет уже изменён. Обновите страницу и повторите сохранение.")
     before = {
         "name": student.name,
         "balance_lessons": student.balance_lessons,
@@ -982,6 +1011,7 @@ async def admin_update_student(
         "frozen_days": student.frozen_days,
         "discipline": student.discipline,
         "parent_phone": student.parent_phone,
+        "parent_phone_secondary": student.parent_phone_secondary,
         "comment": student.comment,
     }
     if payload.name is not None:
@@ -1067,6 +1097,8 @@ async def admin_update_student(
             if normalized_secondary == student.parent_phone:
                 raise HTTPException(status_code=400, detail="Номера родителей должны отличаться")
             student.parent_phone_secondary = normalized_secondary
+    if student.parent_phone and student.parent_phone_secondary and student.parent_phone == student.parent_phone_secondary:
+        raise HTTPException(status_code=400, detail="Номера родителей должны отличаться")
     await db.commit()
     after = {
         "name": student.name,
@@ -1079,6 +1111,7 @@ async def admin_update_student(
         "frozen_days": student.frozen_days,
         "discipline": student.discipline,
         "parent_phone": student.parent_phone,
+        "parent_phone_secondary": student.parent_phone_secondary,
         "comment": student.comment,
     }
     audit_event(

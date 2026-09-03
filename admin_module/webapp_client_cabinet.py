@@ -1040,8 +1040,12 @@ async def webapp_bind_phone_submit(payload: WebAppBindPhonePayload, request: Req
         if student.parent_id is None and matched_primary:
             student.parent_id = user_id
         existing_link = await db.get(StudentParent, {"student_id": student.id, "parent_id": user_id})
-        if not existing_link:
-            db.add(StudentParent(student_id=student.id, parent_id=user_id, is_primary=matched_primary, phone=normalized_phone))
+        is_primary_parent = student.parent_id == user_id
+        if existing_link:
+            existing_link.is_primary = is_primary_parent
+            existing_link.phone = normalized_phone
+        else:
+            db.add(StudentParent(student_id=student.id, parent_id=user_id, is_primary=is_primary_parent, phone=normalized_phone))
     await db.commit()
     audit_event("webapp_phone_bound", club_id=club.id, user_id=user_id, students=[s.id for s in students], phone_tail=clean_phone_10[-4:])
     return {"ok": True, "message": f"Привязаны атлеты: {', '.join(s.name for s in students)}"}

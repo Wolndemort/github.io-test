@@ -4,6 +4,12 @@ from pydantic import BaseModel
 class WebAppActionPayload(BaseModel):
     init_data: str
     club_id: int
+    # Snapshot values protect financial and parent fields from a stale
+    # admin tab overwriting a payment or a newer edit.
+    expected_balance_lessons: int | None = None
+    expected_expire_date: str | None = None
+    expected_parent_phone: str | None = None
+    expected_parent_phone_secondary: str | None = None
     student_id: int
     payment_method: str = "bank_card"
 
