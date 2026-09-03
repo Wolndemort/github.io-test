@@ -123,10 +123,15 @@ async def universal_profile_handler(
     # Запрашиваем студентов этого родителя для текущего клуба
     # Важно: StudentParent нельзя добавлять в WHERE без JOIN — это отдаёт
     # всех атлетов клуба из-за декартова произведения.
-    stmt = select(Student).where(
-        Student.parent_id == user_id,
-        Student.club_id == club_id
-    ).order_by(Student.name).execution_options(populate_existing=True)
+    stmt = (select(Student)
+            .outerjoin(StudentParent, StudentParent.student_id == Student.id)
+            .where(
+                Student.club_id == club_id,
+                (Student.parent_id == user_id) | (StudentParent.parent_id == user_id),
+            )
+            .distinct()
+            .order_by(Student.name)
+            .execution_options(populate_existing=True))
 
     result = await session.execute(stmt)
     students = result.scalars().all()
@@ -260,10 +265,14 @@ async def detailed_status_handler(
     # QR-код доступен только атлетам, привязанным к текущему родителю.
     # Не используем StudentParent без JOIN: это превращает запрос в декартово
     # произведение и возвращает список всех атлетов клуба.
-    stmt = select(Student).where(
-        Student.parent_id == user_id,
-        Student.club_id == club.id
-    ).order_by(Student.name)
+    stmt = (select(Student)
+            .outerjoin(StudentParent, StudentParent.student_id == Student.id)
+            .where(
+                Student.club_id == club.id,
+                (Student.parent_id == user_id) | (StudentParent.parent_id == user_id),
+            )
+            .distinct()
+            .order_by(Student.name))
 
     result = await session.execute(stmt)
     students = result.scalars().all()
