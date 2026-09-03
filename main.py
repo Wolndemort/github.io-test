@@ -34,7 +34,7 @@ from handlers import start, user_option, buttons, payments, admin_option, super_
     super_admin_payment
 from handlers.buttons import get_profile_keyboard
 from services.bot_registry import bots_dict, register_existing_bots, close_all_bots
-from services.scheduler_jobs import saas_daily_morning_check, check_abon_mailing, send_daily_report_to_admins, send_backup_to_admin, send_work_schedule_notice, send_stock_reminder_notice, expire_student_freezes, send_discount_reminders
+from services.scheduler_jobs import saas_daily_morning_check, check_abon_mailing, send_daily_report_to_admins, send_backup_to_admin, send_work_schedule_notice, send_stock_reminder_notice, expire_student_freezes, send_discount_reminders, accrue_motivation_job
 from services.saas_billing import process_saas_auto_renewals
 from middlewares.db_saas_midleware import ClubMiddleware
 from middlewares.main_middleware import DbSessionMiddleware
@@ -131,6 +131,7 @@ async def lifespan(app: FastAPI):
     scheduler.add_job(send_stock_reminder_notice, 'cron', hour=10, minute=0, args=['am'], id="stock_reminder_am", replace_existing=True, coalesce=True, max_instances=1, misfire_grace_time=3600)
     scheduler.add_job(send_stock_reminder_notice, 'cron', hour=18, minute=0, args=['pm'], id="stock_reminder_pm", replace_existing=True, coalesce=True, max_instances=1, misfire_grace_time=3600)
     scheduler.add_job(send_discount_reminders, 'cron', hour=10, minute=15, id="discount_reminders", replace_existing=True, coalesce=True, max_instances=1, misfire_grace_time=3600)
+    scheduler.add_job(accrue_motivation_job, 'interval', minutes=1, id="motivation_accruals", replace_existing=True, coalesce=True, max_instances=1, misfire_grace_time=300)
     # Ночной блок (01:00) — Автоматические списания по подпискам ЮKassa
     # Пока оставляем закомментированным, как ты и хотел!
     # Как закончишь тесты в ЛК ЮKassa — просто убери решетку (#) в начале строки.

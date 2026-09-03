@@ -10,6 +10,11 @@ MOTIVATION_WEEKDAYS = {"mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 
 MOTIVATION_TZ = ZoneInfo("Europe/Moscow")
 
 
+def motivation_bonus(rate_row, _student_count=0):
+    """Return the administrator-defined fixed bonus for one completed lesson."""
+    return max(0, int(getattr(rate_row, "bonus_per_student_kopecks", 0) or 0)) if rate_row else 0
+
+
 def local_date(value):
     if value is None:
         return None
@@ -20,6 +25,26 @@ def local_date(value):
 
 def utc_boundary(day):
     return datetime.combine(day, datetime.min.time(), tzinfo=MOTIVATION_TZ).astimezone(timezone.utc).replace(tzinfo=None)
+
+
+def occurrence_ended(occurrence, now=None):
+    """Return whether a scheduled training has finished in Moscow time."""
+    try:
+        hour, minute = (int(part) for part in str(occurrence.get("time", "00:00")).split(":", 1))
+        duration = int(occurrence.get("duration_minutes", 60) or 60)
+        started = datetime.combine(
+            occurrence["date"],
+            datetime.min.time().replace(hour=hour, minute=minute),
+            tzinfo=MOTIVATION_TZ,
+        )
+    except (AttributeError, KeyError, TypeError, ValueError):
+        return False
+    current = now or datetime.now(MOTIVATION_TZ)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=MOTIVATION_TZ)
+    else:
+        current = current.astimezone(MOTIVATION_TZ)
+    return started + timedelta(minutes=max(15, min(240, duration))) <= current
 
 
 def schedule_versions(settings):
@@ -70,6 +95,12 @@ def motivation_occurrences(settings, start, end):
             for lesson in lessons:
                 staff_ids = lesson.get("coach_staff_ids") or ([lesson["coach_staff_id"]] if lesson.get("coach_staff_id") else [])
                 for staff_id in staff_ids[:5]:
-                    result.append({"date": current, "staff_id": int(staff_id), "discipline": discipline, "time": lesson.get("time", "")})
+                    result.append({
+                        "date": current,
+                        "staff_id": int(staff_id),
+                        "discipline": discipline,
+                        "time": lesson.get("time", ""),
+                        "duration_minutes": lesson.get("duration_minutes", 60),
+                    })
         current += timedelta(days=1)
     return result

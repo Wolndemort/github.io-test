@@ -1,6 +1,6 @@
 import os
 from services.schedule_utils import normalize_schedule_block
-from services.motivation_schedule import remember_schedule_change, schedule_versions
+from services.motivation_schedule import motivation_bonus, occurrence_ended, remember_schedule_change, schedule_versions
 
 os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
 
@@ -25,6 +25,12 @@ def test_occurrences_create_one_payable_row_per_assigned_coach():
     settings = {"disciplines": {"boxing": {"schedule": {"mon": [{"time": "18:00", "coach_staff_ids": [7, 8]}]}}}}
     rows = _motivation_occurrences(settings, date(2026, 8, 31), date(2026, 8, 31))
     assert {(row["staff_id"], row["discipline"], row["time"]) for row in rows} == {(7, "boxing", "18:00"), (8, "boxing", "18:00")}
+
+
+def test_occurrence_ends_after_start_plus_duration():
+    occurrence = {"date": date(2026, 9, 3), "time": "18:00", "duration_minutes": 90}
+    assert occurrence_ended(occurrence, datetime(2026, 9, 3, 19, 29)) is False
+    assert occurrence_ended(occurrence, datetime(2026, 9, 3, 19, 31)) is True
 
 
 def test_schedule_history_uses_old_snapshot_before_change_and_new_after_change():
@@ -67,10 +73,13 @@ def test_scheduled_rate_prefers_weekday_weekend_and_falls_back_to_staff_rate():
     assert _scheduled_rate(None, date(2026, 9, 1), 12500) == 12500
 
 
-def test_bonus_is_only_paid_for_students_above_threshold():
+def test_bonus_is_fixed_per_completed_lesson_and_not_per_student():
     rate = SimpleNamespace(bonus_threshold=5, bonus_per_student_kopecks=2500)
-    assert _motivation_bonus(rate, 5) == 0
-    assert _motivation_bonus(rate, 7) == 5000
+    assert motivation_bonus(None, 0) == 0
+    assert motivation_bonus(rate, 0) == 2500
+    assert motivation_bonus(rate, 2) == 2500
+    assert motivation_bonus(rate, 100) == 2500
+    assert _motivation_bonus(rate, 2) == 2500
 
 
 def test_motivation_uses_moscow_calendar_date_for_utc_timestamp():

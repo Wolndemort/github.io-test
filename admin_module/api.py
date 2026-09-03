@@ -173,6 +173,7 @@ class ScheduleChangePayload(BaseModel):
     coach_staff_ids: list[int] | None = None
     source_day: str | None = None
     source_discipline: str | None = None
+    effective_date: str | None = None
 
 class ProductPayload(BaseModel):
     init_data: str

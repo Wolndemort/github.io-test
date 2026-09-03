@@ -34,6 +34,13 @@ def normalize_schedule_block(schedule_data) -> dict[str, list[dict]]:
                 "max_slots": max(0, max_slots),
                 "taken_slots": max(0, taken_slots),
             }
+            if "duration_minutes" in lesson or "duration" in lesson:
+                raw_duration = lesson.get("duration_minutes", lesson.get("duration", 60))
+                try:
+                    duration_minutes = int(raw_duration if raw_duration is not None else 60)
+                except (ValueError, TypeError):
+                    duration_minutes = 60
+                normalized_lesson["duration_minutes"] = max(15, min(240, duration_minutes))
             raw_coach_ids = lesson.get("coach_staff_ids")
             if isinstance(raw_coach_ids, (list, tuple)):
                 coach_ids = []

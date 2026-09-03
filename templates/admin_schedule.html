@@ -53,6 +53,11 @@ button,.copy-btn{background:#fff!important;color:#090909!important;font-weight:7
 
 <div class="card controls">
   <label>
+    Дата начала действия изменений расписания
+    <input id="effectiveDate" type="date" value="{{ schedule_effective_date }}">
+  </label>
+  <small>Прогноз и начисления используют это расписание начиная с выбранной даты.</small>
+  <label>
     Дисциплина
     <select id="d">
       {% for key, x in disciplines.items() %}
@@ -109,6 +114,8 @@ button,.copy-btn{background:#fff!important;color:#090909!important;font-weight:7
 <div class="card controls">
   <div class="row">
     <input id="time" placeholder="18:00" autocomplete="off">
+    <input id="duration" type="number" min="15" max="240" value="60" placeholder="Длительность, мин.">
+    <input id="maxSlots" type="number" min="0" max="999" value="0" placeholder="Лимит мест">
     <input id="coach" placeholder="Информация" autocomplete="off">
   </div>
   <button id="saveBtn" type="button">Добавить</button>
@@ -137,6 +144,9 @@ const disciplineSelect = document.getElementById('d');
 const daySelect = document.getElementById('day');
 const list = document.getElementById('list');
 const timeInput = document.getElementById('time');
+const durationInput = document.getElementById('duration');
+const maxSlotsInput = document.getElementById('maxSlots');
+const effectiveDateInput = document.getElementById('effectiveDate');
 const coachInput = document.getElementById('coach');
 const coachStaffInput = document.getElementById('coachStaff');
 const saveBtn = document.getElementById('saveBtn');
@@ -202,7 +212,7 @@ function render() {
         <div class="card lesson">
           <div class="meta">
             <div class="title"><strong>${x.time || '00:00'}</strong> — ${x.coach || ''}</div>
-            <div class="sub">${x.max_slots ? `Лимит: ${x.max_slots}` : 'Без лимита'}</div>
+            <div class="sub">${x.duration_minutes || x.duration || 60} мин. · ${x.max_slots ? `Лимит: ${x.max_slots}` : 'Без лимита'}</div>
           </div>
           <div class="actions">
             <button type="button" onclick="edit(${i})">Изменить</button>
@@ -220,6 +230,8 @@ function edit(i) {
   if (!x) return;
   idx = i;
   timeInput.value = x.time || '';
+  durationInput.value = x.duration_minutes || x.duration || 60;
+  maxSlotsInput.value = x.max_slots || 0;
   coachInput.value = x.coach || '';
   if (coachStaffInput) [...coachStaffInput.options].forEach(option => option.selected = (x.coach_staff_ids || (x.coach_staff_id ? [x.coach_staff_id] : [])).includes(Number(option.value)));
   saveBtn.textContent = 'Сохранить';
@@ -233,10 +245,15 @@ async function send(action, extra = {}) {
     discipline: disciplineSelect.value,
     day: daySelect.value,
     index: idx,
+    effective_date: effectiveDateInput.value,
     lesson: action === 'copy_day' ? null : { time: timeInput.value, coach: coachStaffInput?.selectedOptions?.[0]?.textContent || coachInput.value, max_slots: 0 },
     coach_staff_ids: coachStaffInput ? [...coachStaffInput.selectedOptions].map(option => Number(option.value)) : null,
     ...extra,
   };
+  if (body.lesson) {
+    body.lesson.duration_minutes = Number(durationInput.value || 60);
+    body.lesson.max_slots = Number(maxSlotsInput.value || 0);
+  }
   const r = await fetch('/webapp/admin-schedule/change', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

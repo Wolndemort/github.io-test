@@ -11,6 +11,7 @@ from admin_module.utils import get_club_id_from_host, verify_webapp_admin, verif
 from admin_module.webapp_verify import verify_telegram_data
 from database.db import CartOrder, CashEntry, Club, PaymentOrder, Student, User, VisitLog, get_session
 from services.analytics import build_expiry_series, build_revenue_series, build_visit_series, calculate_admin_dashboard, calculate_cash_flow_periods, calculate_projected_renewal_revenue, calculate_revenue_periods, calculate_student_metrics, generate_students_excel, reporting_periods, moscow_date_boundary
+from services.schedule_utils import normalize_schedule_block
 
 
 @router.get("/admin", response_class=HTMLResponse)
@@ -239,27 +240,27 @@ else location.replace(location.pathname+'?club_id=' + encodeURIComponent(new URL
     day_names = {"mon": "Понедельник", "tue": "Вторник", "wed": "Среда", "thu": "Четверг", "fri": "Пятница", "sat": "Суббота", "sun": "Воскресенье"}
     parsed_disciplines = []
     if isinstance(disciplines_data, dict):
-        for _, disc_content in disciplines_data.items():
+        for discipline_key, disc_content in disciplines_data.items():
             if not isinstance(disc_content, dict): continue
             if not disc_content.get("active", True): continue
             parsed_days = []
             for day_key, day_title in day_names.items():
-                lessons = disc_content.get("schedule", {}).get(day_key, [])
-                if not lessons or not isinstance(lessons, list): continue
+                lessons = normalize_schedule_block(disc_content.get("schedule", {})).get(day_key, [])
+                if not lessons: continue
                 parsed_lessons = []
                 for lesson in lessons:
                     if not isinstance(lesson, dict): continue
                     max_slots = int(lesson.get("max_slots") or lesson.get("slots") or lesson.get("limit") or 50)
                     taken_slots = int(lesson.get("taken_slots") or 0)
-                    parsed_lessons.append({"time": str(lesson.get("time", "00:00")), "coach": str(lesson.get("coach", "Инструктор")), "max_slots": max_slots, "free_slots": max(0, max_slots - taken_slots)})
+                    parsed_lessons.append({"time": str(lesson.get("time", "00:00")), "coach": str(lesson.get("coach", "Инструктор")), "duration_minutes": int(lesson.get("duration_minutes", 60)), "max_slots": max_slots, "free_slots": max(0, max_slots - taken_slots)})
                 if parsed_lessons: parsed_days.append({"key": day_key, "title": day_title, "lessons": parsed_lessons})
-            parsed_disciplines.append({"name": disc_content.get("name", "Спортивная секция"), "days": parsed_days})
+            parsed_disciplines.append({"code": str(discipline_key), "name": str(disc_content.get("name") or discipline_key), "days": parsed_days})
     ui = settings.get("ui", {}) if isinstance(settings.get("ui", {}), dict) else {}
     loading = ui.get("loading", {}) if isinstance(ui.get("loading", {}), dict) else {}
     loading_logo = str(loading.get("logo_url") or ui.get("logo_url") or "").strip()
     if loading_logo and loading.get("logo_rev"):
         loading_logo = f"{loading_logo}?v={loading['logo_rev']}"
-    return templates.TemplateResponse("schedule.html", {"request": request, "club_name": club.name or "Без названия", "disciplines": parsed_disciplines, "loading": {"enabled": bool(loading.get("enabled", False)), "duration_ms": max(300, min(10000, int(loading.get("duration_ms", 1200)))), "message": str(loading.get("message", "Загружаем приложение…"))}, "logo_url": loading_logo})
+    return templates.TemplateResponse("schedule.html", {"request": request, "club_id": club_id, "club_name": club.name or "Без названия", "disciplines": parsed_disciplines, "loading": {"enabled": bool(loading.get("enabled", False)), "duration_ms": max(300, min(10000, int(loading.get("duration_ms", 1200)))), "message": str(loading.get("message", "Загружаем приложение…"))}, "logo_url": loading_logo})
 
 
 @router.get("/webapp/live_cam", response_class=HTMLResponse)

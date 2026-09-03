@@ -52,9 +52,10 @@ from services.staff_permissions import staff_can
 from services.motivation_schedule import (
     MOTIVATION_TZ as _MOTIVATION_TZ,
     local_date as _motivation_local_date,
+    motivation_bonus as _fixed_motivation_bonus,
     motivation_occurrences as _motivation_occurrences,
+    occurrence_ended as _motivation_occurrence_ended,
     remember_schedule_change as _remember_motivation_schedule_change,
-    utc_boundary as _motivation_utc_boundary,
 )
 from middlewares.db_saas_midleware import SUPER_ADMIN_IDS
 
@@ -95,8 +96,9 @@ def _attendee_count(visit_rows, occurrence):
         if not visited or _motivation_local_date(visited) != occurrence["date"]:
             continue
         local_visited = visited.replace(tzinfo=timezone.utc).astimezone(_MOTIVATION_TZ) if visited.tzinfo is None else visited.astimezone(_MOTIVATION_TZ)
-        distance = abs((local_visited.hour * 60 + local_visited.minute) - slot_minutes)
-        if distance <= 60:
+        duration = max(15, min(240, int(occurrence.get("duration_minutes", 60) or 60)))
+        visit_minutes = local_visited.hour * 60 + local_visited.minute
+        if slot_minutes - 60 <= visit_minutes <= slot_minutes + duration + 60:
             students.add(visit.student_id)
     return len(students)
 
@@ -107,9 +109,14 @@ def _scheduled_rate(rate_row, training_date, fallback=0):
     return int(specific or rate_row.rate_kopecks or 0)
 
 def _motivation_bonus(rate_row, student_count):
-    threshold = int(rate_row.bonus_threshold if rate_row else 5)
-    per_student = int(rate_row.bonus_per_student_kopecks if rate_row else 0)
-    return max(0, int(student_count) - threshold) * max(0, per_student)
+    return _fixed_motivation_bonus(rate_row, student_count)
+
+def _individual_motivation_occurrence(item):
+    return {
+        "date": item.training_date,
+        "time": item.start_time,
+        "duration_minutes": item.duration_minutes,
+    }
 
 def _parse_motivation_time(value):
     text = str(value or "").strip()
@@ -667,6 +674,7 @@ async def change_admin_tariff(payload: TariffChangePayload, request: Request, se
             object_id=payload.discipline,
             discipline=payload.discipline,
             source_discipline=source_disc,
+            effective_date=effective_date.isoformat(),
         )
         return {"success": True, "copied_from": source_disc}
     elif payload.action == "create_discipline":
@@ -750,12 +758,14 @@ async def change_admin_tariff(payload: TariffChangePayload, request: Request, se
 @router.get("/webapp/admin-motivation", response_class=HTMLResponse)
 async def admin_motivation_page(request: Request, club_id: int = Query(...), date_from: str | None = Query(None), date_to: str | None = Query(None), init_data: str | None = Query(None), session: AsyncSession = Depends(get_session)):
     club = await session.get(Club, club_id)
+    if not init_data:
+        return telegram_init_gate("/webapp/admin-motivation", club_id, "Откройте мотивацию тренеров из Telegram")
     tg_user = await verify_webapp_staff(club, init_data, session, "schedule_view")
     if int(tg_user.get("id", 0)) != int(getattr(club, "owner_id", 0) or 0) and int(tg_user.get("id", 0)) not in SUPER_ADMIN_IDS:
         raise HTTPException(403, "Раздел мотивации доступен только администратору")
     staff = (await session.execute(select(ClubStaff).where(ClubStaff.club_id == club_id).order_by(ClubStaff.full_name))).scalars().all()
-    staff_by_id = {x.id: x for x in staff}
-    today = datetime.now(_MOTIVATION_TZ).date()
+    now_local = datetime.now(_MOTIVATION_TZ)
+    today = now_local.date()
     try:
         start = datetime.strptime(date_from, "%Y-%m-%d").date() if date_from else today.replace(day=1)
         end = datetime.strptime(date_to, "%Y-%m-%d").date() if date_to else today.replace(day=calendar.monthrange(today.year, today.month)[1])
@@ -764,39 +774,25 @@ async def admin_motivation_page(request: Request, club_id: int = Query(...), dat
     if end < start or (end - start).days > 366:
         raise HTTPException(400, "Допустимый диапазон — от 1 до 366 дней")
     occurrences = _motivation_occurrences(club.club_settings or {}, start, end)
-    visit_rows = (await session.execute(select(VisitLog, Student.discipline).join(Student, Student.id == VisitLog.student_id).where(VisitLog.club_id == club_id, VisitLog.visited_at >= _motivation_utc_boundary(start), VisitLog.visited_at < _motivation_utc_boundary(end + timedelta(days=1))))).all()
     adjustments = (await session.execute(select(MotivationAdjustment).where(MotivationAdjustment.club_id == club_id))).scalars().all()
     rates = (await session.execute(select(MotivationRate).where(MotivationRate.club_id == club_id))).scalars().all()
     rate_by_key = {(x.staff_id, x.discipline): x for x in rates}
     individuals = (await session.execute(select(MotivationIndividual).where(MotivationIndividual.club_id == club_id, MotivationIndividual.training_date >= start, MotivationIndividual.training_date <= end))).scalars().all()
     adjustments = [x for x in adjustments if start <= (_motivation_local_date(x.created_at) or start) <= end]
     existing = (await session.execute(select(MotivationAccrual).where(MotivationAccrual.club_id == club_id, MotivationAccrual.occurrence_date >= start, MotivationAccrual.occurrence_date <= min(end, today)))).scalars().all()
-    existing_keys = {x.occurrence_key for x in existing}
-    for occurrence in occurrences:
-        if occurrence["date"] > today:
-            continue
-        key = f"{club_id}:{occurrence['date'].isoformat()}:{occurrence['time']}:{occurrence['discipline']}:{occurrence['staff_id']}"
-        if key not in existing_keys:
-            rate_row = next((x for x in rates if x.staff_id == occurrence["staff_id"] and x.discipline == occurrence["discipline"]), None)
-            assigned_coach = staff_by_id.get(occurrence["staff_id"])
-            rate = _scheduled_rate(rate_row, occurrence["date"], getattr(assigned_coach, "rate_per_training_kopecks", 0))
-            students = _attendee_count(visit_rows, occurrence)
-            bonus = _motivation_bonus(rate_row, students)
-            session.add(MotivationAccrual(club_id=club_id, staff_id=occurrence["staff_id"], occurrence_key=key, occurrence_date=occurrence["date"], start_time=occurrence["time"], discipline=occurrence["discipline"], rate_kopecks=rate, student_count=students, bonus_kopecks=bonus))
-    await session.commit()
-    existing = (await session.execute(select(MotivationAccrual).where(MotivationAccrual.club_id == club_id, MotivationAccrual.occurrence_date >= start, MotivationAccrual.occurrence_date <= min(end, today)))).scalars().all()
     rows = []
     for coach in staff:
         own = [x for x in occurrences if x["staff_id"] == coach.id]
-        completed = [x for x in own if x["date"] <= today]; future = [x for x in own if x["date"] > today]
+        completed = [x for x in own if _motivation_occurrence_ended(x, now_local)]
+        future = [x for x in own if not _motivation_occurrence_ended(x, now_local)]
         correction = sum(x.amount_kopecks for x in adjustments if x.staff_id == coach.id)
         earned = sum(x.rate_kopecks + x.bonus_kopecks for x in existing if x.staff_id == coach.id)
         own_individuals = [x for x in individuals if x.staff_id == coach.id]
-        individual_earned = sum(x.rate_kopecks for x in own_individuals if x.training_date <= today)
-        individual_future = sum(x.rate_kopecks for x in own_individuals if x.training_date > today)
+        individual_earned = sum(x.rate_kopecks for x in own_individuals if _motivation_occurrence_ended(_individual_motivation_occurrence(x), now_local))
+        individual_future = sum(x.rate_kopecks for x in own_individuals if not _motivation_occurrence_ended(_individual_motivation_occurrence(x), now_local))
         future_pay = sum(_scheduled_rate(rate_by_key.get((coach.id, x["discipline"])), x["date"], coach.rate_per_training_kopecks) for x in future)
-        rows.append({"id": coach.id, "name": coach.full_name or f"Тренер #{coach.id}", "rate": coach.rate_per_training_kopecks or 0, "completed": len(completed) + sum(x.training_date <= today for x in own_individuals), "forecast_count": len(future) + sum(x.training_date > today for x in own_individuals), "earned": earned + individual_earned + correction, "forecast": future_pay + individual_future + earned + individual_earned + correction, "correction": correction})
-    return templates.TemplateResponse("admin_motivation.html", {"request": request, "club_id": club_id, "date_from": start.isoformat(), "date_to": end.isoformat(), "month": f"{start:%d.%m.%Y} — {end:%d.%m.%Y}", "staff": rows})
+        rows.append({"id": coach.id, "name": coach.full_name or f"Тренер #{coach.id}", "rate": coach.rate_per_training_kopecks or 0, "completed": len(completed) + sum(_motivation_occurrence_ended(_individual_motivation_occurrence(x), now_local) for x in own_individuals), "forecast_count": len(future) + sum(not _motivation_occurrence_ended(_individual_motivation_occurrence(x), now_local) for x in own_individuals), "earned": earned + individual_earned + correction, "forecast": future_pay + individual_future + earned + individual_earned + correction, "correction": correction})
+    return templates.TemplateResponse("admin_motivation.html", {"request": request, "club_id": club_id, "date_from": start.isoformat(), "date_to": end.isoformat(), "today": today.isoformat(), "month": f"{start:%d.%m.%Y} — {end:%d.%m.%Y}", "staff": rows})
 
 @router.post("/webapp/admin-motivation/adjust")
 async def adjust_admin_motivation(payload: dict, session: AsyncSession = Depends(get_session)):
@@ -901,7 +897,7 @@ async def webapp_admin_schedule_page(
     is_admin = int(tg_user.get("id", 0)) == int(getattr(club, "owner_id", 0) or 0) or int(tg_user.get("id", 0)) in SUPER_ADMIN_IDS
     staff = (await session.execute(select(ClubStaff).where(ClubStaff.club_id == club_id, ClubStaff.is_active.is_(True)).order_by(ClubStaff.full_name))).scalars().all()
     staff_data = [{"id": x.id, "name": x.full_name or f"Тренер #{x.id}"} for x in staff]
-    return templates.TemplateResponse("admin_schedule.html", {"request": request, "club": club, "club_id": club_id, "disciplines": (club.club_settings or {}).get("disciplines", {}), "staff": staff_data, "can_assign_coach": is_admin})
+    return templates.TemplateResponse("admin_schedule.html", {"request": request, "club": club, "club_id": club_id, "disciplines": (club.club_settings or {}).get("disciplines", {}), "staff": staff_data, "can_assign_coach": is_admin, "schedule_effective_date": datetime.now(_MOTIVATION_TZ).date().isoformat()})
 
 @router.post("/webapp/admin-schedule/change")
 async def change_admin_schedule(payload: ScheduleChangePayload, session: AsyncSession = Depends(get_session)):
@@ -911,6 +907,12 @@ async def change_admin_schedule(payload: ScheduleChangePayload, session: AsyncSe
     settings = dict(club.club_settings or {})
     disciplines = dict(settings.get("disciplines", {}))
     previous_disciplines = copy.deepcopy(disciplines)
+    try:
+        effective_date = date.fromisoformat(str(payload.effective_date or datetime.now(_MOTIVATION_TZ).date().isoformat()))
+    except (TypeError, ValueError):
+        raise HTTPException(400, "Дата начала действия должна быть в формате ГГГГ-ММ-ДД")
+    if effective_date < date(1970, 1, 1) or effective_date > date(2100, 12, 31):
+        raise HTTPException(400, "Недопустимая дата начала действия")
     block = dict(disciplines.get(payload.discipline, {}))
     if not block:
         raise HTTPException(404, "Дисциплина не найдена")
@@ -948,7 +950,7 @@ async def change_admin_schedule(payload: ScheduleChangePayload, session: AsyncSe
         block["schedule"] = schedule
         disciplines[payload.discipline] = block
         settings["disciplines"] = disciplines
-        _remember_motivation_schedule_change(settings, previous_disciplines, disciplines)
+        _remember_motivation_schedule_change(settings, previous_disciplines, disciplines, effective_date)
         club.club_settings = settings
         session.add(club)
         await session.commit()
@@ -969,10 +971,18 @@ async def change_admin_schedule(payload: ScheduleChangePayload, session: AsyncSe
             parsed_max_slots = int(raw_max_slots if raw_max_slots is not None else 0)
         except (ValueError, TypeError):
             parsed_max_slots = 0
+        raw_duration = lesson.get("duration_minutes", lesson.get("duration", 60))
+        try:
+            parsed_duration = int(raw_duration if raw_duration is not None else 60)
+        except (ValueError, TypeError):
+            parsed_duration = 60
+        if parsed_duration < 15 or parsed_duration > 240:
+            raise HTTPException(400, "Длительность должна быть от 15 до 240 минут")
         item = {
             "time": str(lesson.get("time", "00:00"))[:5],
             "coach": str(lesson.get("coach", lesson.get("info", "")))[:100],
             "max_slots": max(0, min(999, parsed_max_slots)),
+            "duration_minutes": parsed_duration,
         }
         selected_staff_ids = payload.coach_staff_ids if payload.coach_staff_ids is not None else ([payload.coach_staff_id] if payload.coach_staff_id is not None else None)
         if selected_staff_ids is not None:
@@ -999,7 +1009,7 @@ async def change_admin_schedule(payload: ScheduleChangePayload, session: AsyncSe
     else: raise HTTPException(400, "РќРµРёР·РІРµСЃС‚РЅРѕРµ РґРµР№СЃС‚РІРёРµ")
     lessons.sort(key=lambda x: str(x.get("time", "99:99")))
     schedule[payload.day] = lessons; block["schedule"] = schedule; disciplines[payload.discipline] = block; settings["disciplines"] = disciplines
-    _remember_motivation_schedule_change(settings, previous_disciplines, disciplines)
+    _remember_motivation_schedule_change(settings, previous_disciplines, disciplines, effective_date)
     club.club_settings = settings
     await session.commit()
     audit_event(
@@ -1014,6 +1024,7 @@ async def change_admin_schedule(payload: ScheduleChangePayload, session: AsyncSe
         lesson=payload.lesson,
         index=payload.index,
         source_day=payload.source_day,
+        effective_date=effective_date.isoformat(),
     )
     return {"success": True}
 
@@ -1117,7 +1128,9 @@ async def webapp_schedule_page(
             if not disc_content.get("active", False):
                 continue
 
-            disc_name = disc_content.get("name", "РЎРїРѕСЂС‚РёРІРЅР°СЏ СЃРµРєС†РёСЏ")
+            # Название дисциплины берём только из блока дисциплины. Данные
+            # занятия (включая назначенного тренера) не должны влиять на него.
+            disc_name = str(disc_content.get("name") or disc_key)
             schedule_data = normalize_schedule_block(disc_content.get("schedule", {}))
 
             parsed_days = []
@@ -1147,6 +1160,7 @@ async def webapp_schedule_page(
                     parsed_lessons.append({
                         "time": str(lesson.get("time", "00:00")),
                         "coach": str(lesson.get("coach", "РРЅСЃС‚СЂСѓРєС‚РѕСЂ")),
+                        "duration_minutes": int(lesson.get("duration_minutes", 60)),
                         "max_slots": max_slots,
                         "free_slots": max(0, max_slots - taken_slots)
                     })
@@ -1169,6 +1183,7 @@ async def webapp_schedule_page(
     loading = ui.get("loading", {}) if isinstance(ui.get("loading", {}), dict) else {}
     context = {
         "request": request,
+        "club_id": club_id,
         "club_name": club.name or 'Р‘РµР· РЅР°Р·РІР°РЅРёСЏ',
         "disciplines": parsed_disciplines
         ,"loading": {"enabled": bool(loading.get("enabled", False)),

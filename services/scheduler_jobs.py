@@ -34,6 +34,7 @@ from admin_module.utils import is_staff_or_owner
 from services.order_notifications import notify_stock_reminders
 from services.analytics import calculate_admin_dashboard, calculate_daily_business_report, reporting_periods, is_subscription_active
 from services.bot_registry import bots_dict
+from services.motivation_accrual import accrue_motivation_job
 
 async def send_discount_reminders():
     """Monthly active-discount reminders and one-time expiry notices."""

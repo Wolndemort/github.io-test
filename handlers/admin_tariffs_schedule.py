@@ -517,7 +517,7 @@ async def admin_finalize_schedule(message: types.Message, state: FSMContext, clu
     day = s_data["chosen_day"]
     time_text = s_data["new_time"]
     coach_text = s_data["new_coach"]
-    new_lesson = {"time": time_text, "coach": coach_text, "max_slots": max_slots, "taken_slots": 0}
+    new_lesson = {"time": time_text, "coach": coach_text, "max_slots": max_slots, "taken_slots": 0, "duration_minutes": 60}
     previous_disciplines = copy.deepcopy(club_settings.get("disciplines", {}))
     discipline_block = club_settings["disciplines"][disc_id]
     if "schedule" not in discipline_block or isinstance(discipline_block["schedule"], str):
