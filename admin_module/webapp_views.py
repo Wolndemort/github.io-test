@@ -1169,10 +1169,16 @@ async def webapp_schedule_page(
                     except (ValueError, TypeError):
                         taken_slots = 0
 
+                    assigned_ids = lesson.get("coach_staff_ids") or ([lesson["coach_staff_id"]] if lesson.get("coach_staff_id") else [])
+                    trainer_labels = [staff_names.get(int(staff_id), f"Тренер #{staff_id}") for staff_id in assigned_ids]
+                    lesson_comment = str(lesson.get("coach", "РРЅСЃС‚СЂСѓРєС‚РѕСЂ"))
+                    legacy_comments = {name.strip().casefold() for name in trainer_labels}
+                    if lesson_comment.strip().casefold() in legacy_comments or lesson_comment.strip().casefold() == ", ".join(trainer_labels).casefold():
+                        lesson_comment = ""
                     parsed_lessons.append({
                         "time": str(lesson.get("time", "00:00")),
-                        "coach": str(lesson.get("coach", "РРЅСЃС‚СЂСѓРєС‚РѕСЂ")),
-                        "trainers": ", ".join(staff_names.get(int(staff_id), f"Тренер #{staff_id}") for staff_id in (lesson.get("coach_staff_ids") or ([lesson["coach_staff_id"]] if lesson.get("coach_staff_id") else []))),
+                        "coach": lesson_comment,
+                        "trainers": ", ".join(trainer_labels),
                         "duration_minutes": int(lesson.get("duration_minutes", 60)),
                         "max_slots": max_slots,
                         "free_slots": max(0, max_slots - taken_slots)
