@@ -974,19 +974,23 @@ async def admin_update_student(
     # Protect fields that can be changed by payments, check-ins or another
     # admin tab from stale overwrites.  Do not reject an unrelated edit (for
     # example, a comment) merely because the balance changed meanwhile.
-    if payload.balance_lessons is not None and payload.expected_balance_lessons is not None and payload.expected_balance_lessons != (student.balance_lessons or 0):
+    expected_balance = getattr(payload, "expected_balance_lessons", None)
+    expected_expire = getattr(payload, "expected_expire_date", None)
+    expected_parent_phone = getattr(payload, "expected_parent_phone", None)
+    expected_secondary_phone = getattr(payload, "expected_parent_phone_secondary", None)
+    if payload.balance_lessons is not None and expected_balance is not None and expected_balance != (student.balance_lessons or 0):
         raise HTTPException(status_code=409, detail="Атлет уже изменён. Обновите страницу и повторите сохранение.")
-    if payload.expire_date is not None and payload.expected_expire_date is not None:
+    if payload.expire_date is not None and expected_expire is not None:
         try:
-            expected_expire = parse_user_date_any(payload.expected_expire_date) if payload.expected_expire_date.strip() else None
+            expected_expire_date = parse_user_date_any(expected_expire) if expected_expire.strip() else None
         except ValueError:
             raise HTTPException(status_code=400, detail="Некорректный снимок даты окончания")
         actual_expire = student.expire_date.date() if student.expire_date else None
-        if expected_expire != actual_expire:
+        if expected_expire_date != actual_expire:
             raise HTTPException(status_code=409, detail="Атлет уже изменён. Обновите страницу и повторите сохранение.")
     for new_phone, expected_phone, actual_phone in (
-        (payload.parent_phone, payload.expected_parent_phone, student.parent_phone),
-        (payload.parent_phone_secondary, payload.expected_parent_phone_secondary, student.parent_phone_secondary),
+        (payload.parent_phone, expected_parent_phone, student.parent_phone),
+        (payload.parent_phone_secondary, expected_secondary_phone, student.parent_phone_secondary),
     ):
         if new_phone is not None and expected_phone is not None:
             normalized_expected = normalize_ru_phone(expected_phone) if expected_phone.strip() else None
