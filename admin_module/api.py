@@ -971,20 +971,12 @@ async def admin_update_student(
     tg_user = await verify_webapp_staff(owner_club, payload.init_data, db, "athletes_manage")
     if not tg_user:
         raise HTTPException(status_code=403, detail="Доступ запрещён")
-    # Protect payments and parent links from stale admin tabs. The UI sends
-    # snapshots with every edit; stale/legacy requests are rejected.
-    snapshot_fields = {
-        "expected_balance_lessons",
-        "expected_expire_date",
-        "expected_parent_phone",
-        "expected_parent_phone_secondary",
-    }
-    provided_fields = getattr(payload, "model_fields_set", getattr(payload, "__fields_set__", set()))
-    if not snapshot_fields.issubset(provided_fields):
-        raise HTTPException(status_code=409, detail="Обновите страницу перед сохранением атлета.")
-    if payload.expected_balance_lessons is not None and payload.expected_balance_lessons != (student.balance_lessons or 0):
+    # Protect fields that can be changed by payments, check-ins or another
+    # admin tab from stale overwrites.  Do not reject an unrelated edit (for
+    # example, a comment) merely because the balance changed meanwhile.
+    if payload.balance_lessons is not None and payload.expected_balance_lessons is not None and payload.expected_balance_lessons != (student.balance_lessons or 0):
         raise HTTPException(status_code=409, detail="Атлет уже изменён. Обновите страницу и повторите сохранение.")
-    if payload.expected_expire_date is not None:
+    if payload.expire_date is not None and payload.expected_expire_date is not None:
         try:
             expected_expire = parse_user_date_any(payload.expected_expire_date) if payload.expected_expire_date.strip() else None
         except ValueError:
@@ -992,11 +984,11 @@ async def admin_update_student(
         actual_expire = student.expire_date.date() if student.expire_date else None
         if expected_expire != actual_expire:
             raise HTTPException(status_code=409, detail="Атлет уже изменён. Обновите страницу и повторите сохранение.")
-    for expected_phone, actual_phone in (
-        (payload.expected_parent_phone, student.parent_phone),
-        (payload.expected_parent_phone_secondary, student.parent_phone_secondary),
+    for new_phone, expected_phone, actual_phone in (
+        (payload.parent_phone, payload.expected_parent_phone, student.parent_phone),
+        (payload.parent_phone_secondary, payload.expected_parent_phone_secondary, student.parent_phone_secondary),
     ):
-        if expected_phone is not None:
+        if new_phone is not None and expected_phone is not None:
             normalized_expected = normalize_ru_phone(expected_phone) if expected_phone.strip() else None
             if normalized_expected != actual_phone:
                 raise HTTPException(status_code=409, detail="Атлет уже изменён. Обновите страницу и повторите сохранение.")
