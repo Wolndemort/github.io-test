@@ -614,7 +614,9 @@ async def admin_sales_page(
     init_data: str | None = Query(default=None),
     date_from: str | None = Query(default=None),
     date_to: str | None = Query(default=None),
-    weekday: int | None = Query(default=None),
+    # Браузер отправляет пустое значение для необязательного select. При
+    # типе int FastAPI возвращает 422 ещё до входа в обработчик.
+    weekday: str | None = Query(default=None),
     payment_method: str | None = Query(default=None),
     category: str | None = Query(default=None),
     discipline: str | None = Query(default=None),
@@ -675,9 +677,10 @@ async def admin_sales_page(
                                "method": operation_method, "category": operation_category, "discipline": operation_discipline, "source": "cart",
                                "title": item.title, "status": order.status,
                                "buyer_label": await resolve_user_label(session, order.user_id, empty_label="Плательщик")})
+    selected_weekday = int(weekday) if str(weekday or "").strip().isdigit() else None
     selected_discipline = str(discipline or "").strip().casefold()
     operations = [item for item in operations
-                  if (weekday is None or moscow_weekday(item["created_at"]) == weekday)
+                  if (selected_weekday is None or moscow_weekday(item["created_at"]) == selected_weekday)
                   and (not payment_method or item["method"] == payment_method.strip())
                   and (not category or item["category"] == category.strip())
                   and (not selected_discipline or str(item["discipline"] or "").strip().casefold() == selected_discipline)]
@@ -686,7 +689,7 @@ async def admin_sales_page(
     disciplines = settings.get("disciplines", {}) if isinstance(settings, dict) else {}
     disciplines = disciplines if isinstance(disciplines, dict) else {}
     return templates.TemplateResponse("admin_sales.html", {"request": request, "club": club, "club_id": club_id,
-        "operations": operations, "disciplines": disciplines, "filters": {"date_from": date_from or "", "date_to": date_to or "", "weekday": weekday, "payment_method": payment_method or "", "category": category or "", "discipline": discipline or ""}})
+        "operations": operations, "disciplines": disciplines, "filters": {"date_from": date_from or "", "date_to": date_to or "", "weekday": selected_weekday, "payment_method": payment_method or "", "category": category or "", "discipline": discipline or ""}})
 
 
 @router.get("/admin/cash", response_class=HTMLResponse)
