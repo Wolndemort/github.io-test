@@ -682,7 +682,7 @@ async def admin_sales_page(
                   and (not category or item["category"] == category.strip())
                   and (not selected_discipline or str(item["discipline"] or "").strip().casefold() == selected_discipline)]
     operations.sort(key=lambda item: item["created_at"] or datetime.min, reverse=True)
-    settings = club.club_settings or {}
+    settings = club.club_settings if isinstance(club.club_settings, dict) else {}
     disciplines = settings.get("disciplines", {}) if isinstance(settings, dict) else {}
     disciplines = disciplines if isinstance(disciplines, dict) else {}
     return templates.TemplateResponse("admin_sales.html", {"request": request, "club": club, "club_id": club_id,
