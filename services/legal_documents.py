@@ -5,6 +5,12 @@ club's training services.  Missing fields stay explicit so an owner can fill
 them in before publishing the bot.
 """
 
+from collections.abc import Mapping
+
+def legal_documents_enabled(settings: Mapping | None) -> bool:
+    legal = settings.get("legal", {}) if isinstance(settings, Mapping) else {}
+    return bool(legal.get("enabled", True)) if isinstance(legal, Mapping) else True
+
 
 def legal_context(club) -> dict:
     settings = club.club_settings if club and isinstance(club.club_settings, dict) else {}
