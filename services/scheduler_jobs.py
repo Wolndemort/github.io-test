@@ -492,6 +492,16 @@ async def send_daily_report_to_admins():
                 yesterday_payments = list(yesterday_pay_res.scalars().all()) + list(yesterday_cart_res.scalars().all())
                 cash_entries_res = await session.execute(select(CashEntry).where(CashEntry.club_id == club.id, CashEntry.entry_type == "expense", CashEntry.created_at >= start_of_today))
                 today_cash_expenses = list(cash_entries_res.scalars().all())
+                staff_res = await session.execute(
+                    select(ClubStaff.telegram_id).where(
+                        ClubStaff.club_id == club.id,
+                        ClubStaff.is_active.is_(True),
+                        ClubStaff.role.in_(["manager", "cashier"]),
+                    )
+                )
+                report_recipients = {int(club.owner_id)} | {
+                    int(staff_id) for staff_id in staff_res.scalars().all() if staff_id
+                }
 
             biz_metrics = calculate_daily_business_report(students, today_payments, yesterday_payments, visit_logs=visit_logs)
             # В статистике потеряшки считаются по всей истории VisitLog,
@@ -522,9 +532,10 @@ async def send_daily_report_to_admins():
                 f"💤 Потеряшки (нет визитов более 14 дней): <code>{sleeping_count} чел.</code>\n"
             )
 
-            await bot.send_message(club.owner_id, report_text, parse_mode="HTML")
-            logger.info("🔥 Комплексный ИИ-отчет для клуба %s успешно отправлен боссу!", club.id)
-            await asyncio.sleep(0.05)
+            for recipient_id in report_recipients:
+                await bot.send_message(recipient_id, report_text, parse_mode="HTML")
+                await asyncio.sleep(0.05)
+            logger.info("🔥 Комплексный ИИ-отчет для клуба %s отправлен владельцу и сотрудникам: %s", club.id, report_recipients)
 
         except Exception as exc:
             if notification_key:
