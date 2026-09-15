@@ -580,7 +580,7 @@ async def change_admin_discount(payload: DiscountChangePayload, session: AsyncSe
                 await bot.send_message(club.owner_id, f"🏷️ Скидка «{escape(discount_label)}» отвязана от клиента.", parse_mode="HTML")
             await bot.session.close()
         except Exception:
-            logger.warning("Не удалось отправить уведомление об изменении скидки club=%s", club.id)
+            logger.warning("Не удалось отправить уведомление о скидке club=%s", club.id)
     return {"ok": True}
 
 @router.get("/webapp/admin-discounts/clients")
