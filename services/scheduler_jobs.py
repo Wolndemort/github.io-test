@@ -608,6 +608,29 @@ async def saas_daily_morning_check():
                 await _notification_forget(notification_key)
                 logger.error("Не удалось отправить напоминание о ДР родителю %s: %s", parent_id, reminder_error)
 
+        missing_by_club = {}
+        for (club_id, _parent_id), names in missing_birthdays.items():
+            missing_by_club.setdefault(club_id, set()).update(names)
+        for club_id, names in missing_by_club.items():
+            club = clubs_by_id.get(club_id)
+            bot = bots_dict.get(club.bot_token) if club else None
+            if not club or not club.owner_id or not bot:
+                continue
+            settings = club.club_settings if isinstance(club.club_settings, dict) else {}
+            if not settings.get("features", {}).get("birthday_missing_reminders", True):
+                continue
+            notification_key = f"notify:birthday-missing-admin:{club_id}:{today.isoformat()}"
+            if not await _notification_once(notification_key):
+                continue
+            try:
+                await bot.send_message(
+                    club.owner_id,
+                    f"🎂 <b>Не указана дата рождения</b>\n\nУ {len(names)} атлетов клуба «{escape(club.name)}» не заполнена дата рождения:\n<b>{escape(', '.join(sorted(names)))}</b>.",
+                    parse_mode="HTML",
+                )
+            except Exception:
+                await _notification_forget(notification_key)
+
         for (club_id, parent_id), names in missing_subscriptions.items():
             club = clubs_by_id.get(club_id)
             if not club or not club.subscription_expire_at or club.subscription_expire_at < now_datetime or club.bot_token not in bots_dict:
