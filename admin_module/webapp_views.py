@@ -558,6 +558,10 @@ async def change_admin_discount(payload: DiscountChangePayload, session: AsyncSe
         assignment_query = select(DiscountAssignment).where(DiscountAssignment.discount_id == discount.id)
         assignment_query = assignment_query.where(DiscountAssignment.user_id == payload.user_id) if payload.user_id else assignment_query.where(DiscountAssignment.student_id == payload.student_id)
         assignment = await session.scalar(assignment_query)
+        notification_user_id = payload.user_id
+        if not notification_user_id and payload.student_id:
+            target_student = await session.get(Student, payload.student_id)
+            notification_user_id = getattr(target_student, "parent_id", None)
         if payload.action == "assign" and not assignment:
             session.add(DiscountAssignment(club_id=club.id, discount_id=discount.id, user_id=payload.user_id, student_id=payload.student_id))
         elif payload.action == "unassign" and assignment:
@@ -565,15 +569,18 @@ async def change_admin_discount(payload: DiscountChangePayload, session: AsyncSe
     else:
         raise HTTPException(400, "Неизвестное действие")
     await session.commit()
-    if payload.action in {"assign", "unassign"} and payload.user_id and club.bot_token:
+    if payload.action in {"assign", "unassign"} and club.bot_token:
         try:
             discount_label = discount.name if 'discount' in locals() and discount else "скидка"
             bot = Bot(club.bot_token)
             verb = "привязана к вашему профилю" if payload.action == "assign" else "отвязана от вашего профиля"
-            await bot.send_message(payload.user_id, f"🏷️ Скидка «{escape(discount_label)}» {verb}.", parse_mode="HTML")
+            if notification_user_id:
+                await bot.send_message(notification_user_id, f"🏷️ Скидка «{escape(discount_label)}» {verb}.", parse_mode="HTML")
+            if payload.action == "unassign" and club.owner_id and int(club.owner_id) != int(notification_user_id or 0):
+                await bot.send_message(club.owner_id, f"🏷️ Скидка «{escape(discount_label)}» отвязана от клиента.", parse_mode="HTML")
             await bot.session.close()
         except Exception:
-            logger.warning("Не удалось отправить уведомление о скидке user=%s", payload.user_id)
+            logger.warning("Не удалось отправить уведомление об изменении скидки club=%s", club.id)
     return {"ok": True}
 
 @router.get("/webapp/admin-discounts/clients")

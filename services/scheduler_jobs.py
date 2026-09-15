@@ -40,14 +40,26 @@ async def send_discount_reminders():
     """Monthly active-discount reminders and one-time expiry notices."""
     today = reporting_periods()["local_now"].date()
     async with AsyncSessionLocal() as session:
-        rows = (await session.execute(select(Discount, DiscountAssignment, Club, User).join(DiscountAssignment, DiscountAssignment.discount_id == Discount.id).join(Club, Club.id == Discount.club_id).join(User, User.user_id == DiscountAssignment.user_id).where(Discount.is_active.is_(True)))).all()
-        for discount, assignment, club, user in rows:
-            if discount.starts_at and discount.starts_at > today or discount.ends_at and discount.ends_at < today:
+        rows = (await session.execute(select(Discount, DiscountAssignment, Club, User, Student).join(DiscountAssignment, DiscountAssignment.discount_id == Discount.id).join(Club, Club.id == Discount.club_id).outerjoin(User, User.user_id == DiscountAssignment.user_id).outerjoin(Student, Student.id == DiscountAssignment.student_id).where(Discount.is_active.is_(True)))).all()
+        for discount, assignment, club, user, student in rows:
+            recipient_id = assignment.user_id or getattr(student, "parent_id", None)
+            if discount.starts_at and discount.starts_at > today:
                 continue
             bot = bots_dict.get(club.bot_token)
-            if not bot:
+            if not bot or not recipient_id:
                 continue
             value = f"{discount.value}%" if discount.kind == "percent" else f"{discount.value / 100:g} ₽"
+            if discount.ends_at and discount.ends_at < today:
+                key = f"notify:discount-expired:{club.id}:{recipient_id}:{discount.id}:{discount.ends_at}"
+                if await _notification_once(key, ttl=90 * 86400):
+                    text = f"🏷️ <b>Скидка закончилась</b>\n\n{escape(discount.name)} — {value}.\nСрок действия истёк: <code>{discount.ends_at.strftime('%d.%m.%Y')}</code>."
+                    try:
+                        await bot.send_message(recipient_id, text, parse_mode="HTML")
+                        if club.owner_id and int(club.owner_id) != int(recipient_id):
+                            await bot.send_message(club.owner_id, f"🏷️ Скидка «{escape(discount.name)}» закончилась у клиента.", parse_mode="HTML")
+                    except Exception:
+                        await _notification_forget(key)
+                continue
             if discount.ends_at and (discount.ends_at - today).days <= 1:
                 key = f"notify:discount-expiry:{club.id}:{assignment.user_id}:{discount.id}:{discount.ends_at}"
                 text = f"⏳ <b>Скидка заканчивается</b>\n\n{escape(discount.name)} — {value}.\nДействует до: <code>{discount.ends_at.strftime('%d.%m.%Y')}</code>."
