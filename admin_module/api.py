@@ -657,9 +657,11 @@ async def admin_sales_page(
         raw_total = sum((item.unit_price_kopecks or 0) * (item.quantity or 1) for item in order_items)
         allocated = 0
         for item_index, item in enumerate(order_items):
-            payload = item.payload or {}
+            # Старые товары могли иметь пустой/не-словарный payload. Не даём
+            # одному такому заказу уронить журнал при любом фильтре.
+            payload = item.payload if isinstance(item.payload, dict) else {}
             operation_category = item.item_type
-            operation_discipline = payload.get("discipline", "")
+            operation_discipline = str(payload.get("discipline") or "").strip()
             operation_method = "cash" if str(order.provider_payment_id or "").startswith("CASH:") else ("requisites" if str(order.provider_payment_id or "").startswith("MANUAL:") else ("sbp" if "SBP" in str(order.provider_payment_id or "").upper() else ("card" if order.provider_payment_id else "other")))
             raw_amount = (item.unit_price_kopecks or 0) * (item.quantity or 1)
             if item_index == len(order_items) - 1:
@@ -673,14 +675,16 @@ async def admin_sales_page(
                                "method": operation_method, "category": operation_category, "discipline": operation_discipline, "source": "cart",
                                "title": item.title, "status": order.status,
                                "buyer_label": await resolve_user_label(session, order.user_id, empty_label="Плательщик")})
+    selected_discipline = str(discipline or "").strip().casefold()
     operations = [item for item in operations
                   if (weekday is None or moscow_weekday(item["created_at"]) == weekday)
-                  and (not payment_method or item["method"] == payment_method)
-                  and (not category or item["category"] == category)
-                  and (not discipline or item["discipline"] == discipline)]
+                  and (not payment_method or item["method"] == payment_method.strip())
+                  and (not category or item["category"] == category.strip())
+                  and (not selected_discipline or str(item["discipline"] or "").strip().casefold() == selected_discipline)]
     operations.sort(key=lambda item: item["created_at"] or datetime.min, reverse=True)
     settings = club.club_settings or {}
     disciplines = settings.get("disciplines", {}) if isinstance(settings, dict) else {}
+    disciplines = disciplines if isinstance(disciplines, dict) else {}
     return templates.TemplateResponse("admin_sales.html", {"request": request, "club": club, "club_id": club_id,
         "operations": operations, "disciplines": disciplines, "filters": {"date_from": date_from or "", "date_to": date_to or "", "weekday": weekday, "payment_method": payment_method or "", "category": category or "", "discipline": discipline or ""}})
 
