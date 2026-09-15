@@ -47,6 +47,10 @@
         <p style="margin:0 0 10px 0; color:#444;">🔒 Для активации прохода нужно один раз связать устройство с профилем</p>
         <button class="btn" style="margin:0;" onclick="setupBiometrics()">Активировать доступ</button>
     </div>
+    <div id="biometry-fallback" style="display:none; background:#fff8e6; padding:15px; margin-bottom:20px; border-radius:18px; border:1px solid #f0d38a; text-align:left;">
+        <strong>Face ID недоступен на этом устройстве</strong>
+        <p style="margin:8px 0 0; color:#66552b; line-height:1.45;">Это ограничение Telegram на некоторых телефонах Huawei. Откройте меню бота и выберите «QR-пропуск», затем покажите код сотруднику клуба.</p>
+    </div>
     <p style="color:#666;" id="status-hint">Выберите атлета для прохода:</p>
     <div id="students-list">
         {% for student in students %}
@@ -83,6 +87,12 @@ const bm = tg?.BiometricManager;
 const serverBiometryEnabled = {{ 'true' if biometric_enabled else 'false' }};
 let selectedStudentId = null;
 let isBiometricReady = false;
+function showBiometryFallback() {
+    document.getElementById('setup-biometry-box')?.style.setProperty('display', 'none');
+    document.getElementById('biometry-fallback')?.style.setProperty('display', 'block');
+    const hint = document.getElementById('status-hint');
+    if (hint) hint.textContent = 'Используйте QR-пропуск из меню бота.';
+}
 document.querySelectorAll('.student-card').forEach((card) => {
     card.addEventListener('click', (event) => {
         event.preventDefault();
@@ -90,6 +100,7 @@ document.querySelectorAll('.student-card').forEach((card) => {
     }, { passive: false });
 });
 if (!bm || typeof bm.init !== 'function' || typeof bm.requestAccess !== 'function') {
+    showBiometryFallback();
     const hint = document.getElementById('status-hint');
     if (hint) {
         hint.textContent = 'Включите код-пароль и Face ID/отпечаток в настройках телефона, затем перезапустите Telegram. Если биометрия недоступна, используйте QR-пропуск из меню бота.';
@@ -124,7 +135,8 @@ try {
 }
 function setupBiometrics() {
     if (!bm) {
-        const message = 'Face ID недоступен в этом Telegram. Используйте QR-пропуск из меню бота.';
+        const message = 'Face ID недоступен на этом устройстве. Используйте QR-пропуск из меню бота.';
+        showBiometryFallback();
         document.getElementById('status-hint').textContent = message;
         tg?.showAlert(message);
         return;
@@ -138,7 +150,8 @@ function setupBiometrics() {
         }
     }
     if (!isBiometricReady || typeof bm.requestAccess !== 'function') {
-        const message = 'Не удалось запустить Face ID. Обновите Telegram и разрешите биометрию в настройках телефона.';
+        const message = 'Face ID недоступен на этом устройстве. Используйте QR-пропуск из меню бота.';
+        showBiometryFallback();
         document.getElementById('status-hint').textContent = message;
         tg?.showAlert(message);
         return;
@@ -146,7 +159,8 @@ function setupBiometrics() {
     let accessCallbackCalled = false;
     const accessTimeout = setTimeout(() => {
         if (accessCallbackCalled) return;
-        const message = 'Telegram не ответил на запрос Face ID. Откройте приложение через официальный Telegram и проверьте разрешения биометрии.';
+        const message = 'Face ID недоступен на этом устройстве. Используйте QR-пропуск из меню бота.';
+        showBiometryFallback();
         document.getElementById('status-hint').textContent = message;
         tg?.showAlert(message);
     }, 10000);
@@ -163,6 +177,7 @@ function setupBiometrics() {
             .then(data => { tg.showAlert(data.message || "Устройство успешно связано. Теперь доступ готов."); location.reload(); })
             .catch(error => {
                 console.error('Face ID activation failed', error);
+                showBiometryFallback();
                 document.getElementById('status-hint').textContent = error.message || 'Не удалось активировать Face ID.';
                 tg?.showAlert(error.message || 'Не удалось активировать Face ID.');
             });
