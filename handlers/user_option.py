@@ -1179,6 +1179,16 @@ async def process_athlete_birthday(
         session.add(new_student)
         await session.commit()  # Сохраняем в БД
 
+        if club.owner_id and int(club.owner_id) != user_id:
+            try:
+                await message.bot.send_message(
+                    club.owner_id,
+                    f"🔗 <b>Новая привязка родителя</b>\n\nАтлет: <b>{escape(name)}</b>\nРодитель: <b>{escape(user_full_name)}</b>",
+                    parse_mode="HTML",
+                )
+            except Exception as notify_error:
+                logger.warning("Не удалось уведомить администратора о новом атлете: %s", notify_error)
+
         if birthday_date is None:
             logger.success(f"👤 Клиент сам добавил атлета: {name} без указания ДР (Клуб ID: {club_id})")
         else:
@@ -1290,6 +1300,16 @@ async def process_user_contact(
 
         await session.commit()
         names = ", ".join([f"<b>{s.name}</b>" for s in students])
+
+        if club.owner_id and int(club.owner_id) != user_id:
+            try:
+                await message.bot.send_message(
+                    club.owner_id,
+                    f"🔗 <b>Родитель привязался к атлету</b>\n\nРодитель: <b>{escape(message.from_user.full_name or str(user_id))}</b>\nАтлеты: {names}",
+                    parse_mode="HTML",
+                )
+            except Exception as notify_error:
+                logger.warning("Не удалось уведомить администратора о привязке: %s", notify_error)
 
         await message.answer(
             f"✅ Авторизация в <b>{club.name}</b> успешна!\n\n"

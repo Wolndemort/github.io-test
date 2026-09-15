@@ -640,6 +640,17 @@ async def webapp_create_student_submit(payload: WebAppCreateStudentPayload, db: 
     except IntegrityError:
         await db.rollback()
         raise HTTPException(status_code=409, detail="Такой атлет уже есть")
+    if club.owner_id and int(club.owner_id) != user_id and club.bot_token:
+        try:
+            bot = Bot(club.bot_token)
+            await bot.send_message(
+                club.owner_id,
+                f"🔗 <b>Новая привязка родителя</b>\n\nАтлет: <b>{escape(student.name)}</b>\nРодитель: <code>{user_id}</code>",
+                parse_mode="HTML",
+            )
+            await bot.session.close()
+        except Exception as notify_error:
+            logger.warning("Не удалось уведомить администратора о новом атлете: %s", notify_error)
     audit_event("webapp_student_created", club_id=club.id, user_id=user_id, student_id=student.id, student_name=student.name)
     return {"ok": True, "student": {"id": student.id, "name": student.name}}
 
