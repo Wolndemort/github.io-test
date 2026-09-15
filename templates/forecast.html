@@ -267,6 +267,14 @@
         </form>
         <div class="chartbox"><canvas id="visitChart"></canvas></div>
       </section>
+      <section class="card">
+        <div class="eyebrow">Популярность возрастов</div>
+        <div class="scroll"><table class="table"><tr><th>Возраст</th><th>Участников</th></tr>{% for age, count in age_counts.items() %}<tr><td>{{ age }}</td><td>{{ count }}</td></tr>{% endfor %}</table></div>
+      </section>
+      <section class="card">
+        <div class="eyebrow">Прогноз регистраций за выбранный период</div>
+        <div class="scroll"><table class="table"><tr><th>Дата регистрации</th><th>Участник</th><th>Направление</th></tr>{% for item in registrations %}<tr><td>{{ item.date }}</td><td>{{ item.name }}</td><td>{{ item.discipline }}</td></tr>{% else %}<tr><td colspan="3">Регистраций за период нет</td></tr>{% endfor %}</table></div>
+      </section>
       <section class="card queue-card">
         <details open>
           <summary class="eyebrow queue-summary">Очередь для работы</summary>
