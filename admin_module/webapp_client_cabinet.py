@@ -35,6 +35,7 @@ from services.gate_control import process_athlete_gate_pass
 from services.staff_permissions import staff_can, permissions_for_staff
 from services.analytics import is_subscription_active
 from services.discounts import active_discount, active_discounts, apply_discount, apply_discounts
+from services.legal_documents import legal_documents_enabled
 from middlewares.db_saas_midleware import SUPER_ADMIN_IDS
 
 
@@ -532,6 +533,7 @@ async def get_client_cabinet_page(request: Request, club_id: int, init_data: str
             "students": students,
             "user_name": (user.full_name if user else None) or tg_user.get("first_name", ""),
             "profile_discount": profile_discount,
+            "legal_enabled": legal_documents_enabled(settings),
             "now": datetime.now(),
             "summary": {
                 "total": len(summary_source),

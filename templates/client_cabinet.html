@@ -181,6 +181,14 @@
     </div>
 </div>
 
+{% if legal_enabled %}
+<div class="card mono-card" style="margin-top:16px; text-align:center;">
+    <div class="muted" style="margin-bottom:8px;">Юридическая информация</div>
+    <a class="mono-action" href="/privacy?club_id={{ club_id }}">Политика конфиденциальности</a>
+    <a class="mono-action" href="/oferta?club_id={{ club_id }}">Публичная оферта</a>
+</div>
+{% endif %}
+
 <script>
     const tg = window.Telegram?.WebApp;
     if (tg) {
