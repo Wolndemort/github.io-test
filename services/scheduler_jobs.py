@@ -35,6 +35,7 @@ from services.order_notifications import notify_stock_reminders
 from services.analytics import calculate_admin_dashboard, calculate_daily_business_report, reporting_periods, is_subscription_active
 from services.bot_registry import bots_dict
 from services.motivation_accrual import accrue_motivation_job
+from services.audit import audit_event
 
 async def send_discount_reminders():
     """Monthly active-discount reminders and one-time expiry notices."""
@@ -476,6 +477,16 @@ async def send_onboarding_reminders():
             try:
                 for parent_id in parent_ids:
                     await bot.send_message(parent_id, text, reply_markup=markup, parse_mode="HTML")
+                audit_event(
+                    "retention_notification_sent",
+                    club_id=club.id,
+                    action="send",
+                    object_type="student",
+                    object_id=student.id,
+                    location="scheduler/onboarding",
+                    method=f"day_{milestone}",
+                    recipient_count=len(parent_ids),
+                )
             except Exception as exc:
                 await _notification_forget(key)
                 logger.warning("Не удалось отправить onboarding club=%s student=%s: %s", club.id, student.id, exc)
@@ -702,6 +713,7 @@ async def saas_daily_morning_check():
                     f"🎂 <b>Не указана дата рождения</b>\n\nУ {len(names)} атлетов клуба «{escape(club.name)}» не заполнена дата рождения:\n<b>{escape(', '.join(sorted(names)))}</b>.",
                     parse_mode="HTML",
                 )
+                audit_event("retention_notification_sent", club_id=club.id, action="send", object_type="student", object_id=student.id, location="scheduler/no-subscription", method="weekly", recipient_count=1)
             except Exception:
                 await _notification_forget(notification_key)
 
@@ -796,6 +808,7 @@ async def saas_daily_morning_check():
                             ),
                             parse_mode="HTML",
                         )
+                            audit_event("retention_notification_sent", club_id=student.club_id, action="send", object_type="student", object_id=student.id, location="scheduler/absence", method=f"day_{notice_days}", recipient_count=1)
                             logger.info(f"📢 Напоминание «Мы скучаем» ({notice_days} дней) отправлено для {student.name} родителю {parent_id}")
                     except Exception as e:
                         await _notification_forget(notice_key)
