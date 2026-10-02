@@ -69,7 +69,7 @@ async def send_discount_reminders():
             if not await _notification_once(key, ttl=35 * 86400):
                 continue
             try:
-                await bot.send_message(user.user_id, text, parse_mode="HTML")
+                await bot.send_message(int(recipient_id), text, parse_mode="HTML")
             except Exception:
                 await _notification_forget(key)
 
@@ -651,7 +651,8 @@ async def saas_daily_morning_check():
             if not club or not club.subscription_expire_at or club.subscription_expire_at < now_datetime or club.bot_token not in bots_dict:
                 continue
             settings = club.club_settings if isinstance(club.club_settings, dict) else {}
-            notification_key = f"notify:no-subscription:{club_id}:{parent_id}:{today.isoformat()}"
+            week_key = (today - timedelta(days=today.weekday())).isoformat()
+            notification_key = f"notify:no-subscription:{club_id}:{parent_id}:{week_key}"
             try:
                 if not settings.get("features", {}).get("subscription_expiry_reminders", True):
                     continue
@@ -660,10 +661,10 @@ async def saas_daily_morning_check():
                 await bots_dict[club.bot_token].send_message(
                     chat_id=parent_id,
                     text=(
-                        f"💳 <b>Нет активного абонемента</b>\n\n"
+                        f"💳 <b>Пора возвращаться на тренировку</b>\n\n"
                         f"У атлета(ов) <b>{escape(', '.join(names))}</b> в клубе "
-                        f"<b>{escape(club.name)}</b> нет действующего абонемента.\n"
-                        "Выберите тариф в меню, чтобы продолжить тренировки."
+                        f"<b>{escape(club.name)}</b> сейчас нет активного абонемента.\n"
+                        "Мы скучаем и будем рады видеть вас снова. Выберите новый тариф, чтобы продолжить тренировки."
                     ),
                     reply_markup=types.InlineKeyboardMarkup(inline_keyboard=[[
                         types.InlineKeyboardButton(text="💳 Выбрать абонемент", callback_data="choose_section")
@@ -723,13 +724,14 @@ async def saas_daily_morning_check():
                             await bot.send_message(
                             chat_id=parent_id,
                             text=(
-                                f"👋 Здравствуйте! Мы заметили, что атлет <b>{escape(student.name)}</b> "
-                                f"не посещал тренировки уже {absence_threshold} дней. Мы соскучились! "
-                                "Ждём вас на занятиях. 😉"
+                                f"👋 <b>Мы скучаем по вам</b>\n\n"
+                                f"Атлет <b>{escape(student.name)}</b> не был на тренировке уже "
+                                f"<b>{absence_threshold} дней</b>. Уверены, вы просто заняты — возвращайтесь, "
+                                "мы поможем подобрать удобное занятие. 💪"
                             ),
                             parse_mode="HTML",
                         )
-                            logger.info(f"📢 Уведомление о прогуле (10 дней) отправлено атлету {student.name} родителю {parent_id}")
+                            logger.info(f"📢 Напоминание «Мы скучаем» ({absence_threshold} дней) отправлено для {student.name} родителю {parent_id}")
                     except Exception as e:
                         await _notification_forget(notice_key)
                         logger.error("Не удалось отправить уведомление прогульщику: %s", e)
