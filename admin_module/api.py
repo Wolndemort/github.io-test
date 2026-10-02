@@ -1591,6 +1591,47 @@ async def get_revenue_stats(
                     for title, quantity, amount in sorted((await session.execute(product_top_query)).all(), key=lambda row: row[1] or 0, reverse=True)[:10]]
 
     visit_logs = list((await session.execute(select(VisitLog).where(VisitLog.club_id == club_id))).scalars().all())
+    retention_events = (await session.execute(
+        select(AuditEntry).where(
+            AuditEntry.club_id == club_id,
+            AuditEntry.event == "retention_notification_sent",
+            AuditEntry.created_at >= start_filter,
+        )
+    )).scalars().all()
+    retention_student_ids = {int(e.object_id) for e in retention_events if str(e.object_id or "").isdigit()}
+    visits_by_student = {}
+    for visit in visit_logs:
+        visits_by_student.setdefault(visit.student_id, []).append(visit.visited_at.replace(tzinfo=None))
+    retention_purchases = (await session.execute(
+        select(PaymentOrder.student_id, PaymentOrder.created_at).where(
+            PaymentOrder.club_id == club_id,
+            PaymentOrder.status == "CONFIRMED",
+            PaymentOrder.created_at >= start_filter,
+            PaymentOrder.student_id.in_(retention_student_ids) if retention_student_ids else False,
+        )
+    )).all()
+    retention_purchase_dates = {}
+    for student_id, created_at in retention_purchases:
+        retention_purchase_dates.setdefault(student_id, []).append(created_at.replace(tzinfo=None))
+    retention_returned = 0
+    retention_reactivated = 0
+    for event in retention_events:
+        try:
+            student_id = int(event.object_id)
+        except (TypeError, ValueError):
+            continue
+        sent_at = event.created_at.replace(tzinfo=None)
+        if any(sent_at < visit <= sent_at + timedelta(days=14) for visit in visits_by_student.get(student_id, [])):
+            retention_returned += 1
+        if any(sent_at < paid <= sent_at + timedelta(days=30) for paid in retention_purchase_dates.get(student_id, [])):
+            retention_reactivated += 1
+    retention_metrics = {
+        "sent": len(retention_events),
+        "recipients": sum(int((event.payload or {}).get("recipient_count", 0) or 0) for event in retention_events),
+        "returned": retention_returned,
+        "reactivated": retention_reactivated,
+        "return_rate": round(retention_returned / len(retention_events) * 100, 1) if retention_events else 0,
+    }
     student_metrics = calculate_student_metrics(students, now=now_local, visit_logs=visit_logs)
     total_athletes = student_metrics["total_athletes"]
     total_parents = student_metrics["total_parents"]
@@ -1636,6 +1677,7 @@ async def get_revenue_stats(
             "total_athletes": total_athletes,
             "total_parents": total_parents,
             "retention_rate": retention_rate,
+            "retention_metrics": retention_metrics,
             "active_passes": active_passes,
             "frozen_passes": frozen_passes,
             "burning_passes": burning_passes,

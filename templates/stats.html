@@ -65,10 +65,18 @@
             <div class="label">Родителей с привязкой</div>
             <div class="value">{{ total_parents|default(0) }}</div>
         </div>
-        <div class="card mono-card">
-            <div class="label">Удержание (Retention)</div>
-            <div class="value">{{ retention_rate }}%</div>
-        </div>
+    <div class="card mono-card">
+        <div class="label">Удержание (Retention)</div>
+        <div class="value">{{ retention_rate }}%</div>
+    </div>
+    <div class="card mono-card">
+        <div class="label">📣 Уведомления удержания за месяц</div>
+        <div class="list-item"><span>Отправлено</span><b>{{ retention_metrics.sent|default(0) }}</b></div>
+        <div class="list-item"><span>Получателей</span><b>{{ retention_metrics.recipients|default(0) }}</b></div>
+        <div class="list-item"><span>Вернулись за 14 дней</span><b>{{ retention_metrics.returned|default(0) }}</b></div>
+        <div class="list-item"><span>Конверсия возврата</span><b>{{ retention_metrics.return_rate|default(0) }}%</b></div>
+        <div class="muted-note">Новые покупки после уведомления: {{ retention_metrics.reactivated|default(0) }}</div>
+    </div>
         <div class="card mono-card">
             <div class="label">Активные абон.</div>
             <div class="value">{{ active_passes }}</div>
