@@ -14,7 +14,7 @@ def test_legacy_motivation_is_removed_but_empty_page_contract_remains():
     assert "accrue_motivation_job" not in scheduler
     assert not (ROOT / "services" / "motivation_accrual.py").exists()
     motivation_page = page[page.index('async def admin_motivation_page'):page.index('@router.post("/webapp/admin-motivation/adjust")')]
-    assert '"staff": []' in motivation_page
+    assert '"lessons": motivation_lessons' in motivation_page
 
 
 def test_motivation_tables_are_removed_by_migration():
