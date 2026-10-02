@@ -41,7 +41,7 @@ DEFAULT_CLUB_SETTINGS = {
         "document_version": "1.0",
         "updated_at": "",
         "privacy_operator": "",
-        "platform_name": "ALTER"
+        "platform_name": "Speedy CRM"
     },
 
     # 3. ДИСЦИПЛИНЫ (Ключевой блок для хендлеров оплаты)
