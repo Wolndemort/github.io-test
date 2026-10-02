@@ -32,7 +32,7 @@ from admin_module.api import (
 from admin_module.utils import verify_webapp_admin, verify_webapp_staff
 from admin_module.webapp_shared import get_club_id_from_host, telegram_init_gate, webapp_auth_gate, verify_webapp_admin
 from admin_module.webapp_verify import verify_telegram_data
-from database.db import Club, ClubProduct, ClubStaff, Discount, DiscountAssignment, PaymentOrder, Student, User, VisitLog, get_session, get_student_parent_ids
+from database.db import Club, ClubProduct, ClubStaff, Discount, DiscountAssignment, MotivationAccrual, PaymentOrder, Student, User, VisitLog, get_session, get_student_parent_ids
 from database.db import CartItem, CartOrder
 from services.audit import audit_event
 from services.legal_documents import legal_context
@@ -807,6 +807,24 @@ async def save_admin_motivation_rules(payload: dict, session: AsyncSession = Dep
     lessons[index] = dict(lessons[index]); lessons[index]["motivation_rules"] = rules; block["schedule"] = dict(block.get("schedule", {})); block["schedule"][day] = lessons
     settings["disciplines"] = dict(settings.get("disciplines", {})); settings["disciplines"][discipline] = block; club.club_settings = settings
     await session.commit(); return {"success": True, "rules": rules}
+
+@router.get("/webapp/staff-motivation", response_class=HTMLResponse)
+async def staff_motivation_page(request: Request, club_id: int = Query(...), init_data: str | None = Query(None), session: AsyncSession = Depends(get_session)):
+    club = await session.get(Club, club_id)
+    if not init_data:
+        return telegram_init_gate("/webapp/staff-motivation", club_id, "Откройте мотивацию из Telegram")
+    tg_user = await verify_webapp_staff(club, init_data, session, "schedule_view")
+    user_id = int(tg_user.get("id", 0))
+    staff = await session.scalar(select(ClubStaff).where(ClubStaff.club_id == club_id, ClubStaff.telegram_id == user_id, ClubStaff.is_active.is_(True)))
+    is_admin = user_id == int(getattr(club, "owner_id", 0) or 0) or user_id in SUPER_ADMIN_IDS
+    if not staff and not is_admin:
+        raise HTTPException(403, "Раздел доступен только сотрудникам")
+    rows_query = select(MotivationAccrual).where(MotivationAccrual.club_id == club_id).order_by(MotivationAccrual.occurrence_date.desc(), MotivationAccrual.start_time.desc())
+    rows = list((await session.execute(rows_query)).scalars().all())
+    if not is_admin:
+        rows = [row for row in rows if staff.id in (row.staff_ids or [])]
+    total = sum(int(row.rate_kopecks or 0) for row in rows)
+    return templates.TemplateResponse("staff_motivation.html", {"request": request, "club_id": club_id, "rows": rows, "total": total, "is_admin": is_admin})
     staff = (await session.execute(select(ClubStaff).where(ClubStaff.club_id == club_id).order_by(ClubStaff.full_name))).scalars().all()
     now_local = datetime.now(_MOTIVATION_TZ)
     today = now_local.date()
