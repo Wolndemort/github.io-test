@@ -422,6 +422,65 @@ async def check_abon_mailing():
                 logger.error(f"❌ Ошибка отправки (Student ID {student.id}): {exc}")
 
 
+async def send_onboarding_reminders():
+    """Поддерживает клиента после покупки абонемента: день покупки, 3-й и 7-й день."""
+    periods = reporting_periods()
+    now = periods["now"]
+    today = periods["local_now"].date()
+    async with AsyncSessionLocal() as session:
+        payments = (await session.execute(
+            select(PaymentOrder).where(
+                PaymentOrder.status == "CONFIRMED",
+                PaymentOrder.created_at >= now - timedelta(days=8),
+                PaymentOrder.created_at <= now,
+            )
+        )).scalars().all()
+        for payment in payments:
+            student = await session.get(Student, payment.student_id)
+            if not student or not student.club_id:
+                continue
+            club = await session.get(Club, student.club_id)
+            bot = bots_dict.get(club.bot_token) if club else None
+            if not club or not bot or not club.subscription_expire_at:
+                continue
+            parent_ids = await get_student_parent_ids(student.id, session)
+            if not parent_ids:
+                continue
+            paid_at = payment.created_at.replace(tzinfo=None)
+            days_since = max(0, (now - paid_at).days)
+            milestone = 0 if days_since < 1 else (3 if days_since < 7 else 7)
+            key = f"notify:onboarding:{club.id}:{student.id}:{payment.id}:{milestone}"
+            if not await _notification_once(key, ttl=14 * 86400):
+                continue
+            if milestone == 0:
+                text = (
+                    f"✅ <b>Абонемент активирован</b>\n\n"
+                    f"Атлет: <b>{escape(student.name)}</b>\n"
+                    "Первое посещение лучше запланировать заранее — так проще войти в ритм."
+                )
+            elif milestone == 3:
+                text = (
+                    f"🥊 <b>Как проходит первая неделя?</b>\n\n"
+                    f"Мы ждём <b>{escape(student.name)}</b> на тренировке. Если не получается подобрать время, "
+                    "откройте расписание или напишите администратору."
+                )
+            else:
+                text = (
+                    f"💪 <b>Пора закрепить ритм тренировок</b>\n\n"
+                    f"Уже прошла неделя с покупки абонемента для <b>{escape(student.name)}</b>. "
+                    "Выберите ближайшее удобное занятие и продолжайте без длинных перерывов."
+                )
+            markup = types.InlineKeyboardMarkup(inline_keyboard=[[
+                types.InlineKeyboardButton(text="📅 Выбрать тренировку", callback_data="choose_section"),
+            ]])
+            try:
+                for parent_id in parent_ids:
+                    await bot.send_message(parent_id, text, reply_markup=markup, parse_mode="HTML")
+            except Exception as exc:
+                await _notification_forget(key)
+                logger.warning("Не удалось отправить onboarding club=%s student=%s: %s", club.id, student.id, exc)
+
+
 async def send_daily_report_to_admins():
     """Рассылка вечерних бизнес-отчетов владельцам клубов."""
     periods = reporting_periods()
