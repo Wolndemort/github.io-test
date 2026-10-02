@@ -811,7 +811,7 @@ async def save_admin_motivation_rules(payload: dict, session: AsyncSession = Dep
     await session.commit(); return {"success": True, "rules": rules}
 
 @router.get("/webapp/staff-motivation", response_class=HTMLResponse)
-async def staff_motivation_page(request: Request, club_id: int = Query(...), init_data: str | None = Query(None), session: AsyncSession = Depends(get_session)):
+async def staff_motivation_page(request: Request, club_id: int = Query(...), date_from: str | None = Query(None), date_to: str | None = Query(None), init_data: str | None = Query(None), session: AsyncSession = Depends(get_session)):
     club = await session.get(Club, club_id)
     if not init_data:
         return telegram_init_gate("/webapp/staff-motivation", club_id, "Откройте мотивацию из Telegram")
@@ -821,12 +821,20 @@ async def staff_motivation_page(request: Request, club_id: int = Query(...), ini
     is_admin = user_id == int(getattr(club, "owner_id", 0) or 0) or user_id in SUPER_ADMIN_IDS
     if not staff and not is_admin:
         raise HTTPException(403, "Раздел доступен только сотрудникам")
-    rows_query = select(MotivationAccrual).where(MotivationAccrual.club_id == club_id).order_by(MotivationAccrual.occurrence_date.desc(), MotivationAccrual.start_time.desc())
+    today = datetime.now(_MOTIVATION_TZ).date()
+    try:
+        start = date.fromisoformat(date_from) if date_from else today.replace(day=1)
+        end = date.fromisoformat(date_to) if date_to else today
+    except ValueError:
+        raise HTTPException(400, "Диапазон дат должен быть в формате ГГГГ-ММ-ДД")
+    if end < start or (end - start).days > 366:
+        raise HTTPException(400, "Недопустимый диапазон дат")
+    rows_query = select(MotivationAccrual).where(MotivationAccrual.club_id == club_id, MotivationAccrual.occurrence_date >= start, MotivationAccrual.occurrence_date <= end).order_by(MotivationAccrual.occurrence_date.desc(), MotivationAccrual.start_time.desc())
     rows = list((await session.execute(rows_query)).scalars().all())
     if not is_admin:
         rows = [row for row in rows if staff.id in (row.staff_ids or [])]
     total = sum(int(row.rate_kopecks or 0) for row in rows)
-    return templates.TemplateResponse("staff_motivation.html", {"request": request, "club_id": club_id, "rows": rows, "total": total, "is_admin": is_admin})
+    return templates.TemplateResponse("staff_motivation.html", {"request": request, "club_id": club_id, "rows": rows, "total": total, "is_admin": is_admin, "date_from": start.isoformat(), "date_to": end.isoformat()})
     staff = (await session.execute(select(ClubStaff).where(ClubStaff.club_id == club_id).order_by(ClubStaff.full_name))).scalars().all()
     now_local = datetime.now(_MOTIVATION_TZ)
     today = now_local.date()
