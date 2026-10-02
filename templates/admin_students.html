@@ -451,6 +451,10 @@ function openChat(event, parentId) {
   }
   return false;
 }
+ function requestFullscreen(target = document.documentElement) {
+   if (document.fullscreenElement) return document.exitFullscreen?.();
+   return target.requestFullscreen?.();
+ }
  document.querySelectorAll('input[name="frozen_days"]').forEach(input=>{input.readOnly=true;input.title='Срок по абонементу фиксируется при покупке'});
  </script>
  <script src="/static/js/scroll_top.js"></script>
