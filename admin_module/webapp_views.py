@@ -32,7 +32,7 @@ from admin_module.api import (
 from admin_module.utils import verify_webapp_admin, verify_webapp_staff
 from admin_module.webapp_shared import get_club_id_from_host, telegram_init_gate, webapp_auth_gate, verify_webapp_admin
 from admin_module.webapp_verify import verify_telegram_data
-from database.db import Club, ClubProduct, ClubStaff, Discount, DiscountAssignment, MotivationAccrual, MotivationAdjustment, MotivationRate, MotivationIndividual, PaymentOrder, Student, User, VisitLog, get_session, get_student_parent_ids
+from database.db import Club, ClubProduct, ClubStaff, Discount, DiscountAssignment, PaymentOrder, Student, User, VisitLog, get_session, get_student_parent_ids
 from database.db import CartItem, CartOrder
 from services.audit import audit_event
 from services.legal_documents import legal_context
@@ -770,6 +770,7 @@ async def admin_motivation_page(request: Request, club_id: int = Query(...), dat
     tg_user = await verify_webapp_staff(club, init_data, session, "schedule_view")
     if int(tg_user.get("id", 0)) != int(getattr(club, "owner_id", 0) or 0) and int(tg_user.get("id", 0)) not in SUPER_ADMIN_IDS:
         raise HTTPException(403, "Раздел мотивации доступен только администратору")
+    return templates.TemplateResponse("admin_motivation.html", {"request": request, "club_id": club_id, "date_from": "", "date_to": "", "today": "", "month": "", "staff": []})
     staff = (await session.execute(select(ClubStaff).where(ClubStaff.club_id == club_id).order_by(ClubStaff.full_name))).scalars().all()
     now_local = datetime.now(_MOTIVATION_TZ)
     today = now_local.date()
@@ -803,6 +804,7 @@ async def admin_motivation_page(request: Request, club_id: int = Query(...), dat
 
 @router.post("/webapp/admin-motivation/adjust")
 async def adjust_admin_motivation(payload: dict, session: AsyncSession = Depends(get_session)):
+    raise HTTPException(410, "Мотивация удалена и будет заменена новой логикой")
     club = await session.get(Club, int(payload.get("club_id", 0)))
     tg_user = await verify_webapp_staff(club, payload.get("init_data"), session, "schedule_view")
     if int(tg_user.get("id", 0)) != int(getattr(club, "owner_id", 0) or 0) and int(tg_user.get("id", 0)) not in SUPER_ADMIN_IDS:
@@ -846,6 +848,7 @@ async def adjust_admin_motivation(payload: dict, session: AsyncSession = Depends
 
 @router.post("/webapp/admin-motivation/individual")
 async def add_individual_motivation(payload: dict, session: AsyncSession = Depends(get_session)):
+    raise HTTPException(410, "Мотивация удалена и будет заменена новой логикой")
     club = await session.get(Club, int(payload.get("club_id", 0)))
     tg_user = await verify_webapp_staff(club, payload.get("init_data"), session, "schedule_view")
     if int(tg_user.get("id", 0)) != int(getattr(club, "owner_id", 0) or 0) and int(tg_user.get("id", 0)) not in SUPER_ADMIN_IDS:
@@ -872,6 +875,7 @@ async def add_individual_motivation(payload: dict, session: AsyncSession = Depen
 
 @router.get("/webapp/admin-motivation/export")
 async def export_admin_motivation(club_id: int = Query(...), date_from: str | None = Query(None), date_to: str | None = Query(None), init_data: str | None = Query(None), session: AsyncSession = Depends(get_session)):
+    raise HTTPException(410, "Экспорт мотивации удалён и будет заменён новой логикой")
     club = await session.get(Club, club_id); tg_user = await verify_webapp_staff(club, init_data, session, "schedule_view")
     if int(tg_user.get("id", 0)) != int(getattr(club, "owner_id", 0) or 0) and int(tg_user.get("id", 0)) not in SUPER_ADMIN_IDS: raise HTTPException(403, "Только администратор")
     today = datetime.now(_MOTIVATION_TZ).date(); start = datetime.strptime(date_from, "%Y-%m-%d").date() if date_from else today.replace(day=1); end = datetime.strptime(date_to, "%Y-%m-%d").date() if date_to else today
