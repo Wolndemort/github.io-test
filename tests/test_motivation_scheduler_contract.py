@@ -9,7 +9,8 @@ def test_legacy_motivation_is_removed_but_empty_page_contract_remains():
     scheduler = (ROOT / "services" / "scheduler_jobs.py").read_text(encoding="utf-8")
     page = (ROOT / "admin_module" / "webapp_views.py").read_text(encoding="utf-8")
 
-    assert "motivation_accrual" not in main
+    assert "from services.motivation_engine import motivation_accrual_job" in main
+    assert "scheduler.add_job(motivation_accrual_job, 'interval', minutes=1" in main
     assert "accrue_motivation_job" not in scheduler
     assert not (ROOT / "services" / "motivation_accrual.py").exists()
     motivation_page = page[page.index('async def admin_motivation_page'):page.index('@router.post("/webapp/admin-motivation/adjust")')]
