@@ -770,7 +770,43 @@ async def admin_motivation_page(request: Request, club_id: int = Query(...), dat
     tg_user = await verify_webapp_staff(club, init_data, session, "schedule_view")
     if int(tg_user.get("id", 0)) != int(getattr(club, "owner_id", 0) or 0) and int(tg_user.get("id", 0)) not in SUPER_ADMIN_IDS:
         raise HTTPException(403, "Раздел мотивации доступен только администратору")
-    return templates.TemplateResponse("admin_motivation.html", {"request": request, "club_id": club_id, "date_from": "", "date_to": "", "today": "", "month": "", "staff": []})
+    day_names = {"mon": "Пн", "tue": "Вт", "wed": "Ср", "thu": "Чт", "fri": "Пт", "sat": "Сб", "sun": "Вс"}
+    motivation_lessons = []
+    for discipline, block in (club.club_settings or {}).get("disciplines", {}).items():
+        for day, lessons in (block or {}).get("schedule", {}).items():
+            for index, lesson in enumerate(lessons or []):
+                motivation_lessons.append({
+                    "discipline": discipline,
+                    "discipline_name": (block or {}).get("name") or discipline,
+                    "day": day,
+                    "day_name": day_names.get(day, day),
+                    "index": index,
+                    "time": lesson.get("time", ""),
+                    "duration_minutes": lesson.get("duration_minutes", lesson.get("duration", 60)),
+                    "coach_staff_ids": lesson.get("coach_staff_ids") or ([lesson.get("coach_staff_id")] if lesson.get("coach_staff_id") else []),
+                    "coaches": [next((x.full_name for x in staff if x.id == int(staff_id)), f"Тренер #{staff_id}") for staff_id in (lesson.get("coach_staff_ids") or ([lesson.get("coach_staff_id")] if lesson.get("coach_staff_id") else []))],
+                    "rules": lesson.get("motivation_rules") or [],
+                })
+    return templates.TemplateResponse("admin_motivation.html", {"request": request, "club_id": club_id, "init_data": init_data or "", "lessons": motivation_lessons})
+
+@router.post("/webapp/admin-motivation/rules")
+async def save_admin_motivation_rules(payload: dict, session: AsyncSession = Depends(get_session)):
+    club = (await session.execute(select(Club).where(Club.id == int(payload.get("club_id", 0))).with_for_update())).scalar_one_or_none()
+    tg_user = await verify_webapp_staff(club, payload.get("init_data"), session, "schedule_edit")
+    if int(tg_user.get("id", 0)) != int(getattr(club, "owner_id", 0) or 0) and int(tg_user.get("id", 0)) not in SUPER_ADMIN_IDS:
+        raise HTTPException(403, "Только администратор может менять мотивацию")
+    discipline = str(payload.get("discipline", "")).strip(); day = str(payload.get("day", "")).strip(); index = int(payload.get("index", -1))
+    settings = dict(club.club_settings or {}); block = dict(settings.get("disciplines", {}).get(discipline, {})); lessons = list((block.get("schedule", {}) or {}).get(day, []))
+    if index < 0 or index >= len(lessons): raise HTTPException(404, "Занятие не найдено")
+    rules = []
+    for raw in payload.get("rules", []) or []:
+        minimum = int(raw.get("min_students", 0)); maximum = int(raw.get("max_students", 0)); rate = int(raw.get("rate_kopecks", 0))
+        if minimum < 1 or maximum < minimum or rate < 0: raise HTTPException(400, "Некорректный диапазон или ставка")
+        rules.append({"min_students": minimum, "max_students": maximum, "rate_kopecks": rate})
+    rules.sort(key=lambda item: item["min_students"])
+    lessons[index] = dict(lessons[index]); lessons[index]["motivation_rules"] = rules; block["schedule"] = dict(block.get("schedule", {})); block["schedule"][day] = lessons
+    settings["disciplines"] = dict(settings.get("disciplines", {})); settings["disciplines"][discipline] = block; club.club_settings = settings
+    await session.commit(); return {"success": True, "rules": rules}
     staff = (await session.execute(select(ClubStaff).where(ClubStaff.club_id == club_id).order_by(ClubStaff.full_name))).scalars().all()
     now_local = datetime.now(_MOTIVATION_TZ)
     today = now_local.date()
@@ -977,11 +1013,6 @@ async def change_admin_schedule(payload: ScheduleChangePayload, session: AsyncSe
         return {"success": True}
     elif payload.action in {"add", "update"}:
         lesson = payload.lesson or {}
-        raw_max_slots = lesson.get("max_slots", lesson.get("slots", lesson.get("limit", 0)))
-        try:
-            parsed_max_slots = int(raw_max_slots if raw_max_slots is not None else 0)
-        except (ValueError, TypeError):
-            parsed_max_slots = 0
         raw_duration = lesson.get("duration_minutes", lesson.get("duration", 60))
         try:
             parsed_duration = int(raw_duration if raw_duration is not None else 60)
@@ -992,7 +1023,6 @@ async def change_admin_schedule(payload: ScheduleChangePayload, session: AsyncSe
         item = {
             "time": str(lesson.get("time", "00:00"))[:5],
             "coach": str(lesson.get("info", lesson.get("coach", "")))[:100],
-            "max_slots": max(0, min(999, parsed_max_slots)),
             "duration_minutes": parsed_duration,
         }
         selected_staff_ids = payload.coach_staff_ids if payload.coach_staff_ids is not None else ([payload.coach_staff_id] if payload.coach_staff_id is not None else None)
