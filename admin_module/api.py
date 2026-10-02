@@ -1561,13 +1561,10 @@ async def get_revenue_stats(
     if end_filter:
         payment_top_query = payment_top_query.where(PaymentOrder.created_at < end_filter)
     student_names = {s.id: s.name for s in students}
-    cart_top_query = (select(Student.id, func.sum(CartOrder.amount_kopecks))
-                      .join(CartOrder, CartOrder.user_id == Student.parent_id)
-                      .where(CartOrder.club_id == club_id, CartOrder.status == "CONFIRMED", CartOrder.created_at >= start_filter)
-                      .group_by(Student.id))
-    if end_filter:
-        cart_top_query = cart_top_query.where(CartOrder.created_at < end_filter)
-    payment_rows = list((await session.execute(payment_top_query)).all()) + list((await session.execute(cart_top_query)).all())
+    # Топ оплат — только оплаты абонементов. CartOrder относится к товарам
+    # родителя и не содержит student_id, поэтому его join на Student.parent_id
+    # ошибочно начислял одну покупку каждому ребёнку родителя.
+    payment_rows = list((await session.execute(payment_top_query)).all())
     payment_totals = {}
     for student_id, amount in payment_rows:
         payment_totals[student_id] = payment_totals.get(student_id, 0) + (amount or 0)
@@ -1654,7 +1651,6 @@ async def get_revenue_stats(
             "cash_income_week": cash_flow["week_income"],
             "cash_income_month": cash_flow["month_income"],
             "cash_margin_today": cash_flow["today_margin"],
-            "cash_margin_week": cash_flow["week_margin"],
             "cash_margin_month": cash_flow["month_margin"],
             "payment_types": payment_types,
             "filters": {"date_from": date_from or "", "date_to": date_to or ""},

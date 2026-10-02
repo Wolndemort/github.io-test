@@ -113,16 +113,8 @@ async def process_athlete_gate_pass(
         session_end_str = session_end.strftime("%H:%M")
         message_text = f"Повторный проход. Сессия активна до {session_end_str}."
     else:
-        student.last_visit = now_naive  # Открываем новую сессию в UTC
         balance_text = "Безлимит" if is_unlimited else f"{balance} зан."
         message_text = f"Приятной тренировки! Доступно: {balance_text}"
-
-    db.add(VisitLog(
-        student_id=student.id,
-        club_id=student.club_id,
-        visited_at=now_naive,
-        source="gate" if not is_inside_session else "repeat"
-    ))
 
     # 7. СНАЧАЛА ПОДТВЕРЖДАЕМ ОТКРЫТИЕ ЖЕЛЕЗА, НЕ МЕНЯЯ ЛОГИКУ СЕССИИ.
     # Если реле отказало, откатываем last_visit/VisitLog и позволяем повторить
@@ -178,6 +170,16 @@ async def process_athlete_gate_pass(
     # 8. После успешного открытия фиксируем ровно те же изменения сессии,
     # что и раньше. При выключенном СКУД commit выполняется сразу.
     try:
+        # Фиксируем посещение только после успешного ответа реле. Иначе
+        # неуспешный проход не должен попадать ни в историю, ни в статистику.
+        if not is_inside_session:
+            student.last_visit = now_naive
+        db.add(VisitLog(
+            student_id=student.id,
+            club_id=student.club_id,
+            visited_at=now_naive,
+            source="gate" if not is_inside_session else "repeat"
+        ))
         await db.commit()
     except Exception as db_err:
         logger.error(f"Ошибка коммита СКУД сервиса: {db_err}")

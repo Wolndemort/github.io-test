@@ -139,10 +139,6 @@
             <div class="label">Расходы за неделю</div>
             <div class="value">{{ '%.2f'|format(expenses_week|default(0)) }} ₽</div>
         </div>
-        <div class="card mono-card">
-            <div class="label">Маржа за неделю</div>
-            <div class="value">{{ '%.2f'|format(cash_margin_week|default(0)) }} ₽</div>
-        </div>
         <div class="card mono-card full">
             <div class="label">Выручка за месяц</div>
             <div class="value">{{ '%.2f'|format(revenue_month|default(0)) }} ₽</div>
