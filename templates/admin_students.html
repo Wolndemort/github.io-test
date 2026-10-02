@@ -13,7 +13,6 @@
     .student-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.student-actions button{flex:0 1 auto}.invite-parent{background:#e4f8ec!important;color:#123!important}.invite-status{display:inline-flex;align-items:center;padding:10px 12px;border-radius:12px;background:#dff8e9;color:#14532d;font-weight:700;font-size:13px}
     #list{display:grid;gap:14px}.wrap>.card:first-of-type>.muted,.wrap>.card:first-of-type>p{display:none}.wrap>.card:first-of-type{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 16px}.wrap>.card:first-of-type h2{margin:0;min-width:0}.wrap>.card:first-of-type>a{display:inline-block;width:auto;flex:0 0 auto;padding:10px 14px}
     .wrap>.card:nth-of-type(2){display:block}.wrap>.card:nth-of-type(2)>label{display:flex;flex-direction:column;gap:6px;min-width:0}.wrap>.card:nth-of-type(2)>label input{width:100%;min-width:0}.wrap>.card:nth-of-type(2) .filter-panel{margin:12px 0}.wrap>.card:nth-of-type(2)>a{display:block;width:100%;white-space:nowrap}
-    #fullscreen{position:fixed;right:18px;bottom:88px;z-index:60;width:46px;height:46px;border-radius:50%;border:1px solid #d9d9d9;background:#fff;color:#111;box-shadow:0 8px 22px #0005;float:none!important}
     #fab{position:fixed!important;top:18px!important;right:18px!important;z-index:61!important;width:46px!important;height:46px!important;background:#fff!important;color:#111!important;border:1px solid #d9d9d9!important;box-shadow:0 8px 18px rgba(0,0,0,.12)!important;border-radius:50%!important}
     #modal{display:none;position:fixed;inset:0;z-index:40;background:rgba(0,0,0,.45);padding:16px;box-sizing:border-box;overflow-y:auto;-webkit-overflow-scrolling:touch;touch-action:pan-y}
     body.mono-theme .card,
@@ -71,7 +70,7 @@
     @media(max-width:650px){ #modal .row{grid-template-columns:1fr 1fr}#modal .box{margin:0 auto;max-height:calc(100dvh - 24px)}}
   </style>
 </head>
-<body class="mono-theme"><div class="wrap"><button id="fullscreen" type="button" style="float:right;width:auto">⛶</button>
+<body class="mono-theme"><div class="wrap">
   <div class="card"><div class="muted">Раздел</div><h2>👥 Атлеты · {{ club_name }}</h2><p>Управление атлетами клуба. Пользовательские и системные настройки недоступны.</p><a class="mono-action" href="/webapp/client-cabinet?club_id={{ club_id }}">← В рабочий кабинет</a></div>
   <div class="card"><label>Поиск<input id="search" placeholder="Имя атлета"></label><details class="filter-panel"><summary>Фильтры</summary><div class="filter-checks"><label><input class="student-filter" data-filter="missing" id="missing" type="checkbox"> Без даты рождения</label><label><input class="student-filter" data-filter="active" type="checkbox"> С активным абонементом</label><label><input class="student-filter" data-filter="noSubscription" type="checkbox"> Без абонемента</label><label><input class="student-filter" data-filter="frozen" type="checkbox"> Замороженные</label><label><input class="student-filter" data-filter="noParent" type="checkbox"> Без родителя</label><label class="age-filter"><input class="student-filter age-filter" data-age-min="0" data-age-max="6" type="checkbox"> 0–6 лет</label><label class="age-filter"><input class="student-filter age-filter" data-age-min="7" data-age-max="12" type="checkbox"> 7–12 лет</label><label class="age-filter"><input class="student-filter age-filter" data-age-min="13" data-age-max="17" type="checkbox"> 13–17 лет</label><label class="age-filter"><input class="student-filter age-filter" data-age-min="18" type="checkbox"> 18+ лет</label>{% for code,info in club_settings.get('disciplines', {}).items() %}<label><input class="student-filter discipline-filter" data-discipline="{{ code }}" type="checkbox"> {{ info.name if info.name else code }}</label>{% endfor %}</div></details><a class="mono-action" href="/admin/sales?club_id={{ club_id }}&init_data={{ request.query_params.get('init_data','')|urlencode }}">📈 Продажи</a></div>
   <div id="list">
@@ -131,14 +130,6 @@ const formatDMY = (value) => {
   if (match) return `${match[3]}.${match[2]}.${match[1]}`;
   return raw;
 };
-document.getElementById('fullscreen').onclick = async () => {
-  try {
-    if (document.fullscreenElement) await document.exitFullscreen();
-    else if (document.documentElement.requestFullscreen) await document.documentElement.requestFullscreen();
-    else tg?.expand();
-  } catch (_) { tg?.expand(); }
-};
-
 function filter() {
   const q = document.getElementById('search').value.toLowerCase();
   const checked = [...document.querySelectorAll('.student-filter:checked')];
