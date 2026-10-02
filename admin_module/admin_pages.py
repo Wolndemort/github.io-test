@@ -113,6 +113,7 @@ async def get_revenue_stats(request: Request, session: AsyncSession = Depends(ge
     cash_entries = (await session.execute(select(CashEntry).where(*cash_filter))).scalars().all()
     rows = [type("PaymentRow", (), {"amount_kopecks": amount, "created_at": created_at}) for _student_id, amount, created_at in payments]
     rows.extend(type("PaymentRow", (), {"amount_kopecks": amount, "created_at": created_at}) for amount, created_at in cart_payments)
+    rows.extend(type("PaymentRow", (), {"amount_kopecks": entry.amount_kopecks, "created_at": entry.created_at}) for entry in cash_entries if entry.entry_type == "income")
     revenue = calculate_revenue_periods(rows)
     revenue_today, revenue_week, revenue_month = revenue["today"], revenue["week"], revenue["month"]
     cash_flow = calculate_cash_flow_periods(cash_entries, now=periods["now"])

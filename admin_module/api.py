@@ -1506,6 +1506,17 @@ async def get_revenue_stats(
     cart_payments_res = await session.execute(cart_query)
     payment_rows = [type("PaymentRow", (), {"amount_kopecks": amount, "created_at": created_at}) for amount, created_at in payments_res.all()]
     payment_rows.extend(type("PaymentRow", (), {"amount_kopecks": amount, "created_at": created_at}) for amount, created_at in cart_payments_res.all())
+    # Доходы, внесённые вручную в кассе (включая «Прочие доходы»),
+    # являются частью общей выручки наравне с абонементами и товарами.
+    cash_income_rows = await session.execute(
+        select(CashEntry.amount_kopecks, CashEntry.created_at).where(
+            CashEntry.club_id == club_id,
+            CashEntry.entry_type == "income",
+            CashEntry.created_at >= start_filter,
+            *( [CashEntry.created_at < end_filter] if end_filter else [] ),
+        )
+    )
+    payment_rows.extend(type("PaymentRow", (), {"amount_kopecks": amount, "created_at": created_at}) for amount, created_at in cash_income_rows.all())
     revenue = calculate_revenue_periods(payment_rows)
     revenue_today = revenue["today"]
     revenue_week = revenue["week"]

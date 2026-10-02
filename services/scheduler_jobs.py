@@ -472,7 +472,14 @@ async def send_daily_report_to_admins():
                         CartOrder.created_at >= start_of_today,
                     )
                 )
-                today_payments = list(today_pay_res.scalars().all()) + list(today_cart_res.scalars().all())
+                today_cash_res = await session.execute(
+                    select(CashEntry).where(
+                        CashEntry.club_id == club.id,
+                        CashEntry.entry_type == "income",
+                        CashEntry.created_at >= start_of_today,
+                    )
+                )
+                today_payments = list(today_pay_res.scalars().all()) + list(today_cart_res.scalars().all()) + list(today_cash_res.scalars().all())
                 yesterday_pay_res = await session.execute(
                     select(PaymentOrder).where(
                         PaymentOrder.club_id == club.id,
@@ -489,7 +496,15 @@ async def send_daily_report_to_admins():
                         CartOrder.created_at < start_of_today,
                     )
                 )
-                yesterday_payments = list(yesterday_pay_res.scalars().all()) + list(yesterday_cart_res.scalars().all())
+                yesterday_cash_res = await session.execute(
+                    select(CashEntry).where(
+                        CashEntry.club_id == club.id,
+                        CashEntry.entry_type == "income",
+                        CashEntry.created_at >= start_of_yesterday,
+                        CashEntry.created_at < start_of_today,
+                    )
+                )
+                yesterday_payments = list(yesterday_pay_res.scalars().all()) + list(yesterday_cart_res.scalars().all()) + list(yesterday_cash_res.scalars().all())
                 cash_entries_res = await session.execute(select(CashEntry).where(CashEntry.club_id == club.id, CashEntry.entry_type == "expense", CashEntry.created_at >= start_of_today))
                 today_cash_expenses = list(cash_entries_res.scalars().all())
                 staff_res = await session.execute(
