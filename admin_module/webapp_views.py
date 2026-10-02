@@ -509,11 +509,22 @@ async def webapp_admin_discounts_page(request: Request, club_id: int = Query(...
         .where(DiscountAssignment.club_id == club_id)
         .order_by(Discount.name, User.full_name, Student.name)
     )).all()
+    club_students = (await session.execute(select(Student).where(Student.club_id == club_id))).scalars().all()
+    parent_ids = {int(student.parent_id) for student in club_students if student.parent_id}
+    parent_users = {}
+    if parent_ids:
+        parent_users = {user.user_id: user for user in (await session.execute(select(User).where(User.user_id.in_(parent_ids)))).scalars().all()}
+    athletes_by_parent = {}
+    for student in club_students:
+        if student.parent_id:
+            athletes_by_parent.setdefault(int(student.parent_id), []).append(student.name)
     assigned_discounts = [{
         "id": assignment.id,
         "discount_id": discount.id,
         "discount_name": discount.name,
         "name": (user.full_name if user else None) or (student.name if student else "Клиент"),
+        "owner_label": (f"Родитель: {(user.full_name if user else parent_users.get(student.parent_id).full_name if student and parent_users.get(student.parent_id) else 'не указан')}" if assignment.user_id or (student and student.parent_id) else f"Атлет: {student.name if student else 'не указан'}"),
+        "athletes": athletes_by_parent.get(int(assignment.user_id or (student.parent_id if student else 0)), []) if assignment.user_id or (student and student.parent_id) else [],
         "user_id": assignment.user_id,
         "student_id": assignment.student_id,
         "kind": discount.kind,
