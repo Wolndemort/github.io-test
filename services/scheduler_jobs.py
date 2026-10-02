@@ -715,7 +715,13 @@ async def saas_daily_morning_check():
                 # Совместимость с историческим контрактом: прежний порог был days_absent >= 10.
                 if absence_threshold:
                     try:
-                        notice_key = f"notify:absent:{student.club_id}:{student.id}:{last_visit.date().isoformat()}:{absence_threshold}"
+                        # Первые напоминания идут на 5/10/15-й день, затем
+                        # повторяются раз в неделю, пока клиент не вернулся.
+                        absence_cycle = absence_threshold
+                        if absence_threshold >= 20:
+                            absence_cycle = 20 + ((days_absent - 20) // 7) * 7
+                        notice_key = f"notify:absent:{student.club_id}:{student.id}:{last_visit.date().isoformat()}:{absence_cycle}"
+                        notice_days = absence_cycle
                         if not settings.get("features", {}).get("absence_reminders", True):
                             continue
                         if not await _notification_once(notice_key, ttl=45 * 86400):
@@ -726,12 +732,12 @@ async def saas_daily_morning_check():
                             text=(
                                 f"👋 <b>Мы скучаем по вам</b>\n\n"
                                 f"Атлет <b>{escape(student.name)}</b> не был на тренировке уже "
-                                f"<b>{absence_threshold} дней</b>. Уверены, вы просто заняты — возвращайтесь, "
+                                f"<b>{notice_days} дней</b>. Уверены, вы просто заняты — возвращайтесь, "
                                 "мы поможем подобрать удобное занятие. 💪"
                             ),
                             parse_mode="HTML",
                         )
-                            logger.info(f"📢 Напоминание «Мы скучаем» ({absence_threshold} дней) отправлено для {student.name} родителю {parent_id}")
+                            logger.info(f"📢 Напоминание «Мы скучаем» ({notice_days} дней) отправлено для {student.name} родителю {parent_id}")
                     except Exception as e:
                         await _notification_forget(notice_key)
                         logger.error("Не удалось отправить уведомление прогульщику: %s", e)
