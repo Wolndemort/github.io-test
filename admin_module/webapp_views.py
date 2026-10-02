@@ -788,7 +788,8 @@ async def admin_motivation_page(request: Request, club_id: int = Query(...), dat
                     "coaches": [next((x.full_name for x in staff if x.id == int(staff_id)), f"Тренер #{staff_id}") for staff_id in (lesson.get("coach_staff_ids") or ([lesson.get("coach_staff_id")] if lesson.get("coach_staff_id") else []))],
                     "rules": lesson.get("motivation_rules") or [],
                 })
-    return templates.TemplateResponse("admin_motivation.html", {"request": request, "club_id": club_id, "init_data": init_data or "", "lessons": motivation_lessons})
+    accruals = list((await session.execute(select(MotivationAccrual).where(MotivationAccrual.club_id == club_id).order_by(MotivationAccrual.occurrence_date.desc(), MotivationAccrual.start_time.desc()).limit(100))).scalars().all())
+    return templates.TemplateResponse("admin_motivation.html", {"request": request, "club_id": club_id, "init_data": init_data or "", "lessons": motivation_lessons, "accruals": accruals})
 
 @router.post("/webapp/admin-motivation/rules")
 async def save_admin_motivation_rules(payload: dict, session: AsyncSession = Depends(get_session)):
