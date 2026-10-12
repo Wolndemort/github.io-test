@@ -611,7 +611,7 @@ async def admin_sales_page(
     init_data: str | None = Query(default=None),
     date_from: str | None = Query(default=None),
     date_to: str | None = Query(default=None),
-    weekday: int | None = Query(default=None),
+    weekday: str | None = Query(default=None),
     payment_method: str | None = Query(default=None),
     category: str | None = Query(default=None),
     discipline: str | None = Query(default=None),
@@ -622,6 +622,7 @@ async def admin_sales_page(
     club = await session.get(Club, club_id)
     await verify_webapp_staff(club, init_data, session, "analytics_view")
 
+    weekday_value = int(weekday) if weekday not in (None, "") else None
     start = moscow_date_boundary(date_from) if date_from else None
     end = moscow_date_boundary(date_to) + timedelta(days=1) if date_to else None
     payment_query = select(PaymentOrder).where(PaymentOrder.club_id == club_id, PaymentOrder.status == "CONFIRMED")
@@ -686,7 +687,7 @@ async def admin_sales_page(
                                "title": item.title, "status": order.status,
                                "buyer_label": await resolve_user_label(session, order.user_id, empty_label="Плательщик")})
     operations = [item for item in operations
-                  if (weekday is None or moscow_weekday(item["created_at"]) == weekday)
+                  if (weekday_value is None or moscow_weekday(item["created_at"]) == weekday_value)
                   and (not payment_method or item["method"] == payment_method)
                   and (not category or item["category"] == category)
                   and (not discipline or item["discipline"] == discipline)]
@@ -694,7 +695,7 @@ async def admin_sales_page(
     settings = club.club_settings or {}
     disciplines = settings.get("disciplines", {}) if isinstance(settings, dict) else {}
     return templates.TemplateResponse("admin_sales.html", {"request": request, "club": club, "club_id": club_id,
-        "operations": operations, "disciplines": disciplines, "filters": {"date_from": date_from or "", "date_to": date_to or "", "weekday": weekday, "payment_method": payment_method or "", "category": category or "", "discipline": discipline or ""}})
+        "operations": operations, "disciplines": disciplines, "filters": {"date_from": date_from or "", "date_to": date_to or "", "weekday": weekday_value, "payment_method": payment_method or "", "category": category or "", "discipline": discipline or ""}})
 
 
 @router.get("/admin/cash", response_class=HTMLResponse)
