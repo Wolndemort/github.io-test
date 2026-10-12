@@ -28,6 +28,7 @@ from services.order_notifications import (
 )
 from services.payment_requisites import get_payment_info_text, build_payment_instruction_text
 from services.discounts import active_discount, active_discounts, apply_discount, apply_discounts
+from services.availability import payment_availability
 import hmac
 import os
 import time
@@ -639,12 +640,26 @@ async def admin_sales_page(
     for item in cart_items:
         items_by_order.setdefault(item.cart_order_id, []).append(item)
 
+    student_ids = {order.student_id for order in payment_orders if order.student_id}
+    student_ids.update(
+        int(item.payload["student_id"])
+        for item in cart_items
+        if isinstance(item.payload, dict) and item.payload.get("student_id")
+    )
+    students_by_id = {}
+    if student_ids:
+        students_by_id = {
+            student.id: student
+            for student in (await session.execute(select(Student).where(Student.id.in_(student_ids)))).scalars().all()
+        }
+
     operations = []
     for order in payment_orders:
         operation_category = "freeze" if str(order.type).startswith("FREEZE") else "subscription"
         operation_method = _order_payment_method(order)
         operation_discipline = order.discipline or ""
-        operations.append({"id": order.id, "created_at": order.created_at, "amount": order.amount_kopecks or 0,
+        student = students_by_id.get(order.student_id)
+        operations.append({"id": order.id, "created_at": order.created_at, "amount": order.amount_kopecks or 0, "student_label": student.name if student else "",
                            "method": operation_method, "category": operation_category, "discipline": operation_discipline, "source": "payment",
                            "title": _money_operation_category_label(operation_category), "status": order.status,
                            "buyer_label": await resolve_user_label(session, order.user_id, empty_label="Плательщик")})
@@ -665,7 +680,8 @@ async def admin_sales_page(
             else:
                 operation_amount = 0
             allocated += operation_amount
-            operations.append({"id": order.id, "created_at": order.created_at, "amount": operation_amount,
+            student = students_by_id.get(payload.get("student_id"))
+            operations.append({"id": order.id, "created_at": order.created_at, "amount": operation_amount, "student_label": student.name if student else "",
                                "method": operation_method, "category": operation_category, "discipline": operation_discipline, "source": "cart",
                                "title": item.title, "status": order.status,
                                "buyer_label": await resolve_user_label(session, order.user_id, empty_label="Плательщик")})
@@ -933,17 +949,44 @@ async def admin_update_student(
     tg_user = await verify_webapp_staff(owner_club, payload.init_data, db, "athletes_manage")
     if not tg_user:
         raise HTTPException(status_code=403, detail="Доступ запрещён")
+    # Protect fields that can be changed by payments, check-ins or another
+    # admin tab from stale overwrites.  Do not reject an unrelated edit (for
+    # example, a comment) merely because the balance changed meanwhile.
+    expected_balance = getattr(payload, "expected_balance_lessons", None)
+    expected_expire = getattr(payload, "expected_expire_date", None)
+    expected_parent_phone = getattr(payload, "expected_parent_phone", None)
+    expected_secondary_phone = getattr(payload, "expected_parent_phone_secondary", None)
+    if payload.balance_lessons is not None and expected_balance is not None and expected_balance != (student.balance_lessons or 0):
+        raise HTTPException(status_code=409, detail="Атлет уже изменён. Обновите страницу и повторите сохранение.")
+    if payload.expire_date is not None and expected_expire is not None:
+        try:
+            expected_expire_date = parse_user_date_any(expected_expire) if expected_expire.strip() else None
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Некорректный снимок даты окончания")
+        actual_expire = student.expire_date.date() if student.expire_date else None
+        if expected_expire_date != actual_expire:
+            raise HTTPException(status_code=409, detail="Атлет уже изменён. Обновите страницу и повторите сохранение.")
+    for new_phone, expected_phone, actual_phone in (
+        (payload.parent_phone, expected_parent_phone, student.parent_phone),
+        (payload.parent_phone_secondary, expected_secondary_phone, student.parent_phone_secondary),
+    ):
+        if new_phone is not None and expected_phone is not None:
+            normalized_expected = normalize_ru_phone(expected_phone) if expected_phone.strip() else None
+            if normalized_expected != actual_phone:
+                raise HTTPException(status_code=409, detail="Атлет уже изменён. Обновите страницу и повторите сохранение.")
     before = {
         "name": student.name,
         "balance_lessons": student.balance_lessons,
         "birthday": student.birthday.isoformat() if student.birthday else None,
         "expire_date": student.expire_date.isoformat() if student.expire_date else None,
         "can_freeze": student.can_freeze,
+        "freeze_days_entitlement": getattr(student, "freeze_days_entitlement", None),
         "is_frozen": student.is_frozen,
         "frozen_at": student.frozen_at.isoformat() if student.frozen_at else None,
         "frozen_days": student.frozen_days,
         "discipline": student.discipline,
         "parent_phone": student.parent_phone,
+        "parent_phone_secondary": student.parent_phone_secondary,
         "comment": student.comment,
     }
     if payload.name is not None:
@@ -1029,6 +1072,8 @@ async def admin_update_student(
             if normalized_secondary == student.parent_phone:
                 raise HTTPException(status_code=400, detail="Номера родителей должны отличаться")
             student.parent_phone_secondary = normalized_secondary
+    if student.parent_phone and student.parent_phone_secondary and student.parent_phone == student.parent_phone_secondary:
+        raise HTTPException(status_code=400, detail="Номера родителей должны отличаться")
     await db.commit()
     after = {
         "name": student.name,
@@ -1036,11 +1081,13 @@ async def admin_update_student(
         "birthday": student.birthday.isoformat() if student.birthday else None,
         "expire_date": student.expire_date.isoformat() if student.expire_date else None,
         "can_freeze": student.can_freeze,
+        "freeze_days_entitlement": getattr(student, "freeze_days_entitlement", None),
         "is_frozen": student.is_frozen,
         "frozen_at": student.frozen_at.isoformat() if student.frozen_at else None,
         "frozen_days": student.frozen_days,
         "discipline": student.discipline,
         "parent_phone": student.parent_phone,
+        "parent_phone_secondary": student.parent_phone_secondary,
         "comment": student.comment,
     }
     audit_event(
@@ -1078,7 +1125,6 @@ async def admin_delete_student(
         "parent_phone": student.parent_phone,
         "parent_phone_secondary": student.parent_phone_secondary,
         "comment": student.comment,
-        "parent_phone_secondary": student.parent_phone_secondary,
     }
     await db.delete(student)
     await db.commit()
@@ -1331,6 +1377,7 @@ async def admin_create_student(
             "expire_date": new_student.expire_date.strftime("%Y-%m-%d") if new_student.expire_date else "",
             "can_freeze": new_student.can_freeze or 0,
             "is_frozen": int(new_student.is_frozen or 0),
+            "freeze_days_entitlement": getattr(new_student, "freeze_days_entitlement", None) or "",
             "frozen_days": new_student.frozen_days or "",
             "discipline": new_student.discipline or "",
             "parent_phone": new_student.parent_phone or "",
@@ -1636,6 +1683,11 @@ async def cart_checkout(payload: CartCheckoutPayload, request: Request, session:
         payment_method = "requisites"
     else:
         payment_method = "bank_card"
+    payment_modes = payment_availability(club.club_settings)
+    if payment_method in {"bank_card", "sbp"} and not payment_modes["online"]:
+        raise HTTPException(400, "Онлайн-оплата отключена администратором. Выберите оплату по реквизитам.")
+    if payment_method == "sbp" and not payment_modes["sbp"]:
+        raise HTTPException(400, "СБП отключена в настройках клуба.")
     await _ensure_cart_user(session, club, tg_user)
     pending_cart = (
         await session.execute(
