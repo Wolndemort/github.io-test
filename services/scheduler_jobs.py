@@ -637,6 +637,10 @@ async def saas_daily_morning_check():
         latest_visits = {}
         if visit_result:
             for visit in visit_result.scalars().all():
+                # Повторный проход внутри уже открытой сессии не является
+                # новым посещением и не должен сдвигать retention-таймер.
+                if str(getattr(visit, "source", "") or "").strip().lower() == "repeat":
+                    continue
                 if visit.visited_at and (visit.student_id not in latest_visits or visit.visited_at > latest_visits[visit.student_id]):
                     latest_visits[visit.student_id] = visit.visited_at
 
@@ -712,7 +716,15 @@ async def saas_daily_morning_check():
                     f"🎂 <b>Не указана дата рождения</b>\n\nУ {len(names)} атлетов клуба «{escape(club.name)}» не заполнена дата рождения:\n<b>{escape(', '.join(sorted(names)))}</b>.",
                     parse_mode="HTML",
                 )
-                audit_event("retention_notification_sent", club_id=club.id, action="send", object_type="student", object_id=student.id, location="scheduler/no-subscription", method="weekly", recipient_count=1)
+                audit_event(
+                    "retention_notification_sent",
+                    club_id=club.id,
+                    action="send",
+                    object_type="student_group",
+                    location="scheduler/missing-birthday-admin",
+                    method="daily",
+                    recipient_count=1,
+                )
             except Exception:
                 await _notification_forget(notification_key)
 
