@@ -4,6 +4,7 @@ from html import escape
 
 from fastapi import Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
+from loguru import logger
 from sqlalchemy import select, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -397,6 +398,10 @@ async def staff_checkin(payload: dict, db: AsyncSession = Depends(get_session)):
                 await bot.send_message(parent_id, f"🔔 <b>Вход зафиксирован {actor}</b>\nАтлет: <b>{result['student_name']}</b>\n{result['message']}", parse_mode="HTML")
             if club.owner_id and int(club.owner_id) != user_id:
                 await bot.send_message(int(club.owner_id), f"🟢 <b>Посещение отмечено сотрудником</b>\nАтлет: <b>{result['student_name']}</b>\nСотрудник ID: <code>{user_id}</code>\nРежим: {'с турникетом' if payload.get('open_turnstile') else 'без турникета'}", parse_mode="HTML")
+        except Exception as notify_error:
+            # The attendance transaction has already succeeded. A Telegram
+            # delivery failure must not turn a successful check-in into HTTP 500.
+            logger.warning("Не удалось отправить уведомление о ручном посещении student=%s: %s", payload.get("student_id"), notify_error)
         finally:
             await bot.session.close()
     active_until = None
