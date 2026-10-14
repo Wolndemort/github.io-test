@@ -9,7 +9,7 @@ def test_projected_revenue_uses_recent_expired_and_due_students_and_popular_tari
     students = [
         SimpleNamespace(id=1, name="Expired", expire_date=datetime(2026, 8, 10), last_visit=datetime(2026, 8, 12)),
         SimpleNamespace(id=2, name="Due", expire_date=datetime(2026, 9, 5), last_visit=datetime(2026, 8, 17)),
-        SimpleNamespace(id=3, name="Too old", expire_date=datetime(2026, 9, 1), last_visit=datetime(2026, 8, 1)),
+        SimpleNamespace(id=3, name="Too old", expire_date=datetime(2026, 9, 1), last_visit=datetime(2026, 7, 18)),
     ]
     visits = [SimpleNamespace(student_id=1, visited_at=datetime(2026, 8, 12)), SimpleNamespace(student_id=2, visited_at=datetime(2026, 8, 17))]
     settings = {"disciplines": {"boxing": {"tariffs": [{"name": "8 занятий", "count": 8, "days": 30, "price": 4000}, {"name": "12 занятий", "count": 12, "days": 30, "price": 5500}]}}}
@@ -43,7 +43,7 @@ def test_expiry_end_date_is_inclusive_and_recent_visit_boundary_is_inclusive():
 def test_old_visit_and_expiry_after_window_are_excluded():
     now = datetime(2026, 8, 18, 12)
     students = [
-        SimpleNamespace(id=1, expire_date=datetime(2026, 9, 5), last_visit=now - timedelta(days=15)),
+        SimpleNamespace(id=1, expire_date=datetime(2026, 9, 5), last_visit=now - timedelta(days=31)),
         SimpleNamespace(id=2, expire_date=datetime(2026, 9, 6), last_visit=now - timedelta(days=2)),
     ]
     result = calculate_projected_renewal_revenue(students, now=now, date_from="2026-08-05", date_to="2026-09-05")
@@ -127,3 +127,42 @@ def test_revenue_series_marks_future_as_weekday_estimate():
     result = build_revenue_series(payments, [], [], "2026-08-17", "2026-08-24", today=datetime(2026, 8, 18).date())
     assert result["series"][0]["kind"] == "Факт"
     assert result["series"][-1]["kind"] == "Прогноз"
+
+
+def test_revenue_series_uses_moscow_calendar_date_for_utc_naive_timestamps():
+    payments = [SimpleNamespace(status="CONFIRMED", amount_kopecks=10000, created_at=datetime(2026, 8, 17, 21, 30))]
+    result = build_revenue_series(payments, [], [], "2026-08-18", "2026-08-18", today=datetime(2026, 8, 18).date())
+    assert result["series"][0]["date"] == "2026-08-18"
+    assert result["series"][0]["amount"] == 100.0
+
+
+def test_future_only_revenue_uses_history_outside_selected_window():
+    payments = [SimpleNamespace(status="CONFIRMED", amount_kopecks=10000, created_at=datetime(2026, 8, 17, 10))]
+    result = build_revenue_series(payments, [], [], "2026-08-24", "2026-08-24", today=datetime(2026, 8, 18).date())
+    assert result["series"][0]["amount"] == 100.0
+
+
+def test_projected_revenue_excludes_expiry_before_selected_start_and_uses_true_average():
+    now = datetime(2026, 8, 18, 12)
+    students = [
+        SimpleNamespace(id=1, discipline="boxing", expire_date=datetime(2026, 8, 1), last_visit=now - timedelta(days=1)),
+        SimpleNamespace(id=2, discipline="boxing", expire_date=datetime(2026, 8, 20), last_visit=now - timedelta(days=1)),
+    ]
+    settings = {"disciplines": {"boxing": {"tariffs": [{"count": 8, "days": 30, "price": 5000}]}}}
+    result = calculate_projected_renewal_revenue(
+        students, [], [], settings, "2026-08-05", "2026-08-30", now
+    )
+    assert result["count"] == 1
+    assert result["price"] == 5000
+
+
+def test_discounted_sales_count_towards_popular_tariff():
+    now = datetime(2026, 8, 18, 12)
+    student = SimpleNamespace(id=1, discipline="boxing", expire_date=datetime(2026, 8, 20), last_visit=now - timedelta(days=1))
+    settings = {"disciplines": {"boxing": {"tariffs": [{"count": 8, "days": 30, "price": 5000}]}}}
+    payments = [
+        SimpleNamespace(status="CONFIRMED", discipline="boxing", lesson_count=8, days_to_add=30, amount_kopecks=500000),
+        SimpleNamespace(status="CONFIRMED", discipline="boxing", lesson_count=8, days_to_add=30, amount_kopecks=450000),
+    ]
+    result = calculate_projected_renewal_revenue([student], [], payments, settings, "2026-08-01", "2026-08-31", now)
+    assert result["tariffs_by_discipline"]["boxing"]["sales_count"] == 2

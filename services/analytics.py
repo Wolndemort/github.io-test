@@ -58,6 +58,14 @@ def moscow_weekday(value: datetime | None) -> int | None:
     return value.replace(tzinfo=timezone.utc).astimezone(MOSCOW_TZ).weekday()
 
 
+def moscow_calendar_date(value: datetime | None) -> date | None:
+    """Return the Moscow calendar date for a DB timestamp stored as UTC-naive."""
+    value = _utc_naive(value)
+    if value is None:
+        return None
+    return value.replace(tzinfo=timezone.utc).astimezone(MOSCOW_TZ).date()
+
+
 def _balance(student: Any) -> int:
     return int(getattr(student, "balance_lessons", 0) or 0)
 
@@ -165,7 +173,7 @@ def calculate_projected_renewal_revenue(
     date_from: date | str | None = None,
     date_to: date | str | None = None,
     now: datetime | None = None,
-    visit_window_days: int = 14,
+    visit_window_days: int = 30,
 ) -> dict[str, Any]:
     """Estimate renewals for recently visiting athletes.
 
@@ -181,16 +189,22 @@ def calculate_projected_renewal_revenue(
     finish = finish or start
     if finish < start:
         raise ValueError("date_to must not be earlier than date_from")
-    end_dt = datetime.combine(finish, datetime.max.time())
     latest = {}
     for log in visit_logs or []:
+        if str(getattr(log, "source", "") or "").strip().lower() == "repeat":
+            continue
         at = _utc_naive(getattr(log, "visited_at", None)); sid = getattr(log, "student_id", None)
         if sid is not None and at and (sid not in latest or at > latest[sid]): latest[sid] = at
     candidates = []
     for student in students_models:
         expiry = _utc_naive(getattr(student, "expire_date", None))
         last = latest.get(getattr(student, "id", None), _utc_naive(getattr(student, "last_visit", None)))
-        if expiry and expiry <= end_dt and last and current - timedelta(days=visit_window_days) <= last <= current:
+        if (
+            expiry
+            and start <= expiry.date() <= finish
+            and last
+            and current - timedelta(days=visit_window_days) <= last <= current
+        ):
             candidates.append(student)
 
     settings = club_settings or {}
@@ -215,14 +229,14 @@ def calculate_projected_renewal_revenue(
                 matching.extend([item for item in options if int(item[2].get("count", 0) or 0) == key[1] and int(item[2].get("days", 0) or 0) == key[2]] * count)
         selected = max(matching, key=lambda item: matching.count(item)) if matching else options[0]
         selected_by_discipline[discipline] = selected
-        selected_sales_count[discipline] = sum(count for key, count in sales.items() if key[0] == discipline and key[1] == int(selected[2].get("count", 0) or 0) and key[2] == int(selected[2].get("days", 0) or 0) and key[3] == selected[3])
+        # Discounted sales still belong to the same tariff popularity bucket.
+        selected_sales_count[discipline] = sum(count for key, count in sales.items() if key[0] == discipline and key[1] == int(selected[2].get("count", 0) or 0) and key[2] == int(selected[2].get("days", 0) or 0))
     projected_kopecks = sum(selected_by_discipline.get(getattr(student, "discipline", None) or "boxing", (None, 0, {}, 0))[3] for student in candidates)
-    selected = next(iter(selected_by_discipline.values()), None)
-    prices = {item[3] for item in selected_by_discipline.values()}
     source = "самый продаваемый подтверждённый тариф по каждому направлению" if sales and selected_by_discipline else "нет настроенного тарифа для направления"
     tariffs_by_discipline = {discipline: {"name": item[2].get("name") or (f"{int(item[2].get('count', 0))} посещений" if int(item[2].get("count", 0) or 0) != 999 else "Безлимит"), "price": round(item[3] / 100, 2), "count": int(item[2].get("count", 0) or 0), "sales_count": selected_sales_count.get(discipline, 0)} for discipline, item in selected_by_discipline.items()}
     tariff_label = ", ".join(f"{discipline}: {data['name']} ({data['price']:.2f} ₽)" for discipline, data in tariffs_by_discipline.items()) or "Нет настроенного тарифа"
-    return {"count": len(candidates), "projected_revenue": round(projected_kopecks / 100, 2), "students": candidates, "tariff_name": tariff_label, "tariff_discipline": selected[0] if selected else None, "price": round(sum(prices) / len(prices) / 100, 2) if prices else 0, "price_source": source, "tariffs_by_discipline": tariffs_by_discipline}
+    average_price = projected_kopecks / len(candidates) if candidates else 0
+    return {"count": len(candidates), "projected_revenue": round(projected_kopecks / 100, 2), "students": candidates, "tariff_name": tariff_label, "tariff_discipline": next(iter(selected_by_discipline.values()), (None,))[0] if selected_by_discipline else None, "price": round(average_price / 100, 2), "price_source": source, "tariffs_by_discipline": tariffs_by_discipline}
 
 
 def build_expiry_series(rows: Iterable[dict[str, Any]], start: date | str, finish: date | str) -> dict[str, Any]:
@@ -253,11 +267,10 @@ def build_visit_series(visits: Iterable[Any], start: date | str, finish: date | 
         # посещением: он лишь фиксирует факт повторного открытия прохода.
         if str(getattr(visit, "source", "") or "").strip().lower() == "repeat":
             continue
-        value = _utc_naive(getattr(visit, "visited_at", None))
+        value = moscow_calendar_date(getattr(visit, "visited_at", None))
         if value:
-            day = value.date()
-            if start <= day <= finish:
-                counts[day.isoformat()] = counts.get(day.isoformat(), 0) + 1
+            if start <= value <= finish:
+                counts[value.isoformat()] = counts.get(value.isoformat(), 0) + 1
     series = [{"date": (start + timedelta(days=offset)).isoformat(), "count": counts.get((start + timedelta(days=offset)).isoformat(), 0)} for offset in range((finish - start).days + 1)]
     peak = max((point["count"] for point in series), default=0)
     return {"series": series, "peak_count": peak, "peak_days": [point["date"] for point in series if peak and point["count"] == peak]}
@@ -270,8 +283,8 @@ def build_revenue_series(payments: Iterable[Any], cart_orders: Iterable[Any], ca
     today = today or datetime.now(MOSCOW_TZ).date()
     actual = {}
     def add(value, at):
-        at = _utc_naive(at)
-        if at and start <= at.date() <= finish: actual[at.date()] = actual.get(at.date(), 0) + int(value or 0)
+        day = moscow_calendar_date(at)
+        if day and start <= day <= finish: actual[day] = actual.get(day, 0) + int(value or 0)
     for row in payments:
         if str(getattr(row, "status", "CONFIRMED")) == "CONFIRMED": add(getattr(row, "amount_kopecks", 0), getattr(row, "created_at", None))
     for row in cart_orders:
@@ -279,8 +292,24 @@ def build_revenue_series(payments: Iterable[Any], cart_orders: Iterable[Any], ca
     for row in cash_entries:
         if str(getattr(row, "entry_type", "")).lower() == "income": add(getattr(row, "amount_kopecks", 0), getattr(row, "created_at", None))
     weekday_totals = {}; weekday_counts = {}
-    for day, amount in actual.items():
-        if day <= today: weekday_totals[day.weekday()] = weekday_totals.get(day.weekday(), 0) + amount; weekday_counts[day.weekday()] = weekday_counts.get(day.weekday(), 0) + 1
+    # Forecast baselines must use all available historical actuals, including
+    # rows outside the selected future-only chart window.
+    historical_actual = {}
+    for row in payments:
+        if str(getattr(row, "status", "CONFIRMED")) == "CONFIRMED":
+            day = moscow_calendar_date(getattr(row, "created_at", None))
+            if day and day <= today: historical_actual[day] = historical_actual.get(day, 0) + int(getattr(row, "amount_kopecks", 0) or 0)
+    for row in cart_orders:
+        if str(getattr(row, "status", "CONFIRMED")) == "CONFIRMED":
+            day = moscow_calendar_date(getattr(row, "created_at", None))
+            if day and day <= today: historical_actual[day] = historical_actual.get(day, 0) + int(getattr(row, "amount_kopecks", 0) or 0)
+    for row in cash_entries:
+        if str(getattr(row, "entry_type", "")).lower() == "income":
+            day = moscow_calendar_date(getattr(row, "created_at", None))
+            if day and day <= today: historical_actual[day] = historical_actual.get(day, 0) + int(getattr(row, "amount_kopecks", 0) or 0)
+    for day, amount in historical_actual.items():
+        weekday_totals[day.weekday()] = weekday_totals.get(day.weekday(), 0) + amount
+        weekday_counts[day.weekday()] = weekday_counts.get(day.weekday(), 0) + 1
     series = []
     for offset in range((finish - start).days + 1):
         day = start + timedelta(days=offset); is_future = day > today

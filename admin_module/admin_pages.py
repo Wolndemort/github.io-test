@@ -14,6 +14,20 @@ from services.analytics import build_expiry_series, build_revenue_series, build_
 from services.schedule_utils import normalize_schedule_block
 
 
+def _forecast_date_range(date_from: str | None, date_to: str | None, default_start: date, default_finish: date) -> tuple[str, str, date, date]:
+    """Parse and validate one independent Forecast date filter."""
+    start_text = date_from or default_start.isoformat()
+    finish_text = date_to or default_finish.isoformat()
+    try:
+        start = date.fromisoformat(start_text)
+        finish = date.fromisoformat(finish_text)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Даты должны быть в формате YYYY-MM-DD") from exc
+    if finish < start or finish - start > timedelta(days=366):
+        raise HTTPException(status_code=400, detail="Период должен быть от 0 до 366 дней")
+    return start_text, finish_text, start, finish
+
+
 @router.get("/admin", response_class=HTMLResponse)
 async def get_admin_dashboard(
     request: Request,
@@ -155,20 +169,15 @@ async def get_forecast_page(request: Request, session: AsyncSession = Depends(ge
     local_today = reporting_periods()["local_now"].date()
     # По умолчанию показываем контекст: 30 дней факта и 30 дней прогноза.
     # Пользователь может выбрать любой период, вплоть до разрешённых 366 дней.
-    start = date_from or (local_today - timedelta(days=30)).isoformat()
-    finish = date_to or (local_today + timedelta(days=30)).isoformat()
-    try:
-        start_date = date.fromisoformat(start); finish_date = date.fromisoformat(finish)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail="Даты должны быть в формате YYYY-MM-DD") from exc
-    if finish_date < start_date or finish_date - start_date > timedelta(days=366):
-        raise HTTPException(status_code=400, detail="Период должен быть от 0 до 366 дней")
-    revenue_start = revenue_from or start
-    revenue_finish = revenue_to or finish
-    visits_start = visits_from or start
-    visits_finish = visits_to or finish
-    revenue_start_date = date.fromisoformat(revenue_start); revenue_finish_date = date.fromisoformat(revenue_finish)
-    visits_start_date = date.fromisoformat(visits_start); visits_finish_date = date.fromisoformat(visits_finish)
+    start, finish, start_date, finish_date = _forecast_date_range(
+        date_from, date_to, local_today - timedelta(days=30), local_today + timedelta(days=30)
+    )
+    revenue_start, revenue_finish, revenue_start_date, revenue_finish_date = _forecast_date_range(
+        revenue_from, revenue_to, start_date, finish_date
+    )
+    visits_start, visits_finish, visits_start_date, visits_finish_date = _forecast_date_range(
+        visits_from, visits_to, start_date, finish_date
+    )
     students = list((await session.execute(select(Student).where(Student.club_id == club_id))).scalars().all())
     visits = list((await session.execute(select(VisitLog).where(VisitLog.club_id == club_id))).scalars().all())
     payments = list((await session.execute(select(PaymentOrder).where(PaymentOrder.club_id == club_id, PaymentOrder.status == "CONFIRMED"))).scalars().all())
