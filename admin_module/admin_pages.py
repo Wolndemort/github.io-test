@@ -219,8 +219,8 @@ async def get_forecast_page(request: Request, session: AsyncSession = Depends(ge
         else:
             age = today.year - student.birthday.year - ((today.month, today.day) < (student.birthday.month, student.birthday.day))
             age_counts["1–10" if age <= 10 else "11–15" if age <= 15 else "16+"] += 1
-    registrations = [{"date": s.created_at.date().isoformat(), "name": s.name, "discipline": s.discipline or "—"} for s in students if getattr(s, "created_at", None) and revenue_start_date <= s.created_at.date() <= revenue_finish_date]
-    return templates.TemplateResponse("forecast.html", {"request": request, "club_id": club_id, "club_name": club.name if club else "Клуб", "filters": {"date_from": start, "date_to": finish}, "forecast": forecast, "rows": rows, "age_counts": age_counts, "registrations": registrations})
+    registrations = [{"date": s.created_at.date().isoformat(), "name": s.name, "discipline": s.discipline or "—"} for s in students if getattr(s, "created_at", None) and start_date <= s.created_at.date() <= finish_date]
+    return templates.TemplateResponse("forecast.html", {"request": request, "club_id": club_id, "club_name": club.name if club else "Клуб", "filters": {"date_from": start, "date_to": finish, "revenue_from": revenue_start, "revenue_to": revenue_finish, "visits_from": visits_start, "visits_to": visits_finish}, "forecast": forecast, "rows": rows, "age_counts": age_counts, "registrations": registrations})
 
 
 @router.get("/stats/export/excel")

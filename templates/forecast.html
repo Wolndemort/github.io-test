@@ -182,7 +182,7 @@
             type="hidden"
             name="init_data"
             value="{{ request.query_params.get('init_data','') }}"
-          /><label
+          /><input type="hidden" name="revenue_from" value="{{ filters.revenue_from }}" /><input type="hidden" name="revenue_to" value="{{ filters.revenue_to }}" /><input type="hidden" name="visits_from" value="{{ filters.visits_from }}" /><input type="hidden" name="visits_to" value="{{ filters.visits_to }}" /><label
             >С даты<input
               type="date"
               name="date_from"
@@ -247,9 +247,9 @@
           Чёрная линия — факт, серая — прогноз. Наведите на любую точку.
         </div>
         <form class="filters chart-filters" method="get">
-          <input type="hidden" name="club_id" value="{{ club_id }}" /><input type="hidden" name="init_data" value="{{ request.query_params.get('init_data','') }}" />
-          <label>С даты<input type="date" name="revenue_from" value="{{ request.query_params.get('revenue_from', filters.date_from) }}" /></label>
-          <label>По дату<input type="date" name="revenue_to" value="{{ request.query_params.get('revenue_to', filters.date_to) }}" /></label>
+          <input type="hidden" name="club_id" value="{{ club_id }}" /><input type="hidden" name="init_data" value="{{ request.query_params.get('init_data','') }}" /><input type="hidden" name="date_from" value="{{ filters.date_from }}" /><input type="hidden" name="date_to" value="{{ filters.date_to }}" /><input type="hidden" name="visits_from" value="{{ filters.visits_from }}" /><input type="hidden" name="visits_to" value="{{ filters.visits_to }}" />
+          <label>С даты<input type="date" name="revenue_from" value="{{ filters.revenue_from }}" /></label>
+          <label>По дату<input type="date" name="revenue_to" value="{{ filters.revenue_to }}" /></label>
           <button class="btn dark">Обновить выручку</button>
         </form>
         <div class="chartbox"><canvas id="revenueChart"></canvas></div>
@@ -260,9 +260,9 @@
           Фактическое количество посещений по каждому дню. Наведите на точку.
         </div>
         <form class="filters chart-filters" method="get">
-          <input type="hidden" name="club_id" value="{{ club_id }}" /><input type="hidden" name="init_data" value="{{ request.query_params.get('init_data','') }}" />
-          <label>С даты<input type="date" name="visits_from" value="{{ request.query_params.get('visits_from', filters.date_from) }}" /></label>
-          <label>По дату<input type="date" name="visits_to" value="{{ request.query_params.get('visits_to', filters.date_to) }}" /></label>
+          <input type="hidden" name="club_id" value="{{ club_id }}" /><input type="hidden" name="init_data" value="{{ request.query_params.get('init_data','') }}" /><input type="hidden" name="date_from" value="{{ filters.date_from }}" /><input type="hidden" name="date_to" value="{{ filters.date_to }}" /><input type="hidden" name="revenue_from" value="{{ filters.revenue_from }}" /><input type="hidden" name="revenue_to" value="{{ filters.revenue_to }}" />
+          <label>С даты<input type="date" name="visits_from" value="{{ filters.visits_from }}" /></label>
+          <label>По дату<input type="date" name="visits_to" value="{{ filters.visits_to }}" /></label>
           <button class="btn dark">Обновить посещения</button>
         </form>
         <div class="chartbox"><canvas id="visitChart"></canvas></div>
