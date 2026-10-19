@@ -1344,6 +1344,8 @@ async def admin_create_student(
         raise HTTPException(status_code=400, detail="Некорректный номер второго родителя")
     if primary_phone and secondary_phone and primary_phone == secondary_phone:
         raise HTTPException(status_code=400, detail="Номера родителей должны отличаться")
+    limits = (club.club_settings or {}).get("limits", {}) or {}
+    freeze_days_entitlement = max(1, min(365, int(limits.get("freeze_days_step", 5) or 5)))
     new_student = Student(
         name=name,
         club_id=club.id,
@@ -1355,6 +1357,7 @@ async def admin_create_student(
         expire_date=expire_date,
         can_freeze=1,
         is_frozen=0,
+        freeze_days_entitlement=freeze_days_entitlement,
         discipline=payload.discipline.strip()[:50] or None,
         comment=payload.comment.strip()[:1000] if payload.comment else None,
     )

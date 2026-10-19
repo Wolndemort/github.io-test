@@ -90,7 +90,7 @@ class Student(Base):
     # которые могут отличаться от стандартного шага клуба.
     frozen_days: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     # Снимок срока заморозки на момент покупки абонемента.
-    freeze_days_entitlement: Mapped[int] = mapped_column(Integer, default=7, server_default="7", nullable=False)
+    freeze_days_entitlement: Mapped[int] = mapped_column(Integer, default=5, server_default="5", nullable=False)
     balance_lessons: Mapped[int] = mapped_column(default=0)
     birthday: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     last_visit: Mapped[Optional[datetime]] = mapped_column(DateTime)
