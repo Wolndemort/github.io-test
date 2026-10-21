@@ -32,6 +32,7 @@
   .quickbar{display:grid;grid-template-columns:1fr 1fr;gap:8px;align-items:center}
   .quickbar button{margin:0}
   .floating-top{position:fixed;right:16px;bottom:82px;z-index:40;width:48px;height:48px;border-radius:50%;border:0;background:#111;color:#fff;font-size:20px;box-shadow:0 10px 24px rgba(0,0,0,.22)}
+  .form-heading{display:flex;align-items:center;justify-content:space-between;gap:10px}.form-heading button{margin:0;white-space:nowrap}.form-body[hidden]{display:none}
   @media(max-width:640px){.product{grid-template-columns:1fr}}
 </style>
 <div style="font-size:20px;font-weight:800;margin:4px 0 10px">📦 Склад и товары</div>
@@ -51,8 +52,9 @@
   <button id="topBtn" type="button">Наверх</button>
 </div>
 <div class="card" id="productForm"{% if not can_manage_products %} style="display:none"{% endif %}>
-  <h3 id="caption">Новый товар</h3>
-  <div class="form-grid">
+  <div class="form-heading"><h3 id="caption">Новый товар</h3><button id="toggleFormBtn" type="button" aria-expanded="true">Свернуть</button></div>
+  <div class="form-body" id="formBody">
+   <div class="form-grid">
     <input id="n" placeholder="Название">
     <input id="c" list="categorySuggestions" placeholder="Категория">
     <datalist id="categorySuggestions"></datalist>
@@ -66,6 +68,7 @@
     <button id="saveBtn" type="button">Сохранить</button>
       <button id="resetBtn" type="button">Очистить</button>
     </div>
+   </div>
   </div>
 </div>
 <div class="card warehouse-total"><div class="metric"><small>Стоимость склада</small><b id="warehouseValue">0.00 ₽</b></div><div class="metric"><small>Потенциальная прибыль</small><b id="warehouseProfit">0.00 ₽</b></div><div class="metric"><small>Закупочная стоимость</small><b id="warehouseCost">0.00 ₽</b></div></div>
@@ -101,6 +104,8 @@ const resetBtn = document.getElementById('resetBtn');
 const createBtn = document.getElementById('createBtn');
 const topBtn = document.getElementById('topBtn');
 const scrollTopBtn = document.getElementById('scrollTopBtn');
+const toggleFormBtn = document.getElementById('toggleFormBtn');
+const formBody = document.getElementById('formBody');
 const warehouseValue = document.getElementById('warehouseValue');
 const warehouseProfit = document.getElementById('warehouseProfit');
 const warehouseCost = document.getElementById('warehouseCost');
@@ -108,6 +113,11 @@ categories.forEach(x=>{
   categoryFilter.insertAdjacentHTML('beforeend',`<option value="${esc(x)}">${esc(x)}</option>`);
   categorySuggestions.insertAdjacentHTML('beforeend',`<option value="${esc(x)}">`);
 });
+
+const categoryStorageKey=`admin-products-category-${cid}`;
+let savedCategory=new URLSearchParams(window.location.search).get('category') || '';
+try { savedCategory=savedCategory || localStorage.getItem(categoryStorageKey) || ''; } catch (_) { /* storage can be unavailable in Telegram WebView */ }
+if(savedCategory && categories.some(x=>normalizeCategory(x)===normalizeCategory(savedCategory))) categoryFilter.value=categories.find(x=>normalizeCategory(x)===normalizeCategory(savedCategory));
 
 function thumb(x){
   if(x.image_url) return `<div class="thumb"><img src="${esc(x.image_url)}" alt="${esc(x.name)}"></div>`;
@@ -160,6 +170,7 @@ async function deleteCategory(category){
 
 function editItem(id){
   const x=items.find(y=>y.id===id);
+  setFormExpanded(true);
   edit=id;
   n.value=x.name;
   c.value=x.category;
@@ -180,6 +191,14 @@ function reset(){
   file.value='';
   a.checked=true;
   caption.textContent='Новый товар';
+  c.value=categoryFilter.value || '';
+}
+
+function setFormExpanded(expanded){
+  formBody.hidden=!expanded;
+  formBody.style.display=expanded?'':'none';
+  toggleFormBtn.setAttribute('aria-expanded', String(expanded));
+  toggleFormBtn.textContent=expanded?'Свернуть':'Развернуть';
 }
 
 async function save(){
@@ -215,9 +234,10 @@ async function del(id){
 
 saveBtn.onclick=save;
 resetBtn.onclick=reset;
-createBtn.onclick=()=>{reset(); productForm.scrollIntoView({behavior:'smooth', block:'start'});};
+createBtn.onclick=()=>{reset(); setFormExpanded(true); productForm.scrollIntoView({behavior:'smooth', block:'start'});};
+toggleFormBtn.onclick=()=>setFormExpanded(formBody.hidden);
 topBtn.onclick=scrollTopSmooth;
 scrollTopBtn.onclick=scrollTopSmooth;
-categoryFilter.onchange=draw;
+categoryFilter.onchange=()=>{try { localStorage.setItem(categoryStorageKey, categoryFilter.value); } catch (_) {} draw();};
 draw();
 </script></html>
