@@ -2,13 +2,13 @@
 <html lang="ru"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Скидки</title><script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>body{font-family:sans-serif;background:#090909;color:#fff;padding:14px}.wrap{max-width:900px;margin:auto}.card{background:#151515;border:1px solid #333;border-radius:14px;padding:16px;margin:12px 0}input,select,textarea,button{box-sizing:border-box;padding:10px;margin:4px 0;border-radius:8px;border:1px solid #555;background:#111;color:#fff;width:100%}button{background:#fff;color:#111;font-weight:bold}.grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}.client{border-top:1px solid #333;padding:10px 0;display:grid;grid-template-columns:1fr 120px;gap:8px}.muted{color:#aaa;font-size:13px}.danger{background:#511d1d;color:#fff}</style>
-<style>.back{display:block;text-align:center;text-decoration:none;padding:11px;border-radius:10px;background:#fff;color:#111;font-weight:bold}.form-heading{display:flex;align-items:center;justify-content:space-between;gap:10px}.form-heading h2{margin:0}.form-heading button{width:auto;white-space:nowrap}.discount-form-body[hidden]{display:none}</style>
+<style>.back{display:block;text-align:center;text-decoration:none;padding:11px;border-radius:10px;background:#fff;color:#111;font-weight:bold}.form-heading{display:flex;align-items:center;justify-content:space-between;gap:10px}.form-heading h2,.form-heading h3{margin:0}.form-heading button{width:auto;white-space:nowrap}.discount-form-body[hidden]{display:none}</style>
 <div class="wrap">
 <a class="back" href="/admin?club_id={{ club_id }}&init_data={{ request.query_params.get('init_data','')|urlencode }}">← В кабинет</a>
 <script>
 document.addEventListener('DOMContentLoaded',()=>{
-  const card=document.querySelector('.wrap > .card');
-  const title=card?.querySelector('h2');
+  const card=document.querySelectorAll('.wrap > .card')[1];
+  const title=card?.querySelector('h3');
   if(!card||!title)return;
   const heading=document.createElement('div');
   heading.className='form-heading';
