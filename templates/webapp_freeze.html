@@ -11,7 +11,7 @@
     <div class="mono-divider"></div>
     <button id="btn" class="mono-action dark" style="width:100%;" {% if not can_freeze %}disabled{% endif %}>Заморозить</button>
     <a class="mono-action" style="margin-top:10px;" href="/webapp/client-cabinet/student?club_id={{ club_id }}&student_id={{ student.id }}">← Назад к атлету</a>
-    <a class="mono-action" href="/webapp/client-cabinet?club_id={{ club_id }}">← Назад в кабинет</a>
+    <a class="staff-back-button" href="/webapp/client-cabinet?club_id={{ club_id }}">← В рабочий кабинет</a>
     <p id="msg"></p>
 </div>
 {% endblock %}

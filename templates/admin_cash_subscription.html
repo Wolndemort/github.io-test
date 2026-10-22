@@ -20,7 +20,7 @@
 </head>
 <body>
 <main class="shell">
-  <a class="back" href="/webapp/client-cabinet?club_id={{ club_id }}">← В рабочий кабинет</a>
+  <a class="back staff-back-button" href="/webapp/client-cabinet?club_id={{ club_id }}">← В рабочий кабинет</a>
   <section class="hero"><div class="muted">Касса · абонементы</div><h1>Продажа наличного абонемента</h1><div class="muted">Выберите атлета, дисциплину, тариф и применяемые скидки.</div></section>
   <section class="card"><div class="label">Атлеты клуба · поиск по имени</div><input id="search" class="search" placeholder="Поиск атлета"><div id="students">{% for student in students %}<button type="button" class="student server-student" data-student-id="{{ student.id }}" onclick="pick({{ student.id }})"><b>{{ '✓' if student.status_ok else '✕' }} {{ student.name }}</b><br><span class="muted">{{ student.status_label }} · {{ student.discipline or 'Без дисциплины' }}{% if student.expire_date %} · до {{ student.expire_date[:10] }}{% endif %}</span></button>{% endfor %}{% if not students %}<div class="muted" style="margin-top:12px">Атлеты не найдены</div>{% endif %}</div></section>
   <section id="sale" class="card" hidden><div id="selected" class="selected"></div><div class="form-grid">
