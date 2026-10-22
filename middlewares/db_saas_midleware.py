@@ -130,7 +130,8 @@ class ClubMiddleware(BaseMiddleware):
                 # Если владелец просто пишет что-то другое или жмет другие кнопки — требуем оплату
                 if not is_pay_action:
                     kb = InlineKeyboardBuilder()
-                    kb.row(types.InlineKeyboardButton(text="💳 Оплатить доступ", callback_data="pay_menu"))
+                    kb.row(types.InlineKeyboardButton(text="💳 Оплатить 1 месяц — 7 000 ₽", callback_data="buy_sub_30"))
+                    kb.row(types.InlineKeyboardButton(text="Другие тарифы", callback_data="pay_menu"))
 
                     msg_text = (f"⚠️ <b>Доступ ограничен</b>\n\n"
                                 f"Ваша подписка истекла: <code>{sub_end.strftime('%d.%m.%Y') if sub_end else 'нет данных'}</code>\n"

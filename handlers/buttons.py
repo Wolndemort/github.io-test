@@ -197,7 +197,11 @@ def admin_keyboard(club_id: int, club_settings: dict, subscription_date: datetim
     allowed = set(staff_permissions or ())
     is_full_access = staff_permissions is None
 
-    first_row = [types.InlineKeyboardButton(text=sub_text, callback_data='pay_menu')]
+    is_subscription_expired = not subscription_date or subscription_date.replace(tzinfo=None) <= now_naive
+    first_row = [types.InlineKeyboardButton(
+        text=("💳 Оплатить 1 месяц — 7 000 ₽" if is_subscription_expired else sub_text),
+        callback_data=('buy_sub_30' if is_subscription_expired else 'pay_menu'),
+    )]
     if is_full_access or "settings_manage" in allowed:
         first_row.append(types.InlineKeyboardButton(text='🛠 Настройки клуба', callback_data='admin_settings'))
     builder.row(*first_row)
