@@ -459,7 +459,21 @@ body.mono-theme .card .mono-action,
 body.mono-theme .card .mono-action.dark {
     background: #ffffff !important;
     color: #090909 !important;
+    -webkit-text-fill-color: #090909 !important;
     border-color: #ffffff !important;
+}
+
+/* Keep action labels readable in WebViews even when inherited card colors are
+   rewritten by the contrast rules above. */
+body.mono-theme .card a.mono-action,
+body.mono-theme .card a.mono-action:visited {
+    color: #090909 !important;
+    -webkit-text-fill-color: #090909 !important;
+}
+body.mono-theme .card a.mono-action.dark,
+body.mono-theme .card a.mono-action.dark:visited {
+    color: #ffffff !important;
+    -webkit-text-fill-color: #ffffff !important;
 }
 
 /* Contrast contract: dark surfaces contain light text; intentionally light
