@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Кабинет клиента</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
-    <link rel="stylesheet" href="{{ url_for('static', path='css/mono.css') }}?v=1.1.1">
+    <link rel="stylesheet" href="{{ url_for('static', path='css/mono.css') }}?v=1.1.2">
     <style>
         {% if loading.enabled %}
         body { opacity: 0; }
@@ -45,8 +45,9 @@
         .bottom-bar .btn.dark { background: #111; color: #fff; border-color: #111; }
         .student-actions { display: grid; gap: 8px; margin-top: 10px; }
         .quick-actions { border-color:#111; box-shadow:0 14px 32px rgba(0,0,0,.08); }
-        .quick-actions .actions { grid-template-columns:repeat(2,minmax(0,1fr)); }
-        .quick-actions .primary-action { font-size:17px; padding:17px 14px; }
+         .quick-actions .actions { grid-template-columns:repeat(2,minmax(0,1fr)); }
+         .staff-tools-title { grid-column: 1 / -1; }
+         .quick-actions .primary-action { font-size:17px; padding:17px 14px; }
         .section-title { display:flex; align-items:center; justify-content:space-between; margin-bottom: 10px; }
         .section-title span { text-transform: uppercase; letter-spacing: .16em; font-size: 11px; color: #666; }
         .status-line { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; white-space: normal; }
@@ -194,6 +195,10 @@
     if (tg) {
         tg.ready();
         tg.expand();
+        if (typeof tg.requestFullscreen === 'function' &&
+            (!tg.isVersionAtLeast || tg.isVersionAtLeast('8.0'))) {
+            try { tg.requestFullscreen(); } catch (_) { /* older clients ignore it */ }
+        }
     }
     const bottomBar = document.getElementById('bottomBar');
     const toggleBottomBar = document.getElementById('toggleBottomBar');
