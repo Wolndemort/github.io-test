@@ -545,6 +545,7 @@ async def get_client_cabinet_page(request: Request, club_id: int, init_data: str
             "profile_discount": profile_discount,
             "legal_enabled": legal_documents_enabled(settings),
             "turnstile_enabled": turnstile_enabled(settings),
+            "freeze_enabled": bool(settings.get("features", {}).get("freeze", True)),
             "now": datetime.now(),
             "summary": {
                 "total": len(summary_source),
@@ -766,7 +767,7 @@ async def webapp_student_page(request: Request, club_id: int, student_id: int, i
     active_session = bool(student.last_visit and now - student.last_visit.replace(tzinfo=None) < timedelta(minutes=timeout_minutes))
     active_until = (student.last_visit.replace(tzinfo=None) + timedelta(minutes=timeout_minutes)) if active_session else None
     freeze_price_per_day = (club.club_settings or {}).get("limits", {}).get("freeze_price_per_day", 0)
-    return templates.TemplateResponse("webapp_student.html", {"request": request, "club": club, "student": student, "club_id": club_id, "freeze_price_per_day": freeze_price_per_day, "visit_sessions": visit_sessions, "active_session": active_session, "active_until": active_until, "now": now})
+    return templates.TemplateResponse("webapp_student.html", {"request": request, "club": club, "student": student, "club_id": club_id, "freeze_price_per_day": freeze_price_per_day, "freeze_enabled": bool((club.club_settings or {}).get("features", {}).get("freeze", True)), "turnstile_enabled": turnstile_enabled(club.club_settings), "visit_sessions": visit_sessions, "active_session": active_session, "active_until": active_until, "now": now})
 
 
 @router.get("/webapp/client-cabinet/history", response_class=HTMLResponse)
@@ -853,7 +854,7 @@ async def webapp_buy_subscription_page(request: Request, club_id: int, init_data
         ).distinct().order_by(Student.name)
     )).scalars().all()
     settings = club.club_settings or {}
-    disciplines = settings.get("disciplines", {})
+    disciplines = {code: cfg for code, cfg in (settings.get("disciplines", {}) or {}).items() if isinstance(cfg, dict) and cfg.get("active", True)}
     payment_modes = payment_availability(settings)
     payment_info = get_payment_info_text(settings)
     discounts_by_student = {s.id: [{"kind": d.kind, "value": d.value, "name": d.name} for d in await active_discounts(db, club_id, user.user_id, "subscriptions", student_id=s.id)] for s in students}
@@ -880,7 +881,7 @@ async def webapp_buy_subscription_submit(payload: WebAppBuySubscriptionPayload, 
     if not student or student.club_id != payload.club_id or (student.parent_id != user_id and not linked_parent):
         raise HTTPException(status_code=403, detail="Атлет не найден")
     discipline_cfg = (club.club_settings or {}).get("disciplines", {}).get(payload.sport_type)
-    if not discipline_cfg:
+    if not discipline_cfg or not discipline_cfg.get("active", True):
         raise HTTPException(status_code=400, detail="Направление недоступно")
     tariffs = discipline_cfg.get("tariffs", [])
     if payload.tariff_idx < 0 or payload.tariff_idx >= len(tariffs):
@@ -1091,6 +1092,8 @@ async def webapp_buy_freeze_page(request: Request, club_id: int, student_id: int
     if not student or student.club_id != club_id or (student.parent_id != parent_id and not linked):
         raise HTTPException(status_code=403, detail="Атлет не найден")
     settings = club.club_settings or {}
+    if not settings.get("features", {}).get("freeze", True):
+        raise HTTPException(status_code=404, detail="Заморозка отключена администратором")
     price = settings.get("limits", {}).get("freeze_price_per_day", 0)
     freeze_discounts = await active_discounts(db, club_id, parent_id, "freeze", student_id=student.id)
     preview_price, _ = apply_discounts(int(float(price) * 100), freeze_discounts)
@@ -1112,6 +1115,8 @@ async def webapp_buy_freeze_submit(payload: WebAppActionPayload, request: Reques
     linked = await db.scalar(select(StudentParent.student_id).where(StudentParent.student_id == payload.student_id, StudentParent.parent_id == parent_id))
     if not student or student.club_id != payload.club_id or (student.parent_id != parent_id and not linked):
         raise HTTPException(status_code=403, detail="Атлет не найден")
+    if not (club.club_settings or {}).get("features", {}).get("freeze", True):
+        raise HTTPException(status_code=400, detail="Заморозка отключена администратором")
     payment_method = _normalize_payment_method(payload.payment_method)
     payment_modes = payment_availability(club.club_settings)
     if payment_method in {"bank_card", "sbp"} and not payment_modes["online"]:

@@ -328,6 +328,8 @@ async def process_kids_limit(
 @router.callback_query(F.data == 'pay_one_click')
 async def process_one_click_payment(callback: types.CallbackQuery, state: FSMContext, session: AsyncSession,
                                     club: Club, redis: Redis):
+    if not payment_availability(club.club_settings or {})["online"]:
+        return await callback.answer("Онлайн-оплата отключена администратором", show_alert=True)
     await callback.answer("Провожу платеж в 1 клик...", show_alert=False)
 
     data = await state.get_data()
@@ -494,6 +496,8 @@ async def process_sbp_yookassa_payment(
 ):
     """Онлайн-оплата через СБП в YooKassa."""
     await callback.answer("Проверяю СБП...", show_alert=False)
+    if not payment_availability(club.club_settings or {})["sbp"]:
+        return await callback.answer("Онлайн-СБП отключена администратором", show_alert=True)
 
     data = await state.get_data()
     user_id = callback.from_user.id
@@ -624,6 +628,8 @@ async def process_official_card_payment(
         redis: Redis,
 ):
     """Сценарий онлайн-оплаты через ЮKassa: Ссылка (первый раз) ИЛИ 1 клик (если карта привязана)"""
+    if not payment_availability(club.club_settings or {})["online"]:
+        return await callback.answer("Онлайн-оплата отключена администратором", show_alert=True)
     await callback.answer("Обрабатываю запрос...", show_alert=False)
 
     data = await state.get_data()

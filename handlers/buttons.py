@@ -4,6 +4,7 @@ from aiogram.utils.keyboard import ReplyKeyboardBuilder
 from aiogram.types import WebAppInfo
 from aiogram import types
 from aiogram.utils.keyboard import InlineKeyboardBuilder
+from services.availability import turnstile_enabled
 
 router = Router()
 
@@ -22,16 +23,18 @@ def get_profile_keyboard(user, club_id: int, club_settings: dict, is_authorized:
     base_url = f"https://{club_id}.speedycrm.ru"
 
     is_staff_mode = str(profile_mode).strip().casefold() == "staff"
+    turnstile_on = turnstile_enabled(club_settings)
 
     if is_staff_mode:
-        builder.row(types.InlineKeyboardButton(
+        if turnstile_on:
+            builder.row(types.InlineKeyboardButton(
             text="🔓 Открыть турникет",
             web_app=WebAppInfo(url=f"{base_url}/webapp/staff-pass?club_id={club_id}&user_id={user.user_id}")
-        ))
-        builder.row(types.InlineKeyboardButton(
+            ))
+            builder.row(types.InlineKeyboardButton(
             text="📱 Проход студента",
             web_app=WebAppInfo(url=f"{base_url}/webapp/biometric-pass?club_id={club_id}&user_id={user.user_id}")
-        ))
+            ))
         if club_settings.get("features", {}).get("qr_checkin", True):
             builder.row(types.InlineKeyboardButton(
                 text="📝 Отметить посещение",
@@ -39,10 +42,11 @@ def get_profile_keyboard(user, club_id: int, club_settings: dict, is_authorized:
             ))
     else:
         # 1. Проход и быстрый доступ
-        builder.row(types.InlineKeyboardButton(
+        if turnstile_on:
+            builder.row(types.InlineKeyboardButton(
             text="📱 Проход по FaceID",
             web_app=WebAppInfo(url=f"{base_url}/webapp/biometric-pass?club_id={club_id}&user_id={user.user_id}")
-        ))
+            ))
 
         builder.row(types.InlineKeyboardButton(
             text="🛒 Магазин и корзина",
@@ -65,7 +69,7 @@ def get_profile_keyboard(user, club_id: int, club_settings: dict, is_authorized:
     # 3. Покупки и абонемент
     if features.get("online_payments", False):
         pass  # Кнопка «💳 Абонемент» выше уже ведёт к покупке.
-    if not is_staff_mode and club_settings.get("limits", {}).get("freeze_price_per_day", 0) > 0:
+    if not is_staff_mode and features.get("freeze", True) and club_settings.get("limits", {}).get("freeze_price_per_day", 0) > 0:
         builder.row(
             types.InlineKeyboardButton(text="❄️ Купить заморозку", callback_data="buy_freeze"),
             types.InlineKeyboardButton(text="💳 Управление картами", callback_data="manage_subscription"),

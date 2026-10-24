@@ -389,7 +389,8 @@ async def scanner_scan(
                                    parse_mode="HTML")
     finally:
         await bot.session.close()
-    return {"success": True, "message": "Турникет открыт", "student_name": result["student_name"]}
+    turnstile_message = result.get("turnstile_status") or "ℹ️ СКУД отключен"
+    return {"success": True, "message": f"Посещение отмечено. {turnstile_message}", "student_name": result["student_name"]}
 
 
 @router.get("/admin", response_class=HTMLResponse)
@@ -1812,6 +1813,8 @@ async def cart_checkout(payload: CartCheckoutPayload, request: Request, session:
                 raise HTTPException(400, "Некорректное количество")
             if kind == "subscription":
                 cfg = (settings.get("disciplines", {}).get(str(raw.get("sport_type"))))
+                if not cfg or not cfg.get("active", True):
+                    raise HTTPException(400, "Направление недоступно")
                 tariffs = cfg.get("tariffs", []) if cfg else []; idx = int(raw.get("tariff_idx", -1))
                 if idx < 0 or idx >= len(tariffs): raise HTTPException(400, "Тариф недоступен")
                 t = tariffs[idx]
@@ -1823,6 +1826,8 @@ async def cart_checkout(payload: CartCheckoutPayload, request: Request, session:
                 line_total, line_applied = apply_discounts(line_original, line_discounts); original_total += line_original; total += line_total; applied_discounts.extend(line_applied)
                 normalized.append(("subscription", t, {"student_id": student.id, "discipline": raw.get("sport_type"), "price": price, "quantity": qty}))
             else:
+                if not settings.get("features", {}).get("freeze", True):
+                    raise HTTPException(400, "Заморозка отключена администратором")
                 days = int(raw.get("days", 0)); price = int(float(settings.get("limits", {}).get("freeze_price_per_day", 0)) * days * 100)
                 if days <= 0 or price <= 0: raise HTTPException(400, "Заморозка недоступна")
                 line_original = price * qty; raw_discount_ids = [int(x) for x in raw.get("discount_ids", [])]; line_discounts = await active_discounts(session, club.id, int(tg_user["id"]), "freeze", student.id, raw_discount_ids or None)

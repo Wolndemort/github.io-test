@@ -781,6 +781,7 @@ async def admin_motivation_page(request: Request, club_id: int = Query(...), dat
     tg_user = await verify_webapp_staff(club, init_data, session, "schedule_view")
     if int(tg_user.get("id", 0)) != int(getattr(club, "owner_id", 0) or 0) and int(tg_user.get("id", 0)) not in SUPER_ADMIN_IDS:
         raise HTTPException(403, "Раздел мотивации доступен только администратору")
+    return templates.TemplateResponse("motivation_unavailable.html", {"request": request, "club_id": club_id})
     staff = (await session.execute(select(ClubStaff).where(ClubStaff.club_id == club_id, ClubStaff.is_active.is_(True)))).scalars().all()
     day_names = {"mon": "Пн", "tue": "Вт", "wed": "Ср", "thu": "Чт", "fri": "Пт", "sat": "Сб", "sun": "Вс"}
     motivation_lessons = []
@@ -1332,6 +1333,8 @@ async def save_admin_legal(request: Request, club_id: int = Query(...), session:
     settings = dict(club.club_settings or {})
     fields = ("provider_name", "provider_type", "inn", "ogrn", "legal_address", "club_address", "email", "phone", "document_version", "updated_at", "privacy_operator", "platform_name")
     legal = {field: str(payload.get(field, "") or "").strip()[:500] for field in fields}
+    legal["document_version"] = legal["document_version"] or "1.0"
+    legal["updated_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
     legal["enabled"] = bool(payload.get("enabled", True))
     if legal["enabled"]:
         errors = validate_legal_data(legal)

@@ -122,8 +122,8 @@
             </div>
             <div class="student-actions">
                 <a class="btn soft mono-action" href="/webapp/client-cabinet/student?club_id={{ club_id }}&student_id={{ student.id }}">Открыть атлета</a>
-                <a class="btn soft mono-action" href="/webapp/client-cabinet/freeze?club_id={{ club_id }}&student_id={{ student.id }}">Заморозить</a>
-                {% if freeze_price_per_day and freeze_price_per_day > 0 %}
+                {% if freeze_enabled %}<a class="btn soft mono-action" href="/webapp/client-cabinet/freeze?club_id={{ club_id }}&student_id={{ student.id }}">Заморозить</a>{% endif %}
+                {% if freeze_enabled and freeze_price_per_day and freeze_price_per_day > 0 %}
                 <a class="btn dark mono-action dark" href="/webapp/client-cabinet/buy-freeze?club_id={{ club_id }}&student_id={{ student.id }}">Купить заморозку</a>
                 {% endif %}
             </div>
@@ -185,8 +185,8 @@
 {% if legal_enabled %}
 <div class="card mono-card" style="margin-top:16px; text-align:center;">
     <div class="muted" style="margin-bottom:8px;">Юридическая информация</div>
-    <a class="mono-action" href="/privacy?club_id={{ club_id }}">Политика конфиденциальности</a>
-    <a class="mono-action" href="/oferta?club_id={{ club_id }}">Публичная оферта</a>
+    {% if legal_enabled %}<a class="mono-action" href="/privacy?club_id={{ club_id }}">Политика конфиденциальности</a>
+    <a class="mono-action" href="/oferta?club_id={{ club_id }}">Публичная оферта</a>{% endif %}
 </div>
 {% endif %}
 
