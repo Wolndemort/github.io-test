@@ -35,7 +35,7 @@ from admin_module.webapp_verify import verify_telegram_data
 from database.db import Club, ClubProduct, ClubStaff, Discount, DiscountAssignment, MotivationAccrual, PaymentOrder, Student, User, VisitLog, get_session, get_student_parent_ids
 from database.db import CartItem, CartOrder
 from services.audit import audit_event
-from services.legal_documents import legal_context
+from services.legal_documents import legal_context, legal_documents_enabled, validate_legal_data
 from admin_module.api import audit_actor_context
 from admin_module.api import (
     build_owner_receipt_text,
@@ -1298,6 +1298,8 @@ async def get_privacy_page(request: Request, session: AsyncSession = Depends(get
     """РЎС‚СЂР°РЅРёС†Р° РїРѕР»РёС‚РёРєРё РєРѕРЅС„РёРґРµРЅС†РёР°Р»СЊРЅРѕСЃС‚Рё РґР»СЏ WebApp"""
     club_id = get_club_id_from_host(request)
     club = (await session.execute(select(Club).where(Club.id == club_id))).scalar_one_or_none() if club_id else None
+    if club and not legal_documents_enabled(club.club_settings):
+        raise HTTPException(status_code=404, detail="Юридические документы отключены клубом")
     return templates.TemplateResponse("privacy.html", {"request": request, **legal_context(club)})
 
 
@@ -1306,6 +1308,8 @@ async def get_oferta_page(request: Request, session: AsyncSession = Depends(get_
     """РЎС‚СЂР°РЅРёС†Р° РїСѓР±Р»РёС‡РЅРѕР№ РѕС„РµСЂС‚С‹ РґР»СЏ WebApp"""
     club_id = get_club_id_from_host(request)
     club = (await session.execute(select(Club).where(Club.id == club_id))).scalar_one_or_none() if club_id else None
+    if club and not legal_documents_enabled(club.club_settings):
+        raise HTTPException(status_code=404, detail="Юридические документы отключены клубом")
     return templates.TemplateResponse("oferta.html", {"request": request, **legal_context(club)})
 
 
@@ -1328,6 +1332,11 @@ async def save_admin_legal(request: Request, club_id: int = Query(...), session:
     settings = dict(club.club_settings or {})
     fields = ("provider_name", "provider_type", "inn", "ogrn", "legal_address", "club_address", "email", "phone", "document_version", "updated_at", "privacy_operator", "platform_name")
     legal = {field: str(payload.get(field, "") or "").strip()[:500] for field in fields}
+    legal["enabled"] = bool(payload.get("enabled", True))
+    if legal["enabled"]:
+        errors = validate_legal_data(legal)
+        if errors:
+            raise HTTPException(status_code=400, detail="; ".join(errors))
     settings["legal"] = legal
     club.club_settings = settings
     await session.commit()
@@ -1342,6 +1351,7 @@ async def delete_admin_legal(request: Request, club_id: int = Query(...), sessio
     tg_user = await verify_webapp_admin(club, payload.get("init_data"))
     settings = dict(club.club_settings or {})
     settings.pop("legal", None)
+    settings["legal"] = {"enabled": False}
     club.club_settings = settings
     await session.commit()
     audit_event("legal_documents_deleted", club_id=club.id, actor_user_id=int(tg_user.get("id", 0)), action="delete", object_type="legal_documents", location="webapp/admin-legal")

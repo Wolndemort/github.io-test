@@ -1757,6 +1757,7 @@ async def cart_checkout(payload: CartCheckoutPayload, request: Request, session:
     if not club or not tg_user or not payload.items:
         raise HTTPException(400, "Корзина недоступна")
     settings = club.club_settings or {}; pay = settings.get("payments", {})
+    payment_modes = payment_availability(settings)
     payment_method = (payload.payment_method or "bank_card").strip().lower()
     if payment_method in {"yookassa_sbp", "sbp"}:
         payment_method = "sbp"
@@ -1764,6 +1765,10 @@ async def cart_checkout(payload: CartCheckoutPayload, request: Request, session:
         payment_method = "requisites"
     else:
         payment_method = "bank_card"
+    if payment_method in {"bank_card", "sbp"} and not payment_modes["online"]:
+        raise HTTPException(400, "Онлайн-оплата отключена администратором. Выберите оплату по реквизитам.")
+    if payment_method == "sbp" and not payment_modes["sbp"]:
+        raise HTTPException(400, "Оплата через СБП отключена администратором.")
     await _ensure_cart_user(session, club, tg_user)
     pending_cart = (
         await session.execute(

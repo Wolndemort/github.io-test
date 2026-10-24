@@ -139,13 +139,13 @@
             {% if '*' in staff_permissions %}<a class="btn soft mono-action" href="/webapp/admin-legal?club_id={{ club_id }}">📄 Юридические документы</a>{% endif %}
             {% if '*' in staff_permissions %}<a class="btn soft mono-action" href="/webapp/admin-motivation?club_id={{ club_id }}">Мотивация тренеров</a>{% endif %}{% if '*' in staff_permissions or 'schedule_view' in staff_permissions %}<a class="btn soft mono-action" href="/webapp/staff-motivation?club_id={{ club_id }}">💰 Мои начисления</a>{% endif %}
             {% if not is_staff_mode %}
-            <a class="btn dark mono-action dark primary-action" href="/webapp/biometric-pass?club_id={{ club_id }}&user_id={{ user_id }}">📱 Открыть проход</a>
+            {% if turnstile_enabled %}<a class="btn dark mono-action dark primary-action" href="/webapp/biometric-pass?club_id={{ club_id }}&user_id={{ user_id }}">📱 Открыть проход</a>{% endif %}
             <a class="btn dark mono-action dark primary-action" href="/webapp/shop?club_id={{ club_id }}">🛒 Магазин</a>
             {% endif %}
             {% if is_staff_mode %}
-            <a class="btn dark mono-action dark" href="/webapp/staff-pass?club_id={{ club_id }}&user_id={{ user_id }}">Открыть турникет</a>
+            {% if turnstile_enabled %}<a class="btn dark mono-action dark" href="/webapp/staff-pass?club_id={{ club_id }}&user_id={{ user_id }}">Открыть турникет</a>{% endif %}
             <div class="staff-tools-title">Рабочие разделы</div>
-            {% if '*' in staff_permissions %}<a class="btn soft mono-action" href="/webapp/live_cam?club_id={{ club_id }}">📹 Камеры</a>{% endif %}
+            {# Камеры временно скрыты до отдельного включения функции. #}
             {% if '*' in staff_permissions or 'settings_manage' in staff_permissions %}<a class="btn soft mono-action" href="/webapp/admin-work-schedule?club_id={{ club_id }}">🕑 График работы клуба</a>{% endif %}
             {% if '*' in staff_permissions or 'manual_checkin' in staff_permissions %}<a class="btn soft mono-action" href="/webapp/staff-checkin?club_id={{ club_id }}">Отметить посещение</a>{% endif %}
             {% if '*' in staff_permissions or 'cash_sale' in staff_permissions %}<a class="btn soft mono-action" href="/webapp/admin-product-sale?club_id={{ club_id }}">🛍 Продажа товаров</a>{% endif %}

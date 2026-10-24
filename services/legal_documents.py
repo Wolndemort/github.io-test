@@ -7,6 +7,28 @@ them in before publishing the bot.
 
 from collections.abc import Mapping
 
+LEGAL_PROVIDER_TYPES = {"ИП", "ООО", "Самозанятый", "Физическое лицо"}
+
+
+def validate_legal_data(legal: Mapping | None) -> list[str]:
+    data = legal if isinstance(legal, Mapping) else {}
+    errors = []
+    provider_type = str(data.get("provider_type") or "").strip()
+    if provider_type not in LEGAL_PROVIDER_TYPES:
+        errors.append("Укажите форму исполнителя: ИП, ООО, самозанятый или физическое лицо")
+    required = {"provider_name": "полное наименование", "legal_address": "юридический адрес", "club_address": "адрес клуба", "email": "email для обращений", "phone": "телефон клуба", "privacy_operator": "оператор персональных данных"}
+    errors.extend(f"Заполните: {label}" for key, label in required.items() if not str(data.get(key) or "").strip())
+    inn = "".join(ch for ch in str(data.get("inn") or "") if ch.isdigit())
+    if len(inn) not in {10, 12}:
+        errors.append("ИНН должен содержать 10 или 12 цифр")
+    ogrn = "".join(ch for ch in str(data.get("ogrn") or "") if ch.isdigit())
+    if provider_type in {"ИП", "ООО"} and len(ogrn) not in {13, 15}:
+        errors.append("ОГРН/ОГРНИП должен содержать 13 или 15 цифр")
+    email = str(data.get("email") or "").strip()
+    if email and ("@" not in email or "." not in email.rsplit("@", 1)[-1]):
+        errors.append("Укажите корректный email")
+    return errors
+
 def legal_documents_enabled(settings: Mapping | None) -> bool:
     legal = settings.get("legal", {}) if isinstance(settings, Mapping) else {}
     return bool(legal.get("enabled", True)) if isinstance(legal, Mapping) else True

@@ -354,7 +354,7 @@ async def staff_checkin_page(request: Request, club_id: int, init_data: str | No
     staff = (await db.execute(select(ClubStaff).where(ClubStaff.club_id == club_id, ClubStaff.telegram_id == user_id, ClubStaff.is_active.is_(True)))).scalar_one_or_none()
     if int(club.owner_id or 0) != user_id and not (staff and staff_can(staff, "manual_checkin")):
         raise HTTPException(status_code=403, detail="Нет права отмечать посещения")
-    return templates.TemplateResponse("staff_checkin.html", {"request": request, "club": club, "club_id": club_id, "user_id": user_id})
+    return templates.TemplateResponse("staff_checkin.html", {"request": request, "club": club, "club_id": club_id, "user_id": user_id, "turnstile_enabled": turnstile_enabled(club.club_settings)})
 
 
 @router.get("/webapp/staff-checkin/search")
@@ -387,7 +387,10 @@ async def staff_checkin(payload: dict, db: AsyncSession = Depends(get_session)):
     staff = (await db.execute(select(ClubStaff).where(ClubStaff.club_id == club_id, ClubStaff.telegram_id == user_id, ClubStaff.is_active.is_(True)))).scalar_one_or_none()
     if int(club.owner_id or 0) != user_id and not (staff and staff_can(staff, "manual_checkin")):
         raise HTTPException(status_code=403, detail="Нет права отмечать посещения")
-    result = await process_athlete_gate_pass(int(payload["student_id"]), db, club.club_settings or {}, expected_club_id=club_id, open_turnstile=bool(payload.get("open_turnstile", False)))
+    open_turnstile = bool(payload.get("open_turnstile", False))
+    if open_turnstile and not turnstile_enabled(club.club_settings):
+        raise HTTPException(status_code=400, detail="Турникет отключён администратором")
+    result = await process_athlete_gate_pass(int(payload["student_id"]), db, club.club_settings or {}, expected_club_id=club_id, open_turnstile=open_turnstile)
     if not result.get("success"):
         raise HTTPException(status_code=409, detail=result.get("message", "Посещение не записано"))
     if not result.get("is_inside_session"):
@@ -448,6 +451,8 @@ async def staff_open_turnstile(payload: dict, request: Request, db: AsyncSession
     if not is_staff:
         raise HTTPException(status_code=403, detail="Доступ только для сотрудников")
     club_settings = club.club_settings or {}
+    if not turnstile_enabled(club_settings):
+        raise HTTPException(status_code=400, detail="Турникет отключён администратором")
     relay_config = dict(club_settings.get("turnstile", {}) or {})
     turnstile_status = "ℹ️ СКУД отключен"
     if relay_config.get("enabled", False):
@@ -539,6 +544,7 @@ async def get_client_cabinet_page(request: Request, club_id: int, init_data: str
             "user_name": (user.full_name if user else None) or tg_user.get("first_name", ""),
             "profile_discount": profile_discount,
             "legal_enabled": legal_documents_enabled(settings),
+            "turnstile_enabled": turnstile_enabled(settings),
             "now": datetime.now(),
             "summary": {
                 "total": len(summary_source),
