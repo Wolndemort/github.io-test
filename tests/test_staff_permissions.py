@@ -114,7 +114,7 @@ def test_manager_tariff_webapp_is_present_and_uses_shared_settings():
 
 def test_staff_profile_keyboard_hides_qr_and_freeze_but_keeps_admin_full_mode():
     user = SimpleNamespace(user_id=101)
-    staff_markup = get_profile_keyboard(user, 7, {"features": {"freeze": True}, "limits": {"freeze_price_per_day": 100}}, profile_mode="staff")
+    staff_markup = get_profile_keyboard(user, 7, {"features": {"freeze": True}, "turnstile": {"enabled": True}, "limits": {"freeze_price_per_day": 100}}, profile_mode="staff")
     client_markup = get_profile_keyboard(user, 7, {"features": {"freeze": True}, "limits": {"freeze_price_per_day": 100}}, profile_mode="client")
 
     staff_texts = [button.text for row in staff_markup.inline_keyboard for button in row]

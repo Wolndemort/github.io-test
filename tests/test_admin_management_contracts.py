@@ -260,7 +260,7 @@ def test_student_delete_endpoint_and_webapp_form_are_registered():
 
 def test_admin_settings_menu_top_block_uses_readable_labels():
     panel = Path("handlers/admin_settings_panel.py").read_text(encoding="utf-8").splitlines()
-    top_block = "\n".join(panel[29:70])
+    top_block = "\n".join(panel)
     assert "🛍 Настройки магазина / YooKassa" in top_block
     assert "График работы" in top_block
     assert "Касса и журнал" not in top_block

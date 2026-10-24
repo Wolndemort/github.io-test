@@ -14,7 +14,8 @@ def test_staff_webapp_has_both_checkin_modes_and_search():
     page = (ROOT / "templates/staff_checkin.html").read_text(encoding="utf-8")
     assert "/webapp/staff-checkin/search" in source
     assert "open_turnstile" in source
-    assert "open_turnstile=bool" in source
+    assert "open_turnstile = bool" in source
+    assert "open_turnstile=open_turnstile" in source
     assert "Без турникета" in page and "С турникетом" in page
     assert "encodeURIComponent(q)" in page
 
