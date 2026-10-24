@@ -8,7 +8,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from redis.asyncio import Redis
-from config import SUPER_YOOKASSA_SHOP_ID, SUPER_YOOKASSA_SECRET_KEY, SUPER_YOOKASSA_SBP_ENABLED, SUPER_YOOKASSA_AUTO_RENEW_ENABLED, PROXY_URL
+from config import BASE_URL, SUPER_YOOKASSA_SHOP_ID, SUPER_YOOKASSA_SECRET_KEY, SUPER_YOOKASSA_SBP_ENABLED, SUPER_YOOKASSA_AUTO_RENEW_ENABLED, PROXY_URL
 from services.yookassa_client import YooKassaClient
 
 logger = logging.getLogger(__name__)
@@ -56,6 +56,9 @@ async def show_pay_menu(callback: types.CallbackQuery):
         )
     builder.row(types.InlineKeyboardButton(
         text="☀️ 1 год (365 дн.) — 80 000 ₽", callback_data="buy_sub_365")
+    )
+    builder.row(types.InlineKeyboardButton(
+        text="📄 Оферта SaaS-лицензии", url=f"{BASE_URL.rstrip('/')}/platform-oferta")
     )
     builder.row(types.InlineKeyboardButton(
         text="⬅️ Назад в админку", callback_data="admin")
@@ -118,6 +121,7 @@ async def send_subscription_invoice(callback: types.CallbackQuery, club: "Club",
     await callback.message.answer(
         f"Оплата лицензии клуба «{club.name}» на {days} дней: {price_amount / 100:.0f} ₽.",
         reply_markup=types.InlineKeyboardMarkup(inline_keyboard=[
+            [types.InlineKeyboardButton(text="📄 Оферта SaaS-лицензии", url=f"{BASE_URL.rstrip('/')}/platform-oferta")],
             [types.InlineKeyboardButton(text="💳 Перейти к официальной оплате", url=result["PaymentURL"])],
             [types.InlineKeyboardButton(text="↩️ Назад", callback_data="admin")],
         ]),

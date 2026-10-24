@@ -156,7 +156,7 @@ async def athlete_chosen_handler(callback: types.CallbackQuery, state: FSMContex
     # Спокойно берем конфиг дисциплины из настроек клуба
     discipline_cfg = club_settings.get("disciplines", {}).get(sport_type)
 
-    if not discipline_cfg:
+    if not discipline_cfg or not discipline_cfg.get("active", True):
         return await callback.answer("❌ Ошибка: Выбранное направление временно недоступно.", show_alert=True)
 
     # Формируем клавиатуру тарифов (8 зан, 12 зан, безлимит)
@@ -189,7 +189,7 @@ async def process_kids_limit(
         return await callback.answer("Ошибка обработки кнопки тарифа ❌", show_alert=True)
     # 1. Извлекаем данные о выбранной секции и тарифе
     discipline_cfg = club_settings.get("disciplines", {}).get(sport_type, {})
-    if not discipline_cfg:
+    if not discipline_cfg or not discipline_cfg.get("active", True):
         return await callback.answer("Ошибка: секция не найдена 🛠", show_alert=True)
     tariffs = discipline_cfg.get("tariffs", [])
     if tariff_idx >= len(tariffs):

@@ -30,6 +30,7 @@ DEFAULT_CLUB_SETTINGS = {
         }
     },
     "legal": {
+        "enabled": False,
         "provider_name": "",
         "provider_type": "ИП/ООО",
         "inn": "",

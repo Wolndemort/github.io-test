@@ -1209,6 +1209,8 @@ async def admin_cash_subscription(payload: WebAppCashSubscriptionPayload, db: As
     settings = club.club_settings or {}
     discipline = (payload.sport_type or student.discipline or "").strip()
     cfg = (settings.get("disciplines", {}) or {}).get(discipline) or {}
+    if not cfg or not cfg.get("active", True):
+        raise HTTPException(status_code=400, detail="Дисциплина отключена администратором")
     tariffs = cfg.get("tariffs", [])
     if payload.tariff_idx < 0 or payload.tariff_idx >= len(tariffs):
         raise HTTPException(status_code=400, detail="Тариф не найден")

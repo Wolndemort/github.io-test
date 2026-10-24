@@ -46,6 +46,17 @@ class User(Base):
         """Readable label for SQLAdmin relationship/AJAX selectors."""
         return self.full_name or str(self.user_id)
 
+
+class LegalAcceptance(Base):
+    """Club-scoped acceptance of the club privacy policy and offer."""
+    __tablename__ = "legal_acceptances"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.user_id", ondelete="CASCADE"), index=True)
+    club_id: Mapped[int] = mapped_column(Integer, ForeignKey("clubs.id", ondelete="CASCADE"), index=True)
+    accepted_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, server_default="now()", nullable=False)
+    document_version: Mapped[str] = mapped_column(String(32), default="1.0", server_default="1.0", nullable=False)
+    __table_args__ = (UniqueConstraint("user_id", "club_id", name="uq_legal_acceptance_user_club"),)
+
 class Discount(Base):
     __tablename__ = "discounts"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)

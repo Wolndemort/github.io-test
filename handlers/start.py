@@ -10,8 +10,9 @@ from types import SimpleNamespace
 from loguru import logger
 from handlers.buttons import admin_keyboard, get_profile_keyboard
 from admin_module.utils import is_staff_or_owner
-from database.db import User, Student, StudentParent, Club
+from database.db import User, LegalAcceptance, Student, StudentParent, Club
 from services.audit import audit_event
+from services.legal_documents import legal_documents_enabled
 
 router = Router()
 
@@ -93,7 +94,26 @@ async def start_handler(
         await session.commit()
 
     # 2. ПРОВЕРКА ЮРИДИЧЕСКОГО СОГЛАСИЯ
-    if not db_user.is_accepted:
+    legal_accepted = False
+    if legal_documents_enabled(club_settings):
+        legal_accepted = bool(await session.scalar(
+            select(LegalAcceptance.id).where(
+                LegalAcceptance.user_id == user_id,
+                LegalAcceptance.club_id == club.id,
+            )
+        ))
+        # Preserve legacy acceptance only for the legacy user's own club;
+        # never carry a global acceptance into another club.
+        if not legal_accepted and db_user.is_accepted and db_user.club_id == club.id:
+            session.add(LegalAcceptance(
+                user_id=user_id,
+                club_id=club.id,
+                document_version=str((club_settings.get("legal") or {}).get("document_version") or "1.0"),
+            ))
+            await session.commit()
+            legal_accepted = True
+
+    if not legal_accepted and legal_documents_enabled(club_settings):
         base_url = f"https://{club_id}.speedycrm.ru"
 
         inline_builder = InlineKeyboardBuilder()
@@ -271,9 +291,22 @@ async def accept_legal_handler(
 
     try:
         # 1. Обновляем флаг в базе данных
-        await session.execute(
-            update(User).where(User.user_id == user_id).values(is_accepted=True)
-        )
+        existing = await session.scalar(select(LegalAcceptance).where(
+            LegalAcceptance.user_id == user_id,
+            LegalAcceptance.club_id == club.id,
+        ).with_for_update())
+        if existing:
+            existing.accepted_at = datetime.utcnow()
+            existing.document_version = str((club_settings.get("legal") or {}).get("document_version") or "1.0")
+        else:
+            session.add(LegalAcceptance(
+                user_id=user_id,
+                club_id=club.id,
+                document_version=str((club_settings.get("legal") or {}).get("document_version") or "1.0"),
+            ))
+        # Keep the old column updated for compatibility with old tooling; it
+        # is no longer used as the club-scoped authorization decision.
+        await session.execute(update(User).where(User.user_id == user_id).values(is_accepted=True))
         await session.commit()
 
         # 2. Уведомление и удаление сообщения с офертой

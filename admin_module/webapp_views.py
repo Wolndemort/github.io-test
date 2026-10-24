@@ -36,6 +36,7 @@ from database.db import Club, ClubProduct, ClubStaff, Discount, DiscountAssignme
 from database.db import CartItem, CartOrder
 from services.audit import audit_event
 from services.legal_documents import legal_context, legal_documents_enabled, validate_legal_data
+from services.platform_legal import platform_legal_context
 from admin_module.api import audit_actor_context
 from admin_module.api import (
     build_owner_receipt_text,
@@ -635,6 +636,45 @@ async def change_admin_tariff(payload: TariffChangePayload, request: Request, se
     tg_user = await verify_webapp_staff(club, payload.init_data, session, "tariffs_manage")
     settings = dict(club.club_settings or {})
     disciplines = dict(settings.get("disciplines", {}))
+
+    if payload.action == "create_discipline":
+        raw_name = str((payload.tariff or {}).get("name", "")).strip()
+        if not raw_name:
+            raise HTTPException(400, "Введите название дисциплины")
+        code = "".join(ch.lower() if ch.isalnum() else "_" for ch in raw_name).strip("_")
+        code = "_".join(part for part in code.split("_") if part)[:32] or "discipline"
+        base_code = code
+        suffix = 2
+        while code in disciplines:
+            code = f"{base_code[: max(1, 32 - len(str(suffix)) - 1)]}_{suffix}"
+            suffix += 1
+        disciplines[code] = {
+            "name": raw_name,
+            # Creation and publication are separate operations. The admin
+            # must configure tariffs/schedule and explicitly enable it.
+            "active": False,
+            "type": "lessons",
+            "schedule": {"mon": [], "tue": [], "wed": [], "thu": [], "fri": [], "sat": [], "sun": []},
+            "tariffs": [],
+        }
+        settings["disciplines"] = disciplines
+        await session.execute(update(Club).where(Club.id == club.id).values(club_settings=settings))
+        await session.commit()
+        redis = getattr(request.app.state, "redis_client", None)
+        if redis:
+            await redis.delete(f"club_config:{club.bot_token}")
+        audit_event(
+            "discipline_created",
+            **await audit_actor_context(session, club, tg_user, "webapp/admin-tariffs/change"),
+            club_id=club.id,
+            action="create",
+            object_type="discipline",
+            object_id=code,
+            discipline=code,
+            tariff={"name": raw_name},
+        )
+        return {"success": True, "discipline_code": code, "active": False}
+
     block = dict(disciplines.get(payload.discipline, {}))
     if not block:
         raise HTTPException(404, "???????????? ?? ???????")
@@ -692,44 +732,8 @@ async def change_admin_tariff(payload: TariffChangePayload, request: Request, se
             object_id=payload.discipline,
             discipline=payload.discipline,
             source_discipline=source_disc,
-            effective_date=effective_date.isoformat(),
         )
         return {"success": True, "copied_from": source_disc}
-    elif payload.action == "create_discipline":
-        raw_name = str((payload.tariff or {}).get("name", "")).strip()
-        if not raw_name:
-            raise HTTPException(400, "Р’РІРµРґРёС‚Рµ РЅР°Р·РІР°РЅРёРµ РґРёСЃС†РёРїР»РёРЅС‹")
-        code = "".join(ch.lower() if ch.isalnum() else "_" for ch in raw_name).strip("_")
-        code = "_".join(part for part in code.split("_") if part)[:32] or "discipline"
-        base_code = code
-        suffix = 2
-        while code in disciplines:
-            code = f"{base_code}_{suffix}"
-            suffix += 1
-        disciplines[code] = {
-            "name": raw_name,
-            "active": True,
-            "type": "lessons",
-            "schedule": {"mon": [], "tue": [], "wed": [], "thu": [], "fri": [], "sat": [], "sun": []},
-            "tariffs": [],
-        }
-        settings["disciplines"] = disciplines
-        await session.execute(update(Club).where(Club.id == club.id).values(club_settings=settings))
-        await session.commit()
-        redis = getattr(request.app.state, "redis_client", None)
-        if redis:
-            await redis.delete(f"club_config:{club.bot_token}")
-        audit_event(
-            "discipline_created",
-            **await audit_actor_context(session, club, tg_user, "webapp/admin-tariffs/change"),
-            club_id=club.id,
-            action="create",
-            object_type="discipline",
-            object_id=code,
-            discipline=code,
-            tariff={"name": raw_name},
-        )
-        return {"success": True, "discipline_code": code}
     elif payload.action == "add":
         tariff = payload.tariff or {}
         tariffs.append({"price": _as_float(tariff.get("price", 0)), "days": max(1, _as_int(tariff.get("days", 30), 30)), "count": 999 if block.get("type") == "unlimited" else max(0, _as_int(tariff.get("count", 0), 0)), "min_age": max(0, _as_int(tariff.get("min_age", 0), 0))})
@@ -1049,6 +1053,7 @@ async def change_admin_schedule(payload: ScheduleChangePayload, session: AsyncSe
             object_id=payload.discipline,
             discipline=payload.discipline,
             source_discipline=source_disc,
+            effective_date=effective_date.isoformat(),
         )
         return {"success": True}
     elif payload.action in {"add", "update"}:
@@ -1153,6 +1158,18 @@ async def change_admin_work_schedule(payload: dict, session: AsyncSession = Depe
         open_at = str(item.get("open", "09:00"))[:5]
         close_at = str(item.get("close", "18:00"))[:5]
         note = str(item.get("note", ""))[:180]
+        def _minutes(value: str) -> int | None:
+            parts = value.split(":")
+            if len(parts) != 2 or not all(part.isdigit() for part in parts):
+                return None
+            hour, minute = (int(part) for part in parts)
+            if not (0 <= hour <= 23 and 0 <= minute <= 59):
+                return None
+            return hour * 60 + minute
+        open_minutes = _minutes(open_at)
+        close_minutes = _minutes(close_at)
+        if open_minutes is None or close_minutes is None or open_minutes >= close_minutes:
+            raise HTTPException(400, "Время открытия и закрытия должно быть в формате ЧЧ:ММ, закрытие позже открытия")
         work_schedule[day] = {"open": open_at, "close": close_at, "note": note}
     elif action == "delete":
         work_schedule.pop(day, None)
@@ -1314,6 +1331,12 @@ async def get_oferta_page(request: Request, session: AsyncSession = Depends(get_
     return templates.TemplateResponse("oferta.html", {"request": request, **legal_context(club)})
 
 
+@router.get("/platform-oferta", response_class=HTMLResponse)
+async def get_platform_oferta_page(request: Request):
+    """Immutable SaaS license offer for club owners."""
+    return templates.TemplateResponse("platform_oferta.html", {"request": request, **platform_legal_context()})
+
+
 @router.get("/webapp/admin-legal", response_class=HTMLResponse)
 async def admin_legal_page(request: Request, club_id: int = Query(...), init_data: str | None = Query(default=None), session: AsyncSession = Depends(get_session)):
     club = await session.get(Club, club_id)
@@ -1331,11 +1354,15 @@ async def save_admin_legal(request: Request, club_id: int = Query(...), session:
     club = await session.get(Club, club_id)
     tg_user = await verify_webapp_admin(club, payload.get("init_data"))
     settings = dict(club.club_settings or {})
-    fields = ("provider_name", "provider_type", "inn", "ogrn", "legal_address", "club_address", "email", "phone", "document_version", "updated_at", "privacy_operator", "platform_name")
+    fields = ("provider_name", "provider_type", "inn", "ogrn", "legal_address", "club_address", "email", "phone", "document_version", "updated_at", "privacy_operator")
     legal = {field: str(payload.get(field, "") or "").strip()[:500] for field in fields}
+    provider_types = {"ип": "ИП", "ооо": "ООО", "самозанятый": "Самозанятый", "физическое лицо": "Физическое лицо"}
+    legal["provider_type"] = provider_types.get(legal["provider_type"].casefold(), legal["provider_type"])
     legal["document_version"] = legal["document_version"] or "1.0"
     legal["updated_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
     legal["enabled"] = bool(payload.get("enabled", True))
+    # platform_name belongs to the immutable SaaS offer, never to the club form
+    legal.pop("platform_name", None)
     if legal["enabled"]:
         errors = validate_legal_data(legal)
         if errors:

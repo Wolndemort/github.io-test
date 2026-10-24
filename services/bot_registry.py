@@ -18,8 +18,12 @@ async def register_bot(bot_token: str, webhook_url: str, *, parse_mode: str = "H
         token=bot_token,
         default=DefaultBotProperties(parse_mode=parse_mode),
     )
+    try:
+        await bot.set_webhook(url=webhook_url, drop_pending_updates=drop_pending_updates)
+    except Exception:
+        await bot.session.close()
+        raise
     bots_dict[bot_token] = bot
-    await bot.set_webhook(url=webhook_url, drop_pending_updates=drop_pending_updates)
     logger.info("✅ Вебхук обновлён и бот зарегистрирован token=...%s", bot_token[-8:])
     return bot
 

@@ -213,6 +213,28 @@ def test_subscription_forms_explain_unlimited_marker_999():
     assert "copyFromDisc" in tariffs
 
 
+def test_discipline_creation_is_separate_from_activation_and_has_safe_unique_codes():
+    source = Path("admin_module/webapp_views.py").read_text(encoding="utf-8")
+    create_start = source.index('if payload.action == "create_discipline":')
+    lookup = source.index('block = dict(disciplines.get(payload.discipline, {}))')
+    assert create_start < lookup
+    create_block = source[create_start:lookup]
+    assert '"active": False' in create_block
+    assert '"schedule": {"mon": [], "tue": [], "wed": [], "thu": [], "fri": [], "sat": [], "sun": []}' in create_block
+    assert '"active": False' in source[source.index('return {"success": True, "discipline_code": code'):source.index('return {"success": True, "discipline_code": code') + 100]
+    assert 'base_code[: max(1, 32 - len(str(suffix)) - 1)]' in create_block
+
+
+def test_schedule_and_public_settings_validate_cross_layer_inputs():
+    webapp = Path("admin_module/webapp_views.py").read_text(encoding="utf-8")
+    settings = Path("handlers/admin_settings_panel.py").read_text(encoding="utf-8")
+    assert "закрытие позже открытия" in webapp
+    assert "effective_date=effective_date.isoformat()" in webapp
+    assert "_TELEGRAM_USERNAME_RE" in settings
+    assert "parts[3] == \"1\"" in settings
+    assert "_valid_logo_url" in settings
+
+
 def test_cash_register_and_stats_show_distinct_cashflow_terms():
     cash = Path("templates/cash_register.html").read_text(encoding="utf-8")
     stats = Path("templates/stats.html").read_text(encoding="utf-8")

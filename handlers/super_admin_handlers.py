@@ -202,7 +202,10 @@ async def start_add_club(callback: types.CallbackQuery, state: FSMContext):
 
 @router.message(AddClub.waiting_for_name)
 async def process_name(message: types.Message, state: FSMContext):
-    await state.update_data(name=message.text)
+    name = " ".join((message.text or "").split())
+    if not name or len(name) > 100:
+        return await message.answer("Введите название клуба от 1 до 100 символов.")
+    await state.update_data(name=name)
     # ИСПРАВИЛ: Переход на правильный стейт ожидания ID
     await state.set_state(AddClub.waiting_for_owner_id)
     await message.answer("👤 Теперь введите <b>Telegram ID владельца</b> клуба:", parse_mode="HTML")
@@ -212,7 +215,7 @@ async def process_name(message: types.Message, state: FSMContext):
 
 @router.message(AddClub.waiting_for_owner_id)
 async def process_owner_id(message: types.Message, state: FSMContext):
-    if not message.text.isdigit():
+    if not (message.text or "").isdigit() or int(message.text) <= 0:
         return await message.answer("❌ Введите числовой ID!")
 
     await state.update_data(owner_id=int(message.text))
@@ -226,9 +229,18 @@ async def process_owner_id(message: types.Message, state: FSMContext):
 @router.message(AddClub.waiting_for_token)
 async def process_token(message: types.Message, state: FSMContext, session: AsyncSession):
     data = await state.get_data()
-    club_name = data['name']
-    owner_id = data['owner_id']
+    club_name = str(data.get("name", "")).strip()
+    owner_id = int(data.get("owner_id", 0) or 0)
     bot_token = message.text.strip()
+    if not club_name or not owner_id or not bot_token:
+        return await message.answer("Не хватает данных для создания клуба. Начните создание заново.")
+
+    duplicate_name = await session.scalar(select(Club.id).where(func.lower(Club.name) == club_name.casefold()).limit(1))
+    if duplicate_name:
+        return await message.answer("Клуб с таким названием уже существует. Введите другое название.")
+    duplicate_token = await session.scalar(select(Club.id).where(Club.bot_token == bot_token).limit(1))
+    if duplicate_token:
+        return await message.answer("Этот Telegram-бот уже подключён к клубу.")
 
     # 1. Валидация токена
     try:

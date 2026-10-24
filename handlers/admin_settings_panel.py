@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import copy
 import json
+import re
 from pathlib import Path
 from uuid import uuid4
 from datetime import datetime, timedelta
+from urllib.parse import urlparse
 
 from aiogram import Router, F, types
 from aiogram.fsm.context import FSMContext
@@ -25,6 +27,17 @@ from services.analytics import reporting_periods
 from services.audit import audit_event
 
 router = Router()
+
+_TELEGRAM_USERNAME_RE = re.compile(r"^[A-Za-z0-9_]{5,32}$")
+
+
+def _valid_logo_url(value: str) -> bool:
+    return value.startswith("/") or value.startswith(("https://", "http://"))
+
+
+def _valid_http_url(value: str) -> bool:
+    parsed = urlparse(value)
+    return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
 
 
 @router.callback_query(F.data == "admin_settings")
@@ -285,7 +298,7 @@ async def save_site_url(message: types.Message, state: FSMContext, club: Club, c
     if not (is_owner or is_super_admin):
         return await message.answer("Доступ запрещён")
     value = (message.text or "").strip()
-    if not value.startswith(("https://", "http://")):
+    if not _valid_http_url(value):
         return await message.answer("URL должен начинаться с https:// или http://")
     club_settings.setdefault("ui", {})["site_url"] = value
     await session.execute(update(Club).where(Club.id == club.id).values(club_settings=club_settings))
@@ -300,7 +313,7 @@ async def save_support_username(message: types.Message, state: FSMContext, club:
     if not (is_owner or is_super_admin):
         return await message.answer("Доступ запрещён")
     value = (message.text or "").strip().lstrip("@")
-    if not value or any(ch.isspace() for ch in value):
+    if not _TELEGRAM_USERNAME_RE.fullmatch(value):
         return await message.answer("Введите корректный username Telegram")
     club_settings.setdefault("ui", {})["support_link"] = value
     await session.execute(update(Club).where(Club.id == club.id).values(club_settings=club_settings))
@@ -318,8 +331,10 @@ async def admin_public_links_save(message: types.Message, state: FSMContext, clu
     if len(parts) != 4 or parts[2] not in {"0", "1"} or parts[3] not in {"0", "1"}:
         return await message.answer("Неверный формат. Нужно: сайт | @поддержка | 1/0 | 1/0")
     site, support = parts[0], parts[1].lstrip("@")
-    if site and not site.startswith(("https://", "http://")):
+    if parts[2] == "1" and not _valid_http_url(site):
         return await message.answer("Сайт должен начинаться с https:// или http://")
+    if parts[3] == "1" and not _TELEGRAM_USERNAME_RE.fullmatch(support):
+        return await message.answer("Введите корректный username Telegram")
     club_settings.setdefault("ui", {}).update({"site_url": site, "support_link": support, "site_enabled": parts[2] == "1", "support_enabled": parts[3] == "1"})
     await session.execute(update(Club).where(Club.id == club.id).values(club_settings=club_settings))
     await session.commit()
@@ -696,7 +711,8 @@ async def save_webapp_logo(message: types.Message, state: FSMContext, club: Club
         logo_url = f"/static/uploads/logos/{filename}"
         ui["logo_url"] = logo_url
         loading = dict(ui.get("loading") or {})
-        loading["enabled"] = True
+        # Логотип и загрузочный экран настраиваются независимо.
+        loading["enabled"] = bool(loading.get("enabled", False))
         loading["logo_url"] = logo_url
         loading["logo_rev"] = uuid4().hex
         loading.setdefault("duration_ms", 1200)
@@ -732,6 +748,8 @@ async def save_webapp_loading(message: types.Message, state: FSMContext, club: C
             raise ValueError
         enabled = bool(value.get("enabled", False))
         logo_url = str(value.get("logo_url", "")).strip()
+        if logo_url and not _valid_logo_url(logo_url):
+            return await message.answer("logo_url должен быть локальным путём /... или URL http(s).")
         duration = int(value.get("duration_ms", 1200))
         text = str(value.get("message", "Загружаем приложение…")).strip()[:120]
         if duration < 300 or duration > 10000:

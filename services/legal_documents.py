@@ -6,6 +6,7 @@ them in before publishing the bot.
 """
 
 from collections.abc import Mapping
+from services.platform_legal import PLATFORM_LEGAL
 
 LEGAL_PROVIDER_TYPES = {"ИП", "ООО", "Самозанятый", "Физическое лицо"}
 
@@ -51,5 +52,6 @@ def legal_context(club) -> dict:
         "document_version": legal.get("document_version") or "1.0",
         "updated_at": legal.get("updated_at") or "дата публикации не указана",
         "privacy_operator": legal.get("privacy_operator") or legal.get("provider_name") or getattr(club, "name", "Клуб"),
-        "platform_name": legal.get("platform_name") or "платформа автоматизации клуба",
+        # This is platform-owned context and must never be tenant-editable.
+        "platform_name": PLATFORM_LEGAL["platform_name"],
     }
