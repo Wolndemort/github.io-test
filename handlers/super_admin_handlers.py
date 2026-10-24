@@ -273,7 +273,11 @@ async def process_token(message: types.Message, state: FSMContext, session: Asyn
 
         webhook_url = f"{BASE_URL}/webhook/bot/{bot_token}"
         try:
-            await register_bot(bot_token, webhook_url)
+            await register_bot(
+                bot_token,
+                webhook_url,
+                menu_button_url=f"https://{new_club.id}.speedycrm.ru/webapp/client-cabinet?club_id={new_club.id}",
+            )
             bot_status = "🤖 Бот подключён к текущему процессу и вебхук обновлён."
         except Exception as bot_err:
             logger.error(f"Не удалось сразу зарегистрировать бот для клуба {new_club.id}: {bot_err}")

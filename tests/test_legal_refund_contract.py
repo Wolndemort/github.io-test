@@ -56,3 +56,5 @@ def test_new_club_creation_has_safe_defaults_and_retries_failed_webhooks():
     assert "except Exception:" in registry
     assert "await bot.session.close()" in registry
     assert "bots_dict[bot_token] = bot" in registry
+    assert "set_chat_menu_button" in registry
+    assert "menu_button_url=f\"https://{new_club.id}.speedycrm.ru/webapp/client-cabinet?club_id={new_club.id}\"" in creation
