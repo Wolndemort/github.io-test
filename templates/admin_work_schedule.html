@@ -58,6 +58,6 @@ async function delDay(day){
   if(!r.ok) return alert((await r.json()).detail || 'Ошибка');
   location.reload();
 }
-render();
+render(); document.querySelectorAll('.nav a:nth-child(-n+2)').forEach(x => x.remove());
 </script></body></html>
 <style>html,body{background:#090909!important;color:#f7f7f7!important}.card{background:#151515!important;color:#f7f7f7!important;border-color:#2d2d2d!important;box-shadow:0 16px 42px rgba(0,0,0,.28)}input,select{background:#101010!important;color:#fff!important;border-color:#444!important}button{background:#fff!important;color:#090909!important;font-weight:700}.row{border-color:#333!important}</style>
