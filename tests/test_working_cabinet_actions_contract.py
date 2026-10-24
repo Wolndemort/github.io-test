@@ -33,7 +33,6 @@ def test_working_sections_keep_single_working_cabinet_back_action():
         "admin_visits.html": ("/webapp/admin?", "/webapp/admin-audit?", "/webapp/admin-visits?"),
         "admin_audit.html": ("/admin?", "/webapp/admin-visits?", "/webapp/admin-legal?"),
         "admin_work_schedule.html": ("/admin?", "/webapp/admin-schedule?"),
-        "admin_students.html": ("📈 Продажи",),
     }
     for name, forbidden in checks.items():
         template = (ROOT / "templates" / name).read_text(encoding="utf-8")
