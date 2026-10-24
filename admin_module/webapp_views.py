@@ -831,7 +831,9 @@ async def staff_motivation_page(request: Request, club_id: int = Query(...), dat
     club = await session.get(Club, club_id)
     if not init_data:
         return telegram_init_gate("/webapp/staff-motivation", club_id, "Откройте мотивацию из Telegram")
-    tg_user = await verify_webapp_staff(club, init_data, session, "schedule_view")
+    tg_user = verify_telegram_data(init_data, club.bot_token if club else "")
+    if not tg_user:
+        raise HTTPException(403, "Недействительные данные Telegram")
     user_id = int(tg_user.get("id", 0))
     staff = await session.scalar(select(ClubStaff).where(ClubStaff.club_id == club_id, ClubStaff.telegram_id == user_id, ClubStaff.is_active.is_(True)))
     is_admin = user_id == int(getattr(club, "owner_id", 0) or 0) or user_id in SUPER_ADMIN_IDS

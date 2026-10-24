@@ -1,7 +1,5 @@
 <!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><script src="https://telegram.org/js/telegram-web-app.js"></script><style>body{font-family:sans-serif;background:#f4f4f4;margin:0;padding:14px;color:#111}.nav{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px}.nav a{display:block;text-align:center;text-decoration:none;padding:10px 12px;border-radius:10px;border:1px solid #111;background:#111;color:#fff;font-weight:700}.nav a.secondary{background:#fff;color:#111;border-color:#bbb}.card{background:white;border-radius:16px;padding:14px;margin:10px 0}input,select,button{padding:10px;margin:3px;border-radius:8px;border:1px solid #ccc}button{background:#111;color:white}.row{border-top:1px solid #ddd;padding:10px 0}.row:first-child{border-top:0}.row small{color:#666}</style></head><body>
 <div class="nav">
-  <a href="/admin?club_id={{club_id}}&init_data={{ request.query_params.get('init_data','')|urlencode }}">← В панель</a>
-  <a class="secondary" href="/webapp/admin-schedule?club_id={{club_id}}&init_data={{ request.query_params.get('init_data','')|urlencode }}">Расписание</a>
   <a class="staff-back-button" href="/webapp/client-cabinet?club_id={{club_id}}">← В рабочий кабинет</a>
 </div>
 <h2>График работы — {{ club.name }}</h2>
