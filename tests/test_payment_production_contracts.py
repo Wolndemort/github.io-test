@@ -40,3 +40,11 @@ def test_yookassa_webhook_verifies_provider_status_amount_and_order_metadata():
     assert 'verified_payment.get("metadata", {}).get("order_id")' in source
     assert "received_amount != order.amount_kopecks" in source
     assert 'if order.status == "CONFIRMED"' in source
+
+
+def test_saas_renewal_adds_paid_days_to_remaining_active_term():
+    payment = (ROOT / "handlers/super_admin_payment.py").read_text(encoding="utf-8")
+    webhook = (ROOT / "admin_module/payments_webhook.py").read_text(encoding="utf-8")
+    assert "club.subscription_expire_at.replace(tzinfo=None) + timedelta(days=days)" in payment
+    assert "base + timedelta(days=order.days)" in webhook
+    assert "else:\n        new_expire = now_naive + timedelta(days=days)" in payment

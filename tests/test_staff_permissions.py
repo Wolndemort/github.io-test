@@ -24,6 +24,7 @@ def test_staff_roles_have_separate_least_privilege_permissions():
         "athletes_view",
         "athletes_manage",
         "student_manage",
+        "freeze_manage",
     }
     for role in ROLE_PERMISSIONS:
         if role != "manager":

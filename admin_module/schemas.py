@@ -13,6 +13,7 @@ class AdminFreezePayload(BaseModel):
     club_id: int
     student_id: int
     action: str
+    date_to: str | None = None
 
 
 class StudentInvitePayload(BaseModel):
@@ -91,6 +92,12 @@ class BiometricEnable(BaseModel):
 class AdminStudentUpdate(BaseModel):
     init_data: str
     club_id: int
+    # Snapshot values protect financial and parent fields from a stale
+    # admin tab overwriting a payment or a newer edit.
+    expected_balance_lessons: int | None = None
+    expected_expire_date: str | None = None
+    expected_parent_phone: str | None = None
+    expected_parent_phone_secondary: str | None = None
     name: str | None = None
     birthday: str | None = None
     balance_lessons: int | None = None

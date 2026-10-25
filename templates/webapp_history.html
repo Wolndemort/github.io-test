@@ -4,9 +4,6 @@
 {% block subheader %}{{ club.name }}{% endblock %}
 {% block content %}
 <div class="mono-card">
-    <a class="mono-action" href="/webapp/client-cabinet?club_id={{ club_id }}">← Назад в кабинет</a>
-</div>
-<div class="mono-card">
     <div class="mono-kicker"><div class="name">Сводка</div><span>история</span></div>
     <div class="mono-grid-2">
         <div class="mono-pill"><div class="label">Платежей</div><div class="value">{{ payment_lines|length if payment_lines is defined else 0 }}</div></div>

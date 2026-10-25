@@ -123,10 +123,15 @@ async def universal_profile_handler(
     # Запрашиваем студентов этого родителя для текущего клуба
     # Важно: StudentParent нельзя добавлять в WHERE без JOIN — это отдаёт
     # всех атлетов клуба из-за декартова произведения.
-    stmt = select(Student).where(
-        Student.parent_id == user_id,
-        Student.club_id == club_id
-    ).order_by(Student.name).execution_options(populate_existing=True)
+    stmt = (select(Student)
+            .outerjoin(StudentParent, StudentParent.student_id == Student.id)
+            .where(
+                Student.club_id == club_id,
+                (Student.parent_id == user_id) | (StudentParent.parent_id == user_id),
+            )
+            .distinct()
+            .order_by(Student.name)
+            .execution_options(populate_existing=True))
 
     result = await session.execute(stmt)
     students = result.scalars().all()
@@ -260,10 +265,14 @@ async def detailed_status_handler(
     # QR-код доступен только атлетам, привязанным к текущему родителю.
     # Не используем StudentParent без JOIN: это превращает запрос в декартово
     # произведение и возвращает список всех атлетов клуба.
-    stmt = select(Student).where(
-        Student.parent_id == user_id,
-        Student.club_id == club.id
-    ).order_by(Student.name)
+    stmt = (select(Student)
+            .outerjoin(StudentParent, StudentParent.student_id == Student.id)
+            .where(
+                Student.club_id == club.id,
+                (Student.parent_id == user_id) | (StudentParent.parent_id == user_id),
+            )
+            .distinct()
+            .order_by(Student.name))
 
     result = await session.execute(stmt)
     students = result.scalars().all()
@@ -564,10 +573,10 @@ async def finalize_freeze_action(
         return await callback.answer("❌ Ошибка формата ID", show_alert=True)
 
     # Достаем шаг заморозки из конфига клуба
-    freeze_days = club_settings.get("limits", {}).get("freeze_days_step", 7)
     student = await session.get(Student, student_id)
     if not student or student.club_id != club.id:
         return await callback.answer("❌ Атлет не найден.", show_alert=True)
+    freeze_days = int(getattr(student, "freeze_days_entitlement", None) or club_settings.get("limits", {}).get("freeze_days_step", 7))
     linked = await session.scalar(select(StudentParent.student_id).where(
         StudentParent.student_id == student_id,
         StudentParent.parent_id == callback.from_user.id,
@@ -649,8 +658,6 @@ async def choose_student_for_freeze(
         return await callback.answer("У вас нет атлетов в этом клубе!", show_alert=True)
 
     # 2. Достаем настройки из SaaS-конфига (Limits -> freeze_days_step)
-    freeze_days = club_settings.get("limits", {}).get("freeze_days_step", 7)
-
     builder = InlineKeyboardBuilder()
     count = 0
     now = datetime.now()
@@ -679,7 +686,7 @@ async def choose_student_for_freeze(
         text=(
         f"❄️ <b>Заморозка</b>\n\n"
         f"Клуб: <b>{club.name}</b>\n"
-        f"Выберите атлета. Срок действия будет продлен на <b>{freeze_days} дней</b>.\n\n"
+        f"Выберите атлета. Срок заморозки указан в его абонементе.\n\n"
             f"⚠️ <i>Заморозка доступна 1 раз за период. Абонемент разморозится автоматически при первом входе в зал.</i>"
         ),
         reply_markup=builder.as_markup(),
@@ -1170,6 +1177,18 @@ async def process_athlete_birthday(
         session.add(new_student)
         await session.commit()  # Сохраняем в БД
 
+        if club.owner_id and int(club.owner_id) != user_id:
+            try:
+                await message.bot.send_message(
+                    club.owner_id,
+                    f"🔗 <b>Новая привязка родителя</b>\n\n"
+                    f"Атлет: <b>{escape(name)}</b>\n"
+                    f"Родитель: <b>{escape(user_full_name)}</b>",
+                    parse_mode="HTML",
+                )
+            except Exception as notify_error:
+                logger.warning("Не удалось уведомить администратора о новом атлете: %s", notify_error)
+
         if birthday_date is None:
             logger.success(f"👤 Клиент сам добавил атлета: {name} без указания ДР (Клуб ID: {club_id})")
         else:
@@ -1271,12 +1290,28 @@ async def process_user_contact(
             if student.parent_id is None and matched_primary:
                 student.parent_id = user_id
             existing_link = await session.get(StudentParent, {"student_id": student.id, "parent_id": user_id})
-            if not existing_link:
-                session.add(StudentParent(student_id=student.id, parent_id=user_id, is_primary=matched_primary, phone=normalized_phone))
+            is_primary_parent = student.parent_id == user_id
+            if existing_link:
+                existing_link.is_primary = is_primary_parent
+                existing_link.phone = normalized_phone
+            else:
+                session.add(StudentParent(student_id=student.id, parent_id=user_id, is_primary=is_primary_parent, phone=normalized_phone))
             session.add(student)
 
         await session.commit()
         names = ", ".join([f"<b>{s.name}</b>" for s in students])
+
+        if club.owner_id and int(club.owner_id) != user_id:
+            try:
+                await message.bot.send_message(
+                    club.owner_id,
+                    f"🔗 <b>Родитель привязался к атлету</b>\n\n"
+                    f"Родитель: <b>{escape(message.from_user.full_name or str(user_id))}</b>\n"
+                    f"Атлеты: {names}",
+                    parse_mode="HTML",
+                )
+            except Exception as notify_error:
+                logger.warning("Не удалось уведомить администратора о привязке: %s", notify_error)
 
         await message.answer(
             f"✅ Авторизация в <b>{club.name}</b> успешна!\n\n"

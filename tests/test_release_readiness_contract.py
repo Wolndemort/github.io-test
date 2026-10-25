@@ -2,7 +2,7 @@ from pathlib import Path
 
 
 def test_release_readiness_keeps_production_gates_explicit():
-    source = Path("RELEASE_READINESS.md").read_text(encoding="utf-8")
+    source = Path("PROJECT_STATUS.md").read_text(encoding="utf-8")
     assert "Backup and rollback verification" in source
     assert "Separate explicit approval for production deployment" in source
     assert "Do not push to `master`" in source

@@ -26,7 +26,7 @@ async def test_overview_is_club_scoped_and_read_only(monkeypatch):
     actor = AuthContext(1, 15, "staff", "manager", frozenset({"analytics_view"}), "web")
     monkeypatch.setattr(forecast_routes, "calculate_admin_dashboard", lambda students, visit_logs: {"total_athletes": 0, "total_parents": 0, "active_now_count": 0})
     result = await forecast_routes.overview_data(SimpleNamespace(), actor, Session())
-    assert result == {"club_id": 15, "metrics": {"total_athletes": 0, "total_parents": 0, "active_now_count": 0}, "read_only": True}
+    assert result == {"club_id": 15, "metrics": {"total_athletes": 0, "total_parents": 0, "active_now_count": 0, "active_sessions": [], "past_sessions": [], "session_timeout_minutes": 150}, "read_only": True}
 
 
 @pytest.mark.asyncio

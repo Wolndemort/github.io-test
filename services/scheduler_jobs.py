@@ -2,8 +2,9 @@
 
 import asyncio
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from html import escape
+from zoneinfo import ZoneInfo
 
 from aiogram import types
 from loguru import logger
@@ -35,30 +36,147 @@ from services.order_notifications import notify_stock_reminders
 from services.analytics import calculate_admin_dashboard, calculate_daily_business_report, reporting_periods, is_subscription_active
 from services.bot_registry import bots_dict
 
+MOSCOW_TZ = ZoneInfo("Europe/Moscow")
+
+
+def _club_subscription_days_left(expire_at: datetime, now: datetime | None = None) -> int:
+    """Return remaining calendar days in Moscow for a club SaaS subscription."""
+    current = now or reporting_periods()["local_now"]
+    if current.tzinfo is not None:
+        current = current.astimezone(MOSCOW_TZ).replace(tzinfo=None)
+    expiry_local = expire_at.replace(tzinfo=timezone.utc).astimezone(MOSCOW_TZ).date()
+    return (expiry_local - current.date()).days
+
+
+async def send_club_subscription_expiry_reminders() -> None:
+    """Notify club owners 7, 4 and 2 days before SaaS access expires."""
+    periods = reporting_periods()
+    local_now = periods["local_now"]
+    async with AsyncSessionLocal() as session:
+        clubs = (await session.execute(
+            select(Club).where(Club.subscription_expire_at.is_not(None))
+        )).scalars().all()
+
+    for club in clubs:
+        if not club.owner_id or not club.bot_token or not club.subscription_expire_at:
+            continue
+        bot = bots_dict.get(club.bot_token)
+        if not bot:
+            continue
+        expire_at = club.subscription_expire_at.replace(tzinfo=None)
+        days_left = _club_subscription_days_left(expire_at, local_now)
+        if days_left not in {7, 4, 2}:
+            continue
+        notification_key = f"notify:club-saas-expiry:{club.id}:{expire_at.isoformat()}:{days_left}"
+        if not await _notification_once(notification_key, ttl=10 * 86400):
+            continue
+        try:
+            await bot.send_message(
+                chat_id=int(club.owner_id),
+                text=(
+                    f"⏳ <b>Подписка клуба заканчивается через {days_left} дн.</b>\n\n"
+                    f"Клуб: <b>{escape(club.name or 'Клуб')}</b>\n"
+                    f"Дата окончания: <b>{expire_at.strftime('%d.%m.%Y')}</b>\n\n"
+                    "Продлите подписку заранее, чтобы кабинет и функции клуба не были заблокированы."
+                ),
+                parse_mode="HTML",
+                reply_markup=types.InlineKeyboardMarkup(inline_keyboard=[[
+                    types.InlineKeyboardButton(text="💳 Перейти к оплате", callback_data="pay_menu")
+                ]]),
+            )
+        except Exception as reminder_error:
+            await _notification_forget(notification_key)
+            logger.error(
+                "Не удалось отправить напоминание об окончании SaaS-подписки club=%s owner=%s: %s",
+                club.id,
+                club.owner_id,
+                reminder_error,
+            )
+
 async def send_discount_reminders():
-    """Monthly active-discount reminders and one-time expiry notices."""
+    """Notify clients and responsible club staff about discount lifecycle."""
+    _discount_notification_kinds = ("notify:discount-monthly", "notify:discount-expiry")
     today = reporting_periods()["local_now"].date()
     async with AsyncSessionLocal() as session:
-        rows = (await session.execute(select(Discount, DiscountAssignment, Club, User).join(DiscountAssignment, DiscountAssignment.discount_id == Discount.id).join(Club, Club.id == Discount.club_id).join(User, User.user_id == DiscountAssignment.user_id).where(Discount.is_active.is_(True)))).all()
-        for discount, assignment, club, user in rows:
-            if discount.starts_at and discount.starts_at > today or discount.ends_at and discount.ends_at < today:
+        rows = (await session.execute(select(Discount, DiscountAssignment, Club, User, Student).join(DiscountAssignment, DiscountAssignment.discount_id == Discount.id).join(Club, Club.id == Discount.club_id).outerjoin(User, User.user_id == DiscountAssignment.user_id).outerjoin(Student, Student.id == DiscountAssignment.student_id).where(Discount.is_active.is_(True)))).all()
+        staff_cache = {}
+        for discount, assignment, club, user, student in rows:
+            recipient_ids = set()
+            if assignment.user_id:
+                recipient_ids.add(int(assignment.user_id))
+            elif student:
+                recipient_ids.update(int(parent_id) for parent_id in await get_student_parent_ids(student.id, session) if parent_id)
+                if getattr(student, "parent_id", None):
+                    recipient_ids.add(int(student.parent_id))
+            if discount.starts_at and discount.starts_at > today:
                 continue
             bot = bots_dict.get(club.bot_token)
-            if not bot:
+            if not bot or not recipient_ids:
                 continue
             value = f"{discount.value}%" if discount.kind == "percent" else f"{discount.value / 100:g} ₽"
+            if discount.ends_at and discount.ends_at < today:
+                text = f"🏷️ <b>Скидка закончилась</b>\n\n{escape(discount.name)} — {value}.\nСрок действия истёк: <code>{discount.ends_at.strftime('%d.%m.%Y')}</code>."
+                for recipient_id in recipient_ids:
+                    key = f"notify:discount-expired:{club.id}:{recipient_id}:{discount.id}:{discount.ends_at}"
+                    if await _notification_once(key, ttl=90 * 86400):
+                        try:
+                            await bot.send_message(recipient_id, text, parse_mode="HTML")
+                        except Exception:
+                            await _notification_forget(key)
+                staff_ids = await _discount_staff_recipients(session, club, staff_cache)
+                for staff_id in staff_ids:
+                    key = f"notify:discount-expired-staff:{club.id}:{staff_id}:{discount.id}:{discount.ends_at}"
+                    if await _notification_once(key, ttl=90 * 86400):
+                        try:
+                            await bot.send_message(staff_id, f"🏷️ Скидка «{escape(discount.name)}» закончилась у клиента/атлета.", parse_mode="HTML")
+                        except Exception:
+                            await _notification_forget(key)
+                continue
+            if discount.starts_at == today:
+                text = f"🏷️ <b>Скидка активирована</b>\n\n{escape(discount.name)} — <b>{value}</b>.\nСкидка действует с сегодняшнего дня" + (f" до <code>{discount.ends_at.strftime('%d.%m.%Y')}</code>." if discount.ends_at else ".")
+                for recipient_id in recipient_ids:
+                    key = f"notify:discount-started:{club.id}:{recipient_id}:{discount.id}:{discount.starts_at}"
+                    if await _notification_once(key, ttl=90 * 86400):
+                        try:
+                            await bot.send_message(recipient_id, text, parse_mode="HTML")
+                        except Exception:
+                            await _notification_forget(key)
+                staff_ids = await _discount_staff_recipients(session, club, staff_cache)
+                for staff_id in staff_ids:
+                    key = f"notify:discount-started-staff:{club.id}:{staff_id}:{discount.id}:{discount.starts_at}"
+                    if await _notification_once(key, ttl=90 * 86400):
+                        try:
+                            await bot.send_message(staff_id, f"🏷️ Скидка «{escape(discount.name)}» активирована для клиента/атлета.", parse_mode="HTML")
+                        except Exception:
+                            await _notification_forget(key)
+                continue
             if discount.ends_at and (discount.ends_at - today).days <= 1:
-                key = f"notify:discount-expiry:{club.id}:{assignment.user_id}:{discount.id}:{discount.ends_at}"
+                reminder_kind = "expiry"
                 text = f"⏳ <b>Скидка заканчивается</b>\n\n{escape(discount.name)} — {value}.\nДействует до: <code>{discount.ends_at.strftime('%d.%m.%Y')}</code>."
             else:
-                key = f"notify:discount-monthly:{club.id}:{assignment.user_id}:{discount.id}:{today.year}-{today.month}"
+                reminder_kind = "monthly"
                 text = f"🏷️ <b>Ваша скидка активна</b>\n\n{escape(discount.name)} — <b>{value}</b>.\nДействует до: <code>{discount.ends_at.strftime('%d.%m.%Y') if discount.ends_at else 'без срока'}</code>."
-            if not await _notification_once(key, ttl=35 * 86400):
-                continue
-            try:
-                await bot.send_message(user.user_id, text, parse_mode="HTML")
-            except Exception:
-                await _notification_forget(key)
+            for recipient_id in recipient_ids:
+                key = f"notify:discount-{reminder_kind}:{club.id}:{recipient_id}:{discount.id}:{discount.ends_at or today.year}"
+                if not await _notification_once(key, ttl=35 * 86400):
+                    continue
+                try:
+                    await bot.send_message(recipient_id, text, parse_mode="HTML")
+                except Exception:
+                    await _notification_forget(key)
+
+
+async def _discount_staff_recipients(session, club, cache):
+    if club.id not in cache:
+        rows = (await session.execute(select(ClubStaff).where(ClubStaff.club_id == club.id, ClubStaff.is_active.is_(True)))).scalars().all()
+        ids = {int(club.owner_id)} if club.owner_id else set()
+        for staff in rows:
+            permissions = staff.permissions if isinstance(staff.permissions, dict) else {}
+            if staff.role in {"manager", "cashier"} or permissions.get("cash_sale") or permissions.get("broadcast"):
+                if staff.telegram_id:
+                    ids.add(int(staff.telegram_id))
+        cache[club.id] = ids
+    return cache[club.id]
 
 
 async def expire_student_freezes():
@@ -479,6 +597,16 @@ async def send_daily_report_to_admins():
                 yesterday_payments = list(yesterday_pay_res.scalars().all()) + list(yesterday_cart_res.scalars().all())
                 cash_entries_res = await session.execute(select(CashEntry).where(CashEntry.club_id == club.id, CashEntry.entry_type == "expense", CashEntry.created_at >= start_of_today))
                 today_cash_expenses = list(cash_entries_res.scalars().all())
+                staff_res = await session.execute(
+                    select(ClubStaff.telegram_id).where(
+                        ClubStaff.club_id == club.id,
+                        ClubStaff.is_active.is_(True),
+                        ClubStaff.role.in_(["manager", "cashier"]),
+                    )
+                )
+                report_recipients = {int(club.owner_id)} | {
+                    int(staff_id) for staff_id in staff_res.scalars().all() if staff_id
+                }
 
             biz_metrics = calculate_daily_business_report(students, today_payments, yesterday_payments, visit_logs=visit_logs)
             # В статистике потеряшки считаются по всей истории VisitLog,
@@ -509,9 +637,10 @@ async def send_daily_report_to_admins():
                 f"💤 Потеряшки (нет визитов более 14 дней): <code>{sleeping_count} чел.</code>\n"
             )
 
-            await bot.send_message(club.owner_id, report_text, parse_mode="HTML")
-            logger.info("🔥 Комплексный ИИ-отчет для клуба %s успешно отправлен боссу!", club.id)
-            await asyncio.sleep(0.05)
+            for recipient_id in report_recipients:
+                await bot.send_message(recipient_id, report_text, parse_mode="HTML")
+                await asyncio.sleep(0.05)
+            logger.info("🔥 Комплексный ИИ-отчет для клуба %s отправлен владельцу и сотрудникам: %s", club.id, report_recipients)
 
         except Exception as exc:
             if notification_key:

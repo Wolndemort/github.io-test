@@ -1203,7 +1203,7 @@ async def admin_cash_subscription(payload: WebAppCashSubscriptionPayload, db: As
     age_error = _tariff_age_error(student, tariff, cfg.get("name", discipline))
     if age_error:
         raise HTTPException(status_code=400, detail=age_error)
-    payment_order = PaymentOrder(id=order_id, user_id=int(tg_user.get("id", 0)), student_id=student.id, club_id=club.id, discipline=discipline, amount_kopecks=price, original_amount_kopecks=original_price, discount_id=manual_discount.id if manual_discount else None, discount_name=manual_discount.name if manual_discount else None, discount_kind=manual_discount.kind if manual_discount else None, discount_value=manual_discount.value if manual_discount else None, discount_amount_kopecks=discount_amount or None, status="CONFIRMED", type="CASH_SUBSCRIPTION", provider_payment_id=f"CASH:{order_id}", lesson_count=count, days_to_add=days)
+    payment_order = PaymentOrder(id=order_id, user_id=student.parent_id or int(tg_user.get("id", 0)), student_id=student.id, club_id=club.id, discipline=discipline, amount_kopecks=price, original_amount_kopecks=original_price, discount_id=manual_discount.id if manual_discount else None, discount_name=manual_discount.name if manual_discount else None, discount_kind=manual_discount.kind if manual_discount else None, discount_value=manual_discount.value if manual_discount else None, discount_amount_kopecks=discount_amount or None, status="CONFIRMED", type="CASH_SUBSCRIPTION", provider_payment_id=f"CASH:{order_id}", lesson_count=count, days_to_add=days)
     abon_result = await add_abon(student.id, count, db, club.id, settings, days_to_add=days, discipline=discipline)
     if not abon_result:
         raise HTTPException(status_code=409, detail="Не удалось применить абонемент")
@@ -1461,12 +1461,12 @@ async def get_revenue_stats(
     start_filter = moscow_date_boundary(date_from) if date_from else month_start
     end_filter = moscow_date_boundary(date_to) + timedelta(days=1) if date_to else None
 
-    payment_query = select(PaymentOrder.amount_kopecks, PaymentOrder.created_at).where(
+    payment_query = select(PaymentOrder.amount_kopecks, PaymentOrder.created_at, PaymentOrder.provider_payment_id, PaymentOrder.type).where(
         PaymentOrder.club_id == club_id,
         PaymentOrder.status == "CONFIRMED",
         PaymentOrder.created_at >= start_filter,
     )
-    cart_query = select(CartOrder.amount_kopecks, CartOrder.created_at).where(
+    cart_query = select(CartOrder.amount_kopecks, CartOrder.created_at, CartOrder.provider_payment_id).where(
         CartOrder.club_id == club_id,
         CartOrder.status == "CONFIRMED",
         CartOrder.created_at >= start_filter,
@@ -1477,8 +1477,8 @@ async def get_revenue_stats(
 
     payments_res = await session.execute(payment_query)
     cart_payments_res = await session.execute(cart_query)
-    payment_rows = [type("PaymentRow", (), {"amount_kopecks": amount, "created_at": created_at}) for amount, created_at in payments_res.all()]
-    payment_rows.extend(type("PaymentRow", (), {"amount_kopecks": amount, "created_at": created_at}) for amount, created_at in cart_payments_res.all())
+    payment_rows = [type("PaymentRow", (), {"amount_kopecks": amount, "created_at": created_at, "provider_payment_id": provider, "type": order_type, "status": "CONFIRMED"}) for amount, created_at, provider, order_type in payments_res.all()]
+    payment_rows.extend(type("PaymentRow", (), {"amount_kopecks": amount, "created_at": created_at, "provider_payment_id": provider, "type": "", "status": "CONFIRMED"}) for amount, created_at, provider in cart_payments_res.all())
     revenue = calculate_revenue_periods(payment_rows)
     revenue_today = revenue["today"]
     revenue_week = revenue["week"]
@@ -1505,7 +1505,7 @@ async def get_revenue_stats(
     cash_entries = (await session.execute(
         select(CashEntry).where(CashEntry.club_id == club_id)
     )).scalars().all()
-    cash_flow = calculate_cash_flow_periods(cash_entries, now=now_local)
+    cash_flow = calculate_cash_flow_periods(cash_entries, now=now_local, cash_sales=payment_rows)
     # Маржа должна совпадать с кассой: вся подтверждённая выручка
     # (онлайн, СБП, наличные и корзина) минус расходы журнала.
     cash_flow["today_margin"] = round(revenue_today - cash_flow["today_expense"], 2)

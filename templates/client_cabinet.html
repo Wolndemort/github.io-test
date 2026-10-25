@@ -150,8 +150,9 @@
             {% if '*' in staff_permissions or 'products_view' in staff_permissions %}<a class="btn soft mono-action" href="/webapp/admin-products?club_id={{ club_id }}">📦 Склад и товары</a>{% endif %}
             {% if '*' in staff_permissions or 'cash_view' in staff_permissions %}<a class="btn soft mono-action" href="/admin/cash?club_id={{ club_id }}">💰 Касса и журнал</a><a class="btn soft mono-action" href="/webapp/admin-cash-subscription?club_id={{ club_id }}">💵 Продажа наличного абонемента</a>{% endif %}
             {% if '*' in staff_permissions or 'athletes_view' in staff_permissions %}<a class="btn soft mono-action" href="/admin/students?club_id={{ club_id }}">👥 Атлеты</a>{% endif %}
-            {% if '*' in staff_permissions or 'schedule_view' in staff_permissions %}<a class="btn soft mono-action" href="/webapp/admin-schedule?club_id={{ club_id }}">🗓 Расписание</a>{% endif %}
-            {% if '*' in staff_permissions or 'tariffs_manage' in staff_permissions %}<a class="btn soft mono-action" href="/webapp/admin-tariffs?club_id={{ club_id }}">💳 Тарифы</a>{% endif %}{% if '*' in staff_permissions or 'cash_sale' in staff_permissions %}<a class="btn soft mono-action" href="/webapp/admin-discounts?club_id={{ club_id }}">🏷️ Скидки</a>{% endif %}
+             {% if '*' in staff_permissions or 'schedule_view' in staff_permissions %}<a class="btn soft mono-action" href="/webapp/admin-schedule?club_id={{ club_id }}">🗓 Расписание</a>{% endif %}
+             {% if '*' in staff_permissions %}<a class="btn soft mono-action" href="/webapp/admin-coach-motivation?club_id={{ club_id }}">💪 Мотивация тренеров</a>{% endif %}
+             {% if '*' in staff_permissions or 'tariffs_manage' in staff_permissions %}<a class="btn soft mono-action" href="/webapp/admin-tariffs?club_id={{ club_id }}">💳 Тарифы</a>{% endif %}{% if '*' in staff_permissions or 'cash_sale' in staff_permissions %}<a class="btn soft mono-action" href="/webapp/admin-discounts?club_id={{ club_id }}">🏷️ Скидки</a>{% endif %}
             {% if '*' in staff_permissions or 'analytics_view' in staff_permissions %}<a class="btn soft mono-action" href="/admin?club_id={{ club_id }}">🧮 Таблица WebApp</a><a class="btn soft mono-action" href="/revenue?club_id={{ club_id }}">📊 Статистика</a><a class="btn soft mono-action" href="/forecast?club_id={{ club_id }}">🔮 Прогноз</a><a class="btn soft mono-action" href="/admin/sales?club_id={{ club_id }}">🧾 Журнал операций</a>{% endif %}
             {% if '*' in staff_permissions %}<a class="btn soft mono-action" href="/webapp/admin-freeze?club_id={{ club_id }}">❄️ Заморозка абонементов</a><a class="btn soft mono-action" href="/webapp/admin-audit?club_id={{ club_id }}">🔎 Аудит</a>{% endif %}
             {% endif %}
@@ -177,6 +178,14 @@
         <a class="btn dark mono-action dark" href="/webapp/cart?club_id={{ club_id }}">🛒 Корзина</a>
     </div>
 </div>
+
+{% if legal_enabled %}
+<div class="card mono-card" style="margin-top:16px; text-align:center;">
+    <div class="muted" style="margin-bottom:8px;">Юридическая информация</div>
+    <a class="mono-action" href="/privacy?club_id={{ club_id }}">Политика конфиденциальности</a>
+    <a class="mono-action" href="/oferta?club_id={{ club_id }}">Публичная оферта</a>
+</div>
+{% endif %}
 
 <script>
     const tg = window.Telegram?.WebApp;

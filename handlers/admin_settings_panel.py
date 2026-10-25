@@ -23,6 +23,7 @@ from handlers.skud import save_and_test_turnstile
 from handlers.states import AdminStates, AdminSettingsSG, TurnstileSetup
 from services.analytics import reporting_periods
 from services.audit import audit_event
+from services.club_limits import normalize_limit_updates
 
 router = Router()
 
@@ -60,7 +61,7 @@ async def admin_settings_menu(callback: types.CallbackQuery, club_settings: dict
     builder.row(types.InlineKeyboardButton(text=f"{loading_mark} Загрузочный экран", callback_data="toggle_webapp_loading"))
     builder.row(types.InlineKeyboardButton(text="🖼 Загрузить логотип WebApp", callback_data="upload_webapp_logo"))
     builder.row(types.InlineKeyboardButton(text="💰 Настройка тарифов", callback_data="admin_tariffs_sections"))
-    builder.row(types.InlineKeyboardButton(text="🏷️ Скидки клуба", callback_data="admin_discounts"))
+    builder.row(types.InlineKeyboardButton(text="🏷️ Скидки", callback_data="admin_discounts"))
     builder.row(types.InlineKeyboardButton(text="⏰ Планировщики", callback_data="admin_schedulers"))
     builder.row(types.InlineKeyboardButton(text="💳 Изменить реквизиты", callback_data="admin_edit_payments"))
     turnstile_config = club_settings.get("turnstile", {})
@@ -564,6 +565,7 @@ async def manage_club_limits_handler(callback: types.CallbackQuery, club: Club, 
     timeout = limits.get("session_timeout_minutes", 150)
     freeze_step = limits.get("freeze_days_step", 7)
     freeze_price = limits.get("freeze_price_per_day", 0)
+    subscription_days = limits.get("subscription_days", 30)
     text = (
         f"⚙️ <b>Управление лимитами клуба «{club.name}»</b>\n\n"
         f"⏱ <b>Сессия визита (СКУД):</b> <code>{timeout} мин.</code> ({timeout / 60:.1f} ч.)\n"
@@ -572,12 +574,14 @@ async def manage_club_limits_handler(callback: types.CallbackQuery, club: Club, 
         f"<i>Минимальный пакет дней, на который списывается заморозка.</i>\n\n"
         f"💳 <b>Платная заморозка:</b> <code>{freeze_price} ₽/день</code>\n"
         f"<i>0 — покупка заморозки отключена.</i>\n\n"
+        f"📅 <b>Срок абонемента по умолчанию:</b> <code>{subscription_days} дн.</code>\n\n"
         f"Выберите параметр для изменения:"
     )
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="⏱ зменить время сессии", callback_data="change_limit_session")],
         [InlineKeyboardButton(text="❄️ зменить шаг заморозки", callback_data="change_limit_freeze")],
         [InlineKeyboardButton(text="💳 Цена 1 дня заморозки", callback_data="change_freeze_price")],
+        [InlineKeyboardButton(text="📅 Срок абонемента", callback_data="change_subscription_days")],
         [InlineKeyboardButton(text="⬅️ Назад в настройки", callback_data="admin_settings")]
     ])
     await callback.message.edit_text(text=text, reply_markup=kb, parse_mode="HTML")
@@ -641,6 +645,41 @@ async def configure_webapp_loading(callback: types.CallbackQuery, state: FSMCont
         '<code>{"enabled":true,"logo_url":"https://.../logo.png","duration_ms":1200,"message":"Загружаем приложение…"}</code>\n\n'
         f"Сейчас: {'включён' if loading.get('enabled') else 'выключен'}.", parse_mode="HTML")
     await callback.answer()
+
+
+@router.callback_query(F.data == "change_subscription_days")
+async def change_subscription_days(callback: types.CallbackQuery, state: FSMContext, is_owner: bool, is_super_admin: bool):
+    if not (is_owner or is_super_admin):
+        return await callback.answer("Доступ запрещён", show_alert=True)
+    await state.set_state(AdminSettingsSG.waiting_for_subscription_days)
+    await callback.message.answer("📅 Введите срок абонемента по умолчанию в днях (от 1 до 365):")
+    await callback.answer()
+
+
+@router.message(AdminSettingsSG.waiting_for_subscription_days)
+async def process_subscription_days(message: types.Message, state: FSMContext, club: Club, session: AsyncSession, redis: Redis, is_owner: bool, is_super_admin: bool):
+    if not (is_owner or is_super_admin):
+        return await message.answer("Доступ запрещён")
+    try:
+        values = normalize_limit_updates({"subscription_days": (message.text or "").strip()})
+    except ValueError:
+        return await message.answer("Срок абонемента должен быть целым числом от 1 до 365 дней.")
+    settings = dict(club.club_settings or {})
+    limits = dict(settings.get("limits") or {})
+    limits.update(values)
+    settings["limits"] = limits
+    db_club = await session.merge(club)
+    db_club.club_settings = settings
+    flag_modified(db_club, "club_settings")
+    try:
+        await session.commit()
+        await redis.delete(f"club_config:{message.bot.token}")
+    except Exception:
+        await session.rollback()
+        logger.exception("Ошибка сохранения срока абонемента")
+        return await message.answer("Не удалось сохранить срок абонемента.")
+    await state.clear()
+    await message.answer(f"✅ Срок абонемента по умолчанию сохранён: {values['subscription_days']} дней.")
 
 
 @router.callback_query(F.data == "toggle_webapp_loading")

@@ -373,7 +373,7 @@ async def admin_add_tariff_min_age_final(message: types.Message, state: FSMConte
     s_data = await state.get_data()
     disc_id = s_data["disc_id"]
     club_id = s_data["club_id"]
-    new_tariff = {"count": s_data["new_count"], "days": s_data["new_days"], "price": s_data["new_price"], "min_age": min_age}
+    new_tariff = {"count": s_data["new_count"], "days": s_data["new_days"], "price": s_data["new_price"], "min_age": min_age, "active": True}
     if "tariffs" not in club_settings["disciplines"][disc_id]:
         club_settings["disciplines"][disc_id]["tariffs"] = []
     club_settings["disciplines"][disc_id]["tariffs"].append(new_tariff)

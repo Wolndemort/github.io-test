@@ -46,3 +46,10 @@ def test_start_menu_reads_legacy_and_additional_parent_links():
     assert "Student.parent_id == user_id" in source
     assert "StudentParent.parent_id == user_id" in source
     assert ".distinct()" in source
+
+
+def test_phone_binding_refreshes_existing_link_and_marks_legacy_primary_parent():
+    source = Path("admin_module/webapp_client_cabinet.py").read_text(encoding="utf-8")
+    assert "is_primary_parent = student.parent_id == user_id" in source
+    assert "existing_link.is_primary = is_primary_parent" in source
+    assert "existing_link.phone = normalized_phone" in source

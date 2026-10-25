@@ -21,7 +21,7 @@ from services.order_notifications import build_owner_receipt_text, format_order_
 from services.payment_requisites import get_payment_info_text
 from services.availability import payment_availability
 from services.staff_permissions import permissions_for_staff
-from services.discounts import active_discount, apply_discount
+from services.discounts import active_discount, active_discounts, apply_discount, apply_discounts
 
 
 router = Router()
@@ -62,7 +62,7 @@ async def show_sections(
 
     # 2. Проверяем, есть ли вообще хоть одна активная дисциплина
     # (Чтобы не показывать пустое меню)
-    has_active = any(info.get("active") for info in disciplines.values())
+    has_active = any(info.get("active", True) for info in disciplines.values())
 
     if not disciplines or not has_active:
         return await callback.answer(
@@ -156,7 +156,7 @@ async def athlete_chosen_handler(callback: types.CallbackQuery, state: FSMContex
     # Спокойно берем конфиг дисциплины из настроек клуба
     discipline_cfg = club_settings.get("disciplines", {}).get(sport_type)
 
-    if not discipline_cfg:
+    if not discipline_cfg or not discipline_cfg.get("active", True):
         return await callback.answer("❌ Ошибка: Выбранное направление временно недоступно.", show_alert=True)
 
     # Формируем клавиатуру тарифов (8 зан, 12 зан, безлимит)
@@ -192,9 +192,11 @@ async def process_kids_limit(
     if not discipline_cfg:
         return await callback.answer("Ошибка: секция не найдена 🛠", show_alert=True)
     tariffs = discipline_cfg.get("tariffs", [])
-    if tariff_idx >= len(tariffs):
+    if tariff_idx < 0 or tariff_idx >= len(tariffs):
         return await callback.answer("Ошибка: выбранный тариф больше не существует ❌", show_alert=True)
     selected_tariff = tariffs[tariff_idx]
+    if not selected_tariff.get("active", True):
+        return await callback.answer("Выбранный тариф больше недоступен.", show_alert=True)
     # =========================================================================
     # 🔥 ЗДЕСЬ МЫ ЖЕСТКО И ВЕЖЛИВО ПОБЕЖДАЕМ КЛИЕНТОВ ПО ВОЗРАСТУ
     # =========================================================================
@@ -219,7 +221,7 @@ async def process_kids_limit(
                 available_disciplines = []
                 for disc_key, disc_val in club_settings.get("disciplines", {}).items():
                     # Проверяем только активные направления и исключаем то, куда ребенок не прошел
-                    if disc_val.get("active") and disc_key != sport_type:
+                    if disc_val.get("active", True) and disc_key != sport_type:
                         sect_tariffs = disc_val.get("tariffs", [])
                         if sect_tariffs:
                             # Проверяем самый первый тариф в альтернативной секции — подходит ли возраст?
@@ -329,6 +331,8 @@ async def process_kids_limit(
 async def process_one_click_payment(callback: types.CallbackQuery, state: FSMContext, session: AsyncSession,
                                     club: Club, redis: Redis):
     await callback.answer("Провожу платеж в 1 клик...", show_alert=False)
+    if not payment_availability(club.club_settings)["online"]:
+        return await callback.answer("Онлайн-оплата отключена администратором. Используйте оплату по реквизитам.", show_alert=True)
 
     data = await state.get_data()
     user_id = callback.from_user.id
@@ -526,6 +530,9 @@ async def process_sbp_yookassa_payment(
     secret_key = pay_settings.get("yookassa_secret_key")
     sbp_enabled = pay_settings.get("yookassa_sbp_enabled", True)
 
+    if not payment_availability(club.club_settings)["online"]:
+        return await callback.answer("Онлайн-оплата отключена администратором. Используйте оплату по реквизитам.", show_alert=True)
+
     if not sbp_enabled:
         kb = types.InlineKeyboardMarkup(inline_keyboard=[
             [types.InlineKeyboardButton(text="💳 Оплатить картой", callback_data="pay_method_official")],
@@ -615,7 +622,7 @@ async def process_sbp_yookassa_payment(
     return await callback.answer("СБП недоступна, выберите другой способ", show_alert=True)
 
 
-@router.callback_query(F.data == 'pay_method_official')
+@router.callback_query(F.data.in_({'pay_method_official', 'pay_method_official_force_new'}))
 async def process_official_card_payment(
         callback: types.CallbackQuery,
         state: FSMContext,
@@ -627,6 +634,9 @@ async def process_official_card_payment(
     await callback.answer("Обрабатываю запрос...", show_alert=False)
 
     data = await state.get_data()
+    force_new_card = callback.data == "pay_method_official_force_new"
+    if not payment_availability(club.club_settings)["online"]:
+        return await callback.answer("Онлайн-оплата отключена администратором. Используйте оплату по реквизитам.", show_alert=True)
     user_id = callback.from_user.id
 
     student_id = data['student_id']
@@ -680,7 +690,7 @@ async def process_official_card_payment(
     # =====================================================================
     # СЦЕНАРИЙ Б: КАРТА ЕСТЬ -> СПИСЫВАЕМ В 1 КЛИК
     # =====================================================================
-    if saved_subscription and saved_subscription.rebill_id:
+    if saved_subscription and saved_subscription.rebill_id and not force_new_card:
         new_order = PaymentOrder(
             id=order_id, user_id=user_id, student_id=student_id, club_id=club_id,
             amount_kopecks=amount_kopecks, lesson_count=lesson_count, days_to_add=days_to_add,
@@ -915,7 +925,7 @@ async def admin_confirm_payment(
         active_disciplines = [
             code
             for code, info in club_settings.get("disciplines", {}).items()
-            if isinstance(info, dict) and info.get("active")
+            if isinstance(info, dict) and info.get("active", True)
         ]
         if active_disciplines:
             target_discipline = active_disciplines[0]
@@ -1290,6 +1300,14 @@ async def final_cash_pay(
         return await callback.answer("Некорректный тариф.", show_alert=True)
 
     # 4. Вызываем обновленную функцию начисления, передавая точные дни
+    sale_student = await session.get(Student, student_id)
+    parent_user_id = getattr(sale_student, "parent_id", None)
+    automatic_discounts = await active_discounts(session, club.id, parent_user_id, "subscriptions", student_id=student_id)
+    original_amount_kopecks = price
+    price, applied_discounts = apply_discounts(price, automatic_discounts)
+    primary_discount = applied_discounts[0][0] if applied_discounts else None
+    discount_amount_kopecks = original_amount_kopecks - price
+
     result = await add_abon(
         student_id=student_id,
         lessons_count=count,
@@ -1305,10 +1323,16 @@ async def final_cash_pay(
         student = await session.get(Student, student_id)
 
         # Формируем красивое отображение тарифа для экрана админа (прячем техническое 999)
-        cash_amount = int(float(selected_tariff.get("price", 0) or 0) * 100)
+        cash_amount = price
         session.add(PaymentOrder(id=f"CASH_ABON_{uuid.uuid4().hex[:24]}", user_id=parent_id,
                                  student_id=student_id, club_id=club.id, discipline=sport_type,
-                                 amount_kopecks=cash_amount, status="CONFIRMED",
+                                 amount_kopecks=cash_amount, original_amount_kopecks=original_amount_kopecks,
+                                 discount_id=primary_discount.id if primary_discount else None,
+                                 discount_name=primary_discount.name if primary_discount else None,
+                                 discount_kind=primary_discount.kind if primary_discount else None,
+                                 discount_value=primary_discount.value if primary_discount else None,
+                                 discount_amount_kopecks=discount_amount_kopecks or None,
+                                 status="CONFIRMED",
                                  type="CASH_SUBSCRIPTION", provider_payment_id=f"CASH:{uuid.uuid4().hex}",
                                  lesson_count=count, days_to_add=days))
         await session.commit()
@@ -1335,7 +1359,7 @@ async def final_cash_pay(
                     items_text=format_order_items([
                         type("ItemView", (), {"title": f"{disc_cfg.get('name')} · {t_label}", "quantity": 1, "product_id": 1})()
                     ]),
-                    amount_kopecks=int(float(selected_tariff.get("price", 0) or 0) * 100),
+                    amount_kopecks=cash_amount,
                     extra_lines=[
                         f"Атлет: <b>{student_label}</b>",
                         f"Клуб: <b>{club_name}</b>",

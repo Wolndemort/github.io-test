@@ -1,5 +1,7 @@
 # SpeedyCRM
 
+> Клиентская презентация и руководство: [CLIENT_SUPPORT_PRESENTATION.md](CLIENT_SUPPORT_PRESENTATION.md). Индекс всей документации: [DOCUMENTATION_INDEX.md](DOCUMENTATION_INDEX.md).
+
 ## Приглашение и привязка родителей
 
 В карточке атлета поддерживаются два номера:

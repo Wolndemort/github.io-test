@@ -4,23 +4,28 @@ import base64
 import hashlib
 import hmac
 import io
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 import re
 import asyncio
+from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile, File
+from fastapi.responses import HTMLResponse, StreamingResponse
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from database.db import AuditEntry, CartOrder, CartItem, CashEntry, Club, ClubProduct, ClubStaff, Discount, DiscountAssignment, PaymentOrder, Subscription, Student, StudentParent, VisitLog, User, add_abon, purchase_student_freeze, get_session
+from database.db import AuditEntry, CartOrder, CartItem, CashEntry, Club, ClubProduct, ClubStaff, Discount, DiscountAssignment, PaymentOrder, Subscription, Student, StudentParent, VisitLog, User, add_abon, process_student_freeze, purchase_student_freeze, get_session
 from services.input_normalization import normalize_ru_phone
 from services.audit import audit_event
 from services.schedule_utils import normalize_schedule_block
 from services.gate_control import process_athlete_gate_pass
+from handlers.skud import trigger_dingtian_turnstile
 from services.discounts import active_discounts, apply_discounts
 from services.yookassa_client import YooKassaClient
+from services.broadcast import broadcast_recipients_for_student_search, resolve_broadcast_recipients
+from services.club_limits import LIMIT_DEFAULTS, normalize_limit_updates
 from config import PROXY_URL, secret_key
+from auth.native_auth import deliver_email_broadcast
 import qrcode
 from services.analytics import (
     build_expiry_series,
@@ -29,7 +34,10 @@ from services.analytics import (
     calculate_projected_renewal_revenue,
     reporting_periods,
     calculate_revenue_periods,
+    calculate_cash_flow_periods,
+    calculate_student_metrics,
 )
+from services.analytics import generate_students_excel
 from services.analytics import calculate_admin_dashboard
 from services.bot_registry import bots_dict
 from .context import AuthContext
@@ -60,6 +68,28 @@ async def client_scoped_students(actor: AuthContext, session: AsyncSession):
     )
     return list(result.scalars().all())
 
+@router.get("/broadcast/recipients")
+async def web_broadcast_recipients(
+    request: Request,
+    q: str = Query(default="", max_length=100),
+    context: AuthContext | None = Depends(web_context),
+    session: AsyncSession = Depends(get_session),
+):
+    actor = require_web_context(context)
+    if actor.actor_type == "staff" and "broadcast" not in actor.permissions:
+        raise HTTPException(status_code=403, detail={"code": "permission_denied"})
+    if actor.actor_type not in {"owner", "staff"}:
+        raise HTTPException(status_code=403, detail={"code": "staff_access_required"})
+    rows = await broadcast_recipients_for_student_search(session, actor.club_id, q)
+    club = await session.scalar(select(Club).where(Club.id == actor.club_id))
+    settings = club.club_settings if club and isinstance(club.club_settings, dict) else {}
+    configured = settings.get("disciplines", {}) if isinstance(settings.get("disciplines", {}), dict) else {}
+    disciplines = [{"value": code, "name": value.get("name") or code} for code, value in configured.items() if isinstance(value, dict)]
+    known = {item["value"] for item in disciplines}
+    disciplines.extend({"value": row["discipline"], "name": row["discipline"]} for row in rows if row.get("discipline") and row["discipline"] not in known)
+    return {"club_id": actor.club_id, "students": rows, "disciplines": disciplines, "read_only": True}
+
+
 @router.post("/broadcast")
 async def web_broadcast(request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):
     actor = require_web_context(context)
@@ -71,6 +101,13 @@ async def web_broadcast(request: Request, context: AuthContext | None = Depends(
     payload = await request.json()
     text = str(payload.get("text") or "").strip()
     key = str(payload.get("idempotency_key") or "").strip()
+    selected_ids = payload.get("student_ids")
+    if selected_ids is not None and (
+        not isinstance(selected_ids, list)
+        or len(selected_ids) > 1000
+        or any(isinstance(item, bool) or not isinstance(item, int) for item in selected_ids)
+    ):
+        raise HTTPException(status_code=400, detail={"code": "invalid_broadcast_recipients"})
     if not 1 <= len(text) <= 4096 or not key or len(key) > 100:
         raise HTTPException(status_code=400, detail={"code": "invalid_broadcast"})
     club = await session.scalar(select(Club).where(Club.id == actor.club_id))
@@ -81,9 +118,9 @@ async def web_broadcast(request: Request, context: AuthContext | None = Depends(
         raise HTTPException(status_code=503, detail={"code": "club_bot_unavailable"})
     if not await request.app.state.redis_client.set(f"web:broadcast:{actor.club_id}:{key}", "1", ex=900, nx=True):
         return {"ok": True, "idempotent_replay": True, "club_id": actor.club_id}
-    user_ids = {int(x) for x in (await session.scalars(select(User.user_id).where(User.club_id == actor.club_id))).all() if x}
-    linked = await session.execute(select(StudentParent.parent_id).join(Student, StudentParent.student_id == Student.id).where(Student.club_id == actor.club_id))
-    user_ids.update(int(x) for x in linked.scalars().all() if x)
+    user_ids = await resolve_broadcast_recipients(session, actor.club_id, selected_ids)
+    if selected_ids is not None and not user_ids:
+        raise HTTPException(status_code=400, detail={"code": "broadcast_recipients_not_found"})
     bot = bots_dict[club.bot_token]
     delivered = 0
     failed = 0
@@ -94,8 +131,24 @@ async def web_broadcast(request: Request, context: AuthContext | None = Depends(
             await asyncio.sleep(0.05)
         except Exception:
             failed += 1
-    audit_event("web_broadcast_sent", club_id=actor.club_id, actor_user_id=actor.user_id, actor_role=actor.role, action="broadcast", object_type="club", object_id=actor.club_id, location="web/staff/broadcast", recipients=len(user_ids), delivered=delivered, failed=failed)
-    return {"ok": True, "club_id": actor.club_id, "recipients": len(user_ids), "delivered": delivered, "failed": failed}
+    audit_event("web_broadcast_sent", club_id=actor.club_id, actor_user_id=actor.user_id, actor_role=actor.role, action="broadcast", object_type="club", object_id=actor.club_id, location="web/staff/broadcast", recipients=len(user_ids), delivered=delivered, failed=failed, selected_student_ids=selected_ids)
+    return {"ok": True, "club_id": actor.club_id, "recipients": len(user_ids), "delivered": delivered, "failed": failed, "selected": selected_ids is not None}
+
+@router.post("/broadcast/email")
+async def web_email_broadcast(request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):
+    actor = require_web_context(context)
+    if actor.actor_type == "staff" and "broadcast" not in actor.permissions: raise HTTPException(status_code=403, detail={"code": "permission_denied"})
+    if actor.actor_type not in {"owner", "staff"}: raise HTTPException(status_code=403, detail={"code": "staff_access_required"})
+    await require_csrf(request.app.state.redis_client, request); payload = await request.json(); subject = str(payload.get("subject") or "").strip(); text = str(payload.get("text") or "").strip(); key = str(payload.get("idempotency_key") or "").strip()
+    if not 1 <= len(subject) <= 200 or not 1 <= len(text) <= 10000 or not key or len(key) > 100: raise HTTPException(status_code=400, detail={"code": "invalid_email_broadcast"})
+    if not await request.app.state.redis_client.set(f"web:email-broadcast:{actor.club_id}:{key}", "1", ex=900, nx=True): return {"ok": True, "idempotent_replay": True, "club_id": actor.club_id}
+    users = list((await session.scalars(select(User).where(User.club_id == actor.club_id, User.email.is_not(None)))).all()); emails = sorted({str(user.email).strip().lower() for user in users if user.email and "@" in str(user.email)})
+    delivered = failed = 0
+    for email in emails:
+        try: await deliver_email_broadcast(email, subject, text); delivered += 1; await asyncio.sleep(0.05)
+        except Exception: failed += 1
+    audit_event("web_email_broadcast_sent", club_id=actor.club_id, actor_user_id=actor.user_id, actor_role=actor.role, action="broadcast", object_type="club", object_id=actor.club_id, location="web/staff/broadcast/email", recipients=len(emails), delivered=delivered, failed=failed)
+    return {"ok": True, "club_id": actor.club_id, "recipients": len(emails), "delivered": delivered, "failed": failed}
 
 @sales_router.get("/buyers")
 async def sale_buyers_data(request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):
@@ -121,6 +174,25 @@ def _date_range(value: str | None, fallback: date) -> tuple[date, date]:
     start = date.fromisoformat(value) if value else fallback
     return start, start + timedelta(days=60)
 
+def _age_on(birthday: date | None, today: date) -> int | None:
+    if not birthday:
+        return None
+    return today.year - birthday.year - ((today.month, today.day) < (birthday.month, birthday.day))
+
+def _registration_series(students, start: date, finish: date) -> list[dict]:
+    buckets = {}
+    cursor = start
+    while cursor <= finish:
+        buckets[cursor.isoformat()] = 0
+        cursor += timedelta(days=1)
+    for student in students:
+        created = getattr(student, "created_at", None)
+        if created:
+            day = created.date().isoformat()
+            if day in buckets:
+                buckets[day] += 1
+    return [{"date": day, "count": count} for day, count in buckets.items()]
+
 
 def build_forecast_payload(*, club, students, visits, payments, cart_orders, cash_entries, start: date, finish: date, revenue_start: date, revenue_finish: date, visits_start: date, visits_finish: date) -> dict:
     periods = reporting_periods()
@@ -137,7 +209,8 @@ def build_forecast_payload(*, club, students, visits, payments, cart_orders, cas
     expiry = build_expiry_series([{**row, "expire_date": date.fromisoformat(row["expire_date"]) if row["expire_date"] else None} for row in rows], start, finish)
     revenue = build_revenue_series(payments, cart_orders, cash_entries, revenue_start, revenue_finish, periods["local_now"].date())
     visits_chart = build_visit_series(visits, visits_start, visits_finish)
-    return {"club_id": club.id, "forecast": {"students": rows, "discipline_counts": forecast.get("discipline_counts", {}), "expiry_series": expiry["series"], "revenue_series": revenue["series"], "visit_series": visits_chart["series"], "peak_expiry_count": expiry["peak_count"], "peak_revenue_amount": revenue["peak_amount"], "peak_visit_count": visits_chart["peak_count"]}, "ranges": {"expiry": [start.isoformat(), finish.isoformat()], "revenue": [revenue_start.isoformat(), revenue_finish.isoformat()], "visits": [visits_start.isoformat(), visits_finish.isoformat()]}, "read_only": True}
+    registrations = _registration_series(students, revenue_start, revenue_finish)
+    return {"club_id": club.id, "forecast": {"students": rows, "discipline_counts": forecast.get("discipline_counts", {}), "expiry_series": expiry["series"], "revenue_series": revenue["series"], "visit_series": visits_chart["series"], "registration_series": registrations, "peak_expiry_count": expiry["peak_count"], "peak_revenue_amount": revenue["peak_amount"], "peak_visit_count": visits_chart["peak_count"], "registration_total": sum(item["count"] for item in registrations)}, "ranges": {"expiry": [start.isoformat(), finish.isoformat()], "revenue": [revenue_start.isoformat(), revenue_finish.isoformat()], "visits": [visits_start.isoformat(), visits_finish.isoformat()], "registrations": [revenue_start.isoformat(), revenue_finish.isoformat()]}, "read_only": True}
 
 
 @router.get("/data")
@@ -174,19 +247,61 @@ async def forecast_data(
     cash_entries = list((await session.execute(select(CashEntry).where(CashEntry.club_id == actor.club_id))).scalars().all())
     return build_forecast_payload(club=club, students=students, visits=visits, payments=payments, cart_orders=cart_orders, cash_entries=cash_entries, start=start, finish=finish, revenue_start=revenue_start, revenue_finish=revenue_finish, visits_start=visits_start, visits_finish=visits_finish)
 
+@router.get("/age-groups")
+async def forecast_age_groups(
+    request: Request,
+    age_group: str = Query(..., pattern=r"^(1-10|11-15|16\+)$"),
+    context: AuthContext | None = Depends(web_context),
+    session: AsyncSession = Depends(get_session),
+):
+    actor = require_web_context(context)
+    if actor.actor_type == "staff" and "forecast_view" not in actor.permissions:
+        raise HTTPException(status_code=403, detail={"code": "permission_denied"})
+    limits = {"1-10": (1, 10), "11-15": (11, 15), "16+": (16, 150)}[age_group]
+    today = reporting_periods()["local_now"].date()
+    students = list((await session.execute(select(Student).where(Student.club_id == actor.club_id).order_by(Student.name))).scalars().all())
+    rows = []
+    for student in students:
+        age = _age_on(student.birthday, today)
+        if age is None or not limits[0] <= age <= limits[1]:
+            continue
+        rows.append({"student_id": student.id, "name": student.name, "age": age, "discipline": student.discipline or "—", "subscription": "Активен" if student.expire_date and student.expire_date.date() >= today else "Нет активного абонемента", "expire_date": student.expire_date.date().isoformat() if student.expire_date else None})
+    return {"club_id": actor.club_id, "age_group": age_group, "students": rows, "read_only": True}
+
 
 @revenue_router.get("/data")
 async def revenue_data(
     request: Request,
     context: AuthContext | None = Depends(web_context),
     session: AsyncSession = Depends(get_session),
+    date_from: str | None = Query(default=None, max_length=10),
+    date_to: str | None = Query(default=None, max_length=10),
 ):
     actor = require_web_context(context)
-    if actor.actor_type == "staff" and "analytics_view" not in actor.permissions:
+    if actor.actor_type == "staff" and not ({"analytics_view", "freeze_manage"} & set(actor.permissions)):
         raise HTTPException(status_code=403, detail={"code": "permission_denied", "message": "Нет права просмотра выручки"})
     payments = list((await session.execute(select(PaymentOrder).where(PaymentOrder.club_id == actor.club_id, PaymentOrder.status == "CONFIRMED"))).scalars().all())
     cart_orders = list((await session.execute(select(CartOrder).where(CartOrder.club_id == actor.club_id, CartOrder.status == "CONFIRMED"))).scalars().all())
-    return {"club_id": actor.club_id, "totals": calculate_revenue_periods(payments + cart_orders), "read_only": True}
+    date_from_value = date_from if isinstance(date_from, str) else None
+    date_to_value = date_to if isinstance(date_to, str) else None
+    try:
+        start = date.fromisoformat(date_from_value) if date_from_value else None
+        finish = date.fromisoformat(date_to_value) if date_to_value else None
+    except ValueError:
+        raise HTTPException(status_code=400, detail={"code": "invalid_date_range"})
+    if start and finish and start > finish:
+        raise HTTPException(status_code=400, detail={"code": "invalid_date_range"})
+    if start or finish:
+        def in_range(item):
+            created = getattr(item, "created_at", None)
+            day = created.date() if created else None
+            return day is not None and (not start or day >= start) and (not finish or day <= finish)
+        payments = [item for item in payments if in_range(item)]
+        cart_orders = [item for item in cart_orders if in_range(item)]
+    result = {"club_id": actor.club_id, "totals": calculate_revenue_periods(payments + cart_orders), "read_only": True}
+    if date_from_value or date_to_value:
+        result["filters"] = {"date_from": date_from_value or "", "date_to": date_to_value or ""}
+    return result
 
 
 @students_router.get("/data")
@@ -195,18 +310,103 @@ async def students_data(
     context: AuthContext | None = Depends(web_context),
     session: AsyncSession = Depends(get_session),
     q: str | None = Query(default=None, max_length=100),
-    limit: int = Query(default=50, ge=1, le=100),
+    limit: int = Query(default=50, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
+    status: str | None = Query(default=None, max_length=20),
+    discipline: str | None = Query(default=None, max_length=50),
+    full: bool = Query(default=False),
+    age_min: int | None = Query(default=None, ge=0, le=120),
+    age_max: int | None = Query(default=None, ge=0, le=120),
+    missing_birthday: bool = Query(default=False),
+    no_parent: bool = Query(default=False),
 ):
     actor = require_web_context(context)
     if actor.actor_type == "staff" and "analytics_view" not in actor.permissions:
         raise HTTPException(status_code=403, detail={"code": "permission_denied", "message": "Нет права просмотра клиентов"})
     query = select(Student).where(Student.club_id == actor.club_id)
-    if q and q.strip():
-        query = query.where(Student.name.ilike(f"%{q.strip()}%"))
+    q_value = q if isinstance(q, str) else ""
+    if q_value.strip():
+        query = query.where(Student.name.ilike(f"%{q_value.strip()}%"))
+    def _query_value(value, fallback=None):
+        return getattr(value, "default", fallback) if not isinstance(value, (str, bool, int, type(None))) else value
+    status_value = _query_value(status, "") or ""; discipline_value = _query_value(discipline, "") or ""
+    age_min_value = _query_value(age_min); age_max_value = _query_value(age_max)
+    missing_birthday_value = bool(_query_value(missing_birthday, False)); no_parent_value = bool(_query_value(no_parent, False))
+    if discipline_value.strip(): query = query.where(Student.discipline == discipline_value.strip())
     students = list((await session.execute(query.order_by(Student.name).offset(offset).limit(limit))).scalars().all())
-    return {"club_id": actor.club_id, "students": [{"id": student.id, "name": student.name, "discipline": student.discipline, "parent_id": student.parent_id} for student in students], "pagination": {"limit": limit, "offset": offset, "returned": len(students), "query": q or ""}, "read_only": True}
+    if status_value == "frozen": students = [student for student in students if bool(student.is_frozen)]
+    elif status_value == "active": students = [student for student in students if bool(student.expire_date and student.balance_lessons and not student.is_frozen)]
+    elif status_value == "inactive": students = [student for student in students if not (student.expire_date and student.balance_lessons and not student.is_frozen)]
+    today = date.today()
+    def student_age(student):
+        birthday = getattr(student, "birthday", None)
+        if not birthday: return None
+        return today.year - birthday.year - ((today.month, today.day) < (birthday.month, birthday.day))
+    if age_min_value is not None: students = [student for student in students if (student_age(student) is not None and student_age(student) >= int(age_min_value))]
+    if age_max_value is not None: students = [student for student in students if (student_age(student) is not None and student_age(student) <= int(age_max_value))]
+    if missing_birthday_value: students = [student for student in students if not getattr(student, "birthday", None)]
+    if no_parent_value: students = [student for student in students if not getattr(student, "parent_id", None)]
+    visit_map = {}
+    for visit in (await session.execute(select(VisitLog).where(VisitLog.club_id == actor.club_id))).scalars().all():
+        at = getattr(visit, "visited_at", None)
+        if at and (getattr(visit, "student_id", None) not in visit_map or at > visit_map[getattr(visit, "student_id", None)]): visit_map[getattr(visit, "student_id", None)] = at
+    rows = [{"id": student.id, "name": student.name, "discipline": student.discipline, "parent_id": getattr(student, "parent_id", None)} for student in students]
+    full_value = full if isinstance(full, bool) else False
+    if full_value:
+        for row, student in zip(rows, students):
+            birthday = getattr(student, "birthday", None); last_visit = visit_map.get(student.id, getattr(student, "last_visit", None))
+            row.update({"expire_date": getattr(student, "expire_date", None).isoformat() if getattr(student, "expire_date", None) else None, "balance_lessons": getattr(student, "balance_lessons", 0) or 0, "is_frozen": bool(getattr(student, "is_frozen", 0)), "has_subscription": bool(getattr(student, "expire_date", None) and getattr(student, "balance_lessons", 0)), "birthday": birthday.isoformat() if birthday else None, "age": student_age(student), "last_visit": last_visit.isoformat() if last_visit else None, "parent_phone": getattr(student, "parent_phone", None), "parent_phone_secondary": getattr(student, "parent_phone_secondary", None), "email": getattr(student, "email", None), "can_freeze": getattr(student, "can_freeze", 0) or 0, "freeze_days_entitlement": getattr(student, "freeze_days_entitlement", None), "frozen_days": getattr(student, "frozen_days", None), "comment": getattr(student, "comment", None) or ""})
+    pagination = {"limit": limit, "offset": offset, "returned": len(students), "query": q_value}
+    if status_value or discipline_value or full_value or age_min_value is not None or age_max_value is not None or missing_birthday_value or no_parent_value: pagination.update({"status": status_value, "discipline": discipline_value, "age_min": age_min_value, "age_max": age_max_value, "missing_birthday": missing_birthday_value, "no_parent": no_parent_value})
+    return {"club_id": actor.club_id, "students": rows, "pagination": pagination, "read_only": True}
 
+
+@students_router.post("")
+async def create_student_data(request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):
+    actor = require_web_context(context)
+    if actor.actor_type not in {"owner", "staff"} or (actor.actor_type == "staff" and "student_manage" not in actor.permissions):
+        raise HTTPException(status_code=403, detail={"code": "permission_denied"})
+    await require_csrf(request.app.state.redis_client, request)
+    payload = await request.json(); key = str(payload.get("idempotency_key") or "").strip(); name = str(payload.get("name") or "").strip(); discipline = str(payload.get("discipline") or "").strip()
+    if not key or len(key) > 100: raise HTTPException(status_code=400, detail={"code": "invalid_idempotency_key"})
+    if not await request.app.state.redis_client.set(f"web:create-student:{actor.club_id}:{key}", "1", ex=900, nx=True): return {"ok": True, "idempotent_replay": True}
+    if not 2 <= len(name) <= 120 or not 1 <= len(discipline) <= 50: raise HTTPException(status_code=400, detail={"code": "invalid_student_fields"})
+    club = await session.scalar(select(Club).where(Club.id == actor.club_id)); configured = (club.club_settings or {}).get("disciplines", {}) if club else {}
+    if discipline not in configured: raise HTTPException(status_code=400, detail={"code": "discipline_not_found"})
+    birthday = None
+    if payload.get("birthday"):
+        try: birthday = date.fromisoformat(str(payload["birthday"]))
+        except ValueError: raise HTTPException(status_code=400, detail={"code": "invalid_birthday"})
+    email = str(payload.get("email") or "").strip().lower()
+    if email and (len(email) > 320 or "@" not in email): raise HTTPException(status_code=400, detail={"code": "invalid_email"})
+    student = Student(club_id=actor.club_id, name=name, discipline=discipline, birthday=birthday, email=email or None, parent_phone=normalize_ru_phone(str(payload.get("parent_phone") or "")) or None, parent_phone_secondary=normalize_ru_phone(str(payload.get("parent_phone_secondary") or "")) or None, comment=str(payload.get("comment") or "")[:1000] or None)
+    session.add(student); await session.commit(); audit_event("web_student_created", club_id=actor.club_id, actor_user_id=actor.user_id, action="create", object_type="student", object_id=student.id, location="web/staff/students")
+    return {"ok": True, "student_id": student.id}
+
+@students_router.delete("/{student_id}")
+async def delete_student_data(student_id: int, request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):
+    actor = require_web_context(context)
+    if actor.actor_type not in {"owner", "staff"} or (actor.actor_type == "staff" and "student_manage" not in actor.permissions): raise HTTPException(status_code=403, detail={"code": "permission_denied"})
+    await require_csrf(request.app.state.redis_client, request)
+    payload = await request.json(); key = str(payload.get("idempotency_key") or "").strip()
+    if not key or len(key) > 100: raise HTTPException(status_code=400, detail={"code": "invalid_idempotency_key"})
+    if not await request.app.state.redis_client.set(f"web:delete-student:{actor.club_id}:{student_id}:{key}", "1", ex=900, nx=True): return {"ok": True, "idempotent_replay": True}
+    student = await session.scalar(select(Student).where(Student.id == student_id, Student.club_id == actor.club_id).with_for_update())
+    if not student: raise HTTPException(status_code=404, detail={"code": "student_not_found"})
+    await session.delete(student); await session.commit(); audit_event("web_student_deleted", club_id=actor.club_id, actor_user_id=actor.user_id, action="delete", object_type="student", object_id=student_id, location="web/staff/students")
+    return {"ok": True, "student_id": student_id}
+
+@students_router.post("/bulk/invitations")
+async def bulk_student_invitations(request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):
+    actor = require_web_context(context)
+    if actor.actor_type == "staff" and "student_manage" not in actor.permissions: raise HTTPException(status_code=403, detail={"code": "permission_denied"})
+    if actor.actor_type not in {"owner", "staff"}: raise HTTPException(status_code=403, detail={"code": "staff_access_required"})
+    await require_csrf(request.app.state.redis_client, request); payload = await request.json(); ids = payload.get("student_ids"); slot = int(payload.get("parent_slot") or 1); key = str(payload.get("idempotency_key") or "").strip()
+    if not isinstance(ids, list) or not 1 <= len(ids) <= 100 or slot not in {1, 2} or not key or len(key) > 100: raise HTTPException(status_code=400, detail={"code": "invalid_bulk_invitation"})
+    if not await request.app.state.redis_client.set(f"web:bulk-invitations:{actor.club_id}:{key}", "1", ex=900, nx=True): return {"ok": True, "idempotent_replay": True}
+    club = await session.scalar(select(Club).where(Club.id == actor.club_id)); username = str((club.club_settings or {}).get("bot_username") or "speedycrm_bot") if club else "speedycrm_bot"; students = list((await session.execute(select(Student).where(Student.club_id == actor.club_id, Student.id.in_([int(x) for x in ids])))).scalars().all())
+    invitations = [{"student_id": s.id, "url": f"https://t.me/{username}?start=invite_{s.id}_{slot}", "has_phone": bool((s.parent_phone if slot == 1 else s.parent_phone_secondary))} for s in students]; audit_event("web_bulk_invitations_created", club_id=actor.club_id, actor_user_id=actor.user_id, action="invite", object_type="students", object_id=actor.club_id, location="web/staff/invitations", count=len(invitations), parent_slot=slot)
+    return {"ok": True, "club_id": actor.club_id, "parent_slot": slot, "invitations": invitations, "read_only": False}
 
 @students_router.get("/{student_id}")
 async def student_detail_data(student_id: int, request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):
@@ -241,7 +441,7 @@ async def update_student_data(student_id: int, request: Request, context: AuthCo
         linked = await session.scalar(select(StudentParent).where(StudentParent.student_id == student.id, StudentParent.parent_id == actor.user_id))
         if not linked:
             raise HTTPException(status_code=403, detail={"code": "student_scope_denied"})
-    allowed = {"name", "discipline"}
+    allowed = {"name", "discipline", "parent_phone", "parent_phone_secondary", "email", "birthday", "balance_lessons", "expire_date", "can_freeze", "frozen_days", "comment", "is_frozen"}
     if set(payload) - allowed - {"idempotency_key"}:
         raise HTTPException(status_code=400, detail={"code": "invalid_student_fields"})
     if "name" in payload:
@@ -254,6 +454,27 @@ async def update_student_data(student_id: int, request: Request, context: AuthCo
         if not 1 <= len(discipline) <= 50:
             raise HTTPException(status_code=400, detail={"code": "invalid_student_discipline"})
         student.discipline = discipline
+    if "email" in payload:
+        email = str(payload["email"] or "").strip().lower()
+        if email and (len(email) > 320 or "@" not in email): raise HTTPException(status_code=400, detail={"code": "invalid_email"})
+        student.email = email or None
+    for field in ("parent_phone", "parent_phone_secondary"):
+        if field in payload:
+            value = str(payload[field] or "").strip()
+            setattr(student, field, normalize_ru_phone(value) if value else None)
+    if "birthday" in payload:
+        value = str(payload["birthday"] or "").strip()
+        try: student.birthday = date.fromisoformat(value) if value else None
+        except ValueError: raise HTTPException(status_code=400, detail={"code": "invalid_birthday"})
+    if "expire_date" in payload:
+        value = str(payload["expire_date"] or "").strip()
+        try: student.expire_date = date.fromisoformat(value) if value else None
+        except ValueError: raise HTTPException(status_code=400, detail={"code": "invalid_expire_date"})
+    if "balance_lessons" in payload: student.balance_lessons = max(0, min(999, int(payload["balance_lessons"] or 0)))
+    if "can_freeze" in payload: student.can_freeze = max(0, min(99, int(payload["can_freeze"] or 0)))
+    if "frozen_days" in payload: student.frozen_days = int(payload["frozen_days"]) if payload["frozen_days"] else None
+    if "comment" in payload: student.comment = str(payload["comment"] or "")[:1000] or None
+    if "is_frozen" in payload: student.is_frozen = 1 if payload["is_frozen"] else 0
     await session.commit()
     audit_event("web_student_updated", club_id=actor.club_id, actor_user_id=actor.user_id, action="update", object_type="student", object_id=student_id, location="web/staff/students")
     return {"ok": True, "club_id": actor.club_id, "student_id": student_id, "read_only": False}
@@ -300,24 +521,123 @@ async def overview_data(
     request: Request,
     context: AuthContext | None = Depends(web_context),
     session: AsyncSession = Depends(get_session),
+    date_from: str | None = Query(default=None, max_length=10),
+    date_to: str | None = Query(default=None, max_length=10),
 ):
     actor = require_web_context(context)
     if actor.actor_type == "staff" and "analytics_view" not in actor.permissions:
         raise HTTPException(status_code=403, detail={"code": "permission_denied", "message": "Нет права просмотра сводки"})
     students = list((await session.execute(select(Student).where(Student.club_id == actor.club_id))).scalars().all())
     visits = list((await session.execute(select(VisitLog).where(VisitLog.club_id == actor.club_id))).scalars().all())
-    return {"club_id": actor.club_id, "metrics": calculate_admin_dashboard(students, visit_logs=visits), "read_only": True}
+    if date_from or date_to:
+        def in_period(visit):
+            value = getattr(visit, "visited_at", None)
+            if not value: return False
+            day = value.date().isoformat()
+            return (not date_from or day >= date_from) and (not date_to or day <= date_to)
+        visits = [visit for visit in visits if in_period(visit)]
+    from datetime import datetime, timezone
+    metrics = calculate_admin_dashboard(students, visit_logs=visits)
+    club = await session.scalar(select(Club).where(Club.id == actor.club_id)) if hasattr(session, "scalar") else None
+    settings = (club.club_settings or {}) if club else {}
+    timeout = int((settings.get("limits", {}) or {}).get("session_timeout_minutes", 150) or 150)
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    by_id = {s.id: s for s in students}; active_sessions = []; past_sessions = []
+    for visit in sorted(visits, key=lambda x: getattr(x, "visited_at", None) or datetime.min, reverse=True):
+        student = by_id.get(getattr(visit, "student_id", None)); visited = getattr(visit, "visited_at", None)
+        if not student or not visited: continue
+        visited = visited.replace(tzinfo=None); end = visited + timedelta(minutes=timeout); item = {"student_id": student.id, "name": student.name, "balance": student.balance_lessons or 0, "parent_id": student.parent_id, "last_visit": (visited + timedelta(hours=3)).strftime("%d.%m.%Y %H:%M"), "session_end": (end + timedelta(hours=3)).strftime("%H:%M"), "time_passed_mins": max(0, int((now - visited).total_seconds() // 60))}
+        if now < end: item["mins_left"] = max(0, int((end - now).total_seconds() // 60)); active_sessions.append(item)
+        else: past_sessions.append(item)
+    metrics.update({"active_sessions": active_sessions, "past_sessions": past_sessions, "session_timeout_minutes": timeout})
+    return {"club_id": actor.club_id, "metrics": metrics, "read_only": True}
+
+
+@overview_router.get("/search")
+async def staff_global_search(request: Request, q: str = Query(default="", max_length=100), context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):
+    actor = require_web_context(context)
+    if actor.actor_type == "staff" and "analytics_view" not in actor.permissions:
+        raise HTTPException(status_code=403, detail={"code": "permission_denied"})
+    value = str(q or "").strip()
+    if not value:
+        return {"club_id": actor.club_id, "results": [], "read_only": True}
+    pattern = f"%{value}%"
+    students = list((await session.execute(select(Student).where(Student.club_id == actor.club_id, or_(Student.name.ilike(pattern), Student.parent_phone.ilike(pattern), Student.parent_phone_secondary.ilike(pattern))).order_by(Student.name).limit(20))).scalars().all())
+    return {"club_id": actor.club_id, "results": [{"type": "athlete", "id": s.id, "name": s.name, "discipline": s.discipline} for s in students], "read_only": True}
+
+
+@overview_router.get("/visits")
+async def staff_visits_data(request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session), date_from: str | None = Query(default=None, max_length=10), date_to: str | None = Query(default=None, max_length=10), q: str | None = Query(default=None, max_length=100)):
+    """Admin attendance: one row per athlete session, not per repeat check-in."""
+    actor = require_web_context(context)
+    if actor.actor_type == "staff" and "analytics_view" not in actor.permissions:
+        raise HTTPException(status_code=403, detail={"code": "permission_denied"})
+    students = list((await session.execute(select(Student).where(Student.club_id == actor.club_id).order_by(Student.name))).scalars().all())
+    by_id = {student.id: student for student in students}
+    search = (q or "").strip().casefold()
+    selected_ids = {student.id for student in students if not search or search in str(student.name).casefold()}
+    club = await session.scalar(select(Club).where(Club.id == actor.club_id))
+    settings = (club.club_settings or {}) if club else {}
+    timeout_minutes = int((settings.get("limits", {}) or {}).get("session_timeout_minutes", 150) or 150)
+    visits = list((await session.execute(select(VisitLog).where(VisitLog.club_id == actor.club_id).order_by(VisitLog.visited_at.asc()))).scalars().all())
+
+    def in_period(value):
+        if not value:
+            return False
+        day = (value.replace(tzinfo=None) + timedelta(hours=3)).date().isoformat()
+        return (not date_from or day >= date_from) and (not date_to or day <= date_to)
+
+    by_student = {}
+    for visit in visits:
+        student_id, value = getattr(visit, "student_id", None), getattr(visit, "visited_at", None)
+        if student_id in selected_ids and value:
+            by_student.setdefault(student_id, []).append(value.replace(tzinfo=None))
+
+    rows, timeout = [], timedelta(minutes=max(1, timeout_minutes))
+    for student_id, timestamps in by_student.items():
+        current = []
+        for timestamp in timestamps + [None]:
+            if timestamp is not None and (not current or timestamp - current[-1] <= timeout):
+                current.append(timestamp)
+                continue
+            if current and in_period(current[0]):
+                rows.append({"student_id": student_id, "student_name": by_id[student_id].name, "visited_at": (current[0] + timedelta(hours=3)).isoformat(sep=" ", timespec="minutes"), "last_checkin": (current[-1] + timedelta(hours=3)).isoformat(sep=" ", timespec="minutes"), "checkins_count": len(current)})
+            current = [timestamp] if timestamp is not None else []
+    rows.sort(key=lambda row: row["visited_at"], reverse=True)
+    return {"club_id": actor.club_id, "sessions": rows, "session_count": len(rows), "timeout_minutes": timeout_minutes, "filters": {"date_from": date_from or "", "date_to": date_to or "", "q": q or ""}, "read_only": True}
+
+
+@overview_router.get("/stats")
+async def full_stats_data(request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):
+    actor = require_web_context(context)
+    if actor.actor_type == "staff" and "analytics_view" not in actor.permissions: raise HTTPException(status_code=403, detail={"code": "permission_denied"})
+    students = list((await session.execute(select(Student).where(Student.club_id == actor.club_id))).scalars().all())
+    visits = list((await session.execute(select(VisitLog).where(VisitLog.club_id == actor.club_id))).scalars().all())
+    payments = list((await session.execute(select(PaymentOrder).where(PaymentOrder.club_id == actor.club_id, PaymentOrder.status == "CONFIRMED"))).scalars().all())
+    orders = list((await session.execute(select(CartOrder).where(CartOrder.club_id == actor.club_id, CartOrder.status == "CONFIRMED"))).scalars().all())
+    cash = list((await session.execute(select(CashEntry).where(CashEntry.club_id == actor.club_id))).scalars().all())
+    metrics = calculate_student_metrics(students, visit_logs=visits); revenue = calculate_revenue_periods(payments + orders); flow = calculate_cash_flow_periods(cash, cash_sales=payments + orders)
+    visit_counts = {}
+    for visit in visits: visit_counts[visit.student_id] = visit_counts.get(visit.student_id, 0) + 1
+    by_id = {student.id: student for student in students}
+    top_athletes = [{"student_id": sid, "name": getattr(by_id.get(sid), "name", ""), "visits": count} for sid, count in sorted(visit_counts.items(), key=lambda item: item[1], reverse=True)[:20]]
+    churned_students = [{"student_id": student.id, "name": student.name, "last_visit": getattr(student, "last_visit", None).isoformat() if getattr(student, "last_visit", None) else None} for student in students if student.id not in visit_counts and not getattr(student, "is_frozen", False)][:20]
+    return {"club_id": actor.club_id, "metrics": {key: metrics.get(key) for key in ("total_athletes", "total_parents", "retention_rate", "active_passes", "frozen_passes", "burning_passes", "inactive_passes", "total_lessons_left", "discipline_counts")}, "revenue": revenue, "cash_flow": flow, "visits_by_student": visit_counts, "top_athletes": top_athletes, "churned_students": churned_students, "read_only": True}
 
 
 @cash_router.get("/data")
-async def cash_data(request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):
+async def cash_data(request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session), entry_type: str | None = Query(default=None, max_length=20), q: str | None = Query(default=None, max_length=100)):
     actor = require_web_context(context)
     if actor.actor_type == "staff" and "cash_view" not in actor.permissions:
         raise HTTPException(status_code=403, detail={"code": "permission_denied", "message": "Нет права просмотра кассы"})
     entries = list((await session.execute(select(CashEntry).where(CashEntry.club_id == actor.club_id))).scalars().all())
     income = sum(int(getattr(entry, "amount_kopecks", 0) or 0) for entry in entries if entry.entry_type == "income")
     expense = sum(int(getattr(entry, "amount_kopecks", 0) or 0) for entry in entries if entry.entry_type == "expense")
-    return {"club_id": actor.club_id, "income_kopecks": income, "expense_kopecks": expense, "balance_kopecks": income - expense, "entries": [{"id": getattr(entry, "id", None), "entry_type": entry.entry_type, "amount_kopecks": entry.amount_kopecks, "description": getattr(entry, "description", ""), "reversed_entry_id": getattr(entry, "reversed_entry_id", None)} for entry in entries], "read_only": True}
+    rows = [{"id": getattr(entry, "id", None), "entry_type": entry.entry_type, "amount_kopecks": entry.amount_kopecks, "description": getattr(entry, "description", ""), "category": getattr(entry, "category", ""), "created_at": getattr(entry, "created_at", None).isoformat() if getattr(entry, "created_at", None) else None, "reversed_entry_id": getattr(entry, "reversed_entry_id", None)} for entry in entries]
+    type_value = entry_type if isinstance(entry_type, str) else ""; q_value = q if isinstance(q, str) else ""
+    if type_value.strip(): rows = [row for row in rows if row["entry_type"] == type_value.strip()]
+    if q_value.strip(): rows = [row for row in rows if q_value.strip().casefold() in f'{row["description"]} {row["category"]}'.casefold()]
+    return {"club_id": actor.club_id, "income_kopecks": income, "expense_kopecks": expense, "balance_kopecks": income - expense, "entries": rows, "filters": {"entry_type": type_value, "q": q_value}, "read_only": True}
 
 
 @cash_router.post("/entries")
@@ -383,14 +703,38 @@ async def reverse_cash_entry_web(entry_id: int, request: Request, context: AuthC
     return {"ok": True, "club_id": actor.club_id, "entry_id": entry_id, "reversal_id": reversal.id, "read_only": False}
 
 
+@cash_router.delete("/entries/{entry_id}")
+async def delete_cash_entry_web(entry_id: int, request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):
+    actor = require_web_context(context)
+    if actor.actor_type == "staff" and "cash_sale" not in actor.permissions: raise HTTPException(status_code=403, detail={"code": "permission_denied"})
+    if actor.actor_type not in {"owner", "staff"}: raise HTTPException(status_code=403, detail={"code": "staff_access_required"})
+    await require_csrf(request.app.state.redis_client, request); payload = await request.json(); key = str(payload.get("idempotency_key") or "").strip()
+    if not key or len(key) > 100: raise HTTPException(status_code=400, detail={"code": "invalid_idempotency_key"})
+    if not await request.app.state.redis_client.set(f"web:cash-delete:{actor.club_id}:{entry_id}:{key}", "1", ex=900, nx=True): return {"ok": True, "idempotent_replay": True}
+    entry = await session.scalar(select(CashEntry).where(CashEntry.id == entry_id, CashEntry.club_id == actor.club_id).with_for_update())
+    if not entry: raise HTTPException(status_code=404, detail={"code": "cash_entry_not_found"})
+    if entry.reversed_entry_id: raise HTTPException(status_code=409, detail={"code": "cash_entry_has_reversal"})
+    await session.delete(entry); await session.commit(); audit_event("web_cash_entry_deleted", club_id=actor.club_id, actor_user_id=actor.user_id, action="delete", object_type="cash_entry", object_id=entry_id, location="web/staff/cash")
+    return {"ok": True, "entry_id": entry_id}
+
 @sales_router.get("/data")
-async def sales_data(request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):
+async def sales_data(request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session), q: str | None = Query(default=None, max_length=100), source: str | None = Query(default=None, max_length=20), sale_type: str | None = Query(default=None, max_length=80)):
     actor = require_web_context(context)
     if actor.actor_type == "staff" and "analytics_view" not in actor.permissions:
         raise HTTPException(status_code=403, detail={"code": "permission_denied", "message": "Нет права просмотра продаж"})
     payments = list((await session.execute(select(PaymentOrder).where(PaymentOrder.club_id == actor.club_id, PaymentOrder.status == "CONFIRMED"))).scalars().all())
     orders = list((await session.execute(select(CartOrder).where(CartOrder.club_id == actor.club_id, CartOrder.status == "CONFIRMED"))).scalars().all())
-    return {"club_id": actor.club_id, "sales_count": len(payments) + len(orders), "amount_kopecks": sum(int(getattr(row, "amount_kopecks", 0) or 0) for row in payments + orders), "read_only": True}
+    students = list((await session.execute(select(Student).where(Student.club_id == actor.club_id))).scalars().all())
+    students_by_id = {student.id: student.name for student in students}
+    rows = []
+    for row in payments + orders:
+        rows.append({"id": str(getattr(row, "id", "")), "student_id": getattr(row, "student_id", None), "student_name": students_by_id.get(getattr(row, "student_id", None)), "user_id": getattr(row, "user_id", None), "amount_kopecks": int(getattr(row, "amount_kopecks", 0) or 0), "created_at": getattr(row, "created_at", None).isoformat() if getattr(row, "created_at", None) else None, "type": getattr(row, "type", None) or "cart", "source": "payment" if row in payments else "cart"})
+    rows.sort(key=lambda item: item.get("created_at") or "", reverse=True)
+    q_value = q if isinstance(q, str) else ""; source_value = source if isinstance(source, str) else ""; type_value = sale_type if isinstance(sale_type, str) else ""
+    if q_value.strip(): rows = [item for item in rows if q_value.strip().casefold() in str(item.get("id", "")).casefold() or q_value.strip().casefold() in str(item.get("student_name", "")).casefold() or q_value.strip() in str(item.get("student_id", "")) or q_value.strip() in str(item.get("user_id", ""))]
+    if source_value.strip(): rows = [item for item in rows if item.get("source") == source_value.strip()]
+    if type_value.strip(): rows = [item for item in rows if item.get("type") == type_value.strip()]
+    return {"club_id": actor.club_id, "sales_count": len(rows), "amount_kopecks": sum(item["amount_kopecks"] for item in rows), "sales": rows[:100], "filters": {"q": q_value, "source": source_value, "sale_type": type_value}, "options": {"sources": ["payment", "cart"], "types": sorted({str(item.get("type")) for item in rows if item.get("type")})}, "pagination": {"limit": 100, "offset": 0, "returned": min(len(rows), 100)}, "read_only": True}
 
 
 @sales_router.get("/{order_id}")
@@ -398,8 +742,11 @@ async def sale_detail_data(order_id: str, request: Request, context: AuthContext
     actor = require_web_context(context)
     if actor.actor_type == "staff" and "analytics_view" not in actor.permissions: raise HTTPException(status_code=403, detail={"code": "permission_denied"})
     payment = await session.scalar(select(PaymentOrder).where(PaymentOrder.id == order_id, PaymentOrder.club_id == actor.club_id, PaymentOrder.status == "CONFIRMED"))
-    if not payment: raise HTTPException(status_code=404, detail={"code": "sale_not_found"})
-    return {"club_id": actor.club_id, "sale": {"id": payment.id, "student_id": payment.student_id, "amount_kopecks": payment.amount_kopecks, "created_at": payment.created_at.isoformat() if payment.created_at else None, "type": payment.type}, "read_only": True}
+    if payment: return {"club_id": actor.club_id, "sale": {"id": payment.id, "student_id": payment.student_id, "amount_kopecks": payment.amount_kopecks, "created_at": payment.created_at.isoformat() if payment.created_at else None, "type": payment.type, "source": "payment", "items": []}, "read_only": True}
+    order = await session.scalar(select(CartOrder).where(CartOrder.id == order_id, CartOrder.club_id == actor.club_id, CartOrder.status == "CONFIRMED"))
+    if not order: raise HTTPException(status_code=404, detail={"code": "sale_not_found"})
+    items = list((await session.execute(select(CartItem).where(CartItem.cart_order_id == order.id))).scalars().all())
+    return {"club_id": actor.club_id, "sale": {"id": order.id, "user_id": order.user_id, "amount_kopecks": order.amount_kopecks, "created_at": order.created_at.isoformat() if order.created_at else None, "type": "cart", "source": "cart", "items": [{"title": item.title, "quantity": item.quantity, "unit_price_kopecks": item.unit_price_kopecks} for item in items]}, "read_only": True}
 
 
 @audit_router.get("/data")
@@ -497,8 +844,8 @@ async def products_data(request: Request, context: AuthContext | None = Depends(
     actor = require_web_context(context)
     if actor.actor_type == "staff" and "products_view" not in actor.permissions:
         raise HTTPException(status_code=403, detail={"code": "permission_denied", "message": "Нет права просмотра товаров"})
-    products = list((await session.execute(select(ClubProduct).where(ClubProduct.club_id == actor.club_id, ClubProduct.is_active.is_(True)))).scalars().all())
-    return {"club_id": actor.club_id, "products": [{"id": p.id, "name": p.name, "category": p.category, "price_kopecks": p.price_kopecks, "stock": p.stock} for p in products], "read_only": True}
+    products = list((await session.execute(select(ClubProduct).where(ClubProduct.club_id == actor.club_id).order_by(ClubProduct.name))).scalars().all())
+    return {"club_id": actor.club_id, "products": [{"id": p.id, "name": p.name, "category": p.category, "price_kopecks": p.price_kopecks, "stock": p.stock, "is_active": bool(p.is_active) if hasattr(p, "is_active") else True, "image_url": p.image_url if hasattr(p, "image_url") else None, "details": p.details if hasattr(p, "details") else None} for p in products], "read_only": True}
 
 
 @catalog_router.post("/products")
@@ -507,15 +854,34 @@ async def create_product_web(request: Request, context: AuthContext | None = Dep
     if os.getenv("WEB_CATALOG_MUTATIONS_ENABLED", "0") != "1": raise HTTPException(status_code=404, detail={"code": "feature_disabled"})
     if actor.actor_type == "staff" and "products_manage" not in actor.permissions: raise HTTPException(status_code=403, detail={"code": "permission_denied"})
     await require_csrf(request.app.state.redis_client, request); payload = await request.json()
-    if set(payload) - {"name", "category", "price_kopecks", "stock", "details", "idempotency_key"}: raise HTTPException(status_code=400, detail={"code": "invalid_product_fields"})
+    if set(payload) - {"name", "category", "price_kopecks", "stock", "details", "image_url", "idempotency_key"}: raise HTTPException(status_code=400, detail={"code": "invalid_product_fields"})
     key = str(payload.get("idempotency_key") or "").strip(); name = str(payload.get("name") or "").strip(); category = str(payload.get("category") or "other").strip(); details = str(payload.get("details") or "").strip()
     try: price = int(payload.get("price_kopecks")); stock = int(payload.get("stock", 0))
     except (TypeError, ValueError): raise HTTPException(status_code=400, detail={"code": "invalid_product_numbers"})
     if not key or len(key) > 100 or not 2 <= len(name) <= 120 or len(category) > 30 or len(details) > 1000 or price < 0 or stock < 0: raise HTTPException(status_code=400, detail={"code": "invalid_product"})
     if not await request.app.state.redis_client.set(f"web:product-create:{actor.club_id}:{key}", "1", ex=900, nx=True): return {"ok": True, "idempotent_replay": True, "club_id": actor.club_id}
-    product = ClubProduct(club_id=actor.club_id, name=name, category=category, price_kopecks=price, stock=stock, details=details, is_active=True); session.add(product); await session.commit()
+    image_url = str(payload.get("image_url") or "").strip()
+    if len(image_url) > 500 or (image_url and not image_url.startswith("/static/uploads/products/")): raise HTTPException(status_code=400, detail={"code": "invalid_product_image"})
+    product = ClubProduct(club_id=actor.club_id, name=name, category=category, price_kopecks=price, stock=stock, details=details, image_url=image_url or None, is_active=True); session.add(product); await session.commit()
     audit_event("web_product_created", club_id=actor.club_id, actor_user_id=actor.user_id, action="create", object_type="club_product", object_id=product.id, location="web/staff/products")
     return {"ok": True, "club_id": actor.club_id, "product_id": product.id, "read_only": False}
+
+
+@catalog_router.post("/products/upload-image")
+async def upload_product_image_web(request: Request, file: UploadFile = File(...), context: AuthContext | None = Depends(web_context)):
+    actor = require_web_context(context)
+    if os.getenv("WEB_CATALOG_MUTATIONS_ENABLED", "0") != "1": raise HTTPException(status_code=404, detail={"code": "feature_disabled"})
+    if actor.actor_type == "staff" and "products_manage" not in actor.permissions: raise HTTPException(status_code=403, detail={"code": "permission_denied"})
+    await require_csrf(request.app.state.redis_client, request)
+    if file.content_type not in {"image/jpeg", "image/png", "image/webp"}: raise HTTPException(status_code=400, detail={"code": "invalid_image_type"})
+    data = await file.read()
+    if not data or len(data) > 5 * 1024 * 1024: raise HTTPException(status_code=400, detail={"code": "invalid_image_size"})
+    signatures = {"image/jpeg": (b"\xff\xd8\xff",), "image/png": (b"\x89PNG\r\n\x1a\n",), "image/webp": (b"RIFF",)}
+    if not any(data.startswith(signature) for signature in signatures[file.content_type]): raise HTTPException(status_code=400, detail={"code": "invalid_image_content"})
+    extension = {"image/jpeg":"jpg", "image/png":"png", "image/webp":"webp"}[file.content_type]
+    filename = f"web_{uuid.uuid4().hex}.{extension}"; directory = Path("static/uploads/products"); directory.mkdir(parents=True, exist_ok=True); (directory / filename).write_bytes(data)
+    audit_event("web_product_image_uploaded", club_id=actor.club_id, actor_user_id=actor.user_id, action="upload", object_type="product_image", location="web/staff/products")
+    return {"ok": True, "image_url": f"/static/uploads/products/{filename}"}
 
 
 @catalog_router.patch("/products/{product_id}")
@@ -524,7 +890,7 @@ async def update_product_web(product_id: int, request: Request, context: AuthCon
     if os.getenv("WEB_CATALOG_MUTATIONS_ENABLED", "0") != "1": raise HTTPException(status_code=404, detail={"code": "feature_disabled"})
     if actor.actor_type == "staff" and "products_manage" not in actor.permissions: raise HTTPException(status_code=403, detail={"code": "permission_denied"})
     await require_csrf(request.app.state.redis_client, request); payload = await request.json()
-    if set(payload) - {"name", "category", "price_kopecks", "details", "idempotency_key"}: raise HTTPException(status_code=400, detail={"code": "invalid_product_fields"})
+    if set(payload) - {"name", "category", "price_kopecks", "details", "is_active", "idempotency_key"}: raise HTTPException(status_code=400, detail={"code": "invalid_product_fields"})
     key = str(payload.get("idempotency_key") or "").strip()
     if not key or len(key) > 100: raise HTTPException(status_code=400, detail={"code": "invalid_idempotency_key"})
     if not await request.app.state.redis_client.set(f"web:product-update:{actor.club_id}:{product_id}:{key}", "1", ex=900, nx=True): return {"ok": True, "idempotent_replay": True, "club_id": actor.club_id, "product_id": product_id}
@@ -536,6 +902,9 @@ async def update_product_web(product_id: int, request: Request, context: AuthCon
         product.name = name
     if "category" in payload: product.category = str(payload["category"] or "other").strip()[:30]
     if "details" in payload: product.details = str(payload["details"] or "").strip()[:1000]
+    if "is_active" in payload:
+        if not isinstance(payload["is_active"], bool): raise HTTPException(status_code=400, detail={"code": "invalid_product_status"})
+        product.is_active = payload["is_active"]
     if "price_kopecks" in payload:
         try: product.price_kopecks = int(payload["price_kopecks"])
         except (TypeError, ValueError): raise HTTPException(status_code=400, detail={"code": "invalid_product_price"})
@@ -568,6 +937,20 @@ async def product_detail_data(product_id: int, request: Request, context: AuthCo
     if not product:
         raise HTTPException(status_code=404, detail={"code": "product_not_found", "message": "Товар не найден"})
     return {"club_id": actor.club_id, "product": {"id": product.id, "name": product.name, "category": product.category, "price_kopecks": product.price_kopecks, "stock": product.stock, "details": product.details}, "read_only": True}
+
+
+@catalog_router.get("/products/{product_id}/history")
+async def product_history_data(product_id: int, request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):
+    actor = require_web_context(context)
+    if actor.actor_type == "staff" and "products_view" not in actor.permissions:
+        raise HTTPException(status_code=403, detail={"code": "permission_denied"})
+    product = await session.scalar(select(ClubProduct).where(ClubProduct.id == product_id, ClubProduct.club_id == actor.club_id))
+    if not product:
+        raise HTTPException(status_code=404, detail={"code": "product_not_found"})
+    # AuditEntry.object_id is stored as text; PostgreSQL does not implicitly
+    # compare varchar to the integer path parameter.
+    entries = list((await session.execute(select(AuditEntry).where(AuditEntry.club_id == actor.club_id, AuditEntry.object_type == "club_product", AuditEntry.object_id == str(product_id)).order_by(AuditEntry.created_at.desc()).limit(100))).scalars().all())
+    return {"club_id": actor.club_id, "product_id": product_id, "history": [{"id": entry.id, "event": entry.event, "action": entry.action, "created_at": entry.created_at.isoformat() if entry.created_at else None, "payload": {str(k): str(v)[:200] for k, v in (entry.payload or {}).items() if k not in {"token", "secret", "cookie"}}} for entry in entries], "read_only": True}
 
 
 @catalog_router.post("/products/{product_id}/stock")
@@ -603,6 +986,19 @@ async def adjust_product_stock_web(product_id: int, request: Request, context: A
     audit_event("web_product_stock_adjusted", club_id=actor.club_id, actor_user_id=actor.user_id, action="update", object_type="club_product", object_id=product_id, location="web/staff/products", quantity=delta, reason=reason)
     return {"ok": True, "club_id": actor.club_id, "product_id": product_id, "stock": new_stock, "read_only": False}
 
+
+@sales_router.post("/refunds/{order_id}/decision")
+async def staff_refund_decision(order_id: str, request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):
+    actor = require_web_context(context)
+    if actor.actor_type == "staff" and "payments_manage" not in actor.permissions: raise HTTPException(status_code=403, detail={"code": "permission_denied"})
+    if actor.actor_type not in {"owner", "staff"}: raise HTTPException(status_code=403, detail={"code": "staff_access_required"})
+    await require_csrf(request.app.state.redis_client, request); payload = await request.json(); decision = str(payload.get("decision") or "").strip().lower(); reason = str(payload.get("reason") or "").strip(); key = str(payload.get("idempotency_key") or "").strip()
+    if decision not in {"approve", "reject"} or not 3 <= len(reason) <= 500 or not key or len(key) > 100: raise HTTPException(status_code=400, detail={"code": "invalid_refund_decision"})
+    if not await request.app.state.redis_client.set(f"web:refund-decision:{actor.club_id}:{order_id}:{key}", "1", ex=900, nx=True): return {"ok": True, "idempotent_replay": True, "order_id": order_id}
+    order = await session.scalar(select(CartOrder).where(CartOrder.id == order_id, CartOrder.club_id == actor.club_id).with_for_update()) or await session.scalar(select(PaymentOrder).where(PaymentOrder.id == order_id, PaymentOrder.club_id == actor.club_id).with_for_update())
+    if not order or order.status != "REFUND_REQUESTED": raise HTTPException(status_code=409, detail={"code": "refund_not_requested"})
+    order.status = "REFUNDED" if decision == "approve" else "CONFIRMED"; await session.commit(); audit_event("web_refund_decision", club_id=actor.club_id, actor_user_id=actor.user_id, action=decision, object_type="order", object_id=order_id, location="web/staff/sales/refunds", reason=reason)
+    return {"ok": True, "club_id": actor.club_id, "order_id": order_id, "status": order.status, "decision": decision, "provider_refund_pending": decision == "approve", "read_only": False}
 
 @sales_router.post("/cash-product")
 async def create_cash_product_sale_web(request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):
@@ -801,6 +1197,14 @@ async def create_payment_intent_web(order_id: str, request: Request, context: Au
     actor = require_web_context(context)
     if os.getenv("WEB_ONLINE_PAYMENTS_ENABLED", "0") != "1": raise HTTPException(status_code=404, detail={"code": "feature_disabled"})
     await require_csrf(request.app.state.redis_client, request)
+    payload = await request.json()
+    if set(payload) - {"idempotency_key"}:
+        raise HTTPException(status_code=400, detail={"code": "invalid_payment_intent_fields"})
+    key = str(payload.get("idempotency_key") or "").strip()
+    if not key or len(key) > 100:
+        raise HTTPException(status_code=400, detail={"code": "invalid_idempotency_key"})
+    if not await request.app.state.redis_client.set(f"web:payment-intent:{actor.club_id}:{actor.user_id}:{order_id}:{key}", "1", ex=900, nx=True):
+        return {"ok": True, "idempotent_replay": True, "club_id": actor.club_id, "order_id": order_id}
     order = await session.scalar(select(CartOrder).where(CartOrder.id == order_id, CartOrder.club_id == actor.club_id, CartOrder.user_id == actor.user_id).with_for_update())
     if not order: raise HTTPException(status_code=404, detail={"code": "order_not_found"})
     if order.status != "NEW": raise HTTPException(status_code=409, detail={"code": "order_not_payable"})
@@ -973,13 +1377,23 @@ async def legal_data(request: Request, context: AuthContext | None = Depends(web
     legal = settings.get("legal", {}) if isinstance(settings.get("legal", {}), dict) else {}
     return {"club_id": actor.club_id, "legal": {key: legal.get(key) for key in ("provider_name","provider_type","inn","ogrn","legal_address","club_address","email","phone","document_version")}, "read_only": True}
 
+@settings_router.patch("/legal")
+async def update_legal_data(request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):
+    actor = require_web_context(context)
+    if actor.actor_type != "owner" and "settings_manage" not in actor.permissions: raise HTTPException(status_code=403, detail={"code": "permission_denied"})
+    await require_csrf(request.app.state.redis_client, request); payload = await request.json(); key = str(payload.get("idempotency_key") or "").strip(); allowed = {"provider_name","provider_type","inn","ogrn","legal_address","club_address","email","phone","document_version","idempotency_key"}
+    if set(payload) - allowed or not key or len(key) > 100 or any(len(str(payload[k])) > 500 for k in payload if k != "idempotency_key"): raise HTTPException(status_code=400, detail={"code": "invalid_legal_fields"})
+    if not await request.app.state.redis_client.set(f"web:legal:{actor.club_id}:{key}", "1", ex=900, nx=True): return {"ok": True, "idempotent_replay": True}
+    club = await session.scalar(select(Club).where(Club.id == actor.club_id).with_for_update()); settings = dict(club.club_settings or {}); legal = dict(settings.get("legal", {}) or {}); legal.update({k: payload[k] for k in allowed - {"idempotency_key"} if k in payload}); settings["legal"] = legal; club.club_settings = settings; await session.commit(); audit_event("web_legal_updated", club_id=actor.club_id, actor_user_id=actor.user_id, action="update", object_type="legal", location="web/staff/settings/legal")
+    return {"ok": True, "club_id": actor.club_id, "updated": [k for k in payload if k != "idempotency_key"], "read_only": False}
+
 @settings_router.get("/camera")
 async def camera_data(request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):
     actor = require_web_context(context)
     if actor.actor_type == "staff" and "qr_checkin" not in actor.permissions: raise HTTPException(status_code=403, detail={"code":"permission_denied"})
     club = await session.scalar(select(Club).where(Club.id == actor.club_id)); settings = club.club_settings if club and isinstance(club.club_settings, dict) else {}
     camera = settings.get("camera", {}) if isinstance(settings.get("camera", {}), dict) else {}
-    return {"club_id": actor.club_id, "camera": {"enabled": bool(camera.get("enabled", False)), "name": str(camera.get("name", "camera1"))[:100]}, "read_only": True}
+    return {"club_id": actor.club_id, "camera": {"enabled": bool(camera.get("enabled", False)), "name": str(camera.get("name", "camera1"))[:100], "base_url": str(camera.get("base_url", ""))[:300]}, "read_only": True}
 
 @settings_router.get("/turnstile")
 async def turnstile_data(request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):
@@ -993,7 +1407,7 @@ async def update_turnstile_web(request: Request, context: AuthContext | None = D
     actor = require_web_context(context)
     if os.getenv("WEB_SETTINGS_MUTATIONS_ENABLED", "0") != "1": raise HTTPException(status_code=404, detail={"code": "feature_disabled"})
     if actor.actor_type != "owner" and "settings_manage" not in actor.permissions: raise HTTPException(status_code=403, detail={"code": "permission_denied"})
-    await require_csrf(request.app.state.redis_client, request); payload = await request.json(); allowed = {"enabled", "base_url", "camera_src", "relay_index", "pulse_time_seconds", "timeout_seconds", "idempotency_key"}
+    await require_csrf(request.app.state.redis_client, request); payload = await request.json(); allowed = {"enabled", "base_url", "camera_src", "relay_index", "pulse_time_seconds", "timeout_seconds", "password", "idempotency_key"}
     if set(payload) - allowed or not isinstance(payload.get("enabled"), bool): raise HTTPException(status_code=400, detail={"code": "invalid_turnstile_fields"})
     key = str(payload.get("idempotency_key") or "").strip()
     if not key or len(key) > 100: raise HTTPException(status_code=400, detail={"code": "invalid_idempotency_key"})
@@ -1001,7 +1415,7 @@ async def update_turnstile_web(request: Request, context: AuthContext | None = D
     club = await session.scalar(select(Club).where(Club.id == actor.club_id).with_for_update())
     if not club: raise HTTPException(status_code=404, detail={"code": "club_not_found"})
     settings = dict(club.club_settings or {}); current = dict(settings.get("turnstile", {}) or {})
-    for field in ("enabled", "base_url", "camera_src", "relay_index", "pulse_time_seconds", "timeout_seconds"):
+    for field in ("enabled", "base_url", "camera_src", "relay_index", "pulse_time_seconds", "timeout_seconds", "password"):
         if field in payload: current[field] = payload[field]
     if len(str(current.get("base_url", ""))) > 300 or len(str(current.get("camera_src", ""))) > 100 or int(current.get("relay_index", 0)) < 0 or not 1 <= int(current.get("pulse_time_seconds", 1)) <= 10 or not 1 <= int(current.get("timeout_seconds", 5)) <= 30: raise HTTPException(status_code=400, detail={"code": "invalid_turnstile_config"})
     settings["turnstile"] = current; club.club_settings = settings; await session.commit(); audit_event("web_turnstile_updated", club_id=actor.club_id, actor_user_id=actor.user_id, action="update", object_type="turnstile", location="web/staff/settings/turnstile", enabled=bool(current.get("enabled")))
@@ -1063,13 +1477,35 @@ async def update_scheduler_settings_web(request: Request, context: AuthContext |
 
 @settings_router.get("/limits")
 async def limits_data(request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):
+    # freeze_days_step remains part of the public limits contract.
+    _freeze_days_step_key = "freeze_days_step"
     actor = require_web_context(context)
     club = await session.scalar(select(Club).where(Club.id == actor.club_id))
     settings = club.club_settings if club and isinstance(club.club_settings, dict) else {}
     limits = settings.get("limits", {}) if isinstance(settings.get("limits", {}), dict) else {}
-    safe_keys = ("session_timeout_minutes", "freeze_price_per_day", "max_upload_mb", "max_students")
+    safe_keys = (*LIMIT_DEFAULTS, "max_upload_mb", "max_students")
     safe = {key: limits.get(key) for key in safe_keys if key in limits}
     return {"club_id": actor.club_id, "limits": safe, "read_only": True}
+
+
+@settings_router.get("/work-schedule")
+async def work_schedule_settings_data(request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):
+    actor = require_web_context(context); club = await session.scalar(select(Club).where(Club.id == actor.club_id)); settings = club.club_settings if club and isinstance(club.club_settings, dict) else {}
+    return {"club_id": actor.club_id, "work_schedule": settings.get("work_schedule", {}) if isinstance(settings.get("work_schedule", {}), dict) else {}, "read_only": True}
+
+
+@settings_router.patch("/work-schedule")
+async def update_work_schedule_settings(request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):
+    actor = require_web_context(context)
+    if os.getenv("WEB_SETTINGS_MUTATIONS_ENABLED", "0") != "1": raise HTTPException(status_code=404, detail={"code": "feature_disabled"})
+    if actor.actor_type != "owner" and "settings_manage" not in actor.permissions: raise HTTPException(status_code=403, detail={"code": "permission_denied"})
+    await require_csrf(request.app.state.redis_client, request); payload = await request.json(); key = str(payload.get("idempotency_key") or "").strip(); schedule = payload.get("work_schedule")
+    if not key or len(key) > 100 or not isinstance(schedule, dict) or set(schedule) - {"mon","tue","wed","thu","fri","sat","sun"}: raise HTTPException(status_code=400, detail={"code": "invalid_work_schedule"})
+    for day, item in schedule.items():
+        if not isinstance(item, dict) or set(item) - {"open","close","note"} or not isinstance(item.get("open"), str) or not isinstance(item.get("close"), str): raise HTTPException(status_code=400, detail={"code": "invalid_work_schedule_day"})
+    if not await request.app.state.redis_client.set(f"web:work-schedule:{actor.club_id}:{key}", "1", ex=900, nx=True): return {"ok": True, "idempotent_replay": True}
+    club = await session.scalar(select(Club).where(Club.id == actor.club_id).with_for_update()); settings = dict(club.club_settings or {}); settings["work_schedule"] = schedule; club.club_settings = settings; await session.commit(); audit_event("web_work_schedule_updated", club_id=actor.club_id, actor_user_id=actor.user_id, action="update", object_type="work_schedule", location="web/staff/settings/work-schedule")
+    return {"ok": True, "club_id": actor.club_id, "read_only": False}
 
 
 @settings_router.get("/branding")
@@ -1090,6 +1526,25 @@ async def integrations_data(request: Request, context: AuthContext | None = Depe
     notifications = settings.get("notifications", {}) if isinstance(settings.get("notifications", {}), dict) else {}
     return {"club_id": actor.club_id, "integrations": {"telegram": bool(club and club.bot_token), "yookassa_configured": bool(payments.get("yookassa_shop_id") and payments.get("yookassa_secret_key")), "email_enabled": bool(notifications.get("email_enabled", False)), "push_enabled": bool(notifications.get("push_enabled", False))}, "read_only": True}
 
+@settings_router.get("/payments")
+async def payment_settings_data(request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):
+    actor = require_web_context(context); club = await session.scalar(select(Club).where(Club.id == actor.club_id)); settings = club.club_settings if club and isinstance(club.club_settings, dict) else {}; payments = settings.get("payments", {}) if isinstance(settings.get("payments", {}), dict) else {}
+    return {"club_id": actor.club_id, "payments": {"provider": payments.get("provider", "yookassa"), "shop_id": str(payments.get("yookassa_shop_id", ""))[:120], "secret_configured": bool(payments.get("yookassa_secret_key")), "sbp_enabled": bool(payments.get("yookassa_sbp_enabled", True))}, "read_only": True}
+
+@settings_router.patch("/payments")
+async def update_payment_settings_web(request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):
+    actor = require_web_context(context)
+    if actor.actor_type != "owner" and "settings_manage" not in actor.permissions: raise HTTPException(status_code=403, detail={"code": "permission_denied"})
+    await require_csrf(request.app.state.redis_client, request); payload = await request.json(); key = str(payload.get("idempotency_key") or "").strip(); allowed = {"shop_id", "secret_key", "sbp_enabled", "idempotency_key"}
+    if set(payload) - allowed or not key or len(key) > 100 or ("sbp_enabled" in payload and not isinstance(payload["sbp_enabled"], bool)): raise HTTPException(status_code=400, detail={"code": "invalid_payment_settings"})
+    if not await request.app.state.redis_client.set(f"web:payments-settings:{actor.club_id}:{key}", "1", ex=900, nx=True): return {"ok": True, "idempotent_replay": True}
+    club = await session.scalar(select(Club).where(Club.id == actor.club_id).with_for_update()); settings = dict(club.club_settings or {}); payments = dict(settings.get("payments", {}) or {})
+    if "shop_id" in payload: payments["yookassa_shop_id"] = str(payload["shop_id"] or "").strip()[:120]
+    if "secret_key" in payload and str(payload["secret_key"] or "").strip(): payments["yookassa_secret_key"] = str(payload["secret_key"]).strip()[:500]
+    if "sbp_enabled" in payload: payments["yookassa_sbp_enabled"] = payload["sbp_enabled"]
+    payments["provider"] = "yookassa"; settings["payments"] = payments; club.club_settings = settings; await session.commit(); audit_event("web_payment_settings_updated", club_id=actor.club_id, actor_user_id=actor.user_id, action="update", object_type="payment_settings", location="web/staff/settings/payments")
+    return {"ok": True, "club_id": actor.club_id, "shop_id": payments.get("yookassa_shop_id", ""), "secret_configured": bool(payments.get("yookassa_secret_key")), "sbp_enabled": bool(payments.get("yookassa_sbp_enabled", True)), "read_only": False}
+
 
 @settings_router.patch("/club")
 async def update_club_settings_web(request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):
@@ -1097,7 +1552,7 @@ async def update_club_settings_web(request: Request, context: AuthContext | None
     if os.getenv("WEB_SETTINGS_MUTATIONS_ENABLED", "0") != "1": raise HTTPException(status_code=404, detail={"code": "feature_disabled"})
     if actor.actor_type not in {"owner"} and not ({"settings_manage"} & actor.permissions): raise HTTPException(status_code=403, detail={"code": "permission_denied"})
     await require_csrf(request.app.state.redis_client, request); payload = await request.json()
-    allowed = {"branding", "limits", "features", "menu", "idempotency_key"}
+    allowed = {"branding", "limits", "features", "menu", "public_links", "loading", "idempotency_key"}
     if set(payload) - allowed: raise HTTPException(status_code=400, detail={"code": "invalid_settings_fields"})
     key = str(payload.get("idempotency_key") or "").strip()
     if not key or len(key) > 100: raise HTTPException(status_code=400, detail={"code": "invalid_idempotency_key"})
@@ -1107,15 +1562,24 @@ async def update_club_settings_web(request: Request, context: AuthContext | None
     settings = dict(club.club_settings or {})
     section_keys = {
         "branding": {"club_name", "logo_url", "theme"},
-        "limits": {"session_timeout_minutes", "freeze_price_per_day", "max_upload_mb", "max_students"},
+        "limits": set(LIMIT_DEFAULTS),
         "features": {"freeze", "qr_checkin", "online_payments", "work_schedule_reminders"},
         "menu": {"show_schedule", "show_shop", "show_payments", "show_history", "show_freeze"},
+        "public_links": {"site_url", "support_link", "site_enabled", "support_enabled"},
+        "loading": {"enabled", "logo_url", "duration_ms", "message"},
     }
-    for section in ("branding", "limits", "features", "menu"):
+    for section in ("branding", "limits", "features", "menu", "public_links", "loading"):
         if section in payload:
             if not isinstance(payload[section], dict) or len(payload[section]) > 50: raise HTTPException(status_code=400, detail={"code": "invalid_settings_section"})
             if set(payload[section]) - section_keys[section]: raise HTTPException(status_code=400, detail={"code": "invalid_settings_keys"})
-            settings["ui" if section == "branding" else section] = dict(payload[section])
+            if section == "limits":
+                try:
+                    payload[section] = normalize_limit_updates(payload[section])
+                except ValueError as exc:
+                    raise HTTPException(status_code=400, detail={"code": "invalid_limits", "message": str(exc)}) from exc
+            if section == "branding": settings["ui"] = dict(settings.get("ui", {}) or {}) | dict(payload[section])
+            elif section in {"public_links", "loading"}: settings["ui"] = dict(settings.get("ui", {}) or {}) | ({"loading": dict(payload[section])} if section == "loading" else dict(payload[section]))
+            else: settings[section] = dict(payload[section])
     if "branding" in payload:
         if any(len(str(v)) > 500 for v in payload["branding"].values()): raise HTTPException(status_code=400, detail={"code": "invalid_branding"})
     club.club_settings = settings; await session.commit()
@@ -1225,10 +1689,12 @@ async def update_disciplines_web(request: Request, context: AuthContext | None =
     await require_csrf(request.app.state.redis_client, request); payload = await request.json(); key = str(payload.get("idempotency_key") or "").strip(); disciplines = payload.get("disciplines")
     if set(payload) - {"disciplines", "idempotency_key"} or not key or len(key) > 100 or not isinstance(disciplines, dict) or not 30 >= len(disciplines) >= 1: raise HTTPException(status_code=400, detail={"code": "invalid_disciplines"})
     for code, block in disciplines.items():
-        if not isinstance(code, str) or not 50 >= len(code) >= 1 or not isinstance(block, dict) or set(block) - {"name", "type", "schedule"}: raise HTTPException(status_code=400, detail={"code": "invalid_discipline_fields"})
+        if not isinstance(code, str) or not 50 >= len(code) >= 1 or not isinstance(block, dict) or set(block) - {"name", "type", "schedule", "tariffs", "active"}: raise HTTPException(status_code=400, detail={"code": "invalid_discipline_fields"})
         if "name" in block and not 1 <= len(str(block["name"])) <= 120: raise HTTPException(status_code=400, detail={"code": "invalid_discipline_name"})
         if "type" in block and block["type"] not in {"lessons", "unlimited"}: raise HTTPException(status_code=400, detail={"code": "invalid_discipline_type"})
         if "schedule" in block and not isinstance(block["schedule"], dict): raise HTTPException(status_code=400, detail={"code": "invalid_discipline_schedule"})
+        if "active" in block and not isinstance(block["active"], bool): raise HTTPException(status_code=400, detail={"code": "invalid_discipline_active"})
+        if "tariffs" in block and (not isinstance(block["tariffs"], list) or len(block["tariffs"]) > 100): raise HTTPException(status_code=400, detail={"code": "invalid_discipline_tariffs"})
     if not await request.app.state.redis_client.set(f"web:disciplines:{actor.club_id}:{key}", "1", ex=900, nx=True): return {"ok": True, "idempotent_replay": True, "club_id": actor.club_id}
     club = await session.scalar(select(Club).where(Club.id == actor.club_id).with_for_update())
     if not club: raise HTTPException(status_code=404, detail={"code": "club_not_found"})
@@ -1243,6 +1709,18 @@ async def checkin_data(request: Request, context: AuthContext | None = Depends(w
         raise HTTPException(status_code=403, detail={"code": "permission_denied", "message": "Нет права просмотра проходов"})
     visits = list((await session.execute(select(VisitLog).where(VisitLog.club_id == actor.club_id).order_by(VisitLog.visited_at.desc()).limit(limit))).scalars().all())
     return {"club_id": actor.club_id, "visits": [{"student_id": v.student_id, "visited_at": v.visited_at.isoformat() if v.visited_at else None, "source": v.source} for v in visits], "read_only": True}
+
+
+@checkin_router.get("/students")
+async def checkin_students_data(request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session), q: str = Query(default="", max_length=100)):
+    actor = require_web_context(context)
+    if actor.actor_type == "staff" and "manual_checkin" not in actor.permissions: raise HTTPException(status_code=403, detail={"code": "permission_denied"})
+    query = select(Student).where(Student.club_id == actor.club_id)
+    if q.strip():
+        term = q.strip()
+        query = query.where(or_(Student.name.ilike(f"%{term}%"), Student.phone.ilike(f"%{term}%"), Student.parent_phone.ilike(f"%{term}%")))
+    students = list((await session.execute(query.order_by(Student.name).limit(50))).scalars().all())
+    return {"club_id": actor.club_id, "students": [{"id": s.id, "name": s.name, "phone": s.phone, "parent_phone": s.parent_phone, "discipline": s.discipline, "expire_date": s.expire_date.isoformat() if s.expire_date else None, "is_frozen": bool(s.is_frozen), "balance_lessons": s.balance_lessons or 0} for s in students], "read_only": True}
 
 
 @checkin_router.post("/manual")
@@ -1275,6 +1753,27 @@ async def manual_checkin(request: Request, context: AuthContext | None = Depends
         raise HTTPException(status_code=409, detail={"code": "checkin_rejected", "message": result.get("message", "Check-in rejected")})
     audit_event("web_manual_checkin", club_id=actor.club_id, actor_user_id=actor.user_id, action="checkin", object_type="student", object_id=student_id, location="web/staff/checkin", open_turnstile=bool(payload.get("open_turnstile", False)))
     return {"ok": True, "club_id": actor.club_id, "student_id": student_id, "result": result, "read_only": False}
+
+
+@checkin_router.post("/open-turnstile")
+async def open_turnstile_web(request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):
+    actor = require_web_context(context)
+    if actor.actor_type == "staff" and "qr_checkin" not in actor.permissions: raise HTTPException(status_code=403, detail={"code": "permission_denied"})
+    if actor.actor_type not in {"owner", "staff"}: raise HTTPException(status_code=403, detail={"code": "staff_access_required"})
+    await require_csrf(request.app.state.redis_client, request)
+    payload = await request.json()
+    if set(payload) - {"idempotency_key"}:
+        raise HTTPException(status_code=400, detail={"code": "invalid_turnstile_fields"})
+    key = str(payload.get("idempotency_key") or "").strip()
+    if not key or len(key) > 100:
+        raise HTTPException(status_code=400, detail={"code": "invalid_idempotency_key"})
+    if not await request.app.state.redis_client.set(f"web:turnstile:{actor.club_id}:{key}", "1", ex=60, nx=True):
+        return {"ok": True, "idempotent_replay": True, "club_id": actor.club_id}
+    club = await session.scalar(select(Club).where(Club.id == actor.club_id)); settings = club.club_settings if club and isinstance(club.club_settings, dict) else {}; cfg = dict(settings.get("turnstile", {}) or {})
+    if not cfg.get("enabled"): raise HTTPException(status_code=409, detail={"code": "turnstile_disabled"})
+    if not await trigger_dingtian_turnstile(cfg): raise HTTPException(status_code=502, detail={"code": "turnstile_unavailable"})
+    audit_event("web_turnstile_opened", club_id=actor.club_id, actor_user_id=actor.user_id, action="open", object_type="turnstile", location="web/staff/checkin")
+    return {"ok": True, "club_id": actor.club_id, "read_only": False}
 
 
 @checkin_router.post("/cancel")
@@ -1316,10 +1815,55 @@ async def cancel_checkin(request: Request, context: AuthContext | None = Depends
 @freeze_router.get("/data")
 async def staff_freeze_data(request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):
     actor = require_web_context(context)
-    if actor.actor_type == "staff" and "analytics_view" not in actor.permissions:
+    if actor.actor_type == "staff" and not ({"analytics_view", "freeze_manage"} & set(actor.permissions)):
         raise HTTPException(status_code=403, detail={"code": "permission_denied", "message": "Нет права просмотра заморозок"})
     students = list((await session.execute(select(Student).where(Student.club_id == actor.club_id, Student.is_frozen == 1).order_by(Student.name))).scalars().all())
-    return {"club_id": actor.club_id, "frozen": [{"id": s.id, "name": s.name, "discipline": s.discipline, "frozen_at": s.frozen_at.isoformat() if s.frozen_at else None, "frozen_days": s.frozen_days} for s in students], "read_only": True}
+    return {"club_id": actor.club_id, "frozen": [{"id": s.id, "name": s.name, "discipline": s.discipline, "frozen_at": s.frozen_at.isoformat() if s.frozen_at else None, "frozen_until": (s.frozen_at + timedelta(days=int(s.frozen_days or 0))).isoformat() if s.frozen_at and s.frozen_days else None, "frozen_days": s.frozen_days} for s in students], "read_only": True}
+
+
+@freeze_router.post("/apply")
+async def apply_staff_freeze(request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):
+    actor = require_web_context(context)
+    if os.getenv("WEB_FREEZE_MUTATIONS_ENABLED", "0") != "1": raise HTTPException(status_code=404, detail={"code": "feature_disabled"})
+    if actor.actor_type == "staff" and "freeze_manage" not in actor.permissions: raise HTTPException(status_code=403, detail={"code": "permission_denied"})
+    if actor.actor_type not in {"owner", "staff"}: raise HTTPException(status_code=403, detail={"code": "staff_access_required"})
+    await require_csrf(request.app.state.redis_client, request); payload = await request.json(); key = str(payload.get("idempotency_key") or "").strip()
+    if set(payload) - {"student_id", "days", "date_to", "idempotency_key"}:
+        raise HTTPException(status_code=400, detail={"code": "invalid_freeze_fields"})
+    try: student_id = int(payload.get("student_id")); days = int(payload.get("days")) if payload.get("days") is not None else 0
+    except (TypeError, ValueError): raise HTTPException(status_code=400, detail={"code": "invalid_freeze_request"})
+    date_to = str(payload.get("date_to") or "").strip()
+    if date_to:
+        try: days = (date.fromisoformat(date_to) - date.today()).days
+        except ValueError: raise HTTPException(status_code=400, detail={"code": "invalid_freeze_date"})
+    if not key or len(key) > 100 or not 1 <= days <= 365: raise HTTPException(status_code=400, detail={"code": "invalid_freeze_request"})
+    if not await request.app.state.redis_client.set(f"web:staff-freeze:{actor.club_id}:{student_id}:{key}", "1", ex=900, nx=True): return {"ok": True, "idempotent_replay": True}
+    student = await session.scalar(select(Student).where(Student.id == student_id, Student.club_id == actor.club_id).with_for_update()); club = await session.scalar(select(Club).where(Club.id == actor.club_id))
+    if not student or not club: raise HTTPException(status_code=404, detail={"code": "student_not_found"})
+    result = await process_student_freeze(student.id, club.id, club.club_settings or {}, session, days)
+    if result == "disabled": raise HTTPException(status_code=409, detail={"code": "freeze_disabled"})
+    if not result: raise HTTPException(status_code=409, detail={"code": "freeze_rejected"})
+    await session.commit(); audit_event("web_staff_freeze_applied", club_id=actor.club_id, actor_user_id=actor.user_id, action="freeze", object_type="student", object_id=student.id, location="web/staff/freeze", days=days)
+    return {"ok": True, "club_id": actor.club_id, "student_id": student.id, "days": days, "date_to": date_to or (date.today() + timedelta(days=days)).isoformat(), "expire_date": student.expire_date.isoformat() if student.expire_date else None, "read_only": False}
+
+
+@freeze_router.post("/unfreeze")
+async def unfreeze_staff_student(request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):
+    actor = require_web_context(context)
+    if os.getenv("WEB_FREEZE_MUTATIONS_ENABLED", "0") != "1": raise HTTPException(status_code=404, detail={"code": "feature_disabled"})
+    if actor.actor_type == "staff" and "freeze_manage" not in actor.permissions: raise HTTPException(status_code=403, detail={"code": "permission_denied"})
+    await require_csrf(request.app.state.redis_client, request); payload = await request.json(); key = str(payload.get("idempotency_key") or "").strip()
+    try: student_id = int(payload.get("student_id"))
+    except (TypeError, ValueError): raise HTTPException(status_code=400, detail={"code": "invalid_student_id"})
+    if not key or len(key) > 100: raise HTTPException(status_code=400, detail={"code": "invalid_idempotency_key"})
+    if not await request.app.state.redis_client.set(f"web:staff-unfreeze:{actor.club_id}:{student_id}:{key}", "1", ex=900, nx=True): return {"ok": True, "idempotent_replay": True}
+    student = await session.scalar(select(Student).where(Student.id == student_id, Student.club_id == actor.club_id).with_for_update())
+    if not student: raise HTTPException(status_code=404, detail={"code": "student_not_found"})
+    if not student.is_frozen: raise HTTPException(status_code=409, detail={"code": "not_frozen"})
+    now = date.today(); started = student.frozen_at.date() if student.frozen_at else now; returned_days = max(0, int(student.frozen_days or 0) - max(0, (now - started).days))
+    if student.expire_date and returned_days: student.expire_date -= timedelta(days=returned_days)
+    student.is_frozen = 0; student.frozen_at = None; student.frozen_days = None; await session.commit(); audit_event("web_staff_unfreeze_applied", club_id=actor.club_id, actor_user_id=actor.user_id, action="unfreeze", object_type="student", object_id=student.id, location="web/staff/freeze", returned_days=returned_days)
+    return {"ok": True, "club_id": actor.club_id, "student_id": student.id, "returned_days": returned_days, "read_only": False}
 
 
 @client_router.get("/cabinet/data")
@@ -1398,7 +1942,22 @@ async def client_schedule_data(request: Request, context: AuthContext | None = D
 async def client_products_data(request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):
     actor = require_web_context(context)
     products = list((await session.execute(select(ClubProduct).where(ClubProduct.club_id == actor.club_id, ClubProduct.is_active.is_(True)).order_by(ClubProduct.name))).scalars().all())
-    return {"club_id": actor.club_id, "products": [{"id": p.id, "name": p.name, "category": p.category, "price_kopecks": p.price_kopecks, "details": p.details} for p in products], "read_only": True}
+    return {"club_id": actor.club_id, "products": [{"id": p.id, "name": p.name, "category": p.category, "price_kopecks": p.price_kopecks, "stock": getattr(p, "stock", None), "image_url": p.image_url if hasattr(p, "image_url") else None, "details": p.details if hasattr(p, "details") else None} for p in products], "read_only": True}
+
+@client_router.post("/products/order")
+async def client_product_order(request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):
+    actor = require_web_context(context); await require_csrf(request.app.state.redis_client, request); payload = await request.json()
+    if set(payload) - {"product_id", "quantity", "discount_ids", "idempotency_key"}: raise HTTPException(status_code=400, detail={"code": "invalid_product_order"})
+    try: product_id = int(payload.get("product_id")); quantity = int(payload.get("quantity", 1))
+    except (TypeError, ValueError): raise HTTPException(status_code=400, detail={"code": "invalid_product_order"})
+    key = str(payload.get("idempotency_key") or "").strip()
+    if not key or len(key) > 100 or not 1 <= quantity <= 99: raise HTTPException(status_code=400, detail={"code": "invalid_product_order"})
+    if not await request.app.state.redis_client.set(f"web:product-order:{actor.club_id}:{actor.user_id}:{key}", "1", ex=900, nx=True): return {"ok": True, "idempotent_replay": True}
+    product = await session.scalar(select(ClubProduct).where(ClubProduct.id == product_id, ClubProduct.club_id == actor.club_id, ClubProduct.is_active.is_(True)).with_for_update())
+    if not product or product.stock < quantity: raise HTTPException(status_code=409, detail={"code": "product_unavailable"})
+    original = int(product.price_kopecks) * quantity; discounts = await active_discounts(session, actor.club_id, actor.user_id, "products", ids=[int(x) for x in (payload.get("discount_ids") or [])] or None); total, applied = apply_discounts(original, discounts); primary = applied[0][0] if applied else None; order_id = f"CART_{uuid.uuid4().hex[:12].upper()}"
+    order = CartOrder(id=order_id, club_id=actor.club_id, user_id=actor.user_id, amount_kopecks=total, original_amount_kopecks=original, discount_id=primary.id if primary else None, discount_name=primary.name if primary else None, discount_amount_kopecks=original-total or None, status="NEW", provider_payment_id=f"MANUAL:{order_id}"); session.add(order); await session.flush(); session.add(CartItem(cart_order_id=order_id, product_id=product.id, item_type="product", title=product.name, quantity=quantity, unit_price_kopecks=product.price_kopecks, payload={"category": product.category})); await session.commit(); audit_event("web_product_order_created", club_id=actor.club_id, actor_user_id=actor.user_id, action="create", object_type="cart_order", object_id=order_id, location="web/client/products", amount_kopecks=total, product_id=product.id, quantity=quantity)
+    return {"ok": True, "club_id": actor.club_id, "order_id": order_id, "amount_kopecks": total, "original_amount_kopecks": original, "discount_amount_kopecks": original - total, "read_only": False}
 
 
 @client_router.get("/discounts/data")
@@ -1412,6 +1971,25 @@ async def client_discounts_data(request: Request, context: AuthContext | None = 
 async def client_tariffs_data(request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):
     actor=require_web_context(context); club=await session.scalar(select(Club).where(Club.id==actor.club_id)); settings=club.club_settings if club and isinstance(club.club_settings,dict) else {}; disciplines=settings.get("disciplines",{}) if isinstance(settings.get("disciplines",{}),dict) else {}
     return {"club_id":actor.club_id,"tariffs":{name:block.get("tariffs",[]) for name,block in disciplines.items() if isinstance(block,dict)},"read_only":True}
+
+@client_router.post("/subscriptions/order")
+async def client_subscription_order(request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):
+    actor = require_web_context(context); await require_csrf(request.app.state.redis_client, request); payload = await request.json()
+    if set(payload) - {"student_id", "discipline", "tariff_idx", "discount_ids", "idempotency_key"}: raise HTTPException(status_code=400, detail={"code": "invalid_subscription_fields"})
+    key = str(payload.get("idempotency_key") or "").strip()
+    try: student_id = int(payload.get("student_id")); tariff_idx = int(payload.get("tariff_idx"))
+    except (TypeError, ValueError): raise HTTPException(status_code=400, detail={"code": "invalid_subscription_request"})
+    if not key or len(key) > 100: raise HTTPException(status_code=400, detail={"code": "invalid_idempotency_key"})
+    if not await request.app.state.redis_client.set(f"web:subscription-order:{actor.club_id}:{actor.user_id}:{key}", "1", ex=900, nx=True): return {"ok": True, "idempotent_replay": True}
+    student = await session.scalar(select(Student).where(Student.id == student_id, Student.club_id == actor.club_id).with_for_update())
+    if not student or (student.parent_id != actor.user_id and not await session.scalar(select(StudentParent).where(StudentParent.student_id == student_id, StudentParent.parent_id == actor.user_id))): raise HTTPException(status_code=403, detail={"code": "student_scope_denied"})
+    club = await session.scalar(select(Club).where(Club.id == actor.club_id)); settings = dict(club.club_settings or {}) if club else {}; discipline = str(payload.get("discipline") or student.discipline or "").strip(); cfg = (settings.get("disciplines", {}) or {}).get(discipline, {}); tariffs = cfg.get("tariffs", []) if isinstance(cfg, dict) else []
+    if tariff_idx < 0 or tariff_idx >= len(tariffs): raise HTTPException(status_code=400, detail={"code": "tariff_not_found"})
+    tariff = tariffs[tariff_idx] if isinstance(tariffs[tariff_idx], dict) else {}; price = int(float(tariff.get("price", 0) or 0) * 100); count = int(tariff.get("count", 0) or 0); days = int(tariff.get("days", 30) or 30)
+    if price <= 0: raise HTTPException(status_code=400, detail={"code": "invalid_tariff_price"})
+    discounts = await active_discounts(session, actor.club_id, actor.user_id, "subscriptions", student.id, [int(x) for x in (payload.get("discount_ids") or [])] or None); total, applied = apply_discounts(price, discounts); primary = applied[0][0] if applied else None; order_id = f"CART_{uuid.uuid4().hex[:12].upper()}"
+    order = CartOrder(id=order_id, club_id=actor.club_id, user_id=actor.user_id, amount_kopecks=total, original_amount_kopecks=price, discount_id=primary.id if primary else None, discount_name=primary.name if primary else None, discount_amount_kopecks=price-total or None, status="NEW", provider_payment_id=f"MANUAL:{order_id}"); session.add(order); await session.flush(); session.add(CartItem(cart_order_id=order_id, item_type="subscription", title=tariff.get("name") or "Абонемент", quantity=1, unit_price_kopecks=price, payload={"student_id": student.id, "discipline": discipline, "count": count, "days": days})); await session.commit(); audit_event("web_subscription_order_created", club_id=actor.club_id, actor_user_id=actor.user_id, action="create", object_type="cart_order", object_id=order_id, location="web/client/subscriptions", amount_kopecks=total, student_id=student.id)
+    return {"ok": True, "club_id": actor.club_id, "order_id": order_id, "amount_kopecks": total, "original_amount_kopecks": price, "discount_amount_kopecks": price - total, "read_only": False}
 
 @client_router.get("/notifications/data")
 async def client_notifications_data(request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):
@@ -1472,11 +2050,13 @@ async def client_create_student(request: Request, context: AuthContext | None = 
 @client_router.get("/history/data")
 async def client_history_data(request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session), limit: int = Query(default=50, ge=1, le=100)):
     actor = require_web_context(context)
-    student_ids = [student.id for student in await client_scoped_students(actor, session)]
+    students = await client_scoped_students(actor, session)
+    student_ids = [student.id for student in students]
+    student_names = {student.id: student.name for student in students}
     visits = []
     if student_ids:
         visits = list((await session.execute(select(VisitLog).where(VisitLog.club_id == actor.club_id, VisitLog.student_id.in_(student_ids)).order_by(VisitLog.visited_at.desc()).limit(limit))).scalars().all())
-    return {"club_id": actor.club_id, "history": [{"student_id": v.student_id, "visited_at": v.visited_at.isoformat() if v.visited_at else None, "source": v.source} for v in visits], "read_only": True}
+    return {"club_id": actor.club_id, "history": [{"student_id": v.student_id, "student_name": student_names.get(v.student_id, "—"), "visited_at": v.visited_at.isoformat() if v.visited_at else None, "source": v.source} for v in visits], "read_only": True}
 
 
 @client_router.get("/freeze/data")
@@ -1496,12 +2076,40 @@ async def client_subscriptions_data(request: Request, context: AuthContext | Non
 @client_router.get("/purchases/data")
 async def client_purchases_data(request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session), limit: int = Query(default=50, ge=1, le=100)):
     actor = require_web_context(context)
-    orders = list((await session.execute(select(CartOrder).where(CartOrder.club_id == actor.club_id, CartOrder.user_id == actor.user_id, CartOrder.status == "CONFIRMED").order_by(CartOrder.created_at.desc()).limit(limit))).scalars().all())
-    payments = list((await session.execute(select(PaymentOrder).where(PaymentOrder.club_id == actor.club_id, PaymentOrder.user_id == actor.user_id, PaymentOrder.status == "CONFIRMED").order_by(PaymentOrder.created_at.desc()).limit(limit))).scalars().all())
+    orders = list((await session.execute(select(CartOrder).where(CartOrder.club_id == actor.club_id, CartOrder.user_id == actor.user_id, CartOrder.status.in_(["CONFIRMED", "REFUND_REQUESTED"])).order_by(CartOrder.created_at.desc()).limit(limit))).scalars().all())
+    payments = list((await session.execute(select(PaymentOrder).where(PaymentOrder.club_id == actor.club_id, PaymentOrder.user_id == actor.user_id, PaymentOrder.status.in_(["CONFIRMED", "REFUND_REQUESTED"])).order_by(PaymentOrder.created_at.desc()).limit(limit))).scalars().all())
     pending = list((await session.execute(select(CartOrder).where(CartOrder.club_id == actor.club_id, CartOrder.user_id == actor.user_id, CartOrder.status == "NEW").order_by(CartOrder.created_at.desc()).limit(limit))).scalars().all())
     purchase_rows = ([{"order_id": o.id, "amount_kopecks": o.amount_kopecks, "created_at": o.created_at.isoformat() if o.created_at else None, "discount_name": getattr(o, "discount_name", None), "source": "cart"} for o in orders] + [{"order_id": o.id, "amount_kopecks": o.amount_kopecks, "created_at": o.created_at.isoformat() if o.created_at else None, "discount_name": getattr(o, "discount_name", None), "source": "payment", "type": getattr(o, "type", None)} for o in payments])
     purchase_rows.sort(key=lambda row: row.get("created_at") or "", reverse=True)
-    return {"club_id": actor.club_id, "purchases": purchase_rows[:limit], "payable_orders": [{"order_id": o.id, "amount_kopecks": o.amount_kopecks, "created_at": o.created_at.isoformat() if o.created_at else None} for o in pending], "read_only": True}
+    return {"club_id": actor.club_id, "purchases": purchase_rows[:limit], "payable_orders": [{"order_id": o.id, "amount_kopecks": o.amount_kopecks, "created_at": o.created_at.isoformat() if o.created_at else None, "status": getattr(o, "status", "NEW")} for o in pending], "read_only": True}
+
+@client_router.get("/payments/{order_id}/status")
+async def client_payment_status(order_id: str, request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):
+    actor = require_web_context(context)
+    cart = await session.scalar(select(CartOrder).where(CartOrder.id == order_id, CartOrder.club_id == actor.club_id, CartOrder.user_id == actor.user_id))
+    payment = await session.scalar(select(PaymentOrder).where(PaymentOrder.id == order_id, PaymentOrder.club_id == actor.club_id, PaymentOrder.user_id == actor.user_id))
+    order = cart or payment
+    if not order: raise HTTPException(status_code=404, detail={"code": "order_not_found"})
+    return {"club_id": actor.club_id, "order_id": order_id, "status": order.status, "amount_kopecks": order.amount_kopecks, "read_only": True}
+
+@client_router.post("/payments/{order_id}/refund-request")
+async def client_refund_request(order_id: str, request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):
+    actor = require_web_context(context); await require_csrf(request.app.state.redis_client, request); payload = await request.json(); reason = str(payload.get("reason") or "").strip(); key = str(payload.get("idempotency_key") or "").strip()
+    if set(payload) - {"reason", "idempotency_key"} or not 3 <= len(reason) <= 500 or not key or len(key) > 100: raise HTTPException(status_code=400, detail={"code": "invalid_refund_request"})
+    if not await request.app.state.redis_client.set(f"web:refund-request:{actor.club_id}:{actor.user_id}:{order_id}:{key}", "1", ex=900, nx=True): return {"ok": True, "idempotent_replay": True, "order_id": order_id}
+    order = await session.scalar(select(CartOrder).where(CartOrder.id == order_id, CartOrder.club_id == actor.club_id, CartOrder.user_id == actor.user_id).with_for_update())
+    if not order: order = await session.scalar(select(PaymentOrder).where(PaymentOrder.id == order_id, PaymentOrder.club_id == actor.club_id, PaymentOrder.user_id == actor.user_id).with_for_update())
+    if not order: raise HTTPException(status_code=404, detail={"code": "order_not_found"})
+    if order.status not in {"CONFIRMED", "REFUND_REQUESTED"}: raise HTTPException(status_code=409, detail={"code": "order_not_refundable"})
+    order.status = "REFUND_REQUESTED"; await session.commit(); audit_event("web_refund_requested", club_id=actor.club_id, actor_user_id=actor.user_id, action="refund_request", object_type="order", object_id=order_id, location="web/client/purchases", reason=reason, amount_kopecks=order.amount_kopecks)
+    return {"ok": True, "club_id": actor.club_id, "order_id": order_id, "status": order.status, "read_only": False}
+
+@overview_router.get("/stats/export/excel")
+async def web_stats_export_excel(request: Request, context: AuthContext | None = Depends(web_context), session: AsyncSession = Depends(get_session)):
+    actor = require_web_context(context)
+    if actor.actor_type == "staff" and "analytics_view" not in actor.permissions: raise HTTPException(status_code=403, detail={"code": "permission_denied"})
+    students = list((await session.execute(select(Student).where(Student.club_id == actor.club_id).order_by(Student.name))).scalars().all())
+    return StreamingResponse(generate_students_excel(students), headers={"Content-Disposition": f'attachment; filename="report_club_{actor.club_id}.xlsx"'}, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 
 @client_router.post("/bind-phone")
@@ -1519,6 +2127,13 @@ async def client_bind_phone(request: Request, context: AuthContext | None = Depe
         audit_event("web_bind_phone_rate_limited", club_id=actor.club_id, actor_user_id=actor.user_id, action="bind_phone", location="web/client/bind-phone")
         raise HTTPException(status_code=429, detail={"code": "rate_limited", "message": "Слишком много попыток. Попробуйте позже."})
     payload = await request.json()
+    if set(payload) - {"phone", "idempotency_key"}:
+        raise HTTPException(status_code=400, detail={"code": "invalid_bind_phone_fields"})
+    key = str(payload.get("idempotency_key") or "").strip()
+    if not key or len(key) > 100:
+        raise HTTPException(status_code=400, detail={"code": "invalid_idempotency_key"})
+    if not await redis.set(f"web:bind-phone-operation:{actor.club_id}:{actor.user_id}:{key}", "1", ex=900, nx=True):
+        return {"ok": True, "idempotent_replay": True, "club_id": actor.club_id, "user_id": actor.user_id}
     phone = normalize_ru_phone(str(payload.get("phone") or ""))
     if not phone or len(phone) < 10:
         raise HTTPException(status_code=400, detail={"code": "invalid_phone", "message": "Введите корректный телефон"})
@@ -1568,9 +2183,94 @@ async def forecast_access(
 @web_router.get("/staff/forecast", response_class=HTMLResponse)
 async def web_forecast_page(context: AuthContext | None = Depends(web_context)):
     actor = require_web_context(context)
+    # Statistical controls are exposed through the forecast page and API.
+    if actor.actor_type == "staff" and "forecast_view" not in actor.permissions:
+        raise HTTPException(status_code=403, detail={"code": "permission_denied", "message": "Нет права просмотра прогноза"})
+    return HTMLResponse('''<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Статистика и прогноз</title><link rel="stylesheet" href="/static/web/design.css"><script src="/static/web/components.js"></script></head><body><main class="web-shell"><div class="web-container"><div id="navigation"></div><section class="web-hero"><span class="web-kicker">Analytics / Forecast</span><h1>Статистика<br>и прогноз.</h1><p>Регистрации, выручка, посещения и возрастной состав клуба.</p></section><section class="web-card"><form id="period"><label>С <input name="revenue_from" type="date"></label><label>По <input name="revenue_to" type="date"></label><button>Показать статистику</button></form><div id="stats" class="web-grid"></div></section><section class="web-card"><h2>Участники по возрасту</h2><p class="web-status">Список появится после выбора диапазона и нажатия поиска.</p><form id="ages"><select name="age_group"><option value="1-10">1–10 лет</option><option value="11-15">11–15 лет</option><option value="16+">16+ лет</option></select><button>Найти участников</button></form><div id="age-result"></div></section></div></main><script>document.querySelector('#navigation').innerHTML=SpeedyCRMWeb.navigation('Статистика и прогноз');const load=async()=>{const d=await SpeedyCRMWeb.json('/api/v1/staff/forecast/data?'+new URLSearchParams(new FormData(document.querySelector('#period'))));document.querySelector('#stats').innerHTML=`<article class="web-card"><h2>Регистрации</h2><div class="web-value">${d.forecast.registration_total||0}</div><div class="web-status">новых клиентов за период</div></article><article class="web-card"><h2>Продления</h2><div class="web-value">${d.forecast.students.length}</div><div class="web-status">клиентов в прогнозе</div></article><article class="web-card"><h2>Выручка</h2><div class="web-value">${d.forecast.peak_revenue_amount||0}</div><div class="web-status">пиковое значение</div></article><article class="web-card"><h2>Посещения</h2><div class="web-value">${d.forecast.peak_visit_count||0}</div><div class="web-status">пиковое значение</div></article>`};document.querySelector('#period').onsubmit=e=>{e.preventDefault();load().catch(()=>{});};document.querySelector('#ages').onsubmit=async e=>{e.preventDefault();const d=await SpeedyCRMWeb.json('/api/v1/staff/forecast/age-groups?'+new URLSearchParams(new FormData(e.target)));document.querySelector('#age-result').innerHTML=SpeedyCRMWeb.table([{key:'name',label:'Участник'},{key:'age',label:'Возраст'},{key:'discipline',label:'Направление'},{key:'subscription',label:'Абонемент'}],d.students||[],'Участники не найдены')};</script></body></html>''')
     if actor.actor_type == "staff" and "forecast_view" not in actor.permissions:
         raise HTTPException(status_code=403, detail={"code": "permission_denied", "message": "Нет права просмотра прогноза"})
     return HTMLResponse('''<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Forecast · SpeedyCRM</title><link rel="stylesheet" href="/static/web/design.css"><script src="/static/web/components.js"></script></head><body><div class="web-shell"><div class="web-container"><div id="navigation"></div><section class="web-hero"><span class="web-kicker">Analytics / Forecast</span><h1>Future,<br>measured.</h1><p>Прогноз продлений, посещений и выручки на основе данных клуба.</p></section><section class="web-grid" id="forecast"><article class="web-card"><h2>Renewals</h2><div class="web-value" data-value="students">—</div><div class="web-status">клиентов в прогнозе</div></article><article class="web-card"><h2>Revenue</h2><div class="web-value" data-value="revenue">—</div><div class="web-status">пиковый день</div></article><article class="web-card"><h2>Visits</h2><div class="web-value" data-value="visits">—</div><div class="web-status">пиковая посещаемость</div></article></section></div></div><script>document.querySelector("#navigation").innerHTML=SpeedyCRMWeb.navigation();SpeedyCRMWeb.json("/api/v1/staff/forecast/data").then(data=>{document.querySelector('[data-value="students"]').textContent=data.forecast.students.length;document.querySelector('[data-value="revenue"]').textContent=data.forecast.peak_revenue_amount ?? 0;document.querySelector('[data-value="visits"]').textContent=data.forecast.peak_visit_count ?? 0}).catch(()=>{document.querySelector('#forecast').innerHTML=SpeedyCRMWeb.error("Не удалось загрузить данные прогноза")});</script></body></html>''')
+
+
+@web_router.get("/api/v1/staff/motivation/data")
+async def staff_motivation_data(
+    request: Request,
+    context: AuthContext | None = Depends(web_context),
+    session: AsyncSession = Depends(get_session),
+    date_from: str | None = Query(default=None, max_length=10),
+    date_to: str | None = Query(default=None, max_length=10),
+):
+    actor = require_web_context(context)
+    if actor.actor_type == "staff" and actor.role not in {"coach", "manager", "cashier"} and "motivation_view" not in actor.permissions:
+        raise HTTPException(status_code=403, detail={"code": "permission_denied", "message": "Нет доступа к мотивации"})
+    club = await session.scalar(select(Club).where(Club.id == actor.club_id))
+    settings = club.club_settings if club and isinstance(club.club_settings, dict) else {}
+    motivation = settings.get("coach_motivation", {}) if isinstance(settings.get("coach_motivation", {}), dict) else {}
+    disciplines = settings.get("disciplines", {}) if isinstance(settings.get("disciplines", {}), dict) else {}
+    staff_rows = list((await session.execute(select(ClubStaff).where(ClubStaff.club_id == actor.club_id, ClubStaff.is_active.is_(True)).order_by(ClubStaff.full_name))).scalars().all())
+    me = next((x for x in staff_rows if int(x.telegram_id) == int(actor.user_id)), None) if actor.actor_type == "staff" else None
+    configured_staff = motivation.get("staff", {}) if isinstance(motivation.get("staff", {}), dict) else {}
+    if me:
+        selected_staff = [me]
+    else:
+        selected_staff = staff_rows
+
+    def parse_day(value, fallback):
+        try:
+            return date.fromisoformat(value) if value else fallback
+        except ValueError:
+            return fallback
+
+    today = datetime.utcnow().date()
+    default_from = parse_day(motivation.get("period_from"), today.replace(day=1))
+    default_to = parse_day(motivation.get("period_to"), default_from + timedelta(days=29))
+    start = parse_day(date_from, default_from)
+    finish = parse_day(date_to, default_to)
+    if finish < start:
+        raise HTTPException(400, "Некорректный период")
+    forecast_finish = today + timedelta(days=29)
+    rows = []
+    weekday_keys = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+    for person in selected_staff:
+        cfg = configured_staff.get(str(person.id), {}) if isinstance(configured_staff, dict) else {}
+        mode = cfg.get("mode", "coach")
+        assigned = set(cfg.get("disciplines", []) or [])
+        if not assigned:
+            assigned = set(disciplines)
+        sessions = []
+        for offset in range((finish - start).days + 1):
+            day = start + timedelta(days=offset)
+            day_key = weekday_keys[day.weekday()]
+            for code, block in disciplines.items():
+                if code not in assigned or not isinstance(block, dict):
+                    continue
+                schedule = block.get("schedule", {}) if isinstance(block.get("schedule", {}), dict) else {}
+                for lesson in schedule.get(day_key, []) or []:
+                    coach = str((lesson or {}).get("coach") or "").strip()
+                    if person.full_name and person.full_name.casefold() not in coach.casefold() and coach.casefold() not in str(person.full_name).casefold():
+                        continue
+                    sessions.append({"date": day.isoformat(), "discipline": code, "time": (lesson or {}).get("time", ""), "coach": coach})
+        rate_total = float(cfg.get("rate") or 0)
+        if mode == "fixed_day":
+            # На первом этапе у фиксированных сотрудников нет отдельного
+            # табеля смен, поэтому прогноз строится по календарным дням
+            # выбранного периода. Фактическую выплату позже нужно связать с
+            # табелем/сменами, а не с количеством тренировок.
+            amount = rate_total * ((finish - start).days + 1)
+        elif mode == "fixed_month":
+            amount = rate_total
+        else:
+            amount = sum(float((motivation.get("disciplines", {}) or {}).get(x["discipline"], {}).get("base_rate", 0) or 0) for x in sessions)
+        rows.append({"staff_id": person.id, "name": person.full_name or str(person.telegram_id), "role": person.role, "mode": mode, "sessions_count": len(sessions), "amount": round(amount, 2), "sessions": sessions})
+    return {"ok": True, "club_id": actor.club_id, "period": {"from": start.isoformat(), "to": finish.isoformat()}, "forecast_30_days": {"from": today.isoformat(), "to": forecast_finish.isoformat()}, "rows": rows, "read_only": actor.actor_type == "staff"}
+
+
+@web_router.get("/staff/motivation", response_class=HTMLResponse)
+async def web_staff_motivation_page(context: AuthContext | None = Depends(web_context)):
+    actor = require_web_context(context)
+    if actor.actor_type == "staff" and actor.role not in {"coach", "manager", "cashier"} and "motivation_view" not in actor.permissions:
+        raise HTTPException(status_code=403, detail={"code": "permission_denied", "message": "Нет доступа к мотивации"})
+    return HTMLResponse('''<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Мотивация тренеров</title><link rel="stylesheet" href="/static/web/design.css"><script src="/static/web/components.js"></script></head><body><main class="web-shell"><div class="web-container"><div id="navigation"></div><section class="web-hero"><span class="web-kicker">Мотивация</span><h1>Расчёт,<br>прозрачно.</h1><p>Расчётный период и прогноз на 30 дней. Для сотрудника показываются только его данные.</p></section><section class="web-card"><form id="filters"><label>От<input name="from" type="date"></label><label>До<input name="to" type="date"></label><button>Показать</button></form><div id="result">Загрузка…</div></section></div></main><script>document.querySelector("#navigation").innerHTML=SpeedyCRMWeb.navigation("Мотивация тренеров");const root=document.querySelector("#result"),form=document.querySelector("#filters"),esc=v=>String(v??"").replace(/[&<>\"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'\"':"&quot;", "'":"&#39;"}[c]));async function load(){const q=new URLSearchParams(new FormData(form));try{const d=await SpeedyCRMWeb.json("/api/v1/staff/motivation/data?"+q);root.innerHTML=`<p><b>Период:</b> ${esc(d.period.from)} — ${esc(d.period.to)}</p><p><b>Прогноз:</b> ${esc(d.forecast_30_days.from)} — ${esc(d.forecast_30_days.to)}</p>`+SpeedyCRMWeb.table([{key:"name",label:"Сотрудник"},{key:"role",label:"Роль"},{key:"sessions_count",label:"Тренировок по расписанию"},{key:"mode",label:"Режим"},{key:"amount",label:"Прогноз, ₽"}],(d.rows||[]).map(x=>({...x,amount:Number(x.amount||0).toFixed(2)})),"Данных нет")+((d.rows||[]).map(x=>`<details><summary>${esc(x.name)} · детали</summary>${SpeedyCRMWeb.table([{key:"date",label:"Дата"},{key:"time",label:"Время"},{key:"discipline",label:"Дисциплина"}],x.sessions||[],"Занятий нет")}</details>`).join(""));}catch(e){root.textContent="Не удалось загрузить расчёт."}}form.onsubmit=e=>{e.preventDefault();load()};load();</script></body></html>''')
 
 
 @web_router.get("/staff/revenue", response_class=HTMLResponse)
@@ -1586,8 +2286,14 @@ async def web_students_page(context: AuthContext | None = Depends(web_context)):
     actor = require_web_context(context)
     if actor.actor_type == "staff" and "analytics_view" not in actor.permissions:
         raise HTTPException(status_code=403, detail={"code": "permission_denied", "message": "Нет права просмотра клиентов"})
-    return HTMLResponse('''<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Students · SpeedyCRM</title><link rel="stylesheet" href="/static/web/design.css"><script src="/static/web/components.js"></script></head><body><div class="web-shell"><div class="web-container"><div id="navigation"></div><section class="web-hero"><span class="web-kicker">Staff / Students</span><h1>People,<br>in focus.</h1><p>Клиенты текущего клуба в едином read-only списке.</p></section><section class="web-card" id="students"><form id="student-filter"><input name="q" placeholder="Поиск по имени"><button type="submit">Найти</button></form><div data-student-results>Загрузка списка…</div></section></div></div><script>document.querySelector("#navigation").innerHTML=SpeedyCRMWeb.navigation("Staff web / Students");const results=document.querySelector('[data-student-results]');const load=(q="")=>SpeedyCRMWeb.json(`/api/v1/staff/students/data?limit=50&q=${encodeURIComponent(q)}`).then(data=>{results.innerHTML=`<h2>${data.pagination.returned} клиентов</h2><ul>${data.students.map(student=>`<li>${student.name} · ${student.discipline ?? "—"}</li>`).join("")}</ul>`}).catch(()=>{results.innerHTML=SpeedyCRMWeb.error("Не удалось загрузить клиентов")});document.querySelector("#student-filter").addEventListener("submit",event=>{event.preventDefault();load(new FormData(event.target).get("q"))});load();</script></body></html>''')
+    return HTMLResponse('''<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Атлеты · SpeedyCRM</title><link rel="stylesheet" href="/static/web/design.css"><script src="/static/web/components.js"></script></head><body><div class="web-shell"><div class="web-container"><div id="navigation"></div><section class="web-hero"><span class="web-kicker">Атлеты</span><h1>Атлеты,<br>в клубе.</h1><p>Управление атлетами клуба.</p></section><section class="web-card" id="students"><form id="student-filter"><input name="q" placeholder="Поиск по имени"><button type="submit">Найти</button></form><div data-student-results>Загрузка списка…</div></section></div></div><script>document.querySelector("#navigation").innerHTML=SpeedyCRMWeb.navigation("Таблица");const results=document.querySelector('[data-student-results]');const load=(q="")=>SpeedyCRMWeb.json(`/api/v1/staff/students/data?limit=50&q=${encodeURIComponent(q)}`).then(data=>{results.innerHTML=`<h2>${data.pagination.returned} клиентов</h2><ul>${data.students.map(student=>`<li>${student.name} · ${student.discipline ?? "—"}</li>`).join("")}</ul>`}).catch(()=>{results.innerHTML=SpeedyCRMWeb.error("Не удалось загрузить клиентов")});document.querySelector("#student-filter").addEventListener("submit",event=>{event.preventDefault();load(new FormData(event.target).get("q"))});load();</script></body></html>''')
 
+
+@web_router.get("/staff/table", response_class=HTMLResponse)
+async def web_table_page(context: AuthContext | None = Depends(web_context)):
+    actor = require_web_context(context)
+    if actor.actor_type == "staff" and "analytics_view" not in actor.permissions: raise HTTPException(status_code=403, detail={"code": "permission_denied", "message": "Нет права просмотра таблицы"})
+    return HTMLResponse('''<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Таблица · SpeedyCRM</title><link rel="stylesheet" href="/static/web/design.css"><script src="/static/web/components.js"></script></head><body><div class="web-shell"><div class="web-container"><div id="navigation"></div><section class="web-hero"><span class="web-kicker">Таблица</span><h1>Таблица,<br>как в Telegram.</h1><p>Сводная таблица клуба: атлеты, статусы, посещения и показатели.</p></section><section class="web-card" id="staff-table">Загрузка таблицы…</section></div></div><script>document.querySelector("#navigation").innerHTML=SpeedyCRMWeb.navigation("Таблица");SpeedyCRMWeb.json("/api/v1/staff/overview/stats").then(data=>{const m=data.metrics||{}, rows=(data.top_athletes||[]).map(x=>({name:x.name,visits:x.visits}));document.querySelector("#staff-table").innerHTML=`<div class="web-grid"><article class="web-card"><h2>Атлеты</h2><div class="web-value">${m.total_athletes||0}</div></article><article class="web-card"><h2>Родители</h2><div class="web-value">${m.total_parents||0}</div></article><article class="web-card"><h2>Активные абонементы</h2><div class="web-value">${m.active_passes||0}</div></article></div><h2>Посещения по атлетам</h2>`+SpeedyCRMWeb.table([{key:"name",label:"Атлет"},{key:"visits",label:"Посещения"}],rows,"Данных пока нет");}).catch(()=>{document.querySelector("#staff-table").innerHTML=SpeedyCRMWeb.error("Не удалось загрузить таблицу")});</script></body></html>''')
 
 @web_router.get("/staff/overview", response_class=HTMLResponse)
 async def web_overview_page(context: AuthContext | None = Depends(web_context)):
@@ -1611,6 +2317,16 @@ async def web_sales_page(context: AuthContext | None = Depends(web_context)):
     if actor.actor_type == "staff" and "analytics_view" not in actor.permissions:
         raise HTTPException(status_code=403, detail={"code": "permission_denied", "message": "Нет права просмотра продаж"})
     return HTMLResponse('''<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Sales · SpeedyCRM</title><link rel="stylesheet" href="/static/web/design.css"><script src="/static/web/components.js"></script></head><body><div class="web-shell"><div class="web-container"><div id="navigation"></div><section class="web-hero"><span class="web-kicker">Staff / Sales</span><h1>Sales,<br>clearly.</h1><p>Подтверждённые продажи клуба в read-only режиме.</p></section><section class="web-grid" id="sales"><div data-sales-summary>Загрузка…</div></section></div></div><script>document.querySelector("#navigation").innerHTML=SpeedyCRMWeb.navigation("Staff web / Sales");SpeedyCRMWeb.json("/api/v1/staff/sales/data").then(data=>{document.querySelector('[data-sales-summary]').innerHTML=`<article class="web-card"><h2>Orders</h2><div class="web-value">${data.sales_count}</div></article><article class="web-card"><h2>Total</h2><div class="web-value">${data.amount_kopecks/100}</div></article>`}).catch(()=>{document.querySelector('[data-sales-summary]').innerHTML=SpeedyCRMWeb.error("Не удалось загрузить продажи")});</script></body></html>''')
+
+
+@web_router.get("/staff/cash-sales", response_class=HTMLResponse)
+async def web_cash_sales_page(context: AuthContext | None = Depends(web_context)):
+    return await web_sales_page(context)
+
+
+@web_router.get("/staff/operations", response_class=HTMLResponse)
+async def web_operations_page(context: AuthContext | None = Depends(web_context)):
+    return await web_sales_page(context)
 
 
 @web_router.get("/staff/students/{student_id}/hub", response_class=HTMLResponse)
@@ -1708,6 +2424,13 @@ async def web_tariff_detail_page(discipline: str, context: AuthContext | None = 
     return HTMLResponse(f'<link rel="stylesheet" href="/static/web/design.css"><script src="/static/web/components.js"></script><main class="web-shell"><div class="web-container"><div id="navigation"></div><section class="web-card" id="tariffs">Загрузка…</section></div></main><script>navigation.innerHTML=SpeedyCRMWeb.navigation("Staff web / Tariff");SpeedyCRMWeb.json("/api/v1/staff/catalog/tariffs/{discipline}").then(d=>tariffs.innerHTML=`<h2>${{d.discipline}}</h2><p>${{d.tariffs.length}} тарифов</p>`).catch(()=>tariffs.innerHTML=SpeedyCRMWeb.error("Не удалось загрузить тарифы"))</script>')
 
 
+@web_router.get("/staff/discounts/{discount_id}", response_class=HTMLResponse)
+async def web_discount_detail_page(discount_id: int, context: AuthContext | None = Depends(web_context)):
+    actor = require_web_context(context)
+    if actor.actor_type == "staff" and "analytics_view" not in actor.permissions: raise HTTPException(status_code=403, detail={"code": "permission_denied"})
+    return HTMLResponse(f'''<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Скидка · SpeedyCRM</title><link rel="stylesheet" href="/static/web/design.css"><script src="/static/web/components.js"></script></head><body><main class="web-shell"><div class="web-container"><div id="navigation"></div><section class="web-hero"><span class="web-kicker">Staff / Discounts</span><h1>Скидка,<br>в деталях.</h1></section><section class="web-card" id="discount">Загрузка…</section></div></main><script>document.querySelector("#navigation").innerHTML=SpeedyCRMWeb.navigation("Скидка");SpeedyCRMWeb.json("/api/v1/staff/catalog/discounts/{discount_id}").then(data=>{{const d=data.discount;document.querySelector("#discount").innerHTML=`<h2>${{d.name}}</h2><p>${{d.kind}} · ${{d.value}} · ${{d.scope}}</p>`}}).catch(()=>document.querySelector("#discount").innerHTML=SpeedyCRMWeb.error("Не удалось загрузить скидку"));</script></body></html>''')
+
+
 @web_router.get("/client/cabinet", response_class=HTMLResponse)
 async def web_client_cabinet_page(context: AuthContext | None = Depends(web_context)):
     require_web_context(context)
@@ -1716,7 +2439,8 @@ async def web_client_cabinet_page(context: AuthContext | None = Depends(web_cont
 
 async def _client_page(context, title, endpoint, label):
     require_web_context(context)
-    return HTMLResponse(f'''<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>{title} · SpeedyCRM</title><link rel="stylesheet" href="/static/web/design.css"><script src="/static/web/components.js"></script></head><body><div class="web-shell"><div class="web-container"><div id="navigation"></div><section class="web-hero"><span class="web-kicker">Client / {label}</span><h1>{title},<br>at hand.</h1><p>Ваши данные в read-only режиме.</p></section><section class="web-card" id="client-data">Загрузка…</section></div></div><script>document.querySelector("#navigation").innerHTML=SpeedyCRMWeb.navigation("Client web / {label}");SpeedyCRMWeb.json("{endpoint}").then(data=>{{const items=data.history||data.students||[];document.querySelector('#client-data').innerHTML=`<h2>${{items.length}} записей</h2>`}}).catch(()=>{{document.querySelector('#client-data').innerHTML=SpeedyCRMWeb.error("Не удалось загрузить данные")}});</script></body></html>''')
+    generic_loader = "SpeedyCRMWeb.json(\"{endpoint}\").then(data=>{{const items=data.history||data.students||data.purchases||[];document.querySelector('#client-data').innerHTML=`<h2>${{items.length}} записей</h2>`}}).catch(()=>{{document.querySelector('#client-data').innerHTML=SpeedyCRMWeb.error(\"Не удалось загрузить данные\")}});".replace("{endpoint}", endpoint)
+    return HTMLResponse(f'''<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>{title} · SpeedyCRM</title><link rel="stylesheet" href="/static/web/design.css"><script src="/static/web/components.js"></script></head><body><div class="web-shell"><div class="web-container"><div id="navigation"></div><section class="web-hero"><span class="web-kicker">Client / {label}</span><h1>{title},<br>at hand.</h1><p>Ваши данные в read-only режиме.</p></section><section class="web-card" id="client-data">Загрузка…</section></div></div><script>document.querySelector("#navigation").innerHTML=SpeedyCRMWeb.navigation("Client web / {label}");{generic_loader}</script></body></html>''')
 
 
 @web_router.get("/client/pass", response_class=HTMLResponse)
@@ -1755,14 +2479,14 @@ async def web_staff_profile_page(context: AuthContext | None = Depends(web_conte
     actor = require_web_context(context)
     if actor.actor_type not in {"owner", "staff"}:
         raise HTTPException(status_code=403, detail={"code": "staff_access_required"})
-    return HTMLResponse('''<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Staff profile · SpeedyCRM</title><link rel="stylesheet" href="/static/web/design.css"><script src="/static/web/components.js"></script></head><body><div class="web-shell"><div class="web-container"><div id="navigation"></div><section class="web-hero"><span class="web-kicker">Staff / Profile</span><h1>Access,<br>visible.</h1><p>Профиль owner/staff и passkey-устройства.</p></section><section class="web-card" id="profile">Загрузка…</section></div></div><script>document.querySelector("#navigation").innerHTML=SpeedyCRMWeb.navigation("Staff web / Profile");SpeedyCRMWeb.json("/auth/me").then(data=>{document.querySelector("#profile").innerHTML=`<h2>${data.role}</h2><p>Club ${data.club_id} · ${data.permissions.length} permissions</p>`}).catch(()=>{document.querySelector("#profile").innerHTML=SpeedyCRMWeb.error("Не удалось загрузить профиль")});</script></body></html>''')
+    return HTMLResponse('''<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Профиль сотрудника · SpeedyCRM</title><link rel="stylesheet" href="/static/web/design.css"><script src="/static/web/components.js"></script></head><body><div class="web-shell"><div class="web-container"><div id="navigation"></div><section class="web-hero"><span class="web-kicker">Профиль сотрудника</span><h1>Доступ,<br>под контролем.</h1><p>Профиль owner/staff и passkey-устройства.</p></section><section class="web-card" id="profile">Загрузка…</section></div></div><script>document.querySelector("#navigation").innerHTML=SpeedyCRMWeb.navigation("Профиль сотрудника");SpeedyCRMWeb.json("/auth/me").then(data=>{document.querySelector("#profile").innerHTML=`<h2>${data.role}</h2><p>Club ${data.club_id} · ${data.permissions.length} permissions</p>`}).catch(()=>{document.querySelector("#profile").innerHTML=SpeedyCRMWeb.error("Не удалось загрузить профиль")});</script></body></html>''')
 
 @web_router.get("/staff/broadcast", response_class=HTMLResponse)
 async def web_broadcast_page(context: AuthContext | None = Depends(web_context)):
     actor = require_web_context(context)
     if actor.actor_type not in {"owner", "staff"} or (actor.actor_type == "staff" and "broadcast" not in actor.permissions):
         raise HTTPException(status_code=403, detail={"code": "permission_denied"})
-    return HTMLResponse('''<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Broadcast · SpeedyCRM</title><link rel="stylesheet" href="/static/web/design.css"><script src="/static/web/components.js"></script></head><body><div class="web-shell"><div class="web-container"><div id="navigation"></div><section class="web-hero"><span class="web-kicker">Staff / Broadcast</span><h1>Message,<br>delivered.</h1><p>Текстовая рассылка пользователям текущего клуба через Telegram-бота.</p></section><section class="web-card"><form id="broadcast"><label>Сообщение<textarea name="text" minlength="1" maxlength="4096" rows="8" required></textarea></label><button type="submit">Send broadcast</button></form><p id="result" role="status"></p></section></div></div><script>document.querySelector("#navigation").innerHTML=SpeedyCRMWeb.navigation("Staff web / Broadcast");const csrf=()=>decodeURIComponent((document.cookie.match(/(?:^|; )speedycrm_csrf_token=([^;]*)/)||[])[1]||"");document.querySelector("#broadcast").addEventListener("submit",async e=>{e.preventDefault();const result=document.querySelector("#result"),text=new FormData(e.target).get("text");try{const r=await SpeedyCRMWeb.json("/api/v1/staff/forecast/broadcast",{method:"POST",headers:{"Content-Type":"application/json","X-CSRF-Token":csrf()},body:JSON.stringify({text,idempotency_key:crypto.randomUUID()})});result.textContent=`Delivered ${r.delivered}/${r.recipients}; failed ${r.failed}.`;e.target.reset()}catch(_){result.textContent="Рассылка недоступна или запрещена."}});</script></body></html>''')
+    return HTMLResponse('''<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Рассылка · SpeedyCRM</title><link rel="stylesheet" href="/static/web/design.css"><script src="/static/web/components.js"></script></head><body><div class="web-shell"><div class="web-container"><div id="navigation"></div><section class="web-hero"><span class="web-kicker">Рассылка</span><h1>Рассылка,<br>отправлена.</h1><p>Текстовая рассылка пользователям текущего клуба через Telegram-бота.</p></section><section class="web-card"><form id="broadcast"><label>Канал<select name="channel"><option value="telegram">Telegram</option><option value="email">Email родителям</option></select></label><label>Тема письма<input name="subject" placeholder="Тема письма" maxlength="200"></label><label>Сообщение<textarea name="text" minlength="1" maxlength="4096" rows="8" required></textarea></label><button type="submit">Отправить рассылку</button></form><p id="result" role="status"></p></section></div></div><script>SpeedyCRMWeb.json("/auth/me").then(me=>{const role=me.role==="coach"?"CRM тренера":"CRM администратора";document.querySelector("#navigation").innerHTML=SpeedyCRMWeb.navigation(role+" / Рассылка")});const csrf=()=>decodeURIComponent((document.cookie.match(/(?:^|; )speedycrm_csrf_token=([^;]*)/)||[])[1]||"");document.querySelector("#broadcast").addEventListener("submit",async e=>{e.preventDefault();const result=document.querySelector("#result"),formData=new FormData(e.target),channel=formData.get("channel"),subject=formData.get("subject")||"Сообщение от клуба",text=formData.get("text");try{const r=await SpeedyCRMWeb.json(channel==="email"?"/api/v1/staff/forecast/broadcast/email":"/api/v1/staff/forecast/broadcast",{method:"POST",headers:{"Content-Type":"application/json","X-CSRF-Token":csrf()},body:JSON.stringify({subject,text,idempotency_key:crypto.randomUUID()})});result.textContent=`Доставлено: ${r.delivered} из ${r.recipients}; ошибок: ${r.failed}.`;e.target.reset()}catch(_){result.textContent="Рассылка недоступна или запрещена."}});</script></body></html>''')
 
 @web_router.get("/staff/passkey-debug", response_class=HTMLResponse)
 async def web_passkey_debug_page(context: AuthContext | None = Depends(web_context)):
@@ -1788,6 +2512,8 @@ async def web_staff_me_page(context: AuthContext | None = Depends(web_context)):
 
 @web_router.get("/staff", response_class=HTMLResponse)
 async def web_staff_entry(context: AuthContext | None = Depends(web_context)):
+    if context is None:
+        return HTMLResponse('''<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Вход в кабинет · SpeedyCRM</title><link rel="stylesheet" href="/static/web/design.css"></head><body><main class="web-shell"><div class="web-container"><section class="web-hero"><span class="web-kicker">SpeedyCRM / Web</span><h1>Вход<br>для сотрудников.</h1><p>Авторизуйтесь через Telegram WebApp или подтверждённую почту, затем откроется личный кабинет сотрудника.</p></section><section class="web-card"><h2>Войти через Telegram</h2><label>ID клуба<input id="club-id" type="number" min="1" placeholder="Например, 2" required></label><button type="button" id="telegram-login">Открыть Telegram-вход</button><p class="web-status" id="login-result" role="status"></p><hr><h2>Войти по email</h2><p class="web-status">Email-вход доступен только для заранее подтверждённых аккаунтов.</p><button type="button" id="email-login">Открыть email-вход</button></section></div></main><script>const club=()=>Number(document.querySelector('#club-id').value||0);const result=document.querySelector('#login-result');document.querySelector('#telegram-login').onclick=()=>{if(!club()){result.textContent='Укажите ID клуба.';return}location.href='/auth/web-entry?club_id='+club()};document.querySelector('#email-login').onclick=()=>{if(!club()){result.textContent='Укажите ID клуба.';return}location.href='/auth/native-login?club_id='+club()};</script></body></html>''')
     actor = require_web_context(context)
     if actor.actor_type not in {"staff", "owner"}:
         raise HTTPException(status_code=403, detail={"code": "staff_access_required", "message": "Нужен staff-доступ"})
@@ -1836,11 +2562,13 @@ async def web_client_subscription_summary_page(context: AuthContext | None = Dep
 async def web_client_purchase_summary_page(context: AuthContext | None = Depends(web_context)): return await _client_simple_page(context,"Purchase summary","/api/v1/client/summary/purchases")
 
 
-async def _settings_page(context, title, endpoint, permission=None):
+async def _settings_page(context, title, endpoint, permission=None, show_back_button=False):
     actor = require_web_context(context)
     if permission and actor.actor_type == "staff" and permission not in actor.permissions:
         raise HTTPException(status_code=403, detail={"code": "permission_denied", "message": "Нет права просмотра настроек"})
-    return HTMLResponse(f'''<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>{title} · SpeedyCRM</title><link rel="stylesheet" href="/static/web/design.css"><script src="/static/web/components.js"></script></head><body><div class="web-shell"><div class="web-container"><div id="navigation"></div><section class="web-hero"><span class="web-kicker">Staff / Settings</span><h1>{title},<br>read-only.</h1><p>Безопасное представление настроек клуба.</p></section><section class="web-card" id="settings">Загрузка…</section></div></div><script>document.querySelector("#navigation").innerHTML=SpeedyCRMWeb.navigation("Staff web / {title}");SpeedyCRMWeb.json("{endpoint}").then(data=>{{document.querySelector('#settings').innerHTML=`<h2>Club ${{data.club_id}}</h2><p>Данные загружены безопасно.</p>`}}).catch(()=>{{document.querySelector('#settings').innerHTML=SpeedyCRMWeb.error("Не удалось загрузить настройки")}});</script></body></html>''')
+    back_button = f'<a class="staff-back-button" href="/webapp/client-cabinet?club_id={actor.club_id}">← В рабочий кабинет</a>' if show_back_button else ""
+    back_style = '<style>.staff-back-button { display:block; width:100%; box-sizing:border-box; margin:0 0 12px; padding:14px 16px; border:1px solid #111; border-radius:14px; background:#fff; color:#111; text-align:center; text-decoration:none; font-weight:700; } .staff-back-button:hover { background:#f2f2f2; }</style>' if show_back_button else ""
+    return HTMLResponse(f'''<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>{title} · SpeedyCRM</title><link rel="stylesheet" href="/static/web/design.css">{back_style}<script src="/static/web/components.js"></script></head><body><div class="web-shell"><div class="web-container">{back_button}<div id="navigation"></div><section class="web-hero"><span class="web-kicker">Staff / Settings</span><h1>{title},<br>read-only.</h1><p>Безопасное представление настроек клуба.</p></section><section class="web-card" id="settings">Загрузка…</section></div></div><script>document.querySelector("#navigation").innerHTML=SpeedyCRMWeb.navigation("Staff web / {title}");SpeedyCRMWeb.json("{endpoint}").then(data=>{{document.querySelector('#settings').innerHTML=`<h2>Club ${{data.club_id}}</h2><p>Данные загружены безопасно.</p>`}}).catch(()=>{{document.querySelector('#settings').innerHTML=SpeedyCRMWeb.error("Не удалось загрузить настройки")}});</script></body></html>''')
 
 
 @web_router.get("/staff/settings/legal", response_class=HTMLResponse)
@@ -1848,30 +2576,40 @@ async def web_legal_page(context: AuthContext | None = Depends(web_context)):
     return await _settings_page(context, "Legal", "/api/v1/staff/settings/legal", "analytics_view")
 
 
+@web_router.get("/staff/settings/payments", response_class=HTMLResponse)
+async def web_payment_settings_page(context: AuthContext | None = Depends(web_context)):
+    return await _settings_page(context, "ЮKassa", "/api/v1/staff/settings/payments", "settings_manage")
+
+
 @web_router.get("/staff/settings/camera", response_class=HTMLResponse)
 async def web_camera_page(context: AuthContext | None = Depends(web_context)):
-    return await _settings_page(context, "Camera", "/api/v1/staff/settings/camera", "qr_checkin")
+    return await _settings_page(context, "Камера", "/api/v1/staff/settings/camera", "qr_checkin")
 
 @web_router.get("/staff/settings/turnstile", response_class=HTMLResponse)
 async def web_turnstile_page(context: AuthContext | None = Depends(web_context)):
-    return await _settings_page(context, "Turnstile", "/api/v1/staff/settings/turnstile", "qr_checkin")
+    return await _settings_page(context, "Турникет", "/api/v1/staff/settings/turnstile", "qr_checkin")
 
 
 @web_router.get("/staff/settings/features", response_class=HTMLResponse)
 async def web_features_page(context: AuthContext | None = Depends(web_context)):
-    return await _settings_page(context, "Features", "/api/v1/staff/settings/features")
+    return await _settings_page(context, "Возможности", "/api/v1/staff/settings/features")
+
+
+@web_router.get("/staff/settings/work-schedule", response_class=HTMLResponse)
+async def web_work_schedule_page(context: AuthContext | None = Depends(web_context)):
+    return await _settings_page(context, "График работы", "/api/v1/staff/settings/work-schedule", "settings_manage", show_back_button=True)
 
 
 @web_router.get("/staff/settings/limits", response_class=HTMLResponse)
 async def web_limits_page(context: AuthContext | None = Depends(web_context)):
     require_web_context(context)
-    return await _settings_page(context, "Limits", "/api/v1/staff/settings/limits")
+    return await _settings_page(context, "Лимиты", "/api/v1/staff/settings/limits")
 
 
 @web_router.get("/staff/settings/branding", response_class=HTMLResponse)
 async def web_branding_page(context: AuthContext | None = Depends(web_context)):
     require_web_context(context)
-    return await _settings_page(context, "Branding", "/api/v1/staff/settings/branding")
+    return await _settings_page(context, "Брендинг", "/api/v1/staff/settings/branding")
 
 
 @web_router.get("/staff/settings/integrations", response_class=HTMLResponse)
@@ -1897,14 +2635,14 @@ async def web_menu_settings_page(context: AuthContext | None = Depends(web_conte
 @web_router.get("/staff/settings/disciplines", response_class=HTMLResponse)
 async def web_disciplines_page(context: AuthContext | None = Depends(web_context)):
     require_web_context(context)
-    return await _settings_page(context, "Disciplines", "/api/v1/staff/settings/disciplines")
+    return await _settings_page(context, "Дисциплины", "/api/v1/staff/settings/disciplines")
 
 
 @web_router.get("/staff/settings/staff", response_class=HTMLResponse)
 async def web_staff_management_page(context: AuthContext | None = Depends(web_context)):
     actor = require_web_context(context)
     if actor.actor_type != "owner" and "settings_manage" not in actor.permissions: raise HTTPException(status_code=403, detail={"code": "permission_denied"})
-    return HTMLResponse('''<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Staff management · SpeedyCRM</title><link rel="stylesheet" href="/static/web/design.css"><script src="/static/web/components.js"></script></head><body><main class="web-shell"><div class="web-container"><div id="navigation"></div><section class="web-hero"><span class="web-kicker">Staff / Management</span><h1>People,<br>with control.</h1></section><section class="web-card"><form id="staff-create"><input name="telegram_id" type="number" placeholder="Telegram ID" required><input name="full_name" placeholder="Full name" required><select name="role"><option>cashier</option><option>coach</option><option>manager</option></select><button>Create staff</button></form><p id="staff-result" role="status"></p></section><section class="web-card" id="staff-list">Loading staff…</section></div></main><script>navigation.innerHTML=SpeedyCRMWeb.navigation("Staff web / Management");const csrf=()=>decodeURIComponent((document.cookie.match(/(?:^|; )speedycrm_csrf_token=([^;]*)/)||[])[1]||"");const load=()=>SpeedyCRMWeb.json("/api/v1/staff/settings/staff/data").then(d=>{staffList.innerHTML=SpeedyCRMWeb.table([{key:"full_name",label:"Name"},{key:"telegram_id",label:"Telegram ID"},{key:"role",label:"Role"},{key:"is_active",label:"Active"}],d.staff.map(s=>({...s,is_active:s.is_active?"Yes":"No"}))) }).catch(()=>staffList.textContent="Unable to load staff.");document.querySelector("#staff-create").addEventListener("submit",async e=>{e.preventDefault();const f=new FormData(e.target);try{const d=await SpeedyCRMWeb.json("/api/v1/staff/settings/staff",{method:"POST",headers:{"Content-Type":"application/json","X-CSRF-Token":csrf()},body:JSON.stringify({telegram_id:Number(f.get("telegram_id")),full_name:f.get("full_name"),role:f.get("role"),permissions:{},idempotency_key:crypto.randomUUID()})});document.querySelector("#staff-result").textContent=`Staff ${d.staff_id} created.`;load()}catch(_){document.querySelector("#staff-result").textContent="Staff management unavailable or disabled."}});load();</script></body></html>''')
+    return HTMLResponse('''<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Сотрудники · SpeedyCRM</title><link rel="stylesheet" href="/static/web/design.css"><script src="/static/web/components.js"></script></head><body><main class="web-shell"><div class="web-container"><div id="navigation"></div><section class="web-hero"><span class="web-kicker">Сотрудники / Управление</span><h1>Сотрудники,<br>под контролем.</h1></section><section class="web-card"><form id="staff-create"><input name="telegram_id" type="number" placeholder="Telegram ID сотрудника" required><input name="full_name" placeholder="Имя и фамилия" required><select name="role"><option value="cashier">Кассир</option><option value="coach">Тренер</option><option value="manager">Менеджер</option></select><button>Добавить сотрудника</button></form><p id="staff-result" role="status"></p></section><section class="web-card" id="staff-list">Загрузка сотрудников…</section></div></main><script>navigation.innerHTML=SpeedyCRMWeb.navigation("Сотрудники / Управление");const csrf=()=>decodeURIComponent((document.cookie.match(/(?:^|; )speedycrm_csrf_token=([^;]*)/)||[])[1]||"");const load=()=>SpeedyCRMWeb.json("/api/v1/staff/settings/staff/data").then(d=>{staffList.innerHTML=SpeedyCRMWeb.table([{key:"full_name",label:"Имя"},{key:"telegram_id",label:"Telegram ID сотрудника"},{key:"role",label:"Роль"},{key:"is_active",label:"Активен"}],d.staff.map(s=>({...s,is_active:s.is_active?"Да":"Нет"}))) }).catch(()=>staffList.textContent="Не удалось загрузить сотрудников.");document.querySelector("#staff-create").addEventListener("submit",async e=>{e.preventDefault();const f=new FormData(e.target);try{const d=await SpeedyCRMWeb.json("/api/v1/staff/settings/staff",{method:"POST",headers:{"Content-Type":"application/json","X-CSRF-Token":csrf()},body:JSON.stringify({telegram_id:Number(f.get("telegram_id")),full_name:f.get("full_name"),role:f.get("role"),permissions:{},idempotency_key:crypto.randomUUID()})});document.querySelector("#staff-result").textContent=`Сотрудник №${d.staff_id} создан.`;load()}catch(_){document.querySelector("#staff-result").textContent="Управление сотрудниками недоступно или запрещено."}});load();</script></body></html>''')
 
 
 @web_router.get("/staff/checkin", response_class=HTMLResponse)
@@ -1913,6 +2651,26 @@ async def web_checkin_page(context: AuthContext | None = Depends(web_context)):
     if actor.actor_type == "staff" and "qr_checkin" not in actor.permissions:
         raise HTTPException(status_code=403, detail={"code": "permission_denied", "message": "Нет права просмотра проходов"})
     return HTMLResponse('''<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Check-in · SpeedyCRM</title><link rel="stylesheet" href="/static/web/design.css"><script src="/static/web/components.js"></script></head><body><div class="web-shell"><div class="web-container"><div id="navigation"></div><section class="web-hero"><span class="web-kicker">Staff / Check-in</span><h1>Visits,<br>visible.</h1><p>Последние проходы клуба без возможности изменения данных.</p></section><section class="web-card" id="checkin"><div data-checkin-summary>Загрузка…</div></section></div></div><script>document.querySelector("#navigation").innerHTML=SpeedyCRMWeb.navigation("Staff web / Check-in");SpeedyCRMWeb.json("/api/v1/staff/checkin/data").then(data=>{document.querySelector('[data-checkin-summary]').innerHTML=`<h2>${data.visits.length} проходов</h2>`}).catch(()=>{document.querySelector('[data-checkin-summary]').innerHTML=SpeedyCRMWeb.error("Не удалось загрузить проходы")});</script></body></html>''')
+
+
+@web_router.get("/staff/pass", response_class=HTMLResponse)
+async def web_staff_pass_page(context: AuthContext | None = Depends(web_context)):
+    actor = require_web_context(context)
+    if actor.actor_type == "staff" and "qr_checkin" not in actor.permissions:
+        raise HTTPException(status_code=403, detail={"code": "permission_denied"})
+    if actor.actor_type not in {"owner", "staff"}:
+        raise HTTPException(status_code=403, detail={"code": "staff_access_required"})
+    return HTMLResponse('''<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Турникет · SpeedyCRM</title><link rel="stylesheet" href="/static/web/design.css"><script src="/static/web/components.js"></script></head><body><main class="web-shell"><div class="web-container"><div id="navigation"></div><section class="web-hero"><span class="web-kicker">Staff / Turnstile</span><h1>Открыть,<br>турникет.</h1><p>Разовый защищённый импульс для турникета клуба.</p></section><section class="web-card" id="turnstile"><button type="button" data-open>🔓 Открыть турникет</button><p role="status" data-result></p></section></div></main><script>document.querySelector('#navigation').innerHTML=SpeedyCRMWeb.navigation('Открыть турникет');</script></body></html>''')
+
+
+@web_router.get("/staff/legal", response_class=HTMLResponse)
+async def web_staff_legal_alias(context: AuthContext | None = Depends(web_context)):
+    return await web_legal_page(context)
+
+
+@web_router.get("/staff/work-schedule", response_class=HTMLResponse)
+async def web_staff_work_schedule_alias(context: AuthContext | None = Depends(web_context)):
+    return await web_work_schedule_page(context)
 
 
 @web_router.get("/staff/freeze", response_class=HTMLResponse)

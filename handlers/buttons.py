@@ -57,6 +57,12 @@ def get_profile_keyboard(user, club_id: int, club_settings: dict, is_authorized:
             types.InlineKeyboardButton(text="💳 Абонемент", callback_data="choose_section"),
         )
 
+    if not is_staff_mode:
+        builder.row(types.InlineKeyboardButton(
+            text="🔐 Привязать Web-кабинет",
+            web_app=WebAppInfo(url=f"{base_url}/auth/web-bind?club_id={club_id}")
+        ))
+
     # 2. Дополнительные данные атлетов
     if missing_birthdays and missing_birthdays > 0:
         birthday_label = f"📅 Атлеты без ДР ({missing_birthdays}) — заполнить"
@@ -280,7 +286,7 @@ def discipline(club_settings: dict):
     # Рисуем т4607016282459
     # олько те кнопки, которые АКТИВНЫ в этом клубе
     for code, info in disciplines.items():
-        if info.get("active"):
+        if info.get("active", True):
             builder.row(types.InlineKeyboardButton(
                 text=f"🥋 {info['name']}",
                 callback_data=f"buy_{code}"
@@ -299,6 +305,8 @@ def get_pay_options_kb(discipline_cfg: dict, sport_type: str) -> types.InlineKey
     d_type = discipline_cfg.get("type", "lessons")
 
     for idx, tariff in enumerate(tariffs):
+        if not tariff.get("active", True):
+            continue
         price = tariff.get("price")
         days = tariff.get("days")
         count = tariff.get("count")

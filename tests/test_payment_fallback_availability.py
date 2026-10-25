@@ -47,3 +47,12 @@ def test_bot_removes_online_buttons_but_keeps_manual_requisites_fallback():
     assert '"pay_method_sbp_yookassa"' in source
     assert '"pay_method_official"' in source
     assert '"pay_method_sbp"' in source
+
+
+def test_server_rechecks_disabled_online_methods_and_preserves_manual_cart_path():
+    api = (ROOT / "admin_module/api.py").read_text(encoding="utf-8")
+    bot = (ROOT / "handlers/payments.py").read_text(encoding="utf-8")
+    assert 'payment_method in {"bank_card", "sbp"} and not payment_modes["online"]' in api
+    assert 'F.data.in_({\'pay_method_official\', \'pay_method_official_force_new\'})' in bot
+    assert bot.count('Онлайн-оплата отключена администратором') >= 3
+    assert 'payment_method == "requisites"' in api

@@ -12,6 +12,7 @@ from handlers.buttons import admin_keyboard, get_profile_keyboard
 from admin_module.utils import is_staff_or_owner
 from database.db import User, Student, StudentParent, Club
 from services.audit import audit_event
+from services.legal_documents import legal_documents_enabled
 
 router = Router()
 
@@ -93,7 +94,7 @@ async def start_handler(
         await session.commit()
 
     # 2. ПРОВЕРКА ЮРИДИЧЕСКОГО СОГЛАСИЯ
-    if not db_user.is_accepted:
+    if not db_user.is_accepted and legal_documents_enabled(club_settings):
         base_url = f"https://{club_id}.speedycrm.ru"
 
         inline_builder = InlineKeyboardBuilder()

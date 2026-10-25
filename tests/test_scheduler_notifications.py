@@ -43,6 +43,16 @@ def test_scheduler_has_all_required_client_notification_flows():
     assert "scheduler.add_job(send_stock_reminder_notice, 'cron', hour=18, minute=0, args=['pm']" in main_source
 
 
+def test_club_saas_expiry_reminders_use_7_4_2_days_and_payment_button():
+    source = (ROOT / "services" / "scheduler_jobs.py").read_text(encoding="utf-8")
+    main_source = (ROOT / "main.py").read_text(encoding="utf-8")
+    assert "async def send_club_subscription_expiry_reminders" in source
+    assert "days_left not in {7, 4, 2}" in source
+    assert "notify:club-saas-expiry:" in source
+    assert 'callback_data="pay_menu"' in source
+    assert "club_saas_expiry_reminders" in main_source
+
+
 def test_expiring_scheduler_requires_real_active_subscription():
     source = (ROOT / "database" / "db.py").read_text(encoding="utf-8")
     assert "Student.parent_id.is_not(None)" in source
@@ -75,6 +85,17 @@ def test_scheduled_reports_and_work_schedule_notifications_are_duplicate_safe():
     assert "notify:daily-report:" in source
     assert "notify:work-schedule:" in source
     assert "if notification_key:" in source
+
+
+def test_discount_lifecycle_notifies_start_expiry_and_student_assignments():
+    source = (ROOT / "services" / "scheduler_jobs.py").read_text(encoding="utf-8")
+    views = (ROOT / "admin_module" / "webapp_views.py").read_text(encoding="utf-8")
+    assert "notify:discount-started:" in source
+    assert "notify:discount-expired:" in source
+    assert "get_student_parent_ids(student.id, session)" in source
+    assert "_discount_staff_recipients" in source
+    assert "discount.starts_at > date.today()" in views
+    assert "начнёт действовать с" in views
 
 
 def test_user_schedule_webapp_has_day_keys_and_client_auth():

@@ -26,6 +26,7 @@ import asyncio
 from loguru import logger
 from services.input_normalization import normalize_ru_phone, parse_user_date
 from services.staff_permissions import permissions_for_staff
+from services.broadcast import resolve_broadcast_recipients
 from services.audit import audit_event
 from handlers.admin_students import router as admin_students_router
 from handlers.admin_settings_panel import (
@@ -213,14 +214,9 @@ async def process_broadcast(message: types.Message, state: FSMContext, session: 
     if not (is_owner or is_super_admin or (staff and "broadcast" in permissions_for_staff(staff))):
         await state.clear()
         return await message.answer("Доступ запрещён")
-    # 1. Берем юзеров ТОЛЬКО этого клуба
-    stmt = select(User.user_id).where(User.club_id == club.id)
-    result = await session.execute(stmt)
-    user_ids = {int(user_id) for user_id in result.scalars().all() if user_id}
-    linked = await session.execute(
-        select(StudentParent.parent_id).join(Student, StudentParent.student_id == Student.id).where(Student.club_id == club.id)
-    )
-    user_ids.update(int(user_id) for user_id in linked.scalars().all() if user_id)
+    # Берем адресатов только текущего клуба через общий resolver WebApp/бота;
+    # он сохраняет выборку StudentParent.parent_id для связанных родителей.
+    user_ids = await resolve_broadcast_recipients(session, club.id)
 
     # 2. Рассылаем (через copy_message, чтобы сохранить медиа)
     count = 0

@@ -98,6 +98,27 @@ async def test_gate_opens_new_session_and_logs_visit():
 
 
 @pytest.mark.asyncio
+async def test_gate_disabled_turnstile_records_visit_without_hardware_call():
+    student = make_student()
+    db = make_db(student, SimpleNamespace(id=10, name="Клуб"))
+    with pytest.MonkeyPatch.context() as mp:
+        async def hardware_must_not_be_called(config):
+            raise AssertionError("СКУД не должен вызываться при enabled=False")
+
+        mp.setattr("handlers.skud.trigger_dingtian_turnstile", hardware_must_not_be_called)
+        result = await process_athlete_gate_pass(
+            1, db,
+            {"turnstile": {"enabled": False, "base_url": "http://gate"}},
+            expected_club_id=10,
+            open_turnstile=True,
+        )
+
+    assert result["success"] is True
+    assert result["turnstile_status"] == "ℹ️ СКУД отключен"
+    db.commit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_gate_rejects_rapid_repeat():
     recent_visit = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(seconds=2)
     student = make_student(last_visit=recent_visit)

@@ -118,3 +118,24 @@ def _send_yandex_postbox(recipient: str, code: str) -> None:
 
 async def deliver_email_otp(recipient: str, code: str) -> None:
     await asyncio.to_thread(send_email_otp, recipient, code)
+
+
+def send_email_broadcast(recipient: str, subject: str, body: str) -> None:
+    if os.getenv("EMAIL_PROVIDER", "smtp").casefold() == "yandex_postbox":
+        import boto3
+        client = boto3.client("sesv2", region_name=os.getenv("YANDEX_POSTBOX_REGION", "ru-central1"), endpoint_url=os.getenv("YANDEX_POSTBOX_ENDPOINT", "https://postbox.cloud.yandex.net"), aws_access_key_id=os.getenv("YANDEX_ACCESS_KEY_ID"), aws_secret_access_key=os.getenv("YANDEX_SECRET_ACCESS_KEY"))
+        sender = os.getenv("EMAIL_FROM_EMAIL")
+        if not sender: raise RuntimeError("Yandex Postbox is not configured")
+        client.send_email(FromEmailAddress=sender, Destination={"ToAddresses": [recipient]}, Content={"Simple": {"Subject": {"Data": subject, "Charset": "UTF-8"}, "Body": {"Text": {"Data": body, "Charset": "UTF-8"}}}})
+        return
+    host = os.getenv("SMTP_HOST"); user = os.getenv("SMTP_USERNAME", os.getenv("SMTP_USER")); password = os.getenv("SMTP_PASSWORD"); sender = os.getenv("SMTP_FROM_EMAIL", os.getenv("SMTP_FROM", user or ""))
+    if not host or not sender: raise RuntimeError("SMTP is not configured")
+    message = EmailMessage(); message["Subject"] = subject; message["From"] = sender; message["To"] = recipient; message.set_content(body)
+    with smtplib.SMTP(host, int(os.getenv("SMTP_PORT", "587")), timeout=10) as smtp:
+        if os.getenv("SMTP_USE_TLS", "1") == "1": smtp.starttls()
+        if user and password: smtp.login(user, password)
+        smtp.send_message(message)
+
+
+async def deliver_email_broadcast(recipient: str, subject: str, body: str) -> None:
+    await asyncio.to_thread(send_email_broadcast, recipient, subject, body)

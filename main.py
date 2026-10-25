@@ -20,7 +20,7 @@ except ImportError:  # optional locally; requirements installs it in production
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 from contextlib import asynccontextmanager
 from fastapi import Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from datetime import datetime
 from aiogram import Dispatcher, types
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -34,7 +34,7 @@ from handlers import start, user_option, buttons, payments, admin_option, super_
     super_admin_payment
 from handlers.buttons import get_profile_keyboard
 from services.bot_registry import bots_dict, register_existing_bots, close_all_bots
-from services.scheduler_jobs import saas_daily_morning_check, check_abon_mailing, send_daily_report_to_admins, send_backup_to_admin, send_work_schedule_notice, send_stock_reminder_notice, expire_student_freezes, send_discount_reminders
+from services.scheduler_jobs import saas_daily_morning_check, check_abon_mailing, send_daily_report_to_admins, send_backup_to_admin, send_work_schedule_notice, send_stock_reminder_notice, expire_student_freezes, send_discount_reminders, send_club_subscription_expiry_reminders
 from services.saas_billing import process_saas_auto_renewals
 from middlewares.db_saas_midleware import ClubMiddleware
 from middlewares.main_middleware import DbSessionMiddleware
@@ -133,6 +133,7 @@ async def lifespan(app: FastAPI):
     scheduler.add_job(send_stock_reminder_notice, 'cron', hour=10, minute=0, args=['am'], id="stock_reminder_am", replace_existing=True, coalesce=True, max_instances=1, misfire_grace_time=3600)
     scheduler.add_job(send_stock_reminder_notice, 'cron', hour=18, minute=0, args=['pm'], id="stock_reminder_pm", replace_existing=True, coalesce=True, max_instances=1, misfire_grace_time=3600)
     scheduler.add_job(send_discount_reminders, 'cron', hour=10, minute=15, id="discount_reminders", replace_existing=True, coalesce=True, max_instances=1, misfire_grace_time=3600)
+    scheduler.add_job(send_club_subscription_expiry_reminders, 'cron', hour=10, minute=20, id="club_saas_expiry_reminders", replace_existing=True, coalesce=True, max_instances=1, misfire_grace_time=3600)
     # Ночной блок (01:00) — Автоматические списания по подпискам ЮKassa
     # Пока оставляем закомментированным, как ты и хотел!
     # Как закончишь тесты в ЛК ЮKassa — просто убери решетку (#) в начале строки.
@@ -159,6 +160,14 @@ app.state.redis_client = redis_client
 app.add_middleware(SessionMiddleware, secret_key=os.getenv("SECRET_KEY", ""), https_only=os.getenv("COOKIE_SECURE", "1") == "1")
 app.add_middleware(ProxyHeadersMiddleware, trusted_hosts=["*"])
 app.mount("/static", StaticFiles(directory="static"), name="static")
+
+
+@app.get("/", include_in_schema=False)
+async def web_root():
+    """Browser entry point for the staff/client Web cabinet."""
+    return RedirectResponse(url="/staff", status_code=307)
+
+
 app.include_router(router)
 app.include_router(webapp_views_router)
 app.include_router(admin_pages_router)

@@ -21,3 +21,13 @@ def test_admin_dashboard_exposes_admin_freeze_link():
     assert "/webapp/admin-freeze" in page
     assert "Заморозка атлетов" in page
     assert "/webapp/admin-freeze" not in staff_page
+
+
+def test_admin_freeze_uses_date_range_and_keeps_existing_entrypoint():
+    source = Path("admin_module/webapp_client_cabinet.py").read_text(encoding="utf-8")
+    page = Path("templates/admin_freeze.html").read_text(encoding="utf-8")
+    schema = Path("admin_module/schemas.py").read_text(encoding="utf-8")
+    assert "date_to" in schema and "date.fromisoformat" in source
+    assert "student.frozen_days = days" in source
+    assert "available_students" in source and "frozen_students" in source
+    assert 'name="date_to"' in page and "data-action=\"unfreeze\"" in page

@@ -60,6 +60,16 @@ def test_students_without_profiles_can_own_discount_assignments():
     assert "allow discounts for students without a profile" in migration
     assert "student_id: int | None = None" in service
 
+
+def test_discount_assignment_audience_supports_safe_filters_and_student_scope():
+    views = (ROOT / "admin_module/webapp_views.py").read_text(encoding="utf-8")
+    page = (ROOT / "templates/admin_discounts.html").read_text(encoding="utf-8")
+    assert "no_subscription: bool = Query(default=False)" in views
+    assert "no_visits_14: bool = Query(default=False)" in views
+    assert "Student.discipline == discipline" in views
+    assert '"student_rows"' in views
+    assert "discount-assignment-filters.js" in page
+
 def test_discount_client_search_includes_orphan_students():
     views = (ROOT / "admin_module/webapp_views.py").read_text(encoding="utf-8")
     assert "orphan_query" in views

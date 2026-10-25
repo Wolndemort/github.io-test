@@ -2,7 +2,7 @@ import os
 import uuid
 import logging
 from database.db import Club, SaaSPaymentOrder, AsyncSessionLocal
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from aiogram import Router, F, types
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy import select, update
@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 router = Router()
 
 # Забираем токен ЮKassa из переменных окружения (.env)
-SUBSCRIPTION_PRICES = {30: 150000, 365: 1500000}
+SUBSCRIPTION_PRICES = {30: 700000, 90: 1800000, 365: 7000000}
 
 
 # =========================================================================
@@ -28,14 +28,17 @@ async def show_pay_menu(callback: types.CallbackQuery):
     builder = InlineKeyboardBuilder()
     # Зашиваем количество дней в callback_data
     builder.row(types.InlineKeyboardButton(
-        text="🌙 1 месяц (30 дн.) — 1 500 ₽", callback_data="buy_sub_30")
+        text="🌙 1 месяц (30 дн.) — 7 000 ₽", callback_data="buy_sub_30")
     )
     if SUPER_YOOKASSA_SBP_ENABLED:
         builder.row(types.InlineKeyboardButton(
             text="↔️ Оплатить 30 дней через СБП", callback_data="buy_sub_sbp_30")
         )
     builder.row(types.InlineKeyboardButton(
-        text="☀️ 1 год (365 дн.) — 15 000 ₽", callback_data="buy_sub_365")
+        text="☀️ 1 год (365 дн.) — 70 000 ₽", callback_data="buy_sub_365")
+    )
+    builder.row(types.InlineKeyboardButton(
+        text="📅 3 месяца (90 дн.) — 18 000 ₽", callback_data="buy_sub_90")
     )
     builder.row(types.InlineKeyboardButton(
         text="⬅️ Назад в админку", callback_data="admin")
@@ -168,7 +171,7 @@ async def on_successful_payment(message: types.Message, session: AsyncSession, r
         return
 
     # Наивное локальное время
-    now_naive = datetime.now().replace(tzinfo=None)
+    now_naive = datetime.now(timezone.utc).replace(tzinfo=None)
 
     # Честная математика продления дат
     if club.subscription_expire_at and club.subscription_expire_at.replace(tzinfo=None) > now_naive:

@@ -90,5 +90,6 @@ class AdminSettingsSG(StatesGroup):
     waiting_for_session_timeout = State()  # Ждем ввод минут сессии
     waiting_for_freeze_step = State()      # Ждем ввод дней заморозки
     waiting_for_freeze_price = State()     # Ждем цену 1 дня платной заморозки
+    waiting_for_subscription_days = State()  # Ждем срок абонемента по умолчанию
     waiting_for_loading_config = State()
     waiting_for_loading_logo = State()

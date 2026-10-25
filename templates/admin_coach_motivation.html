@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Мотивация тренеров · {{ club.name }}</title>
+  <link rel="stylesheet" href="/static/css/mono.css">
+  <link rel="stylesheet" href="/static/web/design.css">
+</head>
+<body class="mono-theme">
+<main class="web-shell">
+  <section class="web-card">
+    <div class="web-kicker">{{ club.name }} / Администратор</div>
+    <h1>Мотивация тренеров</h1>
+    <p class="muted">Настройки ставок по существующим дисциплинам клуба. Расписание и назначения тренеров изменяются в отдельной вкладке.</p>
+    <a class="mono-action" href="/webapp/client-cabinet?club_id={{ club_id }}">← В рабочий кабинет</a>
+  </section>
+
+  <form id="motivation-form" class="web-card">
+    <label class="web-toggle"><input id="enabled" type="checkbox" {% if motivation.get('enabled', True) %}checked{% endif %}> Система мотивации включена</label>
+    <h2>Расчётный период</h2>
+    <div class="web-form-grid">
+      <label>Дата от<input id="period_from" type="date" value="{{ motivation.get('period_from', '') }}"></label>
+      <label>Дата до<input id="period_to" type="date" value="{{ motivation.get('period_to', '') }}"></label>
+    </div>
+    <p class="muted">Этот период используется как основной месяц расчёта и отображается сотрудникам.</p>
+    <h2>Ставки по дисциплинам</h2>
+    <p class="muted">Правило по умолчанию: если учеников меньше порога, базовая ставка умножается на коэффициент 0.5.</p>
+    {% if disciplines %}
+      <div class="web-table-wrap">
+        <table class="web-table">
+          <thead><tr><th>Дисциплина</th><th>Включена</th><th>Ставка за тренировку, ₽</th><th>Бонус за ученика, ₽</th><th>Бонус за тренировку, ₽</th><th>Порог</th><th>Коэффициент</th></tr></thead>
+          <tbody>
+          {% for code, block in disciplines.items() %}
+            {% set rule = (motivation.get('disciplines', {}) or {}).get(code, {}) %}
+            <tr data-discipline="{{ code }}">
+              <td><strong>{{ block.get('name', code) if block is mapping else code }}</strong><small>{{ code }}</small></td>
+              <td><input data-field="enabled" type="checkbox" {% if rule.get('enabled', True) %}checked{% endif %}></td>
+              <td><input data-field="base_rate" type="number" min="0" step="0.01" value="{{ rule.get('base_rate', 0) }}"></td>
+              <td><input data-field="bonus_per_student" type="number" min="0" step="0.01" value="{{ rule.get('bonus_per_student', 0) }}"></td>
+              <td><input data-field="bonus_per_session" type="number" min="0" step="0.01" value="{{ rule.get('bonus_per_session', 0) }}"></td>
+              <td><input data-field="low_attendance_threshold" type="number" min="0" max="1000" step="1" value="{{ rule.get('low_attendance_threshold', 10) }}"></td>
+              <td><input data-field="low_attendance_multiplier" type="number" min="0" max="1" step="0.05" value="{{ rule.get('low_attendance_multiplier', 0.5) }}"></td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p>В клубе пока нет созданных дисциплин. Сначала добавьте их в настройках клуба.</p>
+    {% endif %}
+
+    <h2>Персональные тренировки</h2>
+    <label>Базовая цена персональной тренировки, ₽
+      <input id="personal_training_rate" type="number" min="0" step="0.01" value="{{ motivation.get('personal_training_rate', 0) }}">
+    </label>
+    <p class="muted">Это только резервная цена для админки. Если тренер сам назначает стоимость персональной тренировки, фактическая цена может быть указана отдельно.</p>
+    <h2>Персонал и назначение дисциплин</h2>
+    <p class="muted">В списке только активные сотрудники клуба. Один сотрудник может совмещать тренера, кассира или бариста.</p>
+    {% if staff %}
+      <div class="web-table-wrap"><table class="web-table"><thead><tr><th>Сотрудник</th><th>Режим оплаты</th><th>Ставка, ₽</th><th>Дисциплины тренера</th></tr></thead><tbody>
+      {% for person in staff %}{% set cfg=(motivation.get('staff', {}) or {}).get(person.id|string, {}) %}
+      <tr data-staff="{{ person.id }}"><td><strong>{{ person.full_name or person.telegram_id }}</strong><small>{{ person.role }}</small></td>
+        <td><select data-staff-field="mode"><option value="coach" {% if cfg.get('mode','coach')=='coach' %}selected{% endif %}>Тренер: за тренировку</option><option value="fixed_day" {% if cfg.get('mode')=='fixed_day' %}selected{% endif %}>Фиксированная: за день</option><option value="fixed_month" {% if cfg.get('mode')=='fixed_month' %}selected{% endif %}>Фиксированная: за месяц</option></select></td>
+        <td><input data-staff-field="rate" type="number" min="0" step="0.01" value="{{ cfg.get('rate', 0) }}"></td>
+        <td><select data-staff-field="disciplines" multiple size="3">{% for code, block in disciplines.items() %}<option value="{{ code }}" {% if code in cfg.get('disciplines', []) %}selected{% endif %}>{{ block.get('name', code) if block is mapping else code }}</option>{% endfor %}</select></td>
+      </tr>{% endfor %}</tbody></table></div>
+    {% else %}<p>Активного персонала пока нет.</p>{% endif %}
+    <button class="mono-action dark" type="submit">Сохранить настройки</button>
+    <span id="result" role="status"></span>
+  </form>
+</main>
+<script>
+const form = document.getElementById('motivation-form');
+const result = document.getElementById('result');
+const value = (row, field) => row.querySelector(`[data-field="${field}"]`);
+form.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const disciplines = {};
+  form.querySelectorAll('[data-discipline]').forEach(row => {
+    disciplines[row.dataset.discipline] = {
+      enabled: value(row, 'enabled').checked,
+      base_rate: value(row, 'base_rate').value,
+      bonus_per_student: value(row, 'bonus_per_student').value,
+      bonus_per_session: value(row, 'bonus_per_session').value,
+      low_attendance_threshold: value(row, 'low_attendance_threshold').value,
+      low_attendance_multiplier: value(row, 'low_attendance_multiplier').value
+    };
+  });
+  const staff = {};
+  form.querySelectorAll('[data-staff]').forEach(row => {
+    staff[row.dataset.staff] = {
+      mode: row.querySelector('[data-staff-field="mode"]').value,
+      rate: row.querySelector('[data-staff-field="rate"]').value,
+      disciplines: Array.from(row.querySelector('[data-staff-field="disciplines"]').selectedOptions).map(x => x.value)
+    };
+  });
+  try {
+    const response = await fetch('/webapp/admin-coach-motivation/save', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({club_id: {{ club_id }}, init_data: new URLSearchParams(location.search).get('init_data'), enabled: document.getElementById('enabled').checked, period_from: document.getElementById('period_from').value, period_to: document.getElementById('period_to').value, personal_training_rate: document.getElementById('personal_training_rate').value, disciplines, staff})
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.detail || 'Не удалось сохранить настройки');
+    result.textContent = ' Сохранено';
+  } catch (error) { result.textContent = ` Ошибка: ${error.message}`; }
+});
+</script>
+</body>
+</html>

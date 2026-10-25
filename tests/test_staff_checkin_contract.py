@@ -22,4 +22,15 @@ def test_staff_webapp_has_both_checkin_modes_and_search():
 def test_manual_bot_checkin_uses_no_relay_mode():
     source = (ROOT / "handlers/admin_option.py").read_text(encoding="utf-8")
     assert "open_turnstile=use_relay" in source
+
+
+def test_disabled_turnstile_has_explicit_fallback_in_legacy_staff_flows():
+    service = (ROOT / "services/gate_control.py").read_text(encoding="utf-8")
+    cabinet = (ROOT / "admin_module/webapp_client_cabinet.py").read_text(encoding="utf-8")
+    page = (ROOT / "templates/staff_checkin.html").read_text(encoding="utf-8")
+    source = (ROOT / "handlers/admin_option.py").read_text(encoding="utf-8")
+    assert 'relay_config.get("enabled", False)' in service
+    assert 'turnstile_status' in service
+    assert 'turnstile_status' in cabinet
+    assert 'd.turnstile' in page
     assert "без турникета" in source and "с турникетом" in source

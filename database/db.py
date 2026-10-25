@@ -92,12 +92,17 @@ class Student(Base):
         UniqueConstraint("club_id", "name", "birthday", "discipline", "parent_phone", name="uq_students_club_name_bday_disc_phone"),
     )
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, server_default="now()", index=True)
     club_id: Mapped[Optional[int]] = mapped_column(ForeignKey('clubs.id'), index=True)
     parent_id: Mapped[int] = mapped_column(ForeignKey('users.user_id'), nullable=True, index=True)
     name: Mapped[str] = mapped_column(String)
+    email: Mapped[Optional[str]] = mapped_column(String(320), nullable=True)
     comment: Mapped[Optional[str]] = mapped_column(String(1000), nullable=True)
     expire_date: Mapped[Optional[datetime]] = mapped_column(DateTime)
     can_freeze: Mapped[int] = mapped_column(Integer, default=1)
+    # Snapshot of the freeze duration granted by the subscription.
+    # It must not change when the club's global freeze step changes.
+    freeze_days_entitlement: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     is_frozen: Mapped[int] = mapped_column(Integer, default=0)
     frozen_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     # Фактическая длительность текущей заморозки. Нужна для платных пакетов,
@@ -374,7 +379,7 @@ async def register_new_club(
             bot_token=bot_token,
             owner_id=owner_id,
             club_settings=DEFAULT_CLUB_SETTINGS.copy(),  # Копируем эталон
-            subscription_expire_at=datetime.now() + timedelta(days=30)
+            subscription_expire_at=datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(days=30)
         )
         session.add(new_club)
         await session.commit()
@@ -606,6 +611,12 @@ async def add_abon(
         # 2. Расчет даты продления
         if days_to_add is None:
             days_to_add = club_settings.get("limits", {}).get("subscription_days", 30)
+
+        configured_freeze_days = club_settings.get("limits", {}).get("freeze_days_step", 7)
+        try:
+            student.freeze_days_entitlement = max(1, min(365, int(configured_freeze_days)))
+        except (TypeError, ValueError):
+            student.freeze_days_entitlement = 7
 
         current_expire = student.expire_date
         was_frozen = bool(student.is_frozen)

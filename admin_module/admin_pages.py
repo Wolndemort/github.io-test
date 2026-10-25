@@ -107,14 +107,14 @@ async def get_revenue_stats(request: Request, session: AsyncSession = Depends(ge
     cash_filter = [CashEntry.club_id == club_id, CashEntry.created_at >= start]
     if end:
         payment_filter.append(PaymentOrder.created_at < end); cart_filter.append(CartOrder.created_at < end); cash_filter.append(CashEntry.created_at < end)
-    payments = (await session.execute(select(PaymentOrder.student_id, PaymentOrder.amount_kopecks, PaymentOrder.created_at).where(*payment_filter))).all()
-    cart_payments = (await session.execute(select(CartOrder.amount_kopecks, CartOrder.created_at).where(*cart_filter))).all()
+    payments = (await session.execute(select(PaymentOrder.student_id, PaymentOrder.amount_kopecks, PaymentOrder.created_at, PaymentOrder.provider_payment_id, PaymentOrder.type).where(*payment_filter))).all()
+    cart_payments = (await session.execute(select(CartOrder.amount_kopecks, CartOrder.created_at, CartOrder.provider_payment_id).where(*cart_filter))).all()
     cash_entries = (await session.execute(select(CashEntry).where(*cash_filter))).scalars().all()
-    rows = [type("PaymentRow", (), {"amount_kopecks": amount, "created_at": created_at}) for _student_id, amount, created_at in payments]
-    rows.extend(type("PaymentRow", (), {"amount_kopecks": amount, "created_at": created_at}) for amount, created_at in cart_payments)
+    rows = [type("PaymentRow", (), {"amount_kopecks": amount, "created_at": created_at, "provider_payment_id": provider, "type": order_type, "status": "CONFIRMED"}) for _student_id, amount, created_at, provider, order_type in payments]
+    rows.extend(type("PaymentRow", (), {"amount_kopecks": amount, "created_at": created_at, "provider_payment_id": provider, "type": "", "status": "CONFIRMED"}) for amount, created_at, provider in cart_payments)
     revenue = calculate_revenue_periods(rows)
     revenue_today, revenue_week, revenue_month = revenue["today"], revenue["week"], revenue["month"]
-    cash_flow = calculate_cash_flow_periods(cash_entries, now=periods["now"])
+    cash_flow = calculate_cash_flow_periods(cash_entries, now=periods["now"], cash_sales=rows)
     period_revenue = sum(int(row.amount_kopecks or 0) for row in rows) / 100
     period_expenses = sum(int(entry.amount_kopecks or 0) for entry in cash_entries if entry.entry_type == "expense") / 100
     period_margin = period_revenue - period_expenses

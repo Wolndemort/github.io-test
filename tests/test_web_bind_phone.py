@@ -6,17 +6,20 @@ from auth import forecast_routes
 from auth.context import AuthContext
 
 class Redis:
-    def __init__(self): self.count = 0
+    def __init__(self): self.count = 0; self.keys = set()
     async def get(self, key): return json.dumps({"csrf_token": "csrf"})
     async def incr(self, key): self.count += 1; return self.count
     async def expire(self, key, ttl): pass
+    async def set(self, key, value, ex=None, nx=False):
+        if nx and key in self.keys: return False
+        self.keys.add(key); return True
 class Request:
     app = SimpleNamespace(state=SimpleNamespace(redis_client=Redis()))
     cookies = {"speedycrm_web_session": "sid"}
     headers = {"x-csrf-token": "csrf"}
-    async def json(self): return {"phone": "+7 (900) 111-22-33"}
+    async def json(self): return {"phone": "+7 (900) 111-22-33", "idempotency_key": "bind-test"}
 class SpoofedRequest(Request):
-    async def json(self): return {"phone": "+7 (900) 111-22-33", "user_id": 999999, "club_id": 999999}
+    async def json(self): return {"phone": "+7 (900) 111-22-33", "idempotency_key": "bind-spoof", "user_id": 999999, "club_id": 999999}
 class Result:
     def scalars(self): return self
     def all(self): return [SimpleNamespace(id=9, club_id=41, parent_phone="+79001112233", parent_phone_secondary=None)]
@@ -40,9 +43,9 @@ async def test_bind_phone_requires_csrf_and_uses_session_identity(monkeypatch):
 async def test_bind_phone_ignores_spoofed_user_and_club_payload_fields(monkeypatch):
     monkeypatch.setenv("WEB_CLIENT_BIND_PHONE_ENABLED", "1")
     actor = AuthContext(801, 41, "client", "client", frozenset(), "web")
-    result = await forecast_routes.client_bind_phone(SpoofedRequest(), actor, Session())
-    assert result["club_id"] == 41
-    assert result["student_ids"] == [9]
+    with pytest.raises(HTTPException) as error:
+        await forecast_routes.client_bind_phone(SpoofedRequest(), actor, Session())
+    assert error.value.status_code == 400
 
 @pytest.mark.asyncio
 async def test_bind_phone_rejects_invalid_csrf(monkeypatch):

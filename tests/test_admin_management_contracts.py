@@ -655,6 +655,10 @@ def test_admin_can_view_and_update_parent_phone_and_mailing_is_sequenced():
     assert "data-filter=\"noParent\"" in page
     assert "hour=10, minute=5" in main
     assert "requestFullscreen" in page
+    assert "expected_balance_lessons" in schema
+    assert "expected_expire_date" in schema
+    assert "expected_parent_phone" in schema
+    assert "changedFields" in page
 
 
 def test_admin_create_student_ui_has_complete_submit_flow():

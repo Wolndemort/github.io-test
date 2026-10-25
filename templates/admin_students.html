@@ -71,8 +71,11 @@
     @media(max-width:650px){ #modal .row{grid-template-columns:1fr 1fr}#modal .box{margin:0 auto;max-height:calc(100dvh - 24px)}}
   </style>
 </head>
-<body class="mono-theme"><div class="wrap"><button id="fullscreen" type="button" style="float:right;width:auto">⛶</button>
-  <div class="card"><div class="muted">Раздел</div><h2>👥 Атлеты · {{ club_name }}</h2><p>Управление атлетами клуба. Пользовательские и системные настройки недоступны.</p><a class="mono-action" href="/webapp/client-cabinet?club_id={{ club_id }}">← В рабочий кабинет</a></div>
+<body class="mono-theme">
+<!-- В рабочий кабинет · Атлеты -->
+{% include "_staff_back_button.html" %}
+<div class="wrap"><button id="fullscreen" type="button" style="float:right;width:auto">⛶</button>
+  <div class="card"><div class="muted">Раздел</div><h2>👥 Атлеты · {{ club_name }}</h2><p>Управление атлетами клуба. Пользовательские и системные настройки недоступны.</p></div>
   <div class="card"><label>Поиск<input id="search" placeholder="Имя атлета"></label><details class="filter-panel"><summary>Фильтры</summary><div class="filter-checks"><label><input class="student-filter" data-filter="missing" id="missing" type="checkbox"> Без даты рождения</label><label><input class="student-filter" data-filter="active" type="checkbox"> С активным абонементом</label><label><input class="student-filter" data-filter="noSubscription" type="checkbox"> Без абонемента</label><label><input class="student-filter" data-filter="frozen" type="checkbox"> Замороженные</label><label><input class="student-filter" data-filter="noParent" type="checkbox"> Без родителя</label><label class="age-filter"><input class="student-filter age-filter" data-age-min="0" data-age-max="6" type="checkbox"> 0–6 лет</label><label class="age-filter"><input class="student-filter age-filter" data-age-min="7" data-age-max="12" type="checkbox"> 7–12 лет</label><label class="age-filter"><input class="student-filter age-filter" data-age-min="13" data-age-max="17" type="checkbox"> 13–17 лет</label><label class="age-filter"><input class="student-filter age-filter" data-age-min="18" type="checkbox"> 18+ лет</label>{% for code,info in club_settings.get('disciplines', {}).items() %}<label><input class="student-filter discipline-filter" data-discipline="{{ code }}" type="checkbox"> {{ info.name if info.name else code }}</label>{% endfor %}</div></details><a class="mono-action" href="/admin/sales?club_id={{ club_id }}&init_data={{ request.query_params.get('init_data','')|urlencode }}">📈 Продажи</a></div>
   <div id="list">
   {% for s in students %}
@@ -86,7 +89,7 @@
         <label>Дисциплина<input name="discipline" value="{{ s.discipline or '' }}"></label>
         <label>Комментарий<textarea name="comment" maxlength="1000" rows="3" placeholder="Внутренняя заметка">{{ s.comment or '' }}</textarea></label>
         <label>Статус<select name="is_frozen"><option value="0" {% if not s.is_frozen %}selected{% endif %}>Активен</option><option value="1" {% if s.is_frozen %}selected{% endif %}>Заморожен</option></select></label>
-        <label>Дней заморозки<input name="frozen_days" type="number" min="1" max="365" value="{{ s.frozen_days or '' }}"></label>
+        <label>Дней заморозки<input type="text" value="{{ s.freeze_days_entitlement or '—' }} дн." readonly></label>
       </div><div style="display:flex;gap:8px;flex-wrap:wrap"><button type="submit">Сохранить</button><button type="button" class="danger-delete">Удалить</button></div><span class="muted msg"></span>
     </form>
   {% else %}<p>Атлетов нет.</p>{% endfor %}
@@ -242,32 +245,53 @@ function attachInviteButton(form) {
   });
 }
 
+const studentEditFields = ['name', 'birthday', 'balance_lessons', 'expire_date', 'can_freeze', 'is_frozen', 'frozen_days', 'parent_phone', 'parent_phone_secondary', 'discipline', 'comment'];
+const studentNumericFields = new Set(['balance_lessons', 'can_freeze', 'is_frozen']);
+function readStudentEditValues(form) {
+  const f = new FormData(form);
+  const values = {};
+  studentEditFields.forEach(name => {
+    const raw = f.get(name);
+    if (name === 'frozen_days') values[name] = raw ? Number(raw) : null;
+    else if (studentNumericFields.has(name)) values[name] = Number(raw || 0);
+    else values[name] = String(raw ?? '');
+  });
+  return values;
+}
+function studentEditValueKey(name, value) {
+  return value === null || value === undefined ? '' : String(value);
+}
+
 function bindEdit(form) {
   ensureSecondParentPhone(form);
   attachInviteButton(form);
+  let initialValues = readStudentEditValues(form);
   form.addEventListener('submit', async e => {
     e.preventDefault();
     const saveButton = form.querySelector('button[type="submit"]');
     const originalButtonText = saveButton.textContent;
     saveButton.disabled = true;
     saveButton.textContent = 'Сохраняем...';
-    const f = new FormData(form);
+    const values = readStudentEditValues(form);
+    const msg = form.querySelector('.msg');
     const payload = {
       init_data: initData,
       club_id: clubId,
-      name: f.get('name'),
-      birthday: f.get('birthday'),
-      balance_lessons: Number(f.get('balance_lessons')),
-      expire_date: f.get('expire_date'),
-      can_freeze: Number(f.get('can_freeze')),
-      is_frozen: Number(f.get('is_frozen')),
-      frozen_days: f.get('frozen_days') ? Number(f.get('frozen_days')) : null,
-      parent_phone: f.get('parent_phone'),
-      parent_phone_secondary: f.get('parent_phone_secondary'),
-      discipline: f.get('discipline')
-      ,comment: f.get('comment')
+      expected_balance_lessons: initialValues.balance_lessons,
+      expected_expire_date: initialValues.expire_date,
+      expected_parent_phone: initialValues.parent_phone,
+      expected_parent_phone_secondary: initialValues.parent_phone_secondary,
     };
-    const msg = form.querySelector('.msg');
+    const changedFields = studentEditFields.filter(name =>
+      studentEditValueKey(name, values[name]) !== studentEditValueKey(name, initialValues[name])
+    );
+    changedFields.forEach(name => { payload[name] = values[name]; });
+    if (!changedFields.length) {
+      msg.textContent = 'Изменений нет';
+      saveButton.disabled = false;
+      saveButton.textContent = originalButtonText;
+      return;
+    }
     try {
       const r = await fetch('/admin/students/' + form.dataset.id, {
         method: 'PATCH',
@@ -275,6 +299,7 @@ function bindEdit(form) {
         body: JSON.stringify(payload)
       });
       if (r.ok) {
+        initialValues = values;
         attachInviteButton(form);
         msg.textContent = 'Сохранено';
       } else {
@@ -302,7 +327,7 @@ function studentCardHtml(s) {
         <label>Дисциплина<input name="discipline" value="${esc(s.discipline || '')}"></label>
         <label>Комментарий<textarea name="comment" maxlength="1000" rows="3" placeholder="Внутренняя заметка">${esc(s.comment || '')}</textarea></label>
         <label>Статус<select name="is_frozen"><option value="0" ${s.is_frozen ? '' : 'selected'}>Активен</option><option value="1" ${s.is_frozen ? 'selected' : ''}>Заморожен</option></select></label>
-        <label>Дней заморозки<input name="frozen_days" type="number" min="1" max="365" value="${esc(s.frozen_days || '')}"></label>
+        <label>Дней заморозки<input type="text" value="${esc(s.freeze_days_entitlement ? `${s.freeze_days_entitlement} дн.` : '—')}" readonly></label>
       </div><div style="display:flex;gap:8px;flex-wrap:wrap">${canManageStudents ? '<button type="submit">Сохранить</button><button type="button" class="danger-delete">Удалить</button>' : ''}</div><span class="muted msg"></span>
     </form>`;
 }

@@ -84,12 +84,13 @@ async def native_email_bind_verify(payload: NativeOtpVerify, request: Request, c
     email = normalize_email(payload.email)
     if payload.club_id != actor.club_id or not await consume_otp(request.app.state.redis_client, email, actor.club_id, payload.code, purpose="bind"):
         raise HTTPException(status_code=401, detail={"code": "invalid_code"})
-    user = await session.scalar(select(User).where(User.user_id == actor.user_id))
+    user = await session.scalar(select(User).where(User.user_id == actor.user_id, User.club_id == actor.club_id).with_for_update())
     if not user:
         user = User(user_id=actor.user_id, club_id=actor.club_id)
         session.add(user)
     user.email = email
     await session.commit()
+    audit_event("web_native_email_bound", club_id=actor.club_id, actor_user_id=actor.user_id, action="bind", object_type="user_email", object_id=actor.user_id, location="web/auth/native/email/verify")
     return {"ok": True, "email": email}
 
 
@@ -98,6 +99,10 @@ async def native_request(payload: NativeOtpRequest, request: Request, session: A
     if not native_auth_enabled():
         raise HTTPException(status_code=404, detail={"code": "feature_disabled"})
     email = normalize_email(payload.email)
+    client_ip = request.client.host if request.client else "unknown"
+    if not await allow_otp_request(request.app.state.redis_client, email, payload.club_id, client_ip):
+        audit_event("web_native_otp_rate_limited", club_id=payload.club_id, action="login", location="web/auth/native/request")
+        raise HTTPException(status_code=429, detail={"code": "rate_limited"})
     club = await session.scalar(select(Club).where(Club.id == payload.club_id))
     user = await session.scalar(select(User).where(User.club_id == payload.club_id, User.email == email)) if club else None
     if user:
@@ -107,6 +112,7 @@ async def native_request(payload: NativeOtpRequest, request: Request, session: A
         except Exception:
             logger.exception("native email delivery failed")
             raise HTTPException(status_code=503, detail={"code": "email_delivery_unavailable"})
+        audit_event("web_native_otp_requested", club_id=payload.club_id, action="login", location="web/auth/native/request")
     return {"ok": True, "message": "If the account exists, a code was sent."}
 
 
@@ -117,6 +123,7 @@ async def native_verify(payload: NativeOtpVerify, request: Request, session: Asy
     email = normalize_email(payload.email)
     user = await session.scalar(select(User).where(User.club_id == payload.club_id, User.email == email))
     if not user or not await consume_otp(request.app.state.redis_client, email, payload.club_id, payload.code):
+        audit_event("web_native_login_failed", club_id=payload.club_id, action="login_failed", location="web/auth/native/verify")
         raise HTTPException(status_code=401, detail={"code": "invalid_code"})
     club = await session.scalar(select(Club).where(Club.id == payload.club_id))
     staff = await session.scalar(select(ClubStaff).where(ClubStaff.club_id == payload.club_id, ClubStaff.telegram_id == user.user_id, ClubStaff.is_active.is_(True)))
@@ -127,6 +134,7 @@ async def native_verify(payload: NativeOtpVerify, request: Request, session: Asy
     else:
         actor_type, role, permissions = "client", "client", frozenset()
     session_id = await create_web_session(request.app.state.redis_client, AuthContext(user.user_id, payload.club_id, actor_type, role, permissions, "email"))
+    audit_event("web_native_login", club_id=payload.club_id, actor_user_id=user.user_id, actor_role=role, action="login", location="web/auth/native/verify", auth_source="email")
     response = JSONResponse({"ok": True, "redirect": "/staff" if actor_type != "client" else "/client/cabinet"})
     set_session_cookie(response, session_id)
     raw_session = await request.app.state.redis_client.get(f"web_session:{session_id}")
@@ -144,6 +152,17 @@ const status=document.getElementById("status");
 const tg=window.Telegram&&window.Telegram.WebApp;
 if(!tg||!tg.initData){{status.textContent="Open this page from the staging Telegram bot.";}}
 else{{tg.ready();fetch("/auth/telegram/exchange",{{method:"POST",headers:{{"Content-Type":"application/json"}},body:JSON.stringify({{init_data:tg.initData,club_id:{club_id}}})}}).then(async r=>{{if(!r.ok)throw new Error(await r.text());return r.json();}}).then(d=>location.replace(d.redirect||"/staff")).catch(e=>{{status.textContent="Authentication failed.";console.error(e);}});}}
+</script></body></html>''')
+
+
+@router.get("/web-bind", response_class=HTMLResponse)
+async def auth_web_bind(club_id: int):
+    """Authenticate from Telegram and continue to the native email binding page."""
+    return HTMLResponse(f'''<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Привязка Web-кабинета · SpeedyCRM</title><script src="https://telegram.org/js/telegram-web-app.js"></script><link rel="stylesheet" href="/static/web/design.css"></head><body><main class="web-shell"><div class="web-container"><section class="web-card"><h1>Привязка Web-кабинета</h1><p id="status">Проверяем профиль Telegram…</p></section></div></main><script>
+const status=document.getElementById("status");
+const tg=window.Telegram&&window.Telegram.WebApp;
+if(!tg||!tg.initData){{status.textContent="Откройте эту страницу из кнопки профиля в Telegram.";}}
+else{{tg.ready();fetch("/auth/telegram/exchange",{{method:"POST",headers:{{"Content-Type":"application/json"}},body:JSON.stringify({{init_data:tg.initData,club_id:{club_id}}})}}).then(async r=>{{if(!r.ok)throw new Error(await r.text());return r.json();}}).then(()=>location.replace("/auth/email-profile")).catch(()=>{{status.textContent="Не удалось подтвердить профиль Telegram.";}});}}
 </script></body></html>''')
 
 
@@ -226,11 +245,13 @@ async def auth_me(context: AuthContext | None = Depends(web_context), session: A
 
 
 @router.post("/logout")
-async def auth_logout(request: Request):
+async def auth_logout(request: Request, context: AuthContext | None = Depends(web_context)):
     if not await validate_csrf(request.app.state.redis_client, request):
         raise HTTPException(status_code=403, detail={"code": "csrf_failed", "message": "Недействительный CSRF-токен"})
     await revoke_web_session(request.app.state.redis_client, request)
-    audit_event("web_auth_logout", action="logout", location="web/auth/logout", auth_source="web")
+    # Direct unit calls do not pass FastAPI's dependency-resolved context.
+    actor = context if isinstance(context, AuthContext) else await web_context(request)
+    audit_event("web_auth_logout", club_id=actor.club_id if actor else None, actor_user_id=actor.user_id if actor else None, actor_role=actor.role if actor else None, action="logout", location="web/auth/logout", auth_source="web")
     response = JSONResponse({"ok": True})
     response.delete_cookie("speedycrm_web_session", path="/")
     response.delete_cookie("speedycrm_csrf_token", path="/")

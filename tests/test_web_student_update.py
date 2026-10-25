@@ -65,7 +65,7 @@ async def test_student_update_rejects_foreign_club_and_unsafe_fields(monkeypatch
     assert error.value.status_code == 404
 
     class Unsafe(Request):
-        async def json(self): return {"balance_lessons": 999, "idempotency_key": "unsafe"}
+        async def json(self): return {"secret": "leak", "idempotency_key": "unsafe"}
     with pytest.raises(HTTPException) as unsafe:
         await forecast_routes.update_student_data(7, Unsafe(), actor, Session())
     assert unsafe.value.status_code == 400

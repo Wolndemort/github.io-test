@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from html import escape
 
 from fastapi import Depends, HTTPException, Query, Request
@@ -7,6 +7,7 @@ from fastapi.responses import HTMLResponse
 from sqlalchemy import select, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from loguru import logger
 
 from admin_module.router_base import router, templates
 from admin_module.schemas import (
@@ -35,6 +36,7 @@ from services.gate_control import process_athlete_gate_pass
 from services.staff_permissions import staff_can, permissions_for_staff
 from services.analytics import is_subscription_active
 from services.discounts import active_discount, active_discounts, apply_discount, apply_discounts
+from services.legal_documents import legal_documents_enabled
 from middlewares.db_saas_midleware import SUPER_ADMIN_IDS
 
 
@@ -154,6 +156,12 @@ async def _get_saved_subscription(db: AsyncSession, club_id: int, user_id: int) 
 async def _is_staff_webapp_user(db: AsyncSession, club: Club, user_id: int) -> bool:
     if not club:
         return False
+    # Super-admins are allowed into every club's administrative WebApp by
+    # verify_webapp_admin/verify_webapp_staff. Keep the cabinet's mode
+    # detection consistent with those guards; otherwise a super-admin is
+    # incorrectly sent to the client phone-binding screen.
+    if int(user_id) in {int(value) for value in SUPER_ADMIN_IDS}:
+        return True
     if int(getattr(club, "owner_id", 0) or 0) == int(user_id):
         return True
     return bool(
@@ -249,7 +257,17 @@ async def admin_freeze_page(request: Request, club_id: int, init_data: str | Non
     await verify_webapp_admin(club, init_data)
     students = (await db.execute(select(Student).where(Student.club_id == club_id).order_by(Student.name))).scalars().all()
     freeze_days = int((club.club_settings or {}).get("limits", {}).get("freeze_days_step", 7))
-    return templates.TemplateResponse("admin_freeze.html", {"request": request, "club": club, "club_id": club_id, "students": students, "freeze_days": freeze_days})
+    today = datetime.utcnow().date()
+    frozen_students = []
+    available_students = []
+    for student in students:
+        if student.is_frozen:
+            started = student.frozen_at.date() if student.frozen_at else today
+            days = int(student.frozen_days or freeze_days)
+            frozen_students.append({"id": student.id, "name": student.name, "discipline": student.discipline, "frozen_days": days, "frozen_until": started + timedelta(days=days)})
+        elif student.expire_date and student.expire_date.date() >= today:
+            available_students.append(student)
+    return templates.TemplateResponse("admin_freeze.html", {"request": request, "club": club, "club_id": club_id, "students": students, "available_students": available_students, "frozen_students": frozen_students, "freeze_days": freeze_days, "today": today.isoformat()})
 
 
 @router.post("/webapp/admin-freeze")
@@ -262,12 +280,28 @@ async def admin_freeze_submit(payload: AdminFreezePayload, db: AsyncSession = De
     action = payload.action.strip().casefold()
     settings = club.club_settings or {}
     if action == "freeze":
-        days = int(settings.get("limits", {}).get("freeze_days_step", 7))
-        result = await process_student_freeze(student.id, club.id, settings, db, days)
-        if result == "disabled":
+        if not settings.get("features", {}).get("freeze", True):
             raise HTTPException(status_code=400, detail="Заморозка отключена в настройках клуба")
-        if not result:
-            raise HTTPException(status_code=409, detail="Заморозка недоступна: проверьте абонемент, лимит или текущий статус")
+        if student.is_frozen:
+            raise HTTPException(status_code=409, detail="Абонемент уже заморожен")
+        if not student.expire_date or student.expire_date.date() < datetime.utcnow().date():
+            raise HTTPException(status_code=409, detail="У атлета нет действующего абонемента")
+        if payload.date_to:
+            try:
+                until = date.fromisoformat(payload.date_to)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail="Некорректная дата окончания заморозки") from exc
+            days = (until - datetime.utcnow().date()).days
+        else:
+            days = int(settings.get("limits", {}).get("freeze_days_step", 7))
+        if not 1 <= days <= 365:
+            raise HTTPException(status_code=400, detail="Срок заморозки должен быть от 1 до 365 дней")
+        # Administrative freeze is an override and does not consume the client's free-freeze entitlement.
+        student.expire_date += timedelta(days=days)
+        student.is_frozen = 1
+        student.frozen_at = datetime.utcnow()
+        student.frozen_days = days
+        await db.commit()
         audit_event("admin_freeze_applied", club_id=club.id, actor_user_id=int(tg_user["id"]), student_id=student.id, days=days)
         try:
             bot = Bot(club.bot_token)
@@ -379,11 +413,13 @@ async def staff_checkin(payload: dict, db: AsyncSession = Depends(get_session)):
         remaining_lessons = current_balance if current_balance == 999 else max(0, current_balance - (0 if result.get("is_inside_session") else 1))
     active_until_text = active_until.replace("T", " ")[:16] if active_until else ""
     balance_text = "безлимит" if remaining_lessons == 999 else (f"{remaining_lessons} занятий" if remaining_lessons is not None else "—")
+    requested_turnstile = bool(payload.get("open_turnstile", False))
+    actual_turnstile_status = result.get("turnstile_status") or "ℹ️ СКУД отключен"
     if result.get("already_marked"):
         operator_message = f"ℹ️ Посещение уже отмечено. Активная сессия до {active_until_text}. Осталось: {balance_text}."
     else:
         operator_message = f"✅ Посещение успешно отмечено. Сессия активна до {active_until_text}. После закрытия спишется 1 занятие. Осталось: {balance_text}."
-    return {"success": True, "message": operator_message, "already_marked": result.get("already_marked", False), "active_until": active_until, "turnstile": result.get("turnstile_status"), "remaining_lessons": remaining_lessons}
+    return {"success": True, "message": operator_message, "already_marked": result.get("already_marked", False), "active_until": active_until, "turnstile": actual_turnstile_status, "turnstile_requested": requested_turnstile, "remaining_lessons": remaining_lessons}
 
 
 @router.post("/webapp/staff-open-turnstile")
@@ -414,7 +450,7 @@ async def staff_open_turnstile(payload: dict, request: Request, db: AsyncSession
         raise HTTPException(status_code=403, detail="Доступ только для сотрудников")
     club_settings = club.club_settings or {}
     relay_config = dict(club_settings.get("turnstile", {}) or {})
-    turnstile_status = "ℹ️ СКУД отключен"
+    turnstile_status = "ℹ️ СКУД отключен. Команда на турникет не отправлялась."
     if relay_config.get("enabled", False):
         if not relay_config.get("base_url"):
             raise HTTPException(status_code=400, detail="Не настроен адрес турникета")
@@ -503,6 +539,7 @@ async def get_client_cabinet_page(request: Request, club_id: int, init_data: str
             "students": students,
             "user_name": (user.full_name if user else None) or tg_user.get("first_name", ""),
             "profile_discount": profile_discount,
+            "legal_enabled": legal_documents_enabled(settings),
             "now": datetime.now(),
             "summary": {
                 "total": len(summary_source),
@@ -609,6 +646,17 @@ async def webapp_create_student_submit(payload: WebAppCreateStudentPayload, db: 
     except IntegrityError:
         await db.rollback()
         raise HTTPException(status_code=409, detail="Такой атлет уже есть")
+    if club.owner_id and int(club.owner_id) != user_id and club.bot_token:
+        try:
+            bot = Bot(club.bot_token)
+            await bot.send_message(
+                club.owner_id,
+                f"🔗 <b>Новая привязка родителя</b>\n\nАтлет: <b>{escape(student.name)}</b>\nРодитель: <code>{user_id}</code>",
+                parse_mode="HTML",
+            )
+            await bot.session.close()
+        except Exception as notify_error:
+            logger.warning("Не удалось уведомить администратора о новом атлете: %s", notify_error)
     audit_event("webapp_student_created", club_id=club.id, user_id=user_id, student_id=student.id, student_name=student.name)
     return {"ok": True, "student": {"id": student.id, "name": student.name}}
 
@@ -800,7 +848,11 @@ async def webapp_buy_subscription_page(request: Request, club_id: int, init_data
         ).distinct().order_by(Student.name)
     )).scalars().all()
     settings = club.club_settings or {}
-    disciplines = settings.get("disciplines", {})
+    disciplines = {
+        code: {**info, "tariffs": [t for t in (info.get("tariffs", []) or []) if t.get("active", True)]}
+        for code, info in (settings.get("disciplines", {}) or {}).items()
+        if isinstance(info, dict) and info.get("active", True)
+    }
     payment_modes = payment_availability(settings)
     payment_info = get_payment_info_text(settings)
     discounts_by_student = {s.id: [{"kind": d.kind, "value": d.value, "name": d.name} for d in await active_discounts(db, club_id, user.user_id, "subscriptions", student_id=s.id)] for s in students}
@@ -827,10 +879,10 @@ async def webapp_buy_subscription_submit(payload: WebAppBuySubscriptionPayload, 
     if not student or student.club_id != payload.club_id or (student.parent_id != user_id and not linked_parent):
         raise HTTPException(status_code=403, detail="Атлет не найден")
     discipline_cfg = (club.club_settings or {}).get("disciplines", {}).get(payload.sport_type)
-    if not discipline_cfg:
+    if not discipline_cfg or not discipline_cfg.get("active", True):
         raise HTTPException(status_code=400, detail="Направление недоступно")
     tariffs = discipline_cfg.get("tariffs", [])
-    if payload.tariff_idx < 0 or payload.tariff_idx >= len(tariffs):
+    if payload.tariff_idx < 0 or payload.tariff_idx >= len(tariffs) or not tariffs[payload.tariff_idx].get("active", True):
         raise HTTPException(status_code=400, detail="Тариф недоступен")
     selected_tariff = tariffs[payload.tariff_idx]
     price = selected_tariff.get("price")
@@ -1011,8 +1063,12 @@ async def webapp_bind_phone_submit(payload: WebAppBindPhonePayload, request: Req
         if student.parent_id is None and matched_primary:
             student.parent_id = user_id
         existing_link = await db.get(StudentParent, {"student_id": student.id, "parent_id": user_id})
-        if not existing_link:
-            db.add(StudentParent(student_id=student.id, parent_id=user_id, is_primary=matched_primary, phone=normalized_phone))
+        is_primary_parent = student.parent_id == user_id
+        if existing_link:
+            existing_link.is_primary = is_primary_parent
+            existing_link.phone = normalized_phone
+        else:
+            db.add(StudentParent(student_id=student.id, parent_id=user_id, is_primary=is_primary_parent, phone=normalized_phone))
     await db.commit()
     audit_event("webapp_phone_bound", club_id=club.id, user_id=user_id, students=[s.id for s in students], phone_tail=clean_phone_10[-4:])
     return {"ok": True, "message": f"Привязаны атлеты: {', '.join(s.name for s in students)}"}

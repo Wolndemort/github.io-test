@@ -20,7 +20,7 @@ def test_phase1_mutations_are_not_enabled_by_default_in_source():
 
 
 def test_phase1_checklist_keeps_production_gate_explicit():
-    checklist = Path("PHASE1_CHECKLIST.md").read_text(encoding="utf-8")
+    checklist = Path("PROJECT_STATUS.md").read_text(encoding="utf-8")
     assert "Production gate" in checklist
     assert "No direct push to `master`" in checklist
     assert "Web mutation flags disabled" in checklist

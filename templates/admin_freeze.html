@@ -8,44 +8,62 @@
     body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#090909;color:#fff;padding:14px}
     .wrap{max-width:760px;margin:auto}.card{background:#151515;border:1px solid #333;border-radius:16px;padding:14px;margin:10px 0}
     .student{border-top:1px solid #333;padding:12px 0;display:flex;gap:10px;justify-content:space-between;align-items:center}
-    .muted{color:#aaa;font-size:13px}.btn{border:0;border-radius:9px;padding:10px 12px;font-weight:700;cursor:pointer}.freeze{background:#dff8e9;color:#111}.unfreeze{background:#ffe4e4;color:#111}
+    .muted{color:#aaa;font-size:13px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.field{display:flex;flex-direction:column;gap:5px}
+    input,select{box-sizing:border-box;width:100%;padding:11px;border-radius:10px;border:1px solid #555;background:#101010;color:#fff}
+    .btn{border:0;border-radius:9px;padding:10px 12px;font-weight:700;cursor:pointer}.freeze{background:#dff8e9;color:#111}.unfreeze{background:#ffe4e4;color:#111}
+    @media(max-width:560px){.grid{grid-template-columns:1fr}}
   </style>
 </head>
 <body>
 {% include "_staff_back_button.html" %}
 <div class="wrap">
-  <div class="card"><a href="/webapp/staff-pass?club_id={{ club_id }}" style="color:#fff">← В кабинет сотрудника</a><h2>Заморозка абонементов</h2><p class="muted">Доступ только для администратора. Стандартный срок: {{ freeze_days }} дн.</p></div>
   <div class="card">
-    <input id="student-search" type="search" placeholder="Поиск атлета" style="box-sizing:border-box;width:100%;padding:12px;border-radius:10px;border:1px solid #555;background:#101010;color:#fff;margin-bottom:8px">
+    <h2>Заморозка абонементов</h2>
+    <p class="muted">Административная заморозка не списывает бесплатное право клиента. Срок задаётся датой окончания.</p>
+  </div>
+  <div class="card">
+    <h3>Заморозить абонемент</h3>
+    <form id="freeze-form">
+      <div class="grid">
+        <label class="field">Атлет
+          <select name="student_id" required>
+            <option value="">Выберите атлета</option>
+            {% for student in available_students %}<option value="{{ student.id }}">{{ student.name }} · {{ student.discipline or '—' }}</option>{% endfor %}
+          </select>
+        </label>
+        <label class="field">Заморозить до
+          <input name="date_to" type="date" min="{{ today }}" required>
+        </label>
+      </div>
+      <button class="btn freeze" type="submit">Заморозить</button>
+      <p id="freeze-preview" class="muted"></p>
+    </form>
+  </div>
+  <div class="card">
+    <h3>Сейчас заморожены</h3>
+    <input id="student-search" type="search" placeholder="Поиск атлета">
     <p id="empty-search" class="muted" style="display:none">Атлет не найден.</p>
-    {% for student in students %}
+    {% for student in frozen_students %}
     <div class="student" data-student-name="{{ student.name|lower }}">
-      <div><b>{{ student.name }}</b><br><span class="muted">{% if student.is_frozen %}❄️ Заморожен{% else %}Активен{% endif %} · до {{ student.expire_date.strftime('%d.%m.%Y') if student.expire_date else 'нет даты' }}</span></div>
-      <button class="btn {{ 'unfreeze' if student.is_frozen else 'freeze' }}" data-id="{{ student.id }}" data-action="{{ 'unfreeze' if student.is_frozen else 'freeze' }}">{{ 'Разморозить' if student.is_frozen else 'Заморозить' }}</button>
+      <div><b>❄️ {{ student.name }}</b><br><span class="muted">{{ student.discipline or '—' }} · {{ student.frozen_days }} дн. · до {{ student.frozen_until.strftime('%d.%m.%Y') }}</span></div>
+      <button class="btn unfreeze" data-id="{{ student.id }}" data-action="unfreeze">Разморозить</button>
     </div>
-    {% else %}<p class="muted">Атлетов пока нет.</p>{% endfor %}
+    {% else %}<p id="no-frozen" class="muted">Сейчас замороженных абонементов нет.</p>{% endfor %}
     <p id="status" class="muted"></p>
   </div>
 </div>
 <script>
 const tg=window.Telegram?.WebApp; tg?.ready(); tg?.expand();
-document.getElementById('student-search').oninput=(event)=>{
-  const query=event.target.value.trim().toLowerCase(); let visible=0;
-  document.querySelectorAll('.student').forEach(row=>{const match=!query||row.dataset.studentName.includes(query); row.style.display=match?'flex':'none'; if(match) visible++;});
-  document.getElementById('empty-search').style.display=visible?'none':'block';
-};
-document.querySelectorAll('[data-action]').forEach(button=>button.onclick=async()=>{
-  const action=button.dataset.action;
-  if(!confirm(action==='freeze'?'Заморозить абонемент этого атлета?':'Разморозить абонемент этого атлета?')) return;
-  button.disabled=true;
-  const status=document.getElementById('status'); status.textContent='Сохраняем…';
-  try {
-    const response=await fetch('/webapp/admin-freeze',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({init_data:tg?.initData||'',club_id:{{ club_id }},student_id:Number(button.dataset.id),action})});
-    const data=await response.json().catch(()=>({}));
-    if(!response.ok) throw new Error(data.detail||'Не удалось изменить статус');
-    status.textContent=data.message||'Готово'; location.reload();
-  } catch(error) { status.textContent=error.message||'Ошибка'; button.disabled=false; }
-});
+const form=document.getElementById('freeze-form');
+const dateInput=form.querySelector('[name=date_to]');
+const preview=document.getElementById('freeze-preview');
+const today=new Date('{{ today }}T00:00:00');
+const updatePreview=()=>{if(!dateInput.value){preview.textContent='';return;} const end=new Date(dateInput.value+'T00:00:00'); const days=Math.round((end-today)/86400000); preview.textContent=days>0?`Срок: ${days} дн.`:'Выберите будущую дату.';};
+dateInput.value=new Date(today.getTime()+{{ freeze_days }}*86400000).toISOString().slice(0,10); updatePreview(); dateInput.oninput=updatePreview;
+const send=async(payload)=>{const response=await fetch('/webapp/admin-freeze',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...payload,init_data:tg?.initData||'',club_id:{{ club_id }}})});const data=await response.json().catch(()=>({}));if(!response.ok)throw new Error(data.detail||'Не удалось изменить статус');return data;};
+form.onsubmit=async(event)=>{event.preventDefault();const dateTo=dateInput.value;const days=Math.round((new Date(dateTo+'T00:00:00')-today)/86400000);if(days<1||days>365){preview.textContent='Срок должен быть от 1 до 365 дней.';return;}const status=document.getElementById('status');status.textContent='Сохраняем…';try{const data=await send({student_id:Number(new FormData(form).get('student_id')),action:'freeze',date_to:dateTo});status.textContent=data.message||'Заморозка выполнена';location.reload();}catch(error){status.textContent=error.message;}};
+document.getElementById('student-search').oninput=(event)=>{const query=event.target.value.trim().toLowerCase();let visible=0;document.querySelectorAll('.student').forEach(row=>{const match=!query||row.dataset.studentName.includes(query);row.style.display=match?'flex':'none';if(match)visible++;});document.getElementById('empty-search').style.display=visible?'none':'block';};
+document.querySelectorAll('[data-action=unfreeze]').forEach(button=>button.onclick=async()=>{if(!confirm('Разморозить абонемент этого атлета?'))return;button.disabled=true;const status=document.getElementById('status');status.textContent='Сохраняем…';try{const data=await send({student_id:Number(button.dataset.id),action:'unfreeze'});status.textContent=data.message||'Разморозка выполнена';location.reload();}catch(error){status.textContent=error.message;button.disabled=false;}});
 </script>
 </body>
 </html>
