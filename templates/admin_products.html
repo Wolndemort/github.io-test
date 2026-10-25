@@ -47,7 +47,6 @@
 </div>
 <div class="card quickbar"{% if not can_manage_products %} style="display:none"{% endif %}>
   <button id="createBtn" type="button">Создать товар</button>
-  <button id="topBtn" type="button">Наверх</button>
 </div>
 <div class="card" id="productForm"{% if not can_manage_products %} style="display:none"{% endif %}>
   <div class="form-heading"><h3 id="caption">Новый товар</h3><button id="toggleFormBtn" type="button" aria-expanded="true">Свернуть</button></div>
@@ -100,7 +99,6 @@ const caption = document.getElementById('caption');
 const saveBtn = document.getElementById('saveBtn');
 const resetBtn = document.getElementById('resetBtn');
 const createBtn = document.getElementById('createBtn');
-const topBtn = document.getElementById('topBtn');
 const scrollTopBtn = document.getElementById('scrollTopBtn');
 const toggleFormBtn = document.getElementById('toggleFormBtn');
 const formBody = document.getElementById('formBody');

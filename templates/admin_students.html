@@ -85,7 +85,7 @@
         <label>Дисциплина<input name="discipline" value="{{ s.discipline or '' }}"></label>
         <label>Комментарий<textarea name="comment" maxlength="1000" rows="3" placeholder="Внутренняя заметка">{{ s.comment or '' }}</textarea></label>
         <label>Статус<select name="is_frozen"><option value="0" {% if not s.is_frozen %}selected{% endif %}>Активен</option><option value="1" {% if s.is_frozen %}selected{% endif %}>Заморожен</option></select></label>
-        <label>Дней заморозки<input name="frozen_days" type="number" min="1" max="365" value="{{ s.frozen_days or '' }}"></label>
+        <label>Дней заморозки<input type="text" value="{{ s.freeze_days_entitlement or '—' }} дн." readonly></label>
       </div><div style="display:flex;gap:8px;flex-wrap:wrap"><button type="submit">Сохранить</button><button type="button" class="danger-delete">Удалить</button></div><span class="muted msg"></span>
     </form>
   {% else %}<p>Атлетов нет.</p>{% endfor %}
@@ -315,7 +315,7 @@ function studentCardHtml(s) {
         <label>Дисциплина<input name="discipline" value="${esc(s.discipline || '')}"></label>
         <label>Комментарий<textarea name="comment" maxlength="1000" rows="3" placeholder="Внутренняя заметка">${esc(s.comment || '')}</textarea></label>
         <label>Статус<select name="is_frozen"><option value="0" ${s.is_frozen ? '' : 'selected'}>Активен</option><option value="1" ${s.is_frozen ? 'selected' : ''}>Заморожен</option></select></label>
-        <label>Дней заморозки<input name="frozen_days" type="number" min="1" max="365" value="${esc(s.frozen_days || '')}"></label>
+        <label>Дней заморозки<input type="text" value="${esc(s.freeze_days_entitlement ? `${s.freeze_days_entitlement} дн.` : '—')}" readonly></label>
       </div><div style="display:flex;gap:8px;flex-wrap:wrap">${canManageStudents ? '<button type="submit">Сохранить</button><button type="button" class="danger-delete">Удалить</button>' : ''}</div><span class="muted msg"></span>
     </form>`;
 }

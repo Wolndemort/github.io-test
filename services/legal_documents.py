@@ -11,6 +11,24 @@ from services.platform_legal import PLATFORM_LEGAL
 LEGAL_PROVIDER_TYPES = {"ИП", "ООО", "Самозанятый", "Физическое лицо"}
 
 
+def platform_legal_context() -> dict:
+    """Return the immutable platform legal details for platform documents."""
+    return {
+        "platform_name": PLATFORM_LEGAL["platform_name"],
+        "provider_name": PLATFORM_LEGAL["provider_name"],
+        "provider_type": PLATFORM_LEGAL["provider_type"],
+        "inn": PLATFORM_LEGAL["inn"],
+        "ogrn": PLATFORM_LEGAL["ogrn"],
+        "legal_address": PLATFORM_LEGAL["legal_address"],
+        "club_address": PLATFORM_LEGAL["club_address"],
+        "email": PLATFORM_LEGAL["email"],
+        "phone": PLATFORM_LEGAL["phone"],
+        "document_version": PLATFORM_LEGAL["document_version"],
+        "updated_at": PLATFORM_LEGAL.get("updated_at") or "дата публикации указана в актуальной редакции",
+        "privacy_operator": PLATFORM_LEGAL.get("privacy_operator") or PLATFORM_LEGAL["provider_name"],
+    }
+
+
 def validate_legal_data(legal: Mapping | None) -> list[str]:
     data = legal if isinstance(legal, Mapping) else {}
     errors = []
@@ -40,7 +58,8 @@ def legal_context(club) -> dict:
     legal = settings.get("legal", {}) if isinstance(settings.get("legal", {}), dict) else {}
     ui = settings.get("ui", {}) if isinstance(settings.get("ui", {}), dict) else {}
     return {
-        "club_name": legal.get("provider_name") or ui.get("club_name") or getattr(club, "name", "Клуб"),
+        "legal_enabled": legal_documents_enabled(settings),
+        "club_name": ui.get("club_name") or getattr(club, "name", "Клуб"),
         "provider_name": legal.get("provider_name") or "Заполните юридическое наименование клуба",
         "provider_type": legal.get("provider_type") or "ИП/ООО",
         "inn": legal.get("inn") or "не указан",

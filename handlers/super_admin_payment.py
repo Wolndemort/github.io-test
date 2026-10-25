@@ -2,7 +2,7 @@ import os
 import uuid
 import logging
 from database.db import Club, SaaSPaymentOrder, AsyncSessionLocal
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from aiogram import Router, F, types
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy import select, update
@@ -192,7 +192,7 @@ async def on_successful_payment(message: types.Message, session: AsyncSession, r
         return
 
     # Наивное локальное время
-    now_naive = datetime.now().replace(tzinfo=None)
+    now_naive = datetime.now(timezone.utc).replace(tzinfo=None)
 
     # Честная математика продления дат
     if club.subscription_expire_at and club.subscription_expire_at.replace(tzinfo=None) > now_naive:

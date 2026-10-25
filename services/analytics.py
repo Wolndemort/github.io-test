@@ -319,7 +319,11 @@ def build_revenue_series(payments: Iterable[Any], cart_orders: Iterable[Any], ca
     return {"series": series, "peak_amount": peak["amount"], "peak_day": peak["date"]}
 
 
-def calculate_cash_flow_periods(entries: Iterable[Any], now: datetime | None = None) -> dict[str, float]:
+def calculate_cash_flow_periods(
+    entries: Iterable[Any],
+    now: datetime | None = None,
+    cash_sales: Iterable[Any] | None = None,
+) -> dict[str, float]:
     """Calculate cash flow from cash entries only.
 
     Income is positive cash movement, expense is outgoing cash.
@@ -352,6 +356,23 @@ def calculate_cash_flow_periods(entries: Iterable[Any], now: datetime | None = N
             totals[f"today_{kind}"] += amount
             if kind == "expense" and str(getattr(entry, "category", "") or "").strip().casefold() in {"deploy", "деплой"}:
                 totals["today_deploy_expense"] += amount
+    # Confirmed cash sales live in PaymentOrder/CartOrder, not CashEntry.
+    # Include them in cash flow without requiring a second manual cash entry.
+    for sale in cash_sales or []:
+        provider = str(getattr(sale, "provider_payment_id", "") or "").upper()
+        order_type = str(getattr(sale, "type", "") or "").upper()
+        if not (provider.startswith(("CASH", "OVERRIDE:CASH")) or order_type.startswith("CASH")):
+            continue
+        if str(getattr(sale, "status", "CONFIRMED") or "CONFIRMED").upper() != "CONFIRMED":
+            continue
+        amount = _payment_kopecks(sale)
+        created_at = _utc_naive(getattr(sale, "created_at", None))
+        totals["all_income"] += amount
+        if created_at is None:
+            continue
+        for period, boundary in (("month", periods["month"]), ("week", periods["week"]), ("today", periods["today"])):
+            if created_at >= boundary:
+                totals[f"{period}_income"] += amount
     result = {key: round(value / 100, 2) for key, value in totals.items()}
     result["today_margin"] = round(result["today_income"] - result["today_expense"], 2)
     result["week_margin"] = round(result["week_income"] - result["week_expense"], 2)
@@ -431,7 +452,15 @@ def calculate_admin_dashboard(students_models: List[Any], visit_logs: Iterable[A
         "total_athletes": metrics["total_athletes"],
         "total_parents": metrics["total_parents"],
         "active_now_count": metrics["active_now_count"],
+        "active_passes": metrics["active_passes"],
+        "frozen_passes": metrics["frozen_passes"],
+        "inactive_passes": metrics["inactive_passes"],
+        "burning_passes": metrics["burning_passes"],
+        "retention_rate": metrics["retention_rate"],
+        "total_lessons_left": metrics["total_lessons_left"],
         "expired_students": [_dashboard_student_row(s) for s in metrics["inactive_students"]],
+        "inactive_students": [_dashboard_student_row(s) for s in metrics["inactive_students"]],
+        "frozen_students": [_dashboard_student_row(s) for s in metrics["frozen_students"]],
         "burning_students": [{**_dashboard_student_row(s), "balance": _balance(s)} for s in metrics["burning_students"]],
         "sleeping_students": [_dashboard_student_row(s) for s in metrics["sleeping_students"]],
         "all_athletes": [_dashboard_student_row(s) for s in students],

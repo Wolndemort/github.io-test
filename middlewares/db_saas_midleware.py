@@ -1,5 +1,5 @@
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from aiogram import BaseMiddleware, types
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy import select
@@ -8,6 +8,18 @@ from database.constants import DEFAULT_CLUB_SETTINGS
 from redis.asyncio import Redis
 
 SUPER_ADMIN_IDS = [1271717628]
+
+
+def subscription_is_active(expire_at: datetime | None, now: datetime | None = None) -> bool:
+    """Compare naive DB timestamps as UTC and expire access at the exact instant."""
+    if expire_at is None:
+        return False
+    current = now or datetime.now(timezone.utc).replace(tzinfo=None)
+    if current.tzinfo is not None:
+        current = current.astimezone(timezone.utc).replace(tzinfo=None)
+    if expire_at.tzinfo is not None:
+        expire_at = expire_at.astimezone(timezone.utc).replace(tzinfo=None)
+    return expire_at > current.replace(tzinfo=None)
 
 
 class ClubMiddleware(BaseMiddleware):
@@ -91,7 +103,7 @@ class ClubMiddleware(BaseMiddleware):
         club_obj.club_settings = settings
 
         # 3. Логика проверки подписки
-        now = datetime.now()
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
         sub_end = club_obj.subscription_expire_at
         is_owner = (user_id == club_obj.owner_id)
         is_super = (user_id in SUPER_ADMIN_IDS)
@@ -105,7 +117,7 @@ class ClubMiddleware(BaseMiddleware):
         staff = staff_result.scalar_one_or_none()
 
         # Флаг оплаты: активна ли подписка прямо сейчас
-        is_sub_active = sub_end is not None and sub_end > now
+        is_sub_active = subscription_is_active(sub_end, now)
 
         if not is_super:
             if not is_sub_active:

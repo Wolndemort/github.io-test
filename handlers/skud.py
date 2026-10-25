@@ -1,5 +1,6 @@
 import asyncio
 import aiohttp
+from urllib.parse import urlsplit, urlunsplit
 from aiogram import Router, types
 from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,12 +19,28 @@ async def trigger_dingtian_turnstile(config: dict) -> bool:
     # Берем параметры, строго сверяя ключи с функцией сохранения
     relay = config.get("relay_index", 0)  # Оставляем совместимость с ранее рабочей конфигурацией
     pulse_time = config.get("pulse_time_seconds", 1)
-    timeout_val = config.get("timeout_seconds", 5)
+    # Give the cloud relay enough time to answer during degraded club internet.
+    # Keep a minimum of 15s even for older saved club settings containing 5s.
+    try:
+        timeout_val = max(15, int(config.get("timeout_seconds", 15) or 15))
+    except (TypeError, ValueError):
+        timeout_val = 15
     password = config.get("password", "")
 
     clean_url = str(base_url).strip().rstrip("/")
     if clean_url and not clean_url.startswith(("http://", "https://")):
         clean_url = f"http://{clean_url}"
+
+    # CrazeDNS/Netcraze now redirects the public relay endpoint to HTTPS.
+    # Keep plain HTTP for local relay IPs, but upgrade the public hostname so
+    # the CGI request does not depend on a fragile HTTP redirect path.
+    try:
+        parsed_url = urlsplit(clean_url)
+        if parsed_url.hostname and parsed_url.hostname.casefold().endswith(".netcraze.pro"):
+            clean_url = urlunsplit(("https", parsed_url.netloc, parsed_url.path, parsed_url.query, parsed_url.fragment)).rstrip("/")
+    except ValueError:
+        logger.error("Некорректный адрес реле: %s", clean_url)
+        return False
 
     # Корректный URL API для плат Dingtian.
     url = f"{clean_url}/relay_cgi.cgi?type=2&relay={relay}&on=1&time={pulse_time}&pwd=0"

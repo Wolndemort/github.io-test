@@ -658,8 +658,6 @@ async def choose_student_for_freeze(
         return await callback.answer("У вас нет атлетов в этом клубе!", show_alert=True)
 
     # 2. Достаем настройки из SaaS-конфига (Limits -> freeze_days_step)
-    freeze_days = club_settings.get("limits", {}).get("freeze_days_step", 7)
-
     builder = InlineKeyboardBuilder()
     count = 0
     now = datetime.now()
@@ -688,7 +686,7 @@ async def choose_student_for_freeze(
         text=(
         f"❄️ <b>Заморозка</b>\n\n"
         f"Клуб: <b>{club.name}</b>\n"
-        f"Выберите атлета. Срок действия будет продлен на <b>{freeze_days} дней</b>.\n\n"
+        f"Выберите атлета. Срок заморозки указан в его абонементе.\n\n"
             f"⚠️ <i>Заморозка доступна 1 раз за период. Абонемент разморозится автоматически при первом входе в зал.</i>"
         ),
         reply_markup=builder.as_markup(),

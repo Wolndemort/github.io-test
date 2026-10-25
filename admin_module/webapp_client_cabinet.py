@@ -8,6 +8,7 @@ from loguru import logger
 from sqlalchemy import select, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from loguru import logger
 
 from admin_module.router_base import router, templates
 from admin_module.schemas import (
@@ -156,6 +157,12 @@ async def _get_saved_subscription(db: AsyncSession, club_id: int, user_id: int) 
 async def _is_staff_webapp_user(db: AsyncSession, club: Club, user_id: int) -> bool:
     if not club:
         return False
+    # Super-admins are allowed into every club's administrative WebApp by
+    # verify_webapp_admin/verify_webapp_staff. Keep the cabinet's mode
+    # detection consistent with those guards; otherwise a super-admin is
+    # incorrectly sent to the client phone-binding screen.
+    if int(user_id) in {int(value) for value in SUPER_ADMIN_IDS}:
+        return True
     if int(getattr(club, "owner_id", 0) or 0) == int(user_id):
         return True
     return bool(
@@ -251,7 +258,17 @@ async def admin_freeze_page(request: Request, club_id: int, init_data: str | Non
     await verify_webapp_admin_or_manager(club, init_data, db)
     students = (await db.execute(select(Student).where(Student.club_id == club_id).order_by(Student.name))).scalars().all()
     freeze_days = int((club.club_settings or {}).get("limits", {}).get("freeze_days_step", 7))
-    return templates.TemplateResponse("admin_freeze.html", {"request": request, "club": club, "club_id": club_id, "students": students, "freeze_days": freeze_days})
+    today = datetime.utcnow().date()
+    frozen_students = []
+    available_students = []
+    for student in students:
+        if student.is_frozen:
+            started = student.frozen_at.date() if student.frozen_at else today
+            days = int(student.frozen_days or freeze_days)
+            frozen_students.append({"id": student.id, "name": student.name, "discipline": student.discipline, "frozen_days": days, "frozen_until": started + timedelta(days=days)})
+        elif student.expire_date and student.expire_date.date() >= today:
+            available_students.append(student)
+    return templates.TemplateResponse("admin_freeze.html", {"request": request, "club": club, "club_id": club_id, "students": students, "available_students": available_students, "frozen_students": frozen_students, "freeze_days": freeze_days, "today": today.isoformat()})
 
 
 @router.post("/webapp/admin-freeze")
@@ -297,8 +314,26 @@ async def admin_freeze_submit(payload: AdminFreezePayload, db: AsyncSession = De
         result = await process_student_freeze(student.id, club.id, settings, db, days)
         if result == "disabled":
             raise HTTPException(status_code=400, detail="Заморозка отключена в настройках клуба")
-        if not result:
-            raise HTTPException(status_code=409, detail="Заморозка недоступна: проверьте абонемент, лимит или текущий статус")
+        if student.is_frozen:
+            raise HTTPException(status_code=409, detail="Абонемент уже заморожен")
+        if not student.expire_date or student.expire_date.date() < datetime.utcnow().date():
+            raise HTTPException(status_code=409, detail="У атлета нет действующего абонемента")
+        if payload.date_to:
+            try:
+                until = date.fromisoformat(payload.date_to)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail="Некорректная дата окончания заморозки") from exc
+            days = (until - datetime.utcnow().date()).days
+        else:
+            days = int(settings.get("limits", {}).get("freeze_days_step", 7))
+        if not 1 <= days <= 365:
+            raise HTTPException(status_code=400, detail="Срок заморозки должен быть от 1 до 365 дней")
+        # Administrative freeze is an override and does not consume the client's free-freeze entitlement.
+        student.expire_date += timedelta(days=days)
+        student.is_frozen = 1
+        student.frozen_at = datetime.utcnow()
+        student.frozen_days = days
+        await db.commit()
         audit_event("admin_freeze_applied", club_id=club.id, actor_user_id=int(tg_user["id"]), student_id=student.id, days=days)
         try:
             bot = Bot(club.bot_token)
@@ -417,11 +452,13 @@ async def staff_checkin(payload: dict, db: AsyncSession = Depends(get_session)):
         remaining_lessons = current_balance if current_balance == 999 else max(0, current_balance - (0 if result.get("is_inside_session") else 1))
     active_until_text = active_until.replace("T", " ")[:16] if active_until else ""
     balance_text = "безлимит" if remaining_lessons == 999 else (f"{remaining_lessons} занятий" if remaining_lessons is not None else "—")
+    requested_turnstile = bool(payload.get("open_turnstile", False))
+    actual_turnstile_status = result.get("turnstile_status") or "ℹ️ СКУД отключен"
     if result.get("already_marked"):
         operator_message = f"ℹ️ Посещение уже отмечено. Активная сессия до {active_until_text}. Осталось: {balance_text}."
     else:
         operator_message = f"✅ Посещение успешно отмечено. Сессия активна до {active_until_text}. После закрытия спишется 1 занятие. Осталось: {balance_text}."
-    return {"success": True, "message": operator_message, "already_marked": result.get("already_marked", False), "active_until": active_until, "turnstile": result.get("turnstile_status"), "remaining_lessons": remaining_lessons}
+    return {"success": True, "message": operator_message, "already_marked": result.get("already_marked", False), "active_until": active_until, "turnstile": actual_turnstile_status, "turnstile_requested": requested_turnstile, "remaining_lessons": remaining_lessons}
 
 
 @router.post("/webapp/staff-open-turnstile")
@@ -454,7 +491,7 @@ async def staff_open_turnstile(payload: dict, request: Request, db: AsyncSession
     if not turnstile_enabled(club_settings):
         raise HTTPException(status_code=400, detail="Турникет отключён администратором")
     relay_config = dict(club_settings.get("turnstile", {}) or {})
-    turnstile_status = "ℹ️ СКУД отключен"
+    turnstile_status = "ℹ️ СКУД отключен. Команда на турникет не отправлялась."
     if relay_config.get("enabled", False):
         if not relay_config.get("base_url"):
             raise HTTPException(status_code=400, detail="Не настроен адрес турникета")
@@ -884,7 +921,7 @@ async def webapp_buy_subscription_submit(payload: WebAppBuySubscriptionPayload, 
     if not discipline_cfg or not discipline_cfg.get("active", True):
         raise HTTPException(status_code=400, detail="Направление недоступно")
     tariffs = discipline_cfg.get("tariffs", [])
-    if payload.tariff_idx < 0 or payload.tariff_idx >= len(tariffs):
+    if payload.tariff_idx < 0 or payload.tariff_idx >= len(tariffs) or not tariffs[payload.tariff_idx].get("active", True):
         raise HTTPException(status_code=400, detail="Тариф недоступен")
     selected_tariff = tariffs[payload.tariff_idx]
     price = selected_tariff.get("price")

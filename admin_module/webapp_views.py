@@ -63,6 +63,17 @@ from middlewares.db_saas_midleware import SUPER_ADMIN_IDS
 def _normalize_category(value: str | None) -> str:
     return " ".join((value or "other").strip().casefold().replace("ё", "е").split()) or "other"
 
+
+async def _discount_staff_recipient_ids(session: AsyncSession, club: Club) -> set[int]:
+    rows = (await session.execute(select(ClubStaff).where(ClubStaff.club_id == club.id, ClubStaff.is_active.is_(True)))).scalars().all()
+    ids = {int(club.owner_id)} if club.owner_id else set()
+    for staff in rows:
+        permissions = staff.permissions if isinstance(staff.permissions, dict) else {}
+        if staff.role in {"manager", "cashier"} or permissions.get("cash_sale") or permissions.get("broadcast"):
+            if staff.telegram_id:
+                ids.add(int(staff.telegram_id))
+    return ids
+
 async def _canonical_product_category(session: AsyncSession, club_id: int, value: str | None, *, exclude_id: int | None = None) -> str:
     raw = " ".join((value or "other").strip().split()) or "other"
     wanted = _normalize_category(raw)
@@ -535,6 +546,7 @@ async def webapp_admin_discounts_page(request: Request, club_id: int = Query(...
 
 @router.post("/webapp/admin-discounts/change")
 async def change_admin_discount(payload: DiscountChangePayload, session: AsyncSession = Depends(get_session)):
+    # уведомление о скидке отправляется при назначении, отвязке и изменении срока.
     club = await session.get(Club, payload.club_id, with_for_update=True)
     if not club:
         raise HTTPException(404, "Клуб не найден")
@@ -596,11 +608,19 @@ async def change_admin_discount(payload: DiscountChangePayload, session: AsyncSe
     return {"ok": True}
 
 @router.get("/webapp/admin-discounts/clients")
-async def search_discount_clients(request: Request, club_id: int = Query(...), q: str = Query(default=""), init_data: str | None = Query(default=None), session: AsyncSession = Depends(get_session)):
+async def search_discount_clients(request: Request, club_id: int = Query(...), q: str = Query(default=""), discipline: str = Query(default="", max_length=50), no_subscription: bool = Query(default=False), no_visits_14: bool = Query(default=False), init_data: str | None = Query(default=None), session: AsyncSession = Depends(get_session)):
     club = await session.get(Club, club_id)
     await verify_webapp_staff(club, init_data, session, "cash_sale")
     needle = q.strip()
-    query = select(User).join(Student, Student.parent_id == User.user_id).where(Student.club_id == club_id).distinct().order_by(User.full_name, User.user_id).limit(50)
+    now = datetime.utcnow()
+    student_filters = [Student.club_id == club_id]
+    if discipline:
+        student_filters.append(Student.discipline == discipline)
+    if no_subscription:
+        student_filters.append(or_(Student.expire_date.is_(None), Student.expire_date < now, Student.balance_lessons <= 0))
+    if no_visits_14:
+        student_filters.append(or_(Student.last_visit.is_(None), Student.last_visit < now - timedelta(days=14)))
+    query = select(User).join(Student, Student.parent_id == User.user_id).where(*student_filters).distinct().order_by(User.full_name, User.user_id).limit(50)
     if needle:
         # Search by both the parent and the athlete.  The assignment UI is
         # labelled as an athlete search, but linked athletes used to be
@@ -615,17 +635,20 @@ async def search_discount_clients(request: Request, club_id: int = Query(...), q
     users = (await session.execute(query)).scalars().all()
     result = []
     for user in users:
-        students = (await session.execute(select(Student).where(Student.parent_id == user.user_id, Student.club_id == club_id).order_by(Student.name))).scalars().all()
+        students = (await session.execute(select(Student).where(Student.parent_id == user.user_id, *student_filters).order_by(Student.name))).scalars().all()
         assignments = (await session.execute(select(DiscountAssignment.discount_id).where(DiscountAssignment.user_id == user.user_id, DiscountAssignment.club_id == club_id))).scalars().all()
-        result.append({"user_id": user.user_id, "name": user.full_name or str(user.user_id), "phone": next((s.parent_phone for s in students if s.parent_phone), None), "students": [s.name for s in students], "discount_ids": assignments})
-    orphan_query = select(Student).outerjoin(User, User.user_id == Student.parent_id).where(Student.club_id == club_id, User.user_id.is_(None)).order_by(Student.name).limit(50)
+        result.append({"user_id": user.user_id, "name": user.full_name or str(user.user_id), "phone": next((s.parent_phone for s in students if s.parent_phone), None), "students": [s.name for s in students], "student_rows": [{"id": s.id, "name": s.name, "discipline": s.discipline, "discount_ids": (await session.scalars(select(DiscountAssignment.discount_id).where(DiscountAssignment.student_id == s.id, DiscountAssignment.club_id == club_id))).all()} for s in students], "discount_ids": assignments})
+    orphan_query = select(Student).outerjoin(User, User.user_id == Student.parent_id).where(*student_filters, User.user_id.is_(None)).order_by(Student.name).limit(50)
     if needle:
         orphan_query = orphan_query.where(or_(Student.name.ilike(f"%{needle}%"), Student.parent_phone.ilike(f"%{needle}%"), Student.parent_phone_secondary.ilike(f"%{needle}%")))
     orphan_students = (await session.execute(orphan_query)).scalars().all()
     for student in orphan_students:
         assignments = (await session.execute(select(DiscountAssignment.discount_id).where(DiscountAssignment.student_id == student.id, DiscountAssignment.club_id == club_id))).scalars().all()
-        result.append({"student_id": student.id, "name": student.name, "phone": student.parent_phone or student.parent_phone_secondary, "students": [student.name], "discount_ids": assignments, "orphan_student": True})
-    return {"clients": result}
+        result.append({"student_id": student.id, "name": student.name, "phone": student.parent_phone or student.parent_phone_secondary, "students": [student.name], "student_rows": [{"id": student.id, "name": student.name, "discipline": student.discipline, "discount_ids": assignments}], "discount_ids": assignments, "orphan_student": True})
+    settings = club.club_settings if club and isinstance(club.club_settings, dict) else {}
+    configured = settings.get("disciplines", {}) if isinstance(settings.get("disciplines", {}), dict) else {}
+    disciplines = [{"value": code, "name": value.get("name") or code} for code, value in configured.items() if isinstance(value, dict)]
+    return {"clients": result, "disciplines": disciplines, "filters": {"discipline": discipline, "no_subscription": no_subscription, "no_visits_14": no_visits_14}}
 
 
 @router.post("/webapp/admin-tariffs/change")
@@ -695,7 +718,7 @@ async def change_admin_tariff(payload: TariffChangePayload, request: Request, se
             return int(default)
 
     if payload.action == "toggle_active":
-        block["active"] = not bool(block.get("active", False))
+        block["active"] = not bool(block.get("active", True))
     elif payload.action == "toggle_type":
         block["type"] = "lessons" if block.get("type", "lessons") == "unlimited" else "unlimited"
         if block["type"] == "unlimited":
@@ -736,7 +759,7 @@ async def change_admin_tariff(payload: TariffChangePayload, request: Request, se
         return {"success": True, "copied_from": source_disc}
     elif payload.action == "add":
         tariff = payload.tariff or {}
-        tariffs.append({"price": _as_float(tariff.get("price", 0)), "days": max(1, _as_int(tariff.get("days", 30), 30)), "count": 999 if block.get("type") == "unlimited" else max(0, _as_int(tariff.get("count", 0), 0)), "min_age": max(0, _as_int(tariff.get("min_age", 0), 0))})
+        tariffs.append({"price": _as_float(tariff.get("price", 0)), "days": max(1, _as_int(tariff.get("days", 30), 30)), "count": 999 if block.get("type") == "unlimited" else max(0, _as_int(tariff.get("count", 0), 0)), "min_age": max(0, _as_int(tariff.get("min_age", 0), 0)), "active": True})
     elif payload.action in {"update", "delete"}:
         if payload.index is None or payload.index < 0 or payload.index >= len(tariffs):
             raise HTTPException(400, "????? ?? ??????")
@@ -751,7 +774,8 @@ async def change_admin_tariff(payload: TariffChangePayload, request: Request, se
             tariffs.pop(payload.index)
         else:
             tariff = payload.tariff or {}
-            tariffs[payload.index] = {"price": _as_float(tariff.get("price", 0)), "days": max(1, _as_int(tariff.get("days", 30), 30)), "count": 999 if block.get("type") == "unlimited" else max(0, _as_int(tariff.get("count", 0), 0)), "min_age": max(0, _as_int(tariff.get("min_age", 0), 0))}
+            old_active = bool(tariffs[payload.index].get("active", True))
+            tariffs[payload.index] = {"price": _as_float(tariff.get("price", 0)), "days": max(1, _as_int(tariff.get("days", 30), 30)), "count": 999 if block.get("type") == "unlimited" else max(0, _as_int(tariff.get("count", 0), 0)), "min_age": max(0, _as_int(tariff.get("min_age", 0), 0)), "active": old_active}
     else:
         raise HTTPException(400, "??????????? ????????")
     if any(_as_float(t.get("price", 0)) <= 0 or _as_int(t.get("days", 0)) <= 0 or _as_int(t.get("count", 0)) < 0 or _as_int(t.get("min_age", 0)) < 0 or _as_int(t.get("min_age", 0)) > 100 for t in tariffs):
@@ -991,6 +1015,127 @@ async def webapp_admin_schedule_page(
     staff = (await session.execute(select(ClubStaff).where(ClubStaff.club_id == club_id, ClubStaff.is_active.is_(True)).order_by(ClubStaff.full_name))).scalars().all()
     staff_data = [{"id": x.id, "name": x.full_name or f"Тренер #{x.id}"} for x in staff]
     return templates.TemplateResponse("admin_schedule.html", {"request": request, "club": club, "club_id": club_id, "disciplines": (club.club_settings or {}).get("disciplines", {}), "staff": staff_data, "can_assign_coach": is_admin, "schedule_effective_date": datetime.now(_MOTIVATION_TZ).date().isoformat()})
+
+
+@router.get("/webapp/admin-coach-motivation", response_class=HTMLResponse)
+async def webapp_admin_coach_motivation_page(
+        request: Request,
+        club_id: int = Query(...),
+        session: AsyncSession = Depends(get_session),
+        init_data: str | None = Query(default=None),
+):
+    club = (await session.execute(select(Club).where(Club.id == club_id))).scalar_one_or_none()
+    if not init_data:
+        return telegram_init_gate(
+            "/webapp/admin-coach-motivation",
+            club_id,
+            "Откройте мотивацию тренеров из кабинета администратора",
+        )
+    await verify_webapp_admin(club, init_data)
+    settings = club.club_settings if isinstance(club.club_settings, dict) else {}
+    disciplines = settings.get("disciplines", {}) if isinstance(settings.get("disciplines", {}), dict) else {}
+    motivation = settings.get("coach_motivation", {}) if isinstance(settings.get("coach_motivation", {}), dict) else {}
+    staff = list((await session.execute(select(ClubStaff).where(ClubStaff.club_id == club_id, ClubStaff.is_active.is_(True)).order_by(ClubStaff.full_name))).scalars().all())
+    return templates.TemplateResponse(
+        "admin_coach_motivation.html",
+        {
+            "request": request,
+            "club": club,
+            "club_id": club_id,
+            "disciplines": disciplines,
+            "motivation": motivation,
+            "staff": staff,
+        },
+    )
+
+
+@router.post("/webapp/admin-coach-motivation/save")
+async def save_admin_coach_motivation(request: Request, session: AsyncSession = Depends(get_session)):
+    payload = await request.json()
+    club_id = int(payload.get("club_id") or 0)
+    init_data = payload.get("init_data")
+    club = (await session.execute(select(Club).where(Club.id == club_id).with_for_update())).scalar_one_or_none()
+    tg_user = await verify_webapp_admin(club, init_data)
+    settings = dict(club.club_settings or {})
+    disciplines = settings.get("disciplines", {}) if isinstance(settings.get("disciplines", {}), dict) else {}
+
+    raw_rules = payload.get("disciplines", {})
+    if not isinstance(raw_rules, dict):
+        raise HTTPException(400, "Некорректные настройки дисциплин")
+
+    def money(value, default=0):
+        try:
+            value = float(value)
+        except (TypeError, ValueError):
+            return default
+        if value < 0 or value > 10_000_000:
+            raise HTTPException(400, "Сумма должна быть от 0 до 10 000 000 ₽")
+        return round(value, 2)
+
+    clean_rules = {}
+    for code, rule in raw_rules.items():
+        if code not in disciplines or not isinstance(rule, dict):
+            raise HTTPException(400, "Можно настраивать только существующие дисциплины")
+        threshold = int(rule.get("low_attendance_threshold", 10) or 10)
+        if threshold < 0 or threshold > 1000:
+            raise HTTPException(400, "Порог учеников должен быть от 0 до 1000")
+        multiplier = float(rule.get("low_attendance_multiplier", 0.5) or 0.5)
+        if multiplier < 0 or multiplier > 1:
+            raise HTTPException(400, "Коэффициент должен быть от 0 до 1")
+        clean_rules[str(code)] = {
+            "base_rate": money(rule.get("base_rate")),
+            "bonus_per_student": money(rule.get("bonus_per_student")),
+            "bonus_per_session": money(rule.get("bonus_per_session")),
+            "low_attendance_threshold": threshold,
+            "low_attendance_multiplier": round(multiplier, 4),
+            "enabled": bool(rule.get("enabled", True)),
+        }
+
+    personal_training = money(payload.get("personal_training_rate"))
+    period_from = str(payload.get("period_from") or "")[:10]
+    period_to = str(payload.get("period_to") or "")[:10]
+    if period_from and period_to and period_from > period_to:
+        raise HTTPException(400, "Дата начала периода не может быть позже даты окончания")
+
+    staff_rows = payload.get("staff", {})
+    if not isinstance(staff_rows, dict):
+        raise HTTPException(400, "Некорректные настройки персонала")
+    staff_ids = {str(x) for x in (await session.scalars(select(ClubStaff.id).where(ClubStaff.club_id == club.id, ClubStaff.is_active.is_(True)))).all()}
+    clean_staff = {}
+    for staff_id, row in staff_rows.items():
+        if str(staff_id) not in staff_ids or not isinstance(row, dict):
+            raise HTTPException(400, "Можно назначать только активный персонал этого клуба")
+        mode = str(row.get("mode") or "coach").lower()
+        if mode not in {"coach", "fixed_day", "fixed_month"}:
+            raise HTTPException(400, "Некорректный режим оплаты сотрудника")
+        assigned = row.get("disciplines", [])
+        if not isinstance(assigned, list):
+            raise HTTPException(400, "Некорректный список дисциплин сотрудника")
+        clean_staff[str(staff_id)] = {
+            "mode": mode,
+            "rate": money(row.get("rate")),
+            "disciplines": [str(x) for x in assigned if str(x) in disciplines],
+        }
+    settings["coach_motivation"] = {
+        "enabled": bool(payload.get("enabled", True)),
+        "personal_training_rate": personal_training,
+        "period_from": period_from,
+        "period_to": period_to,
+        "disciplines": clean_rules,
+        "staff": clean_staff,
+        "updated_at": datetime.utcnow().isoformat(),
+    }
+    club.club_settings = settings
+    await session.commit()
+    audit_event(
+        "coach_motivation_settings_updated",
+        **await audit_actor_context(session, club, tg_user, "webapp/admin-coach-motivation"),
+        club_id=club.id,
+        action="update",
+        object_type="coach_motivation",
+        disciplines=list(clean_rules),
+    )
+    return {"ok": True, "disciplines": clean_rules, "personal_training_rate": personal_training}
 
 @router.post("/webapp/admin-schedule/change")
 async def change_admin_schedule(payload: ScheduleChangePayload, session: AsyncSession = Depends(get_session)):
@@ -1355,6 +1500,13 @@ async def save_admin_legal(request: Request, club_id: int = Query(...), session:
     payload = await request.json()
     club = await session.get(Club, club_id)
     tg_user = await verify_webapp_admin(club, payload.get("init_data"))
+    club = (await session.execute(select(Club).where(Club.id == club_id).with_for_update())).scalar_one()
+    if not isinstance(payload.get("enabled", True), bool):
+        raise HTTPException(status_code=400, detail="Поле публикации должно быть логическим")
+    fields = ("provider_name", "provider_type", "inn", "ogrn", "legal_address", "club_address", "email", "phone", "document_version", "privacy_operator")
+    allowed = {"init_data", "enabled", *fields}
+    if set(payload) - allowed:
+        raise HTTPException(status_code=400, detail="Передано неизвестное поле юридических документов")
     settings = dict(club.club_settings or {})
     fields = ("provider_name", "provider_type", "inn", "ogrn", "legal_address", "club_address", "email", "phone", "document_version", "updated_at", "privacy_operator")
     legal = {field: str(payload.get(field, "") or "").strip()[:500] for field in fields}

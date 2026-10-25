@@ -2,8 +2,9 @@
 
 import asyncio
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from html import escape
+from zoneinfo import ZoneInfo
 
 from aiogram import types
 from loguru import logger
@@ -36,8 +37,66 @@ from services.analytics import calculate_admin_dashboard, calculate_daily_busine
 from services.bot_registry import bots_dict
 from services.audit import audit_event
 
+MOSCOW_TZ = ZoneInfo("Europe/Moscow")
+
+
+def _club_subscription_days_left(expire_at: datetime, now: datetime | None = None) -> int:
+    """Return remaining calendar days in Moscow for a club SaaS subscription."""
+    current = now or reporting_periods()["local_now"]
+    if current.tzinfo is not None:
+        current = current.astimezone(MOSCOW_TZ).replace(tzinfo=None)
+    expiry_local = expire_at.replace(tzinfo=timezone.utc).astimezone(MOSCOW_TZ).date()
+    return (expiry_local - current.date()).days
+
+
+async def send_club_subscription_expiry_reminders() -> None:
+    """Notify club owners 7, 4 and 2 days before SaaS access expires."""
+    periods = reporting_periods()
+    local_now = periods["local_now"]
+    async with AsyncSessionLocal() as session:
+        clubs = (await session.execute(
+            select(Club).where(Club.subscription_expire_at.is_not(None))
+        )).scalars().all()
+
+    for club in clubs:
+        if not club.owner_id or not club.bot_token or not club.subscription_expire_at:
+            continue
+        bot = bots_dict.get(club.bot_token)
+        if not bot:
+            continue
+        expire_at = club.subscription_expire_at.replace(tzinfo=None)
+        days_left = _club_subscription_days_left(expire_at, local_now)
+        if days_left not in {7, 4, 2}:
+            continue
+        notification_key = f"notify:club-saas-expiry:{club.id}:{expire_at.isoformat()}:{days_left}"
+        if not await _notification_once(notification_key, ttl=10 * 86400):
+            continue
+        try:
+            await bot.send_message(
+                chat_id=int(club.owner_id),
+                text=(
+                    f"⏳ <b>Подписка клуба заканчивается через {days_left} дн.</b>\n\n"
+                    f"Клуб: <b>{escape(club.name or 'Клуб')}</b>\n"
+                    f"Дата окончания: <b>{expire_at.strftime('%d.%m.%Y')}</b>\n\n"
+                    "Продлите подписку заранее, чтобы кабинет и функции клуба не были заблокированы."
+                ),
+                parse_mode="HTML",
+                reply_markup=types.InlineKeyboardMarkup(inline_keyboard=[[
+                    types.InlineKeyboardButton(text="💳 Перейти к оплате", callback_data="pay_menu")
+                ]]),
+            )
+        except Exception as reminder_error:
+            await _notification_forget(notification_key)
+            logger.error(
+                "Не удалось отправить напоминание об окончании SaaS-подписки club=%s owner=%s: %s",
+                club.id,
+                club.owner_id,
+                reminder_error,
+            )
+
 async def send_discount_reminders():
-    """Monthly active-discount reminders and one-time expiry notices."""
+    """Notify clients and responsible club staff about discount lifecycle."""
+    _discount_notification_kinds = ("notify:discount-monthly", "notify:discount-expiry")
     today = reporting_periods()["local_now"].date()
     async with AsyncSessionLocal() as session:
         rows = (await session.execute(select(Discount, DiscountAssignment, Club, User, Student).join(DiscountAssignment, DiscountAssignment.discount_id == Discount.id).join(Club, Club.id == Discount.club_id).outerjoin(User, User.user_id == DiscountAssignment.user_id).outerjoin(Student, Student.id == DiscountAssignment.student_id).where(Discount.is_active.is_(True)))).all()
@@ -61,10 +120,10 @@ async def send_discount_reminders():
                         await _notification_forget(key)
                 continue
             if discount.ends_at and (discount.ends_at - today).days <= 1:
-                key = f"notify:discount-expiry:{club.id}:{assignment.user_id}:{discount.id}:{discount.ends_at}"
+                reminder_kind = "expiry"
                 text = f"⏳ <b>Скидка заканчивается</b>\n\n{escape(discount.name)} — {value}.\nДействует до: <code>{discount.ends_at.strftime('%d.%m.%Y')}</code>."
             else:
-                key = f"notify:discount-monthly:{club.id}:{assignment.user_id}:{discount.id}:{today.year}-{today.month}"
+                reminder_kind = "monthly"
                 text = f"🏷️ <b>Ваша скидка активна</b>\n\n{escape(discount.name)} — <b>{value}</b>.\nДействует до: <code>{discount.ends_at.strftime('%d.%m.%Y') if discount.ends_at else 'без срока'}</code>."
             if not await _notification_once(key, ttl=35 * 86400):
                 continue

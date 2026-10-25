@@ -1,6 +1,6 @@
 import asyncio
 import copy
-from datetime import timedelta, datetime
+from datetime import timedelta, datetime, timezone
 from aiogram.exceptions import TelegramUnauthorizedError, TelegramNetworkError
 from loguru import logger
 from redis.asyncio import Redis
@@ -63,6 +63,14 @@ async def super_admin_main(
     builder.row(types.InlineKeyboardButton(
         text="🖥 Управление всеми клубами (SqlAdmin)",
         url="https://speedycrm.ru/master-dashboard"  # Откроет список франшиз
+    ))
+    builder.row(types.InlineKeyboardButton(
+        text="📄 Политика платформы",
+        web_app=types.WebAppInfo(url=f"{BASE_URL.rstrip('/')}/platform/privacy"),
+    ))
+    builder.row(types.InlineKeyboardButton(
+        text="📜 Оферта для клубов",
+        web_app=types.WebAppInfo(url=f"{BASE_URL.rstrip('/')}/platform/oferta"),
     ))
 
     # --- Остальные кнопки управления SaaS ---
@@ -330,7 +338,7 @@ async def list_for_extend(
             return await callback.message.edit_text("❌ В системе еще нет зарегистрированных клубов.")
 
         builder = InlineKeyboardBuilder()
-        now = datetime.now()
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
 
         for c in clubs:
             # Проверяем дату
@@ -380,7 +388,7 @@ async def process_extend(
         if not club:
             return await callback.message.answer("❌ Клуб не найден.")
 
-        now = datetime.now()
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
 
         # ВАЖНО: используем правильное имя поля из твоей БД
         current_expire = club.subscription_expire_at
@@ -464,7 +472,7 @@ async def system_stats_handler(callback: types.CallbackQuery, session: AsyncSess
     clubs_count = (await session.execute(select(func.count(Club.id)))).scalar() or 0
     students_count = (await session.execute(select(func.count(Student.id)))).scalar() or 0
     active_clubs = (await session.execute(select(func.count(Club.id)).where(Club.subscription_expire_at >
-                                                                            datetime.now()))).scalar() or 0
+                                                                            datetime.now(timezone.utc).replace(tzinfo=None)))).scalar() or 0
     text = (
         "📊 <b>ГЛОБАЛЬНАЯ СТАТИСТИКА SaaS</b>\n\n"
         f"🏢 Всего клубов в системе: <b>{clubs_count}</b>\n"

@@ -55,8 +55,8 @@ function openTurnstile(useBiometric) {
     const go = async (biometricUsed) => {
         try {
             const data = await postOpen(biometricUsed);
-            status.textContent = data.message || 'Турникет открыт';
-            tg?.showAlert(data.message || 'Турникет открыт');
+            status.textContent = data.message || 'Операция обработана';
+            tg?.showAlert(data.message || 'Операция обработана');
         } catch (e) {
             const message = e?.message || 'Не удалось открыть турникет';
             status.textContent = message;

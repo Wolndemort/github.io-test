@@ -103,7 +103,7 @@ if (!bm || typeof bm.init !== 'function' || typeof bm.requestAccess !== 'functio
     showBiometryFallback();
     const hint = document.getElementById('status-hint');
     if (hint) {
-        hint.textContent = 'Включите код-пароль и Face ID/отпечаток в настройках телефона, затем перезапустите Telegram. Если биометрия недоступна, используйте QR-пропуск из меню бота.';
+        hint.textContent = 'Используйте QR-пропуск из меню бота.';
         hint.className = 'hint';
     }
     const setupBox = document.getElementById('setup-biometry-box');
@@ -132,6 +132,7 @@ try {
     }
 } catch (error) {
     console.error('Face ID synchronous init failed', error);
+    showBiometryFallback();
 }
 function setupBiometrics() {
     if (!bm) {
@@ -182,7 +183,7 @@ function setupBiometrics() {
                 tg?.showAlert(error.message || 'Не удалось активировать Face ID.');
             });
         } else {
-            document.getElementById('status-hint').textContent = 'Доступ к Face ID отклонён. Разрешите биометрию или используйте QR-пропуск.';
+            document.getElementById('status-hint').textContent = 'Доступ к Face ID отклонён. Используйте QR-пропуск из меню бота.';
             tg.showAlert("Доступ к Face ID отклонён.");
         }
     });
@@ -193,7 +194,7 @@ function selectStudent(studentId, studentName) {
     document.getElementById(`card-${studentId}`).classList.add('selected-card');
     if (!tg) return;
     if (!bm || (!bm.isAccessGranted && !serverBiometryEnabled)) {
-        tg.showAlert("Атлет выбран. Сначала активируйте Face ID по кнопке сверху.");
+        tg.showAlert("Face ID недоступен. Используйте QR-пропуск из меню бота.");
         return;
     }
     tg.MainButton.text = `ПРОПУСТИТЬ: ${studentName.toUpperCase()}`;
@@ -213,7 +214,7 @@ if (tg) tg.onEvent('mainButtonClicked', function() {
         if (isAuthenticated) {
             fetch('/webapp/open-turnstile', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ student_id: parseInt(selectedStudentId), biometric_token: biometricToken || "verified_by_device", init_data: tg.initData }) })
             .then(res => res.json())
-            .then(data => { if (data.success) { tg.showAlert(data.message || "Турникет открыт!"); setTimeout(() => tg.close(), 1500); } else { tg.showAlert("Ошибка СКУД: " + data.message); } });
+            .then(data => { if (data.success) { tg.showAlert(data.message || "Проход обработан"); setTimeout(() => tg.close(), 1500); } else { tg.showAlert("Не удалось оформить проход: " + data.message); } });
         } else {
             tg.showAlert("Биометрия не пройдена.");
         }
