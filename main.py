@@ -35,6 +35,7 @@ from handlers import start, user_option, buttons, payments, admin_option, super_
 from handlers.buttons import get_profile_keyboard
 from services.bot_registry import bots_dict, register_existing_bots, close_all_bots
 from services.scheduler_jobs import saas_daily_morning_check, check_abon_mailing, send_onboarding_reminders, send_daily_report_to_admins, send_backup_to_admin, send_work_schedule_notice, send_stock_reminder_notice, expire_student_freezes, send_discount_reminders
+from services.scheduler_jobs import send_club_subscription_expiry_reminders
 from services.saas_billing import process_saas_auto_renewals
 from services.motivation_engine import motivation_accrual_job
 from middlewares.db_saas_midleware import ClubMiddleware
