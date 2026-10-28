@@ -1,13 +1,13 @@
 """add surveys and survey answers
 Revision ID: z0a1b2c3d4e5
-Revises: y7z8a9b0c1d2
+Revises: t4u5v6w7x8y9
 """
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 revision = "z0a1b2c3d4e5"
-down_revision = "y7z8a9b0c1d2"
+down_revision = "t4u5v6w7x8y9"
 branch_labels = None
 depends_on = None
 
