@@ -137,7 +137,6 @@
     <div class="card mono-card quick-actions">
         <div class="actions">
             {% if '*' in staff_permissions %}<a class="btn soft mono-action" href="/webapp/admin-legal?club_id={{ club_id }}">📄 Юридические документы</a>{% endif %}
-            {% if '*' in staff_permissions %}<a class="btn soft mono-action" href="/webapp/admin-motivation?club_id={{ club_id }}">Мотивация тренеров</a>{% endif %}
             {% if not is_staff_mode %}
             {% if turnstile_enabled %}<a class="btn dark mono-action dark primary-action" href="/webapp/biometric-pass?club_id={{ club_id }}&user_id={{ user_id }}">📱 Открыть проход</a>{% endif %}
             <a class="btn dark mono-action dark primary-action" href="/webapp/shop?club_id={{ club_id }}">🛒 Магазин</a>
@@ -149,11 +148,13 @@
             {% if '*' in staff_permissions or 'settings_manage' in staff_permissions %}<a class="btn soft mono-action" href="/webapp/admin-work-schedule?club_id={{ club_id }}">🕑 График работы клуба</a>{% endif %}
             {% if '*' in staff_permissions or 'manual_checkin' in staff_permissions %}<a class="btn soft mono-action" href="/webapp/staff-checkin?club_id={{ club_id }}">Отметить посещение</a>{% endif %}
             {% if '*' in staff_permissions or 'cash_sale' in staff_permissions %}<a class="btn soft mono-action" href="/webapp/admin-product-sale?club_id={{ club_id }}">🛍 Продажа товаров</a>{% endif %}
+            {% if '*' in staff_permissions or 'broadcast' in staff_permissions %}<a class="btn soft mono-action" href="/webapp/admin-broadcast?club_id={{ club_id }}">📢 Персональная рассылка</a>{% endif %}
+            {% if '*' in staff_permissions or 'broadcast' in staff_permissions %}<a class="btn soft mono-action" href="/webapp/admin-surveys?club_id={{ club_id }}">📝 Опросы клиентов</a>{% endif %}
             {% if '*' in staff_permissions or 'products_view' in staff_permissions %}<a class="btn soft mono-action" href="/webapp/admin-products?club_id={{ club_id }}">📦 Склад и товары</a>{% endif %}
             {% if '*' in staff_permissions or 'cash_view' in staff_permissions %}<a class="btn soft mono-action" href="/admin/cash?club_id={{ club_id }}">💰 Касса и журнал</a><a class="btn soft mono-action" href="/webapp/admin-cash-subscription?club_id={{ club_id }}">💵 Продажа наличного абонемента</a>{% endif %}
             {% if '*' in staff_permissions or 'athletes_view' in staff_permissions %}<a class="btn soft mono-action" href="/admin/students?club_id={{ club_id }}">👥 Атлеты</a>{% endif %}
              {% if '*' in staff_permissions or 'schedule_view' in staff_permissions %}<a class="btn soft mono-action" href="/webapp/admin-schedule?club_id={{ club_id }}">🗓 Расписание</a>{% endif %}
-             {% if '*' in staff_permissions %}<a class="btn soft mono-action" href="/webapp/admin-coach-motivation?club_id={{ club_id }}">💪 Мотивация тренеров</a>{% endif %}
+             {% if '*' in staff_permissions %}<a class="btn soft mono-action" href="/webapp/admin-motivation?club_id={{ club_id }}">💪 Мотивация тренеров</a>{% endif %}
              {% if is_staff_mode %}<a class="btn soft mono-action" href="/webapp/staff-motivation?club_id={{ club_id }}">💰 Мои начисления</a>{% endif %}
              {% if '*' in staff_permissions or 'tariffs_manage' in staff_permissions %}<a class="btn soft mono-action" href="/webapp/admin-tariffs?club_id={{ club_id }}">💳 Тарифы</a>{% endif %}{% if '*' in staff_permissions or 'cash_sale' in staff_permissions %}<a class="btn soft mono-action" href="/webapp/admin-discounts?club_id={{ club_id }}">🏷️ Скидки</a>{% endif %}
             {% if '*' in staff_permissions or 'analytics_view' in staff_permissions %}<a class="btn soft mono-action" href="/admin?club_id={{ club_id }}">🧮 Таблица WebApp</a><a class="btn soft mono-action" href="/revenue?club_id={{ club_id }}">📊 Статистика</a><a class="btn soft mono-action" href="/forecast?club_id={{ club_id }}">🔮 Прогноз</a><a class="btn soft mono-action" href="/admin/sales?club_id={{ club_id }}">🧾 Журнал операций</a>{% endif %}

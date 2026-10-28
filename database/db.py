@@ -83,6 +83,60 @@ class DiscountAssignment(Base):
     __table_args__ = (UniqueConstraint("club_id", "discount_id", "user_id", name="uq_discount_assignment"),)
 
 
+class Survey(Base):
+    __tablename__ = "surveys"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    club_id: Mapped[int] = mapped_column(ForeignKey("clubs.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(160))
+    intro_text: Mapped[str] = mapped_column(String(2000))
+    trigger_days: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
+    filters: Mapped[dict] = mapped_column(JSONB, default=dict)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="1", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, server_default="now()")
+
+
+class SurveyQuestion(Base):
+    __tablename__ = "survey_questions"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    survey_id: Mapped[int] = mapped_column(ForeignKey("surveys.id", ondelete="CASCADE"), index=True)
+    position: Mapped[int] = mapped_column(Integer, default=0)
+    text: Mapped[str] = mapped_column(String(1000))
+    kind: Mapped[str] = mapped_column(String(20), default="single")
+    options: Mapped[list] = mapped_column(JSONB, default=list)
+    required: Mapped[bool] = mapped_column(Boolean, default=True, server_default="1")
+    __table_args__ = (UniqueConstraint("survey_id", "position", name="uq_survey_question_position"),)
+
+
+class SurveyDelivery(Base):
+    __tablename__ = "survey_deliveries"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    survey_id: Mapped[int] = mapped_column(ForeignKey("surveys.id", ondelete="CASCADE"), index=True)
+    club_id: Mapped[int] = mapped_column(ForeignKey("clubs.id", ondelete="CASCADE"), index=True)
+    student_id: Mapped[int] = mapped_column(ForeignKey("students.id", ondelete="CASCADE"), index=True)
+    recipient_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    trigger_key: Mapped[str] = mapped_column(String(220))
+    status: Mapped[str] = mapped_column(String(20), default="pending", index=True)
+    sent_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, server_default="now()")
+    __table_args__ = (UniqueConstraint("survey_id", "student_id", "recipient_id", "trigger_key", name="uq_survey_delivery_trigger"),)
+
+
+class SurveyAnswer(Base):
+    __tablename__ = "survey_answers"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    delivery_id: Mapped[int] = mapped_column(ForeignKey("survey_deliveries.id", ondelete="CASCADE"), index=True)
+    survey_id: Mapped[int] = mapped_column(ForeignKey("surveys.id", ondelete="CASCADE"), index=True)
+    question_id: Mapped[int] = mapped_column(ForeignKey("survey_questions.id", ondelete="CASCADE"), index=True)
+    student_id: Mapped[int] = mapped_column(ForeignKey("students.id", ondelete="CASCADE"), index=True)
+    recipient_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    value: Mapped[str] = mapped_column(String(4000))
+    value_json: Mapped[dict] = mapped_column(JSONB, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, server_default="now()")
+    __table_args__ = (UniqueConstraint("delivery_id", "question_id", name="uq_survey_answer_question"),)
+
+
 class Student(Base):
     __tablename__ = 'students'
     __table_args__ = (

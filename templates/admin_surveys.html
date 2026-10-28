@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Опросы клиентов</title>
+<style>
+body{font-family:system-ui,sans-serif;background:#090909;color:#fff;padding:14px}.wrap{max-width:900px;margin:auto}
+.card{background:#151515;border:1px solid #333;border-radius:16px;padding:15px;margin:12px 0}
+input,textarea,select,button{box-sizing:border-box;width:100%;padding:10px;margin:4px 0;border-radius:9px;border:1px solid #555;background:#111;color:#fff;font:inherit}
+button{background:#fff;color:#111;font-weight:700}.grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.muted{color:#aaa;font-size:13px}.choice{display:flex;gap:8px;align-items:center;border-top:1px solid #333;padding:7px}.choice input{width:auto}
+.survey{border-top:1px solid #333;padding:12px 0}.question{border:1px solid #444;border-radius:12px;padding:12px;margin:10px 0}
+.question-head{display:flex;gap:8px;align-items:center}.question-head b{flex:1}.question-head button{width:auto;background:#511d1d;color:#fff}
+.option-row{display:flex;gap:6px}.option-row button{width:auto;background:#511d1d;color:#fff}.back{display:flex;justify-content:center;color:#111;background:#fff;border-radius:16px;padding:14px;text-decoration:none;font-weight:700}
+@media(max-width:600px){.grid{grid-template-columns:1fr}}
+</style>
+</head>
+<body><div class="wrap">
+{% include "_staff_back_button.html" %}
+<h1>📝 Опросы клиентов</h1>
+<section class="card">
+<h2>Создать автоматический опрос</h2>
+<input id="name" placeholder="Название опроса"><textarea id="intro" placeholder="Текст приглашения"></textarea>
+<div class="grid"><label>Отправить после отсутствия (дни)<input id="days" type="number" min="1" max="3650" value="30"></label><label><input id="renewal" type="checkbox" checked> Только без продления</label></div>
+<p class="muted">Если дисциплины или тарифы не выбраны, подходят все. Фильтры пересчитываются каждый день.</p>
+<div class="grid"><div><b>Дисциплины</b>{% for item in disciplines %}<label class="choice"><input type="checkbox" class="discipline" value="{{item.code}}">{{item.name}}{% if not item.active %} (выключена){% endif %}</label>{% endfor %}</div>
+<div><b>Купленный тариф</b>{% for item in tariffs %}<label class="choice"><input type="checkbox" class="tariff" value="{{item.key}}">{{item.name}}</label>{% endfor %}</div></div>
+<h3>Вопросы</h3><p class="muted">Добавьте вопросы обычными полями. Клиент увидит их в Telegram по очереди.</p>
+<div id="questionBuilder"></div><button id="addQuestion" type="button">＋ Добавить вопрос</button>
+<button id="create" type="button">Создать опрос</button><div id="status" class="muted"></div>
+</section>
+<section class="card"><h2>Созданные опросы</h2>{% for item in surveys %}<div class="survey"><b>{{item.name}}</b> · порог {{item.trigger_days}} дн. · отправлено {{item.total}}, завершено {{item.completed}}<br><span class="muted">{{item.intro_text}}</span></div>{% else %}<p class="muted">Опросов пока нет</p>{% endfor %}</section>
+<section class="card"><h2>Отчёт по отправкам</h2><div class="grid"><select id="reportSurvey"><option value="">Все опросы</option>{% for item in surveys %}<option value="{{item.id}}">{{item.name}}</option>{% endfor %}</select><select id="reportFilter"><option value="all">Все статусы</option><option value="completed">Пройден</option><option value="started">Начат</option><option value="sent">Не пройден</option><option value="failed">Ошибка отправки</option></select></div><button id="refreshReport">Обновить отчёт</button><div id="reportStatus" class="muted"></div><div id="reportRows"></div></section>
+<div id="detailModal" style="display:none;position:fixed;inset:0;background:#000b;padding:18px;overflow:auto"><div class="card" style="max-width:700px;margin:30px auto"><button id="closeDetail">Закрыть</button><div id="detailBody"></div></div></div>
+</div>
+<script>
+const init=new URLSearchParams(location.search).get('init_data')||'',cid={{club_id}},builder=document.getElementById('questionBuilder');
+const esc=x=>String(x??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+const fmt=x=>x?new Date(x).toLocaleString('ru-RU'):'—';
+function addQuestion(data){data=data||{text:'',kind:'single',options:['Да','Нет']};const card=document.createElement('div');card.className='question';card.innerHTML='<div class="question-head"><b>Вопрос</b><button type="button" class="remove-question">Удалить</button></div><input class="question-text" placeholder="Например: Удобно ли вам время занятий?" value="'+esc(data.text)+'"><select class="question-kind"><option value="single">Один вариант ответа</option><option value="scale">Оценка 1–5</option><option value="text">Свободный текст</option></select><div class="options"></div><button type="button" class="add-option">＋ Добавить вариант</button>';builder.appendChild(card);const kind=card.querySelector('.question-kind'),options=card.querySelector('.options');kind.value=data.kind||'single';function renderOptions(){options.innerHTML='';const values=kind.value==='scale'?['1','2','3','4','5']:(data.options||['Да','Нет']);if(kind.value==='text'){card.querySelector('.add-option').style.display='none';return}card.querySelector('.add-option').style.display='block';values.forEach(value=>{const row=document.createElement('div');row.className='option-row';row.innerHTML='<input class="option-value" value="'+esc(value)+'"><button type="button">×</button>';row.querySelector('button').onclick=()=>row.remove();options.appendChild(row)})}kind.onchange=()=>{data.options=[];renderOptions()};card.querySelector('.add-option').onclick=()=>{const row=document.createElement('div');row.className='option-row';row.innerHTML='<input class="option-value" placeholder="Вариант ответа"><button type="button">×</button>';row.querySelector('button').onclick=()=>row.remove();options.appendChild(row)};card.querySelector('.remove-question').onclick=()=>card.remove();renderOptions()}
+addQuestion();
+function collectQuestions(){return [...document.querySelectorAll('.question')].map(card=>{const kind=card.querySelector('.question-kind').value;return {text:card.querySelector('.question-text').value.trim(),kind:kind,options:kind==='text'?[]:[...card.querySelectorAll('.option-value')].map(x=>x.value.trim()).filter(Boolean)}})}
+document.getElementById('addQuestion').onclick=()=>addQuestion();
+document.getElementById('create').onclick=async()=>{const ds=[...document.querySelectorAll('.discipline:checked')].map(x=>x.value),ts=[...document.querySelectorAll('.tariff:checked')].map(x=>x.value),fd=new FormData();fd.append('club_id',cid);fd.append('init_data',init);fd.append('name',name.value);fd.append('intro_text',intro.value);fd.append('trigger_days',days.value);fd.append('require_no_renewal',renewal.checked?'1':'0');fd.append('disciplines',JSON.stringify(ds));fd.append('tariffs',JSON.stringify(ts));fd.append('questions',JSON.stringify(collectQuestions()));create.disabled=true;try{const r=await fetch('/webapp/admin-surveys/create',{method:'POST',body:fd}),d=await r.json();status.textContent=r.ok?'Опрос создан.':(d.detail||'Ошибка')}catch(e){status.textContent=e.message}finally{create.disabled=false}};
+async function loadReport(){reportStatus.textContent='Загрузка...';const q=new URLSearchParams({club_id:cid,init_data:init,status:reportFilter.value});if(reportSurvey.value)q.set('survey_id',reportSurvey.value);const r=await fetch('/webapp/admin-surveys/report?'+q),d=await r.json();if(!r.ok){reportStatus.textContent=d.detail||'Ошибка отчёта';return}reportStatus.textContent='Показано: '+d.total;reportRows.innerHTML=(d.rows||[]).map(x=>'<div class="survey" data-id="'+x.id+'" style="cursor:pointer"><b>'+esc(x.student_name)+'</b> · '+esc(x.recipient_name)+'<br><span class="muted">'+esc(x.survey_name)+' · '+fmt(x.sent_at)+' · '+(x.status==='completed'?'✅ пройден':x.status==='started'?'🟡 начат':x.status==='failed'?'❌ ошибка':'⚪ не пройден')+' · ответов: '+x.answer_count+'</span></div>').join('')||'<p class="muted">Отправок пока нет</p>';document.querySelectorAll('#reportRows [data-id]').forEach(el=>el.onclick=()=>showDetail(el.dataset.id))}
+async function showDetail(id){const r=await fetch('/webapp/admin-surveys/report/'+id+'?club_id='+cid+'&init_data='+encodeURIComponent(init)),d=await r.json();if(!r.ok)return alert(d.detail||'Не удалось загрузить ответы');detailBody.innerHTML='<h2>'+esc(d.delivery.student_name)+'</h2><p class="muted">Получатель: '+esc(d.delivery.recipient_name)+' · '+esc(d.delivery.survey_name)+'<br>Статус: '+esc(d.delivery.status)+' · отправлено: '+fmt(d.delivery.sent_at)+'</p>'+(d.answers||[]).map((x,i)=>'<div class="survey"><b>'+(i+1)+'. '+esc(x.question)+'</b><br>'+(x.value?esc(x.value):'<span class="muted">Нет ответа</span>')+'</div>').join('');detailModal.style.display='block'}
+closeDetail.onclick=()=>detailModal.style.display='none';refreshReport.onclick=loadReport;reportSurvey.onchange=loadReport;reportFilter.onchange=loadReport;loadReport();
+</script></body></html>

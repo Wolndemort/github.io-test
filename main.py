@@ -32,9 +32,11 @@ from config import ADMIN_IDS, BASE_URL
 from database.db import init_db, engine, AsyncSessionLocal, Club, Student, CartOrder, VisitLog, get_student_parent_ids
 from handlers import start, user_option, buttons, payments, admin_option, super_admin_handlers,official_payment,\
     super_admin_payment
+from handlers.surveys import router as surveys_router
 from handlers.buttons import get_profile_keyboard
 from services.bot_registry import bots_dict, register_existing_bots, close_all_bots
 from services.scheduler_jobs import saas_daily_morning_check, check_abon_mailing, send_onboarding_reminders, send_daily_report_to_admins, send_backup_to_admin, send_work_schedule_notice, send_stock_reminder_notice, expire_student_freezes, send_discount_reminders
+from services.surveys import send_scheduled_surveys
 from services.scheduler_jobs import send_club_subscription_expiry_reminders
 from services.saas_billing import process_saas_auto_renewals
 from services.motivation_engine import motivation_accrual_job
@@ -116,6 +118,7 @@ async def lifespan(app: FastAPI):
     dp.include_router(user_option.router)
     dp.include_router(buttons.router)
     dp.include_router(super_admin_payment.router)
+    dp.include_router(surveys_router)
 
     # 4. Фоновые SaaS-задачи (APScheduler)
     scheduler = AsyncIOScheduler(timezone=ZoneInfo("Europe/Moscow"))
@@ -135,6 +138,7 @@ async def lifespan(app: FastAPI):
     scheduler.add_job(send_stock_reminder_notice, 'cron', hour=10, minute=0, args=['am'], id="stock_reminder_am", replace_existing=True, coalesce=True, max_instances=1, misfire_grace_time=3600)
     scheduler.add_job(send_stock_reminder_notice, 'cron', hour=18, minute=0, args=['pm'], id="stock_reminder_pm", replace_existing=True, coalesce=True, max_instances=1, misfire_grace_time=3600)
     scheduler.add_job(send_discount_reminders, 'cron', hour=10, minute=15, id="discount_reminders", replace_existing=True, coalesce=True, max_instances=1, misfire_grace_time=3600)
+    scheduler.add_job(send_scheduled_surveys, 'cron', hour=10, minute=25, id="survey_scheduler", replace_existing=True, coalesce=True, max_instances=1, misfire_grace_time=3600)
     scheduler.add_job(send_club_subscription_expiry_reminders, 'cron', hour=10, minute=20, id="club_saas_expiry_reminders", replace_existing=True, coalesce=True, max_instances=1, misfire_grace_time=3600)
     # Ночной блок (01:00) — Автоматические списания по подпискам ЮKassa
     # Пока оставляем закомментированным, как ты и хотел!
@@ -742,6 +746,3 @@ async def auto_close_sessions_job():
         except Exception as cron_err:
             logger.error(f"❌ Ошибка в кроне автосписаний: {cron_err}", exc_info=True)
             await db.rollback()
-
-
-

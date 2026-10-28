@@ -158,6 +158,7 @@ async def admin_schedulers_menu(callback: types.CallbackQuery, club_settings: di
         ("absence_reminders", "Прогульщики"),
         ("work_schedule_reminders", "График работы"),
         ("stock_reminders", "Склад"),
+        ("survey_scheduler", "Опросы после отсутствия"),
     ]
     for key, label in items:
         status = "✅" if features.get(key, True) else "❌"
@@ -212,6 +213,7 @@ async def toggle_logic(callback: types.CallbackQuery, club: Club, club_settings:
         "absence_reminders",
         "work_schedule_reminders",
         "stock_reminders",
+        "survey_scheduler",
     }
 
     if action_type == "feat":
@@ -880,5 +882,4 @@ async def process_freeze_step(message: types.Message, state: FSMContext, session
         return await message.answer("❌ Не удалось сохранить изменения шага заморозки в БД.")
     await state.clear()
     await message.answer(f"✅ <b>Минимальный шаг заморозки успешно изменен на {days} дней!</b>", parse_mode="HTML")
-
 

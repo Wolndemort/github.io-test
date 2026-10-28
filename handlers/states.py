@@ -28,6 +28,10 @@ class AdminStates(StatesGroup):
     waiting_for_staff_role = State()
     waiting_for_parent_id = State()
 
+
+class SurveyStates(StatesGroup):
+    waiting_for_text = State()
+
 # --- ДОБАВЛЯЕМ ДЛЯ SAAS СИСТЕМЫ ---
 
 

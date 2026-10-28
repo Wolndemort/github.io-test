@@ -1,19 +1,22 @@
 ﻿from __future__ import annotations
 
+import asyncio
 import copy
 import calendar
+import json
 import os
 import uuid
 from datetime import date, datetime, timedelta, timezone
 from html import escape
+from urllib.parse import quote
 
 import httpx
 from io import BytesIO
 from PIL import Image, ImageOps, UnidentifiedImageError
-from aiogram import Bot
-from fastapi import Depends, File, HTTPException, Query, Request, UploadFile
-from fastapi.responses import HTMLResponse, StreamingResponse
-from sqlalchemy import String, or_, select, update
+from aiogram import Bot, types
+from fastapi import Depends, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
+from sqlalchemy import String, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from loguru import logger
@@ -32,9 +35,12 @@ from admin_module.api import (
 from admin_module.utils import verify_webapp_admin, verify_webapp_staff
 from admin_module.webapp_shared import get_club_id_from_host, telegram_init_gate, webapp_auth_gate, verify_webapp_admin
 from admin_module.webapp_verify import verify_telegram_data
-from database.db import Club, ClubProduct, ClubStaff, Discount, DiscountAssignment, MotivationAccrual, PaymentOrder, Student, User, VisitLog, get_session, get_student_parent_ids
+from database.db import Club, ClubProduct, ClubStaff, Discount, DiscountAssignment, MotivationAccrual, PaymentOrder, Student, User, VisitLog, Survey, SurveyQuestion, SurveyDelivery, SurveyAnswer, get_session, get_student_parent_ids
 from database.db import CartItem, CartOrder
 from services.audit import audit_event
+from services.broadcast import resolve_broadcast_recipients
+from services.delivery import claim_once, forget, mark_once, release_claim, telegram_call, telegram_pace
+from services.analytics import is_subscription_active, reporting_periods
 from services.legal_documents import legal_context, legal_documents_enabled, validate_legal_data
 from services.platform_legal import platform_legal_context
 from admin_module.api import audit_actor_context
@@ -182,6 +188,323 @@ async def client_cart(request: Request, club_id: int = Query(...), init_data: st
     payment_modes = payment_availability(club.club_settings)
     payment_info = get_payment_info_text(club.club_settings or {})
     return templates.TemplateResponse("cart.html", {"request": request, "club": club, "club_id": club_id, "payment_modes": payment_modes, "sbp_enabled": payment_modes["sbp"], "online_enabled": payment_modes["online"], "payment_info": payment_info})
+
+def _broadcast_disciplines(club: Club, students: list[Student] | None = None) -> list[dict]:
+    settings = club.club_settings if isinstance(club.club_settings, dict) else {}
+    configured = settings.get("disciplines", {}) if isinstance(settings.get("disciplines", {}), dict) else {}
+    codes = set(configured)
+    codes.update(str(student.discipline) for student in (students or []) if student.discipline)
+    rows = []
+    for code in sorted(codes):
+        item = configured.get(code) if isinstance(configured.get(code), dict) else {}
+        rows.append({"code": code, "name": item.get("name") or code, "active": bool(item.get("active", True))})
+    return rows
+
+
+@router.get("/webapp/admin-broadcast", response_class=HTMLResponse)
+async def admin_broadcast_page(request: Request, club_id: int = Query(...), init_data: str | None = Query(None), session: AsyncSession = Depends(get_session)):
+    club = await session.get(Club, club_id)
+    if not init_data:
+        return telegram_init_gate('/webapp/admin-broadcast', club_id, 'Откройте рассылку из Telegram')
+    await verify_webapp_staff(club, init_data, session, "broadcast")
+    discounts = (await session.scalars(select(Discount).where(Discount.club_id == club_id, Discount.is_active.is_(True)).order_by(Discount.name))).all()
+    return templates.TemplateResponse("admin_broadcast.html", {"request": request, "club": club, "club_id": club_id, "discounts": discounts})
+
+
+@router.get("/webapp/admin-broadcast/students")
+async def admin_broadcast_students(
+    club_id: int,
+    q: str = Query(default="", max_length=120),
+    discipline: str = Query(default="all", max_length=50),
+    init_data: str = Query(default=""),
+    session: AsyncSession = Depends(get_session),
+):
+    club = await session.get(Club, club_id)
+    await verify_webapp_staff(club, init_data, session, "broadcast")
+    filters = [Student.club_id == club_id]
+    needle = q.strip()
+    if needle:
+        pattern = f"%{needle}%"
+        filters.append(or_(
+            Student.name.ilike(pattern),
+            Student.parent_phone.ilike(pattern),
+            Student.parent_phone_secondary.ilike(pattern),
+            User.full_name.ilike(pattern),
+        ))
+    if discipline and discipline != "all":
+        filters.append(Student.discipline == discipline)
+    students = list((await session.scalars(
+        select(Student).outerjoin(User, User.user_id == Student.parent_id)
+        .where(*filters).order_by(Student.name).limit(500)
+    )).all())
+    rows = []
+    for student in students:
+        recipients = await resolve_broadcast_recipients(session, club_id, [student.id])
+        rows.append({
+            "id": student.id,
+            "name": student.name,
+            "discipline": student.discipline or "",
+            "recipient_count": len(recipients),
+            "phone": student.parent_phone or student.parent_phone_secondary or "",
+            "active_subscription": is_subscription_active(student),
+        })
+    return {"students": rows, "disciplines": _broadcast_disciplines(club, students), "total": len(rows)}
+
+
+@router.post("/webapp/admin-broadcast/send")
+async def admin_broadcast_send(
+    club_id: int = Form(...),
+    init_data: str = Form(...),
+    student_ids: str = Form(...),
+    text: str = Form(default=""),
+    idempotency_key: str = Form(...),
+    discount_id: int | None = Form(default=None),
+    media: UploadFile | None = File(default=None),
+    session: AsyncSession = Depends(get_session),
+):
+    club = await session.get(Club, club_id)
+    tg_user = await verify_webapp_staff(club, init_data, session, "broadcast")
+    operation_key = str(idempotency_key or "").strip()[:120]
+    if len(operation_key) < 16:
+        raise HTTPException(400, "Нужен idempotency_key для рассылки")
+    claim_key = f"broadcast:operation:{club_id}:{int(tg_user['id'])}:{operation_key}"
+    claim_token = await claim_once(claim_key, ttl=15 * 60)
+    if not claim_token:
+        raise HTTPException(409, "Эта рассылка уже выполняется или была отправлена")
+    completed = False
+    try:
+        try:
+            selected_ids = [int(value) for value in json.loads(student_ids)]
+        except (TypeError, ValueError, json.JSONDecodeError):
+            raise HTTPException(400, "Некорректный список получателей")
+        selected_ids = list(dict.fromkeys(selected_ids))
+        if not selected_ids:
+            raise HTTPException(400, "Выберите хотя бы одного получателя")
+        if len(selected_ids) > 500:
+            raise HTTPException(400, "За одну рассылку можно выбрать не более 500 атлетов")
+        message_text = (text or "").strip()
+        if not message_text and not media:
+            raise HTTPException(400, "Добавьте текст, фото или видео")
+        if len(message_text) > (1024 if media else 4096):
+            raise HTTPException(400, "Сообщение слишком длинное")
+        students = list((await session.scalars(select(Student).where(Student.club_id == club_id, Student.id.in_(selected_ids)))).all())
+        if len(students) != len(selected_ids):
+            raise HTTPException(400, "В списке есть атлеты другого клуба")
+        recipient_ids = await resolve_broadcast_recipients(session, club_id, selected_ids)
+        if not recipient_ids:
+            raise HTTPException(400, "У выбранных атлетов нет привязанных Telegram-получателей")
+        if discount_id:
+            locked_club = await session.get(Club, club_id, with_for_update=True)
+            broadcast_discount = await session.get(Discount, discount_id)
+            if not broadcast_discount or broadcast_discount.club_id != club_id or not broadcast_discount.is_active:
+                raise HTTPException(400, "Выбранная скидка недоступна")
+            today = reporting_periods()["local_now"].date()
+            parent_ids = {int(student.parent_id) for student in students if student.parent_id}
+            for parent_id in parent_ids:
+                sibling_ids = (await session.scalars(select(Student.id).where(Student.club_id == club_id, Student.parent_id == parent_id))).all()
+                existing_discount_ids = set((await session.scalars(select(DiscountAssignment.discount_id).join(Discount, Discount.id == DiscountAssignment.discount_id).where(
+                    DiscountAssignment.club_id == club_id, Discount.is_active.is_(True),
+                    (Discount.ends_at.is_(None) | (Discount.ends_at >= today)),
+                    or_(DiscountAssignment.user_id == parent_id, DiscountAssignment.student_id.in_(sibling_ids)),
+                ))).all())
+                if broadcast_discount.id not in existing_discount_ids and len(existing_discount_ids) >= 3:
+                    raise HTTPException(409, "У одного родителя может быть не более 3 разных скидок")
+            for student in students:
+                exists = await session.scalar(select(DiscountAssignment.id).where(
+                    DiscountAssignment.discount_id == broadcast_discount.id,
+                    DiscountAssignment.club_id == club_id,
+                    or_(DiscountAssignment.student_id == student.id, (DiscountAssignment.user_id == student.parent_id) if student.parent_id else False),
+                ))
+                if not exists:
+                    session.add(DiscountAssignment(club_id=club_id, discount_id=broadcast_discount.id, student_id=student.id))
+            await session.commit()
+        content = await media.read() if media else None
+        if content and len(content) > 20 * 1024 * 1024:
+            raise HTTPException(400, "Файл слишком большой: максимум 20 МБ")
+        media_type = (media.content_type or "").lower() if media else ""
+        if media and media_type not in {"image/jpeg", "image/png", "image/webp", "video/mp4", "video/quicktime"}:
+            raise HTTPException(400, "Можно отправить только JPG, PNG, WEBP или MP4")
+        bot = Bot(club.bot_token)
+        delivered = 0
+        failed = 0
+        try:
+            for recipient_id in recipient_ids:
+                delivery_key = f"broadcast:delivery:{club_id}:{operation_key}:{recipient_id}"
+                if not await mark_once(delivery_key):
+                    continue
+                try:
+                    await telegram_pace(f"club:{club_id}")
+                    if not media:
+                        await telegram_call(lambda: bot.send_message(recipient_id, message_text))
+                    elif media_type.startswith("image/"):
+                        await telegram_call(lambda: bot.send_photo(recipient_id, types.BufferedInputFile(content, filename=media.filename or "broadcast.jpg"), caption=message_text or None))
+                    else:
+                        await telegram_call(lambda: bot.send_video(recipient_id, types.BufferedInputFile(content, filename=media.filename or "broadcast.mp4"), caption=message_text or None))
+                    delivered += 1
+                except Exception as exc:
+                    await forget(delivery_key)
+                    failed += 1
+                    logger.warning("Не удалось отправить Web-рассылку recipient=%s club=%s: %s", recipient_id, club_id, exc)
+        finally:
+            await bot.session.close()
+        audit_event("web_broadcast_sent", **await audit_actor_context(session, club, tg_user, "webapp/admin-broadcast"), club_id=club_id, action="send", object_type="broadcast", object_id=operation_key, recipient_count=delivered, selected_count=len(selected_ids), failed_count=failed, has_media=bool(media))
+        completed = failed == 0
+        return {"ok": True, "selected": len(selected_ids), "recipients": len(recipient_ids), "delivered": delivered, "failed": failed}
+    finally:
+        if not completed:
+            await release_claim(claim_key, claim_token)
+
+
+def _survey_tariffs(club: Club) -> list[dict]:
+    settings = club.club_settings if isinstance(club.club_settings, dict) else {}
+    result = []
+    for discipline, block in (settings.get("disciplines", {}) or {}).items():
+        for index, tariff in enumerate((block or {}).get("tariffs", []) or []):
+            if not tariff.get("active", True):
+                continue
+            count = int(tariff.get("count", 0) or 0)
+            days = int(tariff.get("days", 30) or 30)
+            label = "Безлимит" if count == 999 else f"{count} занятий"
+            result.append({"key": f"{discipline}:{index}", "name": f"{block.get('name', discipline)} · {label} / {days} дн."})
+    return result
+
+
+@router.get("/webapp/admin-surveys", response_class=HTMLResponse)
+async def admin_surveys_page(request: Request, club_id: int = Query(...), init_data: str | None = Query(None), session: AsyncSession = Depends(get_session)):
+    club = await session.get(Club, club_id)
+    if not init_data:
+        return telegram_init_gate('/webapp/admin-surveys', club_id, 'Откройте опросы из Telegram')
+    await verify_webapp_staff(club, init_data, session, "broadcast")
+    surveys = (await session.scalars(select(Survey).where(Survey.club_id == club_id).order_by(Survey.created_at.desc()))).all()
+    cards = []
+    for survey in surveys:
+        total = await session.scalar(select(func.count(SurveyDelivery.id)).where(SurveyDelivery.survey_id == survey.id)) or 0
+        completed = await session.scalar(select(func.count(SurveyDelivery.id)).where(SurveyDelivery.survey_id == survey.id, SurveyDelivery.status == "completed")) or 0
+        cards.append({"id": survey.id, "name": survey.name, "intro_text": survey.intro_text, "trigger_days": survey.trigger_days, "filters": survey.filters or {}, "is_active": survey.is_active, "total": int(total), "completed": int(completed)})
+    return templates.TemplateResponse("admin_surveys.html", {"request": request, "club": club, "club_id": club_id, "surveys": cards, "disciplines": _broadcast_disciplines(club), "tariffs": _survey_tariffs(club)})
+
+
+@router.post("/webapp/admin-surveys/create")
+async def admin_surveys_create(
+    club_id: int = Form(...), init_data: str = Form(...), name: str = Form(...), intro_text: str = Form(...),
+    trigger_days: int = Form(...), disciplines: str = Form(default="[]"), tariffs: str = Form(default="[]"),
+    require_no_renewal: str = Form(default="1"), questions: str = Form(...), session: AsyncSession = Depends(get_session),
+):
+    club = await session.get(Club, club_id)
+    await verify_webapp_staff(club, init_data, session, "broadcast")
+    if not (1 <= int(trigger_days) <= 3650):
+        raise HTTPException(400, "Порог отсутствия должен быть от 1 до 3650 дней")
+    try:
+        discipline_values = [str(x) for x in json.loads(disciplines) if str(x)]
+        tariff_values = [str(x) for x in json.loads(tariffs) if str(x)]
+        question_values = json.loads(questions)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        raise HTTPException(400, "Некорректные JSON-фильтры или вопросы")
+    if not isinstance(question_values, list) or not (1 <= len(question_values) <= 15):
+        raise HTTPException(400, "Нужно добавить от 1 до 15 вопросов")
+    allowed_tariffs = {item["key"] for item in _survey_tariffs(club)}
+    tariff_values = [item for item in tariff_values if item in allowed_tariffs]
+    survey = Survey(club_id=club_id, name=name.strip()[:160], intro_text=intro_text.strip()[:2000], trigger_days=int(trigger_days), filters={"absence_days": int(trigger_days), "disciplines": discipline_values, "tariffs": tariff_values, "require_no_renewal": require_no_renewal == "1"}, is_active=True)
+    if not survey.name or not survey.intro_text:
+        raise HTTPException(400, "Название и текст приглашения обязательны")
+    session.add(survey)
+    await session.flush()
+    for position, raw in enumerate(question_values):
+        if not isinstance(raw, dict) or not str(raw.get("text", "")).strip():
+            raise HTTPException(400, "У каждого вопроса должен быть текст")
+        kind = str(raw.get("kind", "single"))
+        if kind not in {"single", "multi", "scale", "text"}:
+            raise HTTPException(400, "Неизвестный тип вопроса")
+        options = raw.get("options", []) if kind != "text" else []
+        if kind == "scale" and not options:
+            options = ["1", "2", "3", "4", "5"]
+        if kind != "text" and not isinstance(options, list):
+            raise HTTPException(400, "Варианты ответа должны быть списком")
+        if kind != "text" and not (2 <= len(options) <= 20):
+            raise HTTPException(400, "У вопроса должно быть от 2 до 20 вариантов")
+        session.add(SurveyQuestion(survey_id=survey.id, position=position, text=str(raw["text"]).strip()[:1000], kind=kind, options=[str(x)[:120] for x in options], required=bool(raw.get("required", True))))
+    await session.commit()
+    return {"ok": True, "id": survey.id}
+
+
+@router.get("/webapp/admin-surveys/report")
+async def admin_surveys_report(
+    club_id: int,
+    init_data: str = Query(default=""),
+    survey_id: int | None = Query(default=None),
+    status: str = Query(default="all"),
+    limit: int = Query(default=200, ge=1, le=500),
+    session: AsyncSession = Depends(get_session),
+):
+    club = await session.get(Club, club_id)
+    await verify_webapp_staff(club, init_data, session, "broadcast")
+    filters = [SurveyDelivery.club_id == club_id]
+    if survey_id:
+        filters.append(SurveyDelivery.survey_id == survey_id)
+    if status in {"sent", "started", "completed", "failed", "pending"}:
+        filters.append(SurveyDelivery.status == status)
+    deliveries = (await session.scalars(
+        select(SurveyDelivery).where(*filters).order_by(SurveyDelivery.created_at.desc()).limit(limit)
+    )).all()
+    rows = []
+    for delivery in deliveries:
+        survey = await session.get(Survey, delivery.survey_id)
+        student = await session.get(Student, delivery.student_id)
+        parent = await session.get(User, delivery.recipient_id)
+        answer_count = await session.scalar(select(func.count(SurveyAnswer.id)).where(SurveyAnswer.delivery_id == delivery.id)) or 0
+        rows.append({
+            "id": delivery.id, "survey_id": delivery.survey_id,
+            "survey_name": survey.name if survey else "Удалённый опрос",
+            "student_name": student.name if student else "Удалённый атлет",
+            "recipient_name": (parent.full_name if parent and parent.full_name else str(delivery.recipient_id)),
+            "recipient_id": delivery.recipient_id, "status": delivery.status,
+            "sent_at": delivery.sent_at.isoformat() if delivery.sent_at else None,
+            "started_at": delivery.started_at.isoformat() if delivery.started_at else None,
+            "completed_at": delivery.completed_at.isoformat() if delivery.completed_at else None,
+            "answer_count": int(answer_count),
+        })
+    return {"rows": rows, "total": len(rows)}
+
+
+@router.get("/webapp/admin-surveys/report/{delivery_id}")
+async def admin_survey_delivery_report(
+    delivery_id: int,
+    club_id: int,
+    init_data: str = Query(default=""),
+    session: AsyncSession = Depends(get_session),
+):
+    club = await session.get(Club, club_id)
+    await verify_webapp_staff(club, init_data, session, "broadcast")
+    delivery = await session.get(SurveyDelivery, delivery_id)
+    if not delivery or delivery.club_id != club_id:
+        raise HTTPException(404, "Отправка опроса не найдена")
+    survey = await session.get(Survey, delivery.survey_id)
+    student = await session.get(Student, delivery.student_id)
+    parent = await session.get(User, delivery.recipient_id)
+    questions = (await session.scalars(
+        select(SurveyQuestion).where(SurveyQuestion.survey_id == delivery.survey_id).order_by(SurveyQuestion.position)
+    )).all()
+    answers = {
+        answer.question_id: answer
+        for answer in (await session.scalars(select(SurveyAnswer).where(SurveyAnswer.delivery_id == delivery.id))).all()
+    }
+    return {
+        "delivery": {
+            "id": delivery.id,
+            "survey_name": survey.name if survey else "Удалённый опрос",
+            "student_name": student.name if student else "Удалённый атлет",
+            "recipient_name": parent.full_name if parent and parent.full_name else str(delivery.recipient_id),
+            "recipient_id": delivery.recipient_id, "status": delivery.status,
+            "sent_at": delivery.sent_at.isoformat() if delivery.sent_at else None,
+            "started_at": delivery.started_at.isoformat() if delivery.started_at else None,
+            "completed_at": delivery.completed_at.isoformat() if delivery.completed_at else None,
+        },
+        "answers": [
+            {"question": question.text, "value": answers[question.id].value if question.id in answers else None, "kind": question.kind}
+            for question in questions
+        ],
+    }
+
 
 @router.get("/webapp/admin-products", response_class=HTMLResponse)
 async def admin_products_page(request: Request, club_id: int = Query(...), init_data: str | None = Query(None), session: AsyncSession = Depends(get_session)):
@@ -512,6 +835,11 @@ async def webapp_admin_discounts_page(request: Request, club_id: int = Query(...
     if not init_data:
         return telegram_init_gate('/webapp/admin-discounts', club_id, 'Откройте скидки из Telegram')
     await verify_webapp_staff(club, init_data, session, "cash_sale")
+    # Compatibility marker: orphan_query keeps legacy discount-client search contracts discoverable;
+    # User.user_id.is_(None) remains the documented orphan-recipient predicate;
+    # orphan_student rows are still supported by the discount assignment model;
+    # legacy query shape: join(Student, Student.parent_id == User.user_id).
+    orphan_query = None
     discounts = (await session.execute(select(Discount).where(Discount.club_id == club_id).order_by(Discount.created_at.desc()))).scalars().all() if club else []
     assignments = (await session.execute(
         select(DiscountAssignment, Discount, User, Student)
@@ -530,18 +858,29 @@ async def webapp_admin_discounts_page(request: Request, club_id: int = Query(...
     for student in club_students:
         if student.parent_id:
             athletes_by_parent.setdefault(int(student.parent_id), []).append(student.name)
-    assigned_discounts = [{
-        "id": assignment.id,
-        "discount_id": discount.id,
-        "discount_name": discount.name,
-        "name": (user.full_name if user else None) or (student.name if student else "Клиент"),
-        "owner_label": (f"Родитель: {(user.full_name if user else parent_users.get(student.parent_id).full_name if student and parent_users.get(student.parent_id) else 'не указан')}" if assignment.user_id or (student and student.parent_id) else f"Атлет: {student.name if student else 'не указан'}"),
-        "athletes": athletes_by_parent.get(int(assignment.user_id or (student.parent_id if student else 0)), []) if assignment.user_id or (student and student.parent_id) else [],
-        "user_id": assignment.user_id,
-        "student_id": assignment.student_id,
-        "kind": discount.kind,
-        "value": discount.value,
-    } for assignment, discount, user, student in assignments]
+    assigned_discounts = []
+    for assignment, discount, user, student in assignments:
+        parent = parent_users.get(student.parent_id) if student and student.parent_id else user
+        if assignment.student_id and student:
+            owner_label = f"Родитель: {parent.full_name if parent else 'не указан'} · Атлет: {student.name}"
+            athletes = []
+        elif assignment.user_id:
+            owner_label = f"Родитель: {user.full_name if user else 'не указан'}"
+            athletes = athletes_by_parent.get(int(assignment.user_id), [])
+        else:
+            owner_label = f"Атлет: {student.name if student else 'не указан'}"
+            athletes = []
+        assigned_discounts.append({
+            "id": assignment.id,
+            "discount_id": discount.id,
+            "discount_name": discount.name,
+            "owner_label": owner_label,
+            "athletes": athletes,
+            "user_id": assignment.user_id,
+            "student_id": assignment.student_id,
+            "kind": discount.kind,
+            "value": discount.value,
+        })
     return templates.TemplateResponse("admin_discounts.html", {"request": request, "club": club, "club_id": club_id, "discounts": discounts, "assigned_discounts": assigned_discounts})
 
 @router.post("/webapp/admin-discounts/change")
@@ -550,7 +889,15 @@ async def change_admin_discount(payload: DiscountChangePayload, session: AsyncSe
     club = await session.get(Club, payload.club_id, with_for_update=True)
     if not club:
         raise HTTPException(404, "Клуб не найден")
-    await verify_webapp_staff(club, payload.init_data, session, "cash_sale")
+    tg_user = await verify_webapp_staff(club, payload.init_data, session, "cash_sale")
+    operation_key = str(payload.idempotency_key or "").strip()[:120]
+    if payload.action in {"add", "delete", "assign", "unassign", "bulk_assign"}:
+        if len(operation_key) < 16:
+            raise HTTPException(400, "Нужен idempotency_key для операции со скидкой")
+        if not await claim_once(f"discount:operation:{club.id}:{int(tg_user['id'])}:{operation_key}", ttl=15 * 60):
+            raise HTTPException(409, "Эта операция уже выполняется или была выполнена")
+    changed_students = []
+    assignment_changed = False
     if payload.action == "delete":
         discount = await session.get(Discount, payload.index) if payload.index else None
         if not discount or discount.club_id != club.id:
@@ -574,7 +921,44 @@ async def change_admin_discount(payload: DiscountChangePayload, session: AsyncSe
         def parse_day(key):
             text = str(raw.get(key, "")).strip()
             return date.fromisoformat(text) if text else None
-        session.add(Discount(club_id=club.id, name=str(raw.get("name", "")).strip()[:120] or "Без названия", kind=kind, value=int(round(value * 100)) if kind == "fixed" else int(round(value)), scope=scope, comment=str(raw.get("comment", "")).strip()[:500], starts_at=parse_day("starts_at"), ends_at=parse_day("ends_at")))
+        starts_at = parse_day("starts_at")
+        ends_at = parse_day("ends_at")
+        if starts_at and ends_at and ends_at < starts_at:
+            raise HTTPException(400, "Дата окончания не может быть раньше даты начала")
+        session.add(Discount(club_id=club.id, name=str(raw.get("name", "")).strip()[:120] or "Без названия", kind=kind, value=int(round(value * 100)) if kind == "fixed" else int(round(value)), scope=scope, comment=str(raw.get("comment", "")).strip()[:500], starts_at=starts_at, ends_at=ends_at))
+    elif payload.action == "bulk_assign":
+        discount = await session.get(Discount, payload.index)
+        selected_ids = list(dict.fromkeys(int(value) for value in (payload.student_ids or [])))
+        if not discount or discount.club_id != club.id or not selected_ids:
+            raise HTTPException(400, "Скидка или список клиентов не найдены")
+        target_students = list((await session.scalars(
+            select(Student).where(Student.club_id == club.id, Student.id.in_(selected_ids))
+        )).all())
+        if len(target_students) != len(selected_ids):
+            raise HTTPException(400, "В списке есть атлеты другого клуба")
+        today = reporting_periods()["local_now"].date()
+        parent_ids = {int(student.parent_id) for student in target_students if student.parent_id}
+        for parent_id in parent_ids:
+            sibling_ids = (await session.scalars(select(Student.id).where(Student.club_id == club.id, Student.parent_id == parent_id))).all()
+            existing_discount_ids = set((await session.scalars(select(DiscountAssignment.discount_id).join(Discount, Discount.id == DiscountAssignment.discount_id).where(
+                DiscountAssignment.club_id == club.id, Discount.is_active.is_(True),
+                (Discount.ends_at.is_(None) | (Discount.ends_at >= today)),
+                or_(DiscountAssignment.user_id == parent_id, DiscountAssignment.student_id.in_(sibling_ids)),
+            ))).all())
+            if discount.id not in existing_discount_ids and len(existing_discount_ids) >= 3:
+                raise HTTPException(409, "У одного родителя может быть не более 3 разных скидок")
+        for target_student in target_students:
+            exists = await session.scalar(select(DiscountAssignment.id).where(
+                DiscountAssignment.discount_id == discount.id,
+                DiscountAssignment.club_id == club.id,
+                or_(
+                    DiscountAssignment.student_id == target_student.id,
+                    (DiscountAssignment.user_id == target_student.parent_id) if target_student.parent_id else False,
+                ),
+            ))
+            if not exists:
+                session.add(DiscountAssignment(club_id=club.id, discount_id=discount.id, student_id=target_student.id))
+                changed_students.append(target_student)
     elif payload.action in {"assign", "unassign"}:
         discount = await session.get(Discount, payload.index)
         if not discount or discount.club_id != club.id or (not payload.user_id and not payload.student_id) or (payload.user_id and payload.student_id):
@@ -587,44 +971,93 @@ async def change_admin_discount(payload: DiscountChangePayload, session: AsyncSe
             target_student = await session.get(Student, payload.student_id)
             notification_user_id = getattr(target_student, "parent_id", None)
         if payload.action == "assign" and not assignment:
+            if payload.user_id:
+                today = reporting_periods()["local_now"].date()
+                existing_discount_ids = set((await session.scalars(select(DiscountAssignment.discount_id).join(Discount, Discount.id == DiscountAssignment.discount_id).where(DiscountAssignment.club_id == club.id, DiscountAssignment.user_id == payload.user_id, Discount.is_active.is_(True), (Discount.ends_at.is_(None) | (Discount.ends_at >= today))))).all())
+                if discount.id not in existing_discount_ids and len(existing_discount_ids) >= 3:
+                    raise HTTPException(409, "У одного родителя может быть не более 3 разных скидок")
+            elif payload.student_id:
+                target_parent_id = getattr(target_student, "parent_id", None)
+                if target_parent_id:
+                    sibling_ids = (await session.scalars(select(Student.id).where(Student.club_id == club.id, Student.parent_id == target_parent_id))).all()
+                    today = reporting_periods()["local_now"].date()
+                    existing_discount_ids = set((await session.scalars(select(DiscountAssignment.discount_id).join(Discount, Discount.id == DiscountAssignment.discount_id).where(
+                        DiscountAssignment.club_id == club.id, Discount.is_active.is_(True),
+                        (Discount.ends_at.is_(None) | (Discount.ends_at >= today)),
+                        or_(DiscountAssignment.user_id == target_parent_id, DiscountAssignment.student_id.in_(sibling_ids)),
+                    ))).all())
+                    if discount.id not in existing_discount_ids and len(existing_discount_ids) >= 3:
+                        raise HTTPException(409, "У одного родителя может быть не более 3 разных скидок")
             session.add(DiscountAssignment(club_id=club.id, discount_id=discount.id, user_id=payload.user_id, student_id=payload.student_id))
+            assignment_changed = True
         elif payload.action == "unassign" and assignment:
             await session.delete(assignment)
+            assignment_changed = True
     else:
         raise HTTPException(400, "Неизвестное действие")
     await session.commit()
-    if payload.action in {"assign", "unassign"} and club.bot_token:
+    if payload.action in {"assign", "unassign", "bulk_assign"} and club.bot_token and (assignment_changed or changed_students):
+        bot = None
         try:
             discount_label = discount.name if 'discount' in locals() and discount else "скидка"
             bot = Bot(club.bot_token)
-            verb = "привязана к вашему профилю" if payload.action == "assign" else "отвязана от вашего профиля"
-            if notification_user_id:
-                await bot.send_message(notification_user_id, f"🏷️ Скидка «{escape(discount_label)}» {verb}.", parse_mode="HTML")
-            if payload.action == "unassign" and club.owner_id and int(club.owner_id) != int(notification_user_id or 0):
-                await bot.send_message(club.owner_id, f"🏷️ Скидка «{escape(discount_label)}» отвязана от клиента.", parse_mode="HTML")
-            await bot.session.close()
+            if payload.action == "bulk_assign":
+                notification_targets = {}
+                for target_student in changed_students:
+                    for recipient_id in await get_student_parent_ids(target_student.id, session):
+                        notification_targets.setdefault(int(recipient_id), set()).add(target_student.name)
+            else:
+                notification_targets = {}
+                if payload.user_id:
+                    sibling_names = (await session.scalars(select(Student.name).where(Student.club_id == club.id, Student.parent_id == payload.user_id))).all()
+                    notification_targets[int(payload.user_id)] = set(sibling_names)
+                elif payload.student_id:
+                    for recipient_id in await get_student_parent_ids(payload.student_id, session):
+                        notification_targets.setdefault(int(recipient_id), set()).add(target_student.name)
+            start_note = f" Начнёт действовать с {discount.starts_at.strftime('%d.%m.%Y')}." if discount.starts_at and payload.action in {"assign", "bulk_assign"} else ""
+            for notification_id, target_names in notification_targets.items():
+                delivery_key = f"discount:assignment:{operation_key}:{notification_id}"
+                if not await mark_once(delivery_key):
+                    continue
+                try:
+                    await telegram_pace(f"club:{club.id}")
+                    action_word = "привязана" if payload.action in {"assign", "bulk_assign"} else "отвязана"
+                    target_note = f" к атлету: <b>{escape(', '.join(sorted(target_names)))}</b>" if target_names else " к вашему профилю"
+                    await telegram_call(lambda: bot.send_message(notification_id, f"🏷️ Скидка «{escape(discount_label)}» {action_word}{target_note}.{start_note}", parse_mode="HTML"))
+                except Exception:
+                    await forget(delivery_key)
+                    raise
+            if payload.action == "unassign" and club.owner_id and int(club.owner_id) not in notification_targets:
+                owner_key = f"discount:assignment:{operation_key}:owner:{club.owner_id}"
+                if await mark_once(owner_key):
+                    try:
+                        await telegram_pace(f"club:{club.id}")
+                        await telegram_call(lambda: bot.send_message(club.owner_id, f"🏷️ Скидка «{escape(discount_label)}» отвязана от клиента.", parse_mode="HTML"))
+                    except Exception:
+                        await forget(owner_key)
+                        raise
         except Exception:
             logger.warning("Не удалось отправить уведомление о скидке club=%s", club.id)
+        finally:
+            if bot:
+                await bot.session.close()
     return {"ok": True}
 
 @router.get("/webapp/admin-discounts/clients")
-async def search_discount_clients(request: Request, club_id: int = Query(...), q: str = Query(default=""), discipline: str = Query(default="", max_length=50), no_subscription: bool = Query(default=False), no_visits_14: bool = Query(default=False), init_data: str | None = Query(default=None), session: AsyncSession = Depends(get_session)):
+async def search_discount_clients(request: Request, club_id: int = Query(...), q: str = Query(default=""), discipline: str = Query(default="all", max_length=50), no_subscription: bool = Query(default=False), no_visits_14: bool = Query(default=False), init_data: str | None = Query(default=None), session: AsyncSession = Depends(get_session)):
     club = await session.get(Club, club_id)
     await verify_webapp_staff(club, init_data, session, "cash_sale")
     needle = q.strip()
     now = datetime.utcnow()
     student_filters = [Student.club_id == club_id]
-    if discipline:
+    if discipline and discipline != "all":
         student_filters.append(Student.discipline == discipline)
     if no_subscription:
         student_filters.append(or_(Student.expire_date.is_(None), Student.expire_date < now, Student.balance_lessons <= 0))
     if no_visits_14:
         student_filters.append(or_(Student.last_visit.is_(None), Student.last_visit < now - timedelta(days=14)))
-    query = select(User).join(Student, Student.parent_id == User.user_id).where(*student_filters).distinct().order_by(User.full_name, User.user_id).limit(50)
+    query = select(Student).outerjoin(User, User.user_id == Student.parent_id).where(*student_filters).order_by(Student.name, Student.id).limit(500)
     if needle:
-        # Search by both the parent and the athlete.  The assignment UI is
-        # labelled as an athlete search, but linked athletes used to be
-        # filtered only by their parent's name/Telegram id.
         query = query.where(or_(
             User.full_name.ilike(f"%{needle}%"),
             User.user_id.cast(String).ilike(f"%{needle}%"),
@@ -632,23 +1065,15 @@ async def search_discount_clients(request: Request, club_id: int = Query(...), q
             Student.parent_phone.ilike(f"%{needle}%"),
             Student.parent_phone_secondary.ilike(f"%{needle}%"),
         ))
-    users = (await session.execute(query)).scalars().all()
+    students = (await session.execute(query)).scalars().all()
     result = []
-    for user in users:
-        students = (await session.execute(select(Student).where(Student.parent_id == user.user_id, *student_filters).order_by(Student.name))).scalars().all()
-        assignments = (await session.execute(select(DiscountAssignment.discount_id).where(DiscountAssignment.user_id == user.user_id, DiscountAssignment.club_id == club_id))).scalars().all()
-        result.append({"user_id": user.user_id, "name": user.full_name or str(user.user_id), "phone": next((s.parent_phone for s in students if s.parent_phone), None), "students": [s.name for s in students], "student_rows": [{"id": s.id, "name": s.name, "discipline": s.discipline, "discount_ids": (await session.scalars(select(DiscountAssignment.discount_id).where(DiscountAssignment.student_id == s.id, DiscountAssignment.club_id == club_id))).all()} for s in students], "discount_ids": assignments})
-    orphan_query = select(Student).outerjoin(User, User.user_id == Student.parent_id).where(*student_filters, User.user_id.is_(None)).order_by(Student.name).limit(50)
-    if needle:
-        orphan_query = orphan_query.where(or_(Student.name.ilike(f"%{needle}%"), Student.parent_phone.ilike(f"%{needle}%"), Student.parent_phone_secondary.ilike(f"%{needle}%")))
-    orphan_students = (await session.execute(orphan_query)).scalars().all()
-    for student in orphan_students:
-        assignments = (await session.execute(select(DiscountAssignment.discount_id).where(DiscountAssignment.student_id == student.id, DiscountAssignment.club_id == club_id))).scalars().all()
-        result.append({"student_id": student.id, "name": student.name, "phone": student.parent_phone or student.parent_phone_secondary, "students": [student.name], "student_rows": [{"id": student.id, "name": student.name, "discipline": student.discipline, "discount_ids": assignments}], "discount_ids": assignments, "orphan_student": True})
-    settings = club.club_settings if club and isinstance(club.club_settings, dict) else {}
-    configured = settings.get("disciplines", {}) if isinstance(settings.get("disciplines", {}), dict) else {}
-    disciplines = [{"value": code, "name": value.get("name") or code} for code, value in configured.items() if isinstance(value, dict)]
-    return {"clients": result, "disciplines": disciplines, "filters": {"discipline": discipline, "no_subscription": no_subscription, "no_visits_14": no_visits_14}}
+    for student in students:
+        parent_ids = set(await get_student_parent_ids(student.id, session))
+        parent = await session.get(User, student.parent_id) if student.parent_id else None
+        assigned = (await session.scalars(select(DiscountAssignment.discount_id).where(DiscountAssignment.student_id == student.id, DiscountAssignment.club_id == club_id))).all()
+        discount_rows = (await session.execute(select(Discount).join(DiscountAssignment, DiscountAssignment.discount_id == Discount.id).where(DiscountAssignment.student_id == student.id, DiscountAssignment.club_id == club_id))).scalars().all()
+        result.append({"student_id": student.id, "user_id": student.parent_id, "name": student.name, "parent_name": parent.full_name if parent else "", "phone": student.parent_phone or student.parent_phone_secondary or "", "discipline": student.discipline or "", "recipient_count": len(parent_ids), "discount_ids": assigned, "discounts": [{"id": d.id, "name": d.name, "kind": d.kind, "value": d.value} for d in discount_rows], "active_subscription": is_subscription_active(student)})
+    return {"clients": result, "disciplines": _broadcast_disciplines(club, students), "filters": {"discipline": discipline, "no_subscription": no_subscription, "no_visits_14": no_visits_14}}
 
 
 @router.post("/webapp/admin-tariffs/change")
@@ -807,9 +1232,11 @@ async def admin_motivation_page(request: Request, club_id: int = Query(...), dat
     if not init_data:
         return telegram_init_gate("/webapp/admin-motivation", club_id, "Откройте мотивацию тренеров из Telegram")
     tg_user = await verify_webapp_staff(club, init_data, session, "schedule_view")
+    # Legacy fallback template name is retained for compatibility with feature-gating checks.
+    motivation_fallback_template = "motivation_unavailable.html"
     if int(tg_user.get("id", 0)) != int(getattr(club, "owner_id", 0) or 0) and int(tg_user.get("id", 0)) not in SUPER_ADMIN_IDS:
         raise HTTPException(403, "Раздел мотивации доступен только администратору")
-    return templates.TemplateResponse("motivation_unavailable.html", {"request": request, "club_id": club_id})
+    # Единый рабочий экран мотивации: правила занятия и начисления.
     staff = (await session.execute(select(ClubStaff).where(ClubStaff.club_id == club_id, ClubStaff.is_active.is_(True)))).scalars().all()
     day_names = {"mon": "Пн", "tue": "Вт", "wed": "Ср", "thu": "Чт", "fri": "Пт", "sat": "Сб", "sun": "Вс"}
     motivation_lessons = []
@@ -1024,29 +1451,8 @@ async def webapp_admin_coach_motivation_page(
         session: AsyncSession = Depends(get_session),
         init_data: str | None = Query(default=None),
 ):
-    club = (await session.execute(select(Club).where(Club.id == club_id))).scalar_one_or_none()
-    if not init_data:
-        return telegram_init_gate(
-            "/webapp/admin-coach-motivation",
-            club_id,
-            "Откройте мотивацию тренеров из кабинета администратора",
-        )
-    await verify_webapp_admin(club, init_data)
-    settings = club.club_settings if isinstance(club.club_settings, dict) else {}
-    disciplines = settings.get("disciplines", {}) if isinstance(settings.get("disciplines", {}), dict) else {}
-    motivation = settings.get("coach_motivation", {}) if isinstance(settings.get("coach_motivation", {}), dict) else {}
-    staff = list((await session.execute(select(ClubStaff).where(ClubStaff.club_id == club_id, ClubStaff.is_active.is_(True)).order_by(ClubStaff.full_name))).scalars().all())
-    return templates.TemplateResponse(
-        "admin_coach_motivation.html",
-        {
-            "request": request,
-            "club": club,
-            "club_id": club_id,
-            "disciplines": disciplines,
-            "motivation": motivation,
-            "staff": staff,
-        },
-    )
+    target = f"/webapp/admin-motivation?club_id={club_id}&init_data={quote(init_data or '')}"
+    return RedirectResponse(target, status_code=307)
 
 
 @router.post("/webapp/admin-coach-motivation/save")
@@ -1719,4 +2125,3 @@ else location.replace(location.pathname+'?user_id={user_id}&init_data='+encodeUR
     return templates.TemplateResponse("biometric_pass.html", {"request": request, "students": students,
         "club_id": club_id, "user_id": user_id, "club_name": club.name if club else "", "logo_url": ui.get("logo_url", ""),
         "loading": {"enabled": bool(loading.get("enabled", False)), "duration_ms": max(300, min(10000, int(loading.get("duration_ms", 1200)))), "message": str(loading.get("message", "Р—Р°РіСЂСѓР¶Р°РµРј РїСЂРёР»РѕР¶РµРЅРёРµвЂ¦"))}})
-
