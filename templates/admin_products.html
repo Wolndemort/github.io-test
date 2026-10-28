@@ -4,11 +4,9 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Склад и товары</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
+{% include "_staff_back_button.html" %}
 <style>
   body{font-family:sans-serif;background:#f4f4f4;padding:14px;color:#111}
-  .topbar{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px}
-  .navlink{display:block;text-align:center;text-decoration:none;padding:10px 12px;border-radius:12px;border:1px solid #111;background:#111;color:#fff;font-weight:700}
-  .navlink.secondary{background:#fff;color:#111;border-color:#bbb}
   .card{background:#fff;border-radius:16px;padding:12px;margin:8px 0;box-shadow:0 1px 0 rgba(0,0,0,.03)}
   .filters{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
   .filters select{flex:1;min-width:180px}
@@ -35,9 +33,6 @@
   @media(max-width:640px){.product{grid-template-columns:1fr}}
 </style>
 <div style="font-size:20px;font-weight:800;margin:4px 0 10px">📦 Склад и товары</div>
-<div class="topbar">
-  <a class="navlink staff-back-button" href="/webapp/client-cabinet?club_id={{ club_id }}">← В рабочий кабинет</a>
-</div>
 <h2>Товары клуба</h2>
 <div class="card">
   <div class="filters">

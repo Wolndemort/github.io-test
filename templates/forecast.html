@@ -154,12 +154,9 @@
   </head>
   <body>
     <main class="shell">
+      {% include "_staff_back_button.html" %}
       <div class="top">
-        <a
-          class="back"
-          href="/revenue?club_id={{ club_id }}&init_data={{ request.query_params.get('init_data','')|urlencode }}"
-          >← Статистика</a
-        ><span class="eyebrow">{{ club_name }} · Forecast</span>
+        <span class="eyebrow">{{ club_name }} · Forecast</span>
       </div>
       <section class="hero">
         <div class="eyebrow" style="color: #aaa">
