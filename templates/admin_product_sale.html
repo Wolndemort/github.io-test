@@ -34,11 +34,9 @@
 </head>
 <body>
 {% include "_staff_back_button.html" %}
+<!-- ← В рабочий кабинет: кнопка отображается общим компонентом выше. -->
 <div style="font-size:18px;font-weight:800;margin:4px 0 10px">🛍 Продажа товаров</div>
 <div class="wrap">
-  <div class="card" style="margin-top:0">
-    <a class="chip staff-back-button" style="display:block;text-align:center;text-decoration:none" href="/webapp/client-cabinet?club_id={{ club_id }}">← В рабочий кабинет</a>
-  </div>
   <div class="card">
     <h2>Продажа товаров</h2>
     <div class="muted">Фильтруйте по категории или ищите товар по названию. Остатки спишутся после подтверждения наличной оплаты.</div>
@@ -87,7 +85,7 @@
   <div class="paybar">
     <div class="card" style="margin:0">
       <div id="selected" class="selected"></div>
-      <label>Скидки (можно несколько)<select id="discount" multiple>{% for d in discounts %}<option value="{{d.id}}">{{d.name}}</option>{% endfor %}</select></label>
+      <label>Скидки на товары{% if discounts %} (можно несколько){% endif %}<select id="discount" multiple {% if not discounts %}disabled{% endif %}>{% for d in discounts %}<option value="{{d.id}}">{{d.name}}</option>{% else %}<option value="" disabled>Нет доступных скидок на товары</option>{% endfor %}</select></label>
       <b id="total">Итого: 0 ₽</b>
       <button id="pay" class="pay" disabled>Подтвердить оплату наличными</button>
     </div>

@@ -129,6 +129,10 @@ async def start_handler(
             text="✅ Принять и продолжить",
             callback_data="accept_legal_rules"
         ))
+        inline_builder.row(types.InlineKeyboardButton(
+            text="❌ Отклонить",
+            callback_data="reject_legal_rules"
+        ))
 
         legal_text = (
             f"📍 <b>{club.name}</b>\n\n"
@@ -388,3 +392,12 @@ async def accept_legal_handler(
         logger.error(f"❌ Ошибка в хендлере принятия оферты: {e}")
         await callback.message.answer(
             "⚠️ Произошла ошибка при обработке согласия. Попробуйте перезапустить бота через /start")
+
+
+@router.callback_query(lambda c: c.data == "reject_legal_rules")
+async def reject_legal_handler(callback: types.CallbackQuery):
+    await callback.answer("Без согласия доступ к кабинету невозможен.", show_alert=True)
+    await callback.message.edit_text(
+        "❌ Вы отклонили условия обработки данных и публичную оферту.\n\n"
+        "Доступ к личному кабинету не предоставлен. Если передумаете, снова отправьте /start."
+    )

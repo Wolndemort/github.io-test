@@ -4,7 +4,7 @@
 <style>body{font-family:sans-serif;background:#090909;color:#fff;padding:14px}.wrap{max-width:900px;margin:auto}.card{background:#151515;border:1px solid #333;border-radius:14px;padding:16px;margin:12px 0}input,select,textarea,button{box-sizing:border-box;padding:10px;margin:4px 0;border-radius:8px;border:1px solid #555;background:#111;color:#fff;width:100%}button{background:#fff;color:#111;font-weight:bold}.grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}.client{border-top:1px solid #333;padding:10px 0;display:grid;grid-template-columns:1fr 120px;gap:8px}.muted{color:#aaa;font-size:13px}.danger{background:#511d1d;color:#fff}</style>
 <style>.back{display:block;text-align:center;text-decoration:none;padding:11px;border-radius:10px;background:#fff;color:#111;font-weight:bold}.form-heading{display:flex;align-items:center;justify-content:space-between;gap:10px}.form-heading h2,.form-heading h3{margin:0}.form-heading button{width:auto;white-space:nowrap}.discount-form-body[hidden]{display:none}</style>
 <div class="wrap">
-<a class="back staff-back-button" href="/webapp/client-cabinet?club_id={{ club_id }}">← В рабочий кабинет</a>
+{% include "_staff_back_button.html" %}
 <script>
 document.addEventListener('DOMContentLoaded',()=>{
   const card=document.querySelectorAll('.wrap > .card')[1];

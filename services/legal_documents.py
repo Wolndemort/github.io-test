@@ -50,7 +50,7 @@ def validate_legal_data(legal: Mapping | None) -> list[str]:
 
 def legal_documents_enabled(settings: Mapping | None) -> bool:
     legal = settings.get("legal", {}) if isinstance(settings, Mapping) else {}
-    return bool(legal.get("enabled", True)) if isinstance(legal, Mapping) else True
+    return bool(legal.get("enabled", False)) if isinstance(legal, Mapping) else False
 
 
 def legal_context(club) -> dict:
