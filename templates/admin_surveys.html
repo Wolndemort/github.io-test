@@ -19,8 +19,8 @@ button{background:#fff;color:#111;font-weight:700}.grid{display:grid;grid-templa
 <body><div class="wrap">
 {% include "_staff_back_button.html" %}
 <h1>📝 Опросы клиентов</h1>
-<section class="card">
-<h2>Создать автоматический опрос</h2>
+<section class="card" id="surveyEditor">
+<h2 id="surveyEditorTitle">Создать автоматический опрос</h2>
 <input id="name" placeholder="Название опроса"><textarea id="intro" placeholder="Текст приглашения"></textarea>
 <div class="grid"><label><input id="schedulerEnabled" type="checkbox" checked> Включить планировщик</label><label>Отправить после отсутствия (дни)<input id="days" type="number" min="1" max="3650" value="30"></label><label><input id="renewal" type="checkbox" checked> Только без продления</label></div>
 <p class="muted">Если дисциплины или тарифы не выбраны, подходят все. Фильтры пересчитываются каждый день.</p>
@@ -29,7 +29,7 @@ button{background:#fff;color:#111;font-weight:700}.grid{display:grid;grid-templa
 <details class="card" style="margin:12px 0;background:#101010"><summary><b>Клиенты для ручной отправки</b></summary><p class="muted">Выберите конкретного клиента для теста. Это не меняет фильтры планировщика.</p><input id="recipientSearch" placeholder="Поиск по имени или номеру"><div id="recipientList" class="choice"></div><button id="selectAllRecipients" type="button">Выбрать всех найденных</button></details>
 <h3>Вопросы</h3><p class="muted">Добавьте вопросы обычными полями. Клиент увидит их в Telegram по очереди.</p>
 <div id="questionBuilder"></div><button id="addQuestion" type="button">＋ Добавить вопрос</button>
-<button id="create" type="button">Создать опрос</button><div id="status" class="muted"></div>
+<button id="create" type="button">Создать опрос</button><button id="cancelEdit" type="button" style="display:none;background:#555;color:#fff">Отмена редактирования</button><div id="status" class="muted"></div>
 </section>
 <section class="card"><button id="toggleSavedSurveys" type="button" aria-expanded="false">Активные опросы ({{ surveys|selectattr('archived', 'equalto', false)|list|length }}) <span>▾</span></button><div id="savedSurveysList" hidden style="margin-top:10px">{% for item in surveys if not item.archived %}<div class="survey"><b>{{item.name}}</b> · {% if item.trigger_days %}планировщик: {{item.trigger_days}} дн.{% else %}разовый, без планировщика{% endif %} · отправлено {{item.total}}, завершено {{item.completed}}<br><span class="muted">{{item.intro_text}}</span><div class="grid" style="margin-top:8px"><button type="button" onclick="configureSurvey({{item.id}})">Настроить</button><button type="button" onclick="sendSavedSurvey({{item.id}},'selected')">Отправить выбранным</button><button type="button" onclick="sendSavedSurvey({{item.id}},'filters')">Отправить по фильтрам</button><button type="button" onclick="sendSavedSurvey({{item.id}},'all')">Отправить всем</button><button type="button" onclick="resendSurvey({{item.id}},'not_completed')">Повторить непройденным</button><button type="button" onclick="resendSurvey({{item.id}},'failed')">Повторить недоставленным</button><button type="button" onclick="toggleSavedSurvey({{item.id}},this)">{{'Выключить' if item.is_active else 'Включить'}}</button><button type="button" class="danger-action" onclick="archiveSurvey({{item.id}})">Удалить</button></div></div>{% else %}<p class="muted">Активных опросов нет</p>{% endfor %}</div></section><section class="card"><button id="toggleArchivedSurveys" type="button" aria-expanded="false">Архивные опросы ({{ surveys|selectattr('archived')|list|length }}) <span>▾</span></button><div id="archivedSurveysList" hidden style="margin-top:10px">{% for item in surveys if item.archived %}<div class="survey"><b>{{item.name}}</b> · архивный · отправлено {{item.total}}, завершено {{item.completed}}<br><span class="muted">{{item.intro_text}}</span></div>{% else %}<p class="muted">Архивных опросов нет</p>{% endfor %}</div></section>
 <section class="card"><h2>Отчёт по отправкам</h2><div class="grid"><select id="reportSurvey"><option value="">Все опросы</option>{% for item in surveys %}<option value="{{item.id}}">{{item.name}}</option>{% endfor %}</select><select id="reportFilter"><option value="all">Все статусы</option><option value="completed">Пройден</option><option value="started">Начат</option><option value="sent">Не пройден</option><option value="failed">Ошибка отправки</option></select></div><button id="refreshReport">Обновить отчёт</button><div id="reportStatus" class="muted"></div><div id="reportRows"></div></section>
@@ -57,9 +57,16 @@ closeDetail.onclick=()=>detailModal.style.display='none';refreshReport.onclick=l
   const requireNoRenewal = document.getElementById('renewal');
   const createButton = document.getElementById('create');
   const createStatus = document.getElementById('status');
+  const surveyEditorTitle = document.getElementById('surveyEditorTitle');
+  const cancelEdit = document.getElementById('cancelEdit');
+  window.editingSurveyId = null;
   const initData = new URLSearchParams(location.search).get('init_data') || '';
   const clubId = {{ club_id }};
   const recipientSelectionKey = `survey-recipient-selection:${clubId}`;
+  const operationKey = () => (window.crypto && typeof window.crypto.randomUUID === 'function') ? window.crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
+  const storageGet = key => { try { return localStorage.getItem(key); } catch (_) { return null; } };
+  const storageSet = (key, value) => { try { localStorage.setItem(key, value); } catch (_) {} };
+  const storageRemove = key => { try { localStorage.removeItem(key); } catch (_) {} };
 
   createButton.onclick = async () => {
     const questions = [...document.querySelectorAll('.question')].map(card => {
@@ -85,34 +92,59 @@ closeDetail.onclick=()=>detailModal.style.display='none';refreshReport.onclick=l
     form.append('init_data', initData);
     form.append('name', surveyName.value.trim());
     form.append('intro_text', introText.value.trim());
-    form.append('trigger_days', schedulerEnabled.checked ? triggerDays.value : '');
+    if (schedulerEnabled.checked) form.append('trigger_days', triggerDays.value);
     form.append('scheduler_enabled', schedulerEnabled.checked ? '1' : '0');
     form.append('require_no_renewal', requireNoRenewal.checked ? '1' : '0');
     form.append('disciplines', JSON.stringify([...document.querySelectorAll('.discipline:checked')].map(x => x.value)));
     form.append('tariffs', JSON.stringify([...document.querySelectorAll('.tariff:checked')].map(x => x.value)));
     form.append('questions', JSON.stringify(questions));
     createButton.disabled = true;
-    createStatus.textContent = 'Создание опроса…';
+    createStatus.textContent = window.editingSurveyId ? 'Сохранение настроек…' : 'Создание опроса…';
     try {
-      const response = await fetch('/webapp/admin-surveys/create', { method: 'POST', body: form });
+      const endpoint = window.editingSurveyId ? `/webapp/admin-surveys/${window.editingSurveyId}/edit` : '/webapp/admin-surveys/create';
+      if (window.editingSurveyId) form.append('idempotency_key', `edit:${window.editingSurveyId}:${operationKey()}`);
+      const response = await fetch(endpoint, { method: 'POST', body: form });
       const payload = await response.json().catch(() => ({}));
       createStatus.textContent = response.ok
-        ? 'Опрос создан.'
+        ? (window.editingSurveyId ? 'Настройки сохранены.' : 'Опрос создан.')
         : (payload.detail || `Ошибка создания (${response.status}).`);
+      if (response.ok) setTimeout(() => location.reload(), 250);
     } catch (error) {
       createStatus.textContent = `Ошибка сети: ${error.message}`;
     } finally {
       createButton.disabled = false;
     }
   };
+  cancelEdit.onclick = () => location.reload();
 })();
 </script>
 <script>
 (() => {
+  // Этот блок отвечает за действия сохранённых опросов. Он намеренно
+  // содержит собственные ссылки на редактор и storage: первый скрипт
+  // страницы находится в другом IIFE и не экспортирует эти переменные.
+  const surveyEditor = document.getElementById('surveyEditor');
+  const surveyName = document.getElementById('name');
+  const introText = document.getElementById('intro');
+  const triggerDays = document.getElementById('days');
+  const schedulerEnabled = document.getElementById('schedulerEnabled');
+  const requireNoRenewal = document.getElementById('renewal');
+  const createButton = document.getElementById('create');
+  const createStatus = document.getElementById('status');
+  const surveyEditorTitle = document.getElementById('surveyEditorTitle');
+  const cancelEdit = document.getElementById('cancelEdit');
+  const builder = document.getElementById('questionBuilder');
+  const operationKey = () => (window.crypto && typeof window.crypto.randomUUID === 'function')
+    ? window.crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
+  const storageGet = key => { try { return window.localStorage.getItem(key); } catch (_) { return null; } };
+  const storageSet = (key, value) => { try { window.localStorage.setItem(key, value); } catch (_) {} };
+  const storageRemove = key => { try { window.localStorage.removeItem(key); } catch (_) {} };
   const recipientList = document.getElementById('recipientList');
   const recipientSearch = document.getElementById('recipientSearch');
   const initData = new URLSearchParams(location.search).get('init_data') || '';
   const clubId = {{ club_id }};
+  const recipientSelectionKey = `survey-recipient-selection:${clubId}`;
   const html = value => String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
   async function loadRecipients() {
     const query = new URLSearchParams({club_id: clubId, init_data: initData, q: recipientSearch.value});
@@ -120,11 +152,11 @@ closeDetail.onclick=()=>detailModal.style.display='none';refreshReport.onclick=l
     const payload = await response.json();
     if (!response.ok) { recipientList.textContent = payload.detail || 'Не удалось загрузить клиентов'; return; }
     recipientList.innerHTML = (payload.students || []).map(student => `<label class="choice"><input type="checkbox" class="recipient" value="${student.id}"><span>${html(student.name)} · ${html(student.discipline || 'без дисциплины')} · получателей: ${student.recipient_count}</span></label>`).join('') || '<span class="muted">Клиенты не найдены</span>';
-    const saved = new Set(JSON.parse(localStorage.getItem(recipientSelectionKey) || '[]').map(String));
+    const saved = new Set(JSON.parse(storageGet(recipientSelectionKey) || '[]').map(String));
     document.querySelectorAll('.recipient').forEach(input => { input.checked = saved.has(input.value); });
   }
   window.sendSavedSurvey = async (surveyId, mode) => {
-    const selectedIds = new Set(JSON.parse(localStorage.getItem(recipientSelectionKey) || '[]').map(Number));
+    const selectedIds = new Set(JSON.parse(storageGet(recipientSelectionKey) || '[]').map(Number));
     document.querySelectorAll('.recipient').forEach(input => { if (input.checked) selectedIds.add(Number(input.value)); else selectedIds.delete(Number(input.value)); });
     const selected = [...selectedIds];
     if (mode === 'selected' && !selected.length) return alert('Раскройте список клиентов и выберите хотя бы одного.');
@@ -133,19 +165,19 @@ closeDetail.onclick=()=>detailModal.style.display='none';refreshReport.onclick=l
     const form = new FormData();
     form.append('club_id', clubId); form.append('init_data', initData); form.append('mode', mode);
     form.append('student_ids', JSON.stringify(selected));
-    form.append('idempotency_key', `${surveyId}:${mode}:${crypto.randomUUID()}`);
+    form.append('idempotency_key', `${surveyId}:${mode}:${operationKey()}`);
     try {
       const response = await fetch(`/webapp/admin-surveys/${surveyId}/send`, {method:'POST', body:form});
       const payload = await response.json().catch(() => ({}));
       alert(response.ok ? `Отправлено: ${payload.sent}, ошибок: ${payload.failed || 0}` : (payload.detail || 'Ошибка отправки'));
-      if (response.ok) { localStorage.removeItem(recipientSelectionKey); location.reload(); }
+      if (response.ok) { storageRemove(recipientSelectionKey); location.reload(); }
     } catch (error) { alert(`Ошибка сети: ${error.message}`); }
   };
   window.resendSurvey = async (surveyId, target) => {
     const label = target === 'failed' ? 'недоставленным' : 'непройденным';
     if (!confirm(`Повторить опрос ${label}?`)) return;
     const form = new FormData(); form.append('club_id', clubId); form.append('init_data', initData);
-    form.append('target', target); form.append('idempotency_key', `${surveyId}:resend:${target}:${crypto.randomUUID()}`);
+    form.append('target', target); form.append('idempotency_key', `${surveyId}:resend:${target}:${operationKey()}`);
     try {
       const response = await fetch(`/webapp/admin-surveys/${surveyId}/resend`, {method:'POST', body:form});
       const payload = await response.json().catch(() => ({}));
@@ -158,33 +190,24 @@ closeDetail.onclick=()=>detailModal.style.display='none';refreshReport.onclick=l
     const response = await fetch(`/webapp/admin-surveys/${surveyId}/settings?${query}`);
     const settings = await response.json().catch(() => ({}));
     if (!response.ok) return alert(settings.detail || 'Не удалось загрузить настройки');
-    const name = prompt('Название опроса', settings.name === 'undefined' ? '' : settings.name);
-    if (name === null) return;
-    const intro = prompt('Текст приглашения', settings.intro_text === 'undefined' ? '' : settings.intro_text);
-    if (intro === null) return;
-    const scheduler = confirm('Включить планировщик для новой версии опроса?');
-    let days = settings.trigger_days || 30;
-    if (scheduler) {
-      days = prompt('Через сколько дней отсутствия отправлять?', String(days));
-      if (days === null) return;
-    }
-    const form = new FormData();
-    form.append('club_id', clubId); form.append('init_data', initData); form.append('name', name);
-    form.append('intro_text', intro); form.append('scheduler_enabled', scheduler ? '1' : '0');
-    if (scheduler) form.append('trigger_days', days);
-    form.append('disciplines', JSON.stringify(settings.filters?.disciplines || []));
-    form.append('tariffs', JSON.stringify(settings.filters?.tariffs || []));
-    form.append('require_no_renewal', settings.filters?.require_no_renewal === false ? '0' : '1');
-    form.append('questions', JSON.stringify(settings.questions || []));
-    form.append('idempotency_key', `edit:${surveyId}:${crypto.randomUUID()}`);
-    const saved = await fetch(`/webapp/admin-surveys/${surveyId}/edit`, {method:'POST', body:form});
-    const payload = await saved.json().catch(() => ({}));
-    if (!saved.ok) return alert(payload.detail || 'Не удалось сохранить настройки');
-    location.reload();
+    window.editingSurveyId = surveyId;
+    surveyEditorTitle.textContent = 'Настроить опрос';
+    createButton.textContent = 'Сохранить настройки';
+    cancelEdit.style.display = 'block';
+    surveyName.value = settings.name === 'undefined' ? '' : settings.name;
+    introText.value = settings.intro_text === 'undefined' ? '' : settings.intro_text;
+    schedulerEnabled.checked = Boolean(settings.filters?.scheduler_enabled ?? settings.trigger_days);
+    triggerDays.value = settings.trigger_days || 30;
+    requireNoRenewal.checked = settings.filters?.require_no_renewal !== false;
+    document.querySelectorAll('.discipline').forEach(input => { input.checked = (settings.filters?.disciplines || []).includes(input.value); });
+    document.querySelectorAll('.tariff').forEach(input => { input.checked = (settings.filters?.tariffs || []).includes(input.value); });
+    builder.innerHTML = '';
+    (settings.questions || []).forEach(question => addQuestion(question));
+    document.getElementById('surveyEditor').scrollIntoView({behavior:'smooth', block:'start'});
   };
   window.archiveSurvey = async surveyId => {
     if (!confirm('Архивировать опрос? История и отчёты сохранятся.')) return;
-    const form = new FormData(); form.append('club_id', clubId); form.append('init_data', initData); form.append('idempotency_key', `archive:${surveyId}:${crypto.randomUUID()}`);
+    const form = new FormData(); form.append('club_id', clubId); form.append('init_data', initData); form.append('idempotency_key', `archive:${surveyId}:${operationKey()}`);
     const response = await fetch(`/webapp/admin-surveys/${surveyId}/archive`, {method:'POST', body:form});
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) return alert(payload.detail || 'Не удалось архивировать опрос');
@@ -216,14 +239,14 @@ closeDetail.onclick=()=>detailModal.style.display='none';refreshReport.onclick=l
   recipientSearch.addEventListener('input', () => loadRecipients().catch(error => { recipientList.textContent = error.message; }));
   recipientList.addEventListener('change', event => {
     if (!event.target.classList.contains('recipient')) return;
-    const selected = new Set(JSON.parse(localStorage.getItem(recipientSelectionKey) || '[]').map(String));
+    const selected = new Set(JSON.parse(storageGet(recipientSelectionKey) || '[]').map(String));
     if (event.target.checked) selected.add(event.target.value); else selected.delete(event.target.value);
-    localStorage.setItem(recipientSelectionKey, JSON.stringify([...selected]));
+    storageSet(recipientSelectionKey, JSON.stringify([...selected]));
   });
   document.getElementById('selectAllRecipients').onclick = () => {
-    const selected = new Set(JSON.parse(localStorage.getItem(recipientSelectionKey) || '[]').map(String));
+    const selected = new Set(JSON.parse(storageGet(recipientSelectionKey) || '[]').map(String));
     document.querySelectorAll('.recipient').forEach(input => { input.checked = true; selected.add(input.value); });
-    localStorage.setItem(recipientSelectionKey, JSON.stringify([...selected]));
+    storageSet(recipientSelectionKey, JSON.stringify([...selected]));
   };
   loadRecipients().catch(error => { recipientList.textContent = error.message; });
 })();
