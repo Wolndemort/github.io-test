@@ -25,6 +25,7 @@ from services.order_notifications import (
     notify_product_staff,
     resolve_user_label,
 )
+from services.advance_visits import advance_purchase_warning
 from aiogram import Bot
 
 
@@ -248,6 +249,10 @@ async def yookassa_webhook(request: Request, session: AsyncSession = Depends(get
         club_result = await session.execute(select(Club).where(Club.id == order.club_id))
         club = club_result.scalar_one_or_none()
         club_settings = club.club_settings if club else {}
+        advance_warning = ""
+        if not order.type.startswith("FREEZE"):
+            student_before = await session.get(Student, order.student_id)
+            advance_warning = advance_purchase_warning(student_before, club_settings, html=True) if student_before else ""
         if order.type.startswith("FREEZE"):
             abon_result = await purchase_student_freeze(order.student_id, order.club_id, order.days_to_add, session)
         else:
@@ -258,6 +263,8 @@ async def yookassa_webhook(request: Request, session: AsyncSession = Depends(get
             try:
                 frozen_student = await session.get(Student, order.student_id)
                 payer_label = await resolve_user_label(session, order.user_id, empty_label="Не указан")
+                if advance_warning:
+                    payer_label = f"{payer_label}\n{advance_warning}"
                 bot = Bot(club.bot_token)
                 is_freeze = order.type.startswith("FREEZE")
                 await bot.send_message(

@@ -37,6 +37,7 @@ from services.gate_control import process_athlete_gate_pass
 from services.staff_permissions import staff_can, permissions_for_staff
 from services.analytics import is_subscription_active
 from services.discounts import active_discount, active_discounts, apply_discount, apply_discounts
+from services.advance_visits import advance_purchase_warning, advance_debt_snapshot
 from services.legal_documents import legal_documents_enabled
 from middlewares.db_saas_midleware import SUPER_ADMIN_IDS
 
@@ -435,7 +436,7 @@ async def staff_checkin(payload: dict, db: AsyncSession = Depends(get_session)):
             for parent_id in await get_student_parent_ids(int(payload["student_id"]), db):
                 await bot.send_message(parent_id, f"🔔 <b>Вход зафиксирован {actor}</b>\nАтлет: <b>{result['student_name']}</b>\n{result['message']}", parse_mode="HTML")
             if club.owner_id and int(club.owner_id) != user_id:
-                await bot.send_message(int(club.owner_id), f"🟢 <b>Посещение отмечено сотрудником</b>\nАтлет: <b>{result['student_name']}</b>\nСотрудник ID: <code>{user_id}</code>\nРежим: {'с турникетом' if payload.get('open_turnstile') else 'без турникета'}", parse_mode="HTML")
+                await bot.send_message(int(club.owner_id), f"🟢 <b>Посещение отмечено сотрудником</b>\nАтлет: <b>{result['student_name']}</b>\n{result['message']}\nСотрудник ID: <code>{user_id}</code>\nРежим: {'с турникетом' if payload.get('open_turnstile') else 'без турникета'}", parse_mode="HTML")
         except Exception as notify_error:
             # The attendance transaction has already succeeded. A Telegram
             # delivery failure must not turn a successful check-in into HTTP 500.
@@ -895,7 +896,8 @@ async def webapp_buy_subscription_page(request: Request, club_id: int, init_data
     payment_modes = payment_availability(settings)
     payment_info = get_payment_info_text(settings)
     discounts_by_student = {s.id: [{"kind": d.kind, "value": d.value, "name": d.name} for d in await active_discounts(db, club_id, user.user_id, "subscriptions", student_id=s.id)] for s in students}
-    return templates.TemplateResponse("webapp_buy_subscription.html", {"request": request, "club": club, "club_id": club_id, "students": students, "disciplines": disciplines, "discounts_by_student": discounts_by_student, "payment_modes": payment_modes, "sbp_enabled": payment_modes["sbp"], "online_enabled": payment_modes["online"], "payment_info": payment_info})
+    advance_by_student = {s.id: {**advance_debt_snapshot(s), "warning": advance_purchase_warning(s, settings)} for s in students}
+    return templates.TemplateResponse("webapp_buy_subscription.html", {"request": request, "club": club, "club_id": club_id, "students": students, "disciplines": disciplines, "discounts_by_student": discounts_by_student, "advance_by_student": advance_by_student, "payment_modes": payment_modes, "sbp_enabled": payment_modes["sbp"], "online_enabled": payment_modes["online"], "payment_info": payment_info})
 
 
 @router.post("/webapp/client-cabinet/buy-subscription")
@@ -927,6 +929,7 @@ async def webapp_buy_subscription_submit(payload: WebAppBuySubscriptionPayload, 
     price = selected_tariff.get("price")
     days = selected_tariff.get("days", 30)
     count = selected_tariff.get("count", 0)
+    advance_warning = advance_purchase_warning(student, club.club_settings or {})
     age_error = _tariff_age_error(student, selected_tariff, discipline_cfg.get("name", payload.sport_type))
     if age_error:
         raise HTTPException(status_code=400, detail=age_error)

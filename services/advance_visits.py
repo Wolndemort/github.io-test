@@ -1,0 +1,93 @@
+"""Controlled loyalty credit for visits made after subscription expiry."""
+from __future__ import annotations
+
+from datetime import datetime
+
+
+DEFAULT_MAX_DEBT_DAYS = 15
+DEFAULT_MAX_DEBT_LESSONS = 7
+
+
+def advance_config(settings: dict | None) -> dict:
+    raw = (settings or {}).get("limits", {}).get("advance_visits", {}) or {}
+    return {
+        "enabled": bool(raw.get("enabled", False)),
+        "max_debt_days": max(0, int(raw.get("max_debt_days", DEFAULT_MAX_DEBT_DAYS) or DEFAULT_MAX_DEBT_DAYS)),
+        "max_debt_lessons": max(0, int(raw.get("max_debt_lessons", DEFAULT_MAX_DEBT_LESSONS) or DEFAULT_MAX_DEBT_LESSONS)),
+    }
+
+
+def advance_preview(student, now: datetime, settings: dict | None, *, new_session: bool = True) -> dict:
+    """Return projected debt without mutating the student."""
+    config = advance_config(settings)
+    current_days = max(0, int(getattr(student, "advance_debt_days", 0) or 0))
+    current_lessons = max(0, int(getattr(student, "advance_debt_lessons", 0) or 0))
+    expiry = getattr(student, "expire_date", None)
+    expiry = expiry.replace(tzinfo=None) if expiry else None
+    overdue_days = max(0, (now.date() - expiry.date()).days) if expiry and expiry < now else 0
+    projected_days = max(current_days, overdue_days)
+    projected_lessons = current_lessons + (1 if new_session else 0)
+    is_advance = bool(config["enabled"] and expiry and expiry < now and new_session)
+    return {
+        "enabled": config["enabled"],
+        "is_advance": is_advance,
+        "debt_days": projected_days,
+        "debt_lessons": projected_lessons,
+        "max_debt_days": config["max_debt_days"],
+        "max_debt_lessons": config["max_debt_lessons"],
+        "allowed": (not is_advance) or (projected_days <= config["max_debt_days"] and projected_lessons <= config["max_debt_lessons"]),
+    }
+
+
+def record_advance_visit(student, now: datetime, settings: dict | None) -> dict:
+    preview = advance_preview(student, now, settings, new_session=True)
+    if preview["is_advance"] and preview["allowed"]:
+        student.advance_debt_days = preview["debt_days"]
+        student.advance_debt_lessons = preview["debt_lessons"]
+    return preview
+
+
+def settle_advance_debt(student, days_to_add: int, lessons_count: int, settings: dict | None) -> dict:
+    """Consume debt from a newly purchased subscription while holding the student lock."""
+    config = advance_config(settings)
+    debt_days = max(0, int(getattr(student, "advance_debt_days", 0) or 0))
+    debt_lessons = max(0, int(getattr(student, "advance_debt_lessons", 0) or 0))
+    days_consumed = min(debt_days, max(0, int(days_to_add or 0))) if config["enabled"] else 0
+    lessons_consumed = (debt_lessons if int(lessons_count or 0) == 999 else min(debt_lessons, max(0, int(lessons_count or 0)))) if config["enabled"] else 0
+    student.advance_debt_days = debt_days - days_consumed
+    student.advance_debt_lessons = debt_lessons - lessons_consumed
+    return {
+        "debt_days_before": debt_days,
+        "debt_lessons_before": debt_lessons,
+        "days_consumed": days_consumed,
+        "lessons_consumed": lessons_consumed,
+        "debt_days_after": student.advance_debt_days,
+        "debt_lessons_after": student.advance_debt_lessons,
+    }
+
+
+def advance_debt_snapshot(student) -> dict:
+    """Return a stable, serialisable debt snapshot for UI and notifications."""
+    return {
+        "days": max(0, int(getattr(student, "advance_debt_days", 0) or 0)),
+        "lessons": max(0, int(getattr(student, "advance_debt_lessons", 0) or 0)),
+    }
+
+
+def advance_purchase_warning(student, settings: dict | None, *, html: bool = False) -> str:
+    """Explain to a payer that the next purchase will settle an advance debt."""
+    if not advance_config(settings)["enabled"]:
+        return ""
+    debt = advance_debt_snapshot(student)
+    if not debt["days"] and not debt["lessons"]:
+        return ""
+    text = (
+        f"⚠️ У атлета есть задолженность по авансовым посещениям: "
+        f"{debt['days']} дн. / {debt['lessons']} зан. "
+        "При покупке она будет погашена из нового абонемента "
+        "(срок и количество занятий уменьшатся)."
+    )
+    if html:
+        from html import escape
+        return escape(text)
+    return text
