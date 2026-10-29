@@ -63,9 +63,12 @@
 <script>
 const disciplines = {{ disciplines | tojson }};
 const discountsByStudent = {{ discounts_by_student | tojson }};
+const advanceByStudent = {{ advance_by_student | tojson }};
 const sportSelect = document.getElementById('sport');
 const tariffSelect = document.getElementById('tariff');
 const studentSelect = document.getElementById('student');
+const advanceWarning = document.createElement('div'); advanceWarning.style='display:none;margin-top:10px;padding:10px;border-radius:10px;background:#ffe1e1;color:#9b111e;font-weight:700'; studentSelect.closest('.mono-card').appendChild(advanceWarning);
+function renderAdvanceWarning(){const item=advanceByStudent[studentSelect.value]||{}; advanceWarning.textContent=item.warning||''; advanceWarning.style.display=item.warning?'block':'none';}
 function renderTariffs() {
   const tariffs = (disciplines[sportSelect.value] || {}).tariffs || [];
   tariffSelect.innerHTML = '';
@@ -91,7 +94,7 @@ function renderTariffs() {
 function renderPricePreview(){const t=(disciplines[sportSelect.value]?.tariffs||[])[Number(tariffSelect.value)||0];if(!t)return;let amount=Number(t.price)*100;const ds=discountsByStudent[studentSelect.value]||[];for(const d of ds)amount=d.kind==='percent'?Math.round(amount*(100-Number(d.value))/100):Math.max(0,amount-Number(d.value));const el=document.getElementById('pricePreview');if(el)el.textContent='К оплате: '+(amount/100).toFixed(2)+' ₽'+(ds.length?' · автоматическая скидка применена':'')}
 sportSelect.addEventListener('change', renderTariffs);
 tariffSelect.addEventListener('change', renderPricePreview);studentSelect.addEventListener('change', renderPricePreview);
-renderTariffs();
+renderTariffs(); renderAdvanceWarning(); studentSelect.addEventListener('change', renderAdvanceWarning);
 document.getElementById('create').addEventListener('click', async () => {
   const button = document.getElementById('create');
   button.disabled = true;

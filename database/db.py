@@ -162,6 +162,9 @@ class Student(Base):
     # Снимок срока заморозки на момент покупки абонемента.
     freeze_days_entitlement: Mapped[int] = mapped_column(Integer, default=5, server_default="5", nullable=False)
     balance_lessons: Mapped[int] = mapped_column(default=0)
+    # Controlled loyalty credit after subscription expiry.
+    advance_debt_days: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
+    advance_debt_lessons: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
     birthday: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     last_visit: Mapped[Optional[datetime]] = mapped_column(DateTime)
     parent: Mapped["User"] = relationship(back_populates="students")
@@ -663,6 +666,8 @@ async def add_abon(
     Работает и для онлайн-чеков, и для налички.
     """
     try:
+        from services.advance_visits import settle_advance_debt
+
         # 1. Загружаем студента и проверяем принадлежность к клубу
         # Serialize date/balance updates across webhook, bot, WebApp and cash.
         student = await session.get(Student, student_id, with_for_update=True)
@@ -693,6 +698,9 @@ async def add_abon(
 
         current_expire = student.expire_date
         was_frozen = bool(student.is_frozen)
+        settlement = settle_advance_debt(student, days_to_add, lessons_count, club_settings)
+        credited_days = max(0, int(days_to_add) - settlement["days_consumed"])
+        credited_lessons = 999 if int(lessons_count or 0) == 999 else max(0, int(lessons_count or 0) - settlement["lessons_consumed"])
 
         # Если абонемент еще активен — плюсуем к дате окончания. Если просрочен — отсчет от сегодняшней полночи.
         if current_expire and current_expire > now:
@@ -700,7 +708,7 @@ async def add_abon(
         else:
             start_date = now
 
-        new_expire = start_date + timedelta(days=days_to_add)
+        new_expire = start_date + timedelta(days=credited_days)
 
         # Принудительно выставляем конец дня
         student.expire_date = new_expire.replace(hour=23, minute=59, second=59, microsecond=0)
@@ -716,12 +724,12 @@ async def add_abon(
             student.balance_lessons = 999
         else:
             if is_lessons_tariff and not was_frozen and not (current_expire and current_expire > now):
-                student.balance_lessons = lessons_count
+                student.balance_lessons = credited_lessons
             else:
                 current_balance = student.balance_lessons or 0
                 if current_balance == 999:
                     current_balance = 0
-                student.balance_lessons = current_balance + lessons_count
+                student.balance_lessons = current_balance + credited_lessons
 
         # 4. Сброс флагов заморозки
         student.is_frozen = 0

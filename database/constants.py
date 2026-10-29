@@ -102,6 +102,11 @@ DEFAULT_CLUB_SETTINGS = {
         "freeze_days_step": 7,
         "freeze_price_per_day": 0,
         "subscription_days": 30,
+        "advance_visits": {
+            "enabled": False,
+            "max_debt_days": 15,
+            "max_debt_lessons": 7,
+        },
         "session_timeout_minutes": 150  # 👈 Добавили таймаут сессии визита в минутах
     },
     "payments": {

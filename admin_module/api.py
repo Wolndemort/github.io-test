@@ -28,6 +28,7 @@ from services.order_notifications import (
 )
 from services.payment_requisites import get_payment_info_text, build_payment_instruction_text
 from services.discounts import active_discount, active_discounts, apply_discount, apply_discounts
+from services.advance_visits import advance_purchase_warning, advance_debt_snapshot
 import hmac
 import os
 import time
@@ -381,7 +382,7 @@ async def scanner_scan(
     bot = Bot(club.bot_token)
     try:
         admin_text = (f"🟢 <b>ПРОХОД</b>\n👤 Атлет: <b>{result['student_name']}</b>\n"
-                      f"📅 До: {result['expire_str']}\n{result['turnstile_status']}")
+                      f"📅 До: {result['expire_str']}\n{result['message']}\n{result['turnstile_status']}")
         await bot.send_message(club.owner_id, admin_text, parse_mode="HTML")
         for parent_id in await get_student_parent_ids(student_id, session):
             await bot.send_message(parent_id,
@@ -1183,6 +1184,9 @@ async def admin_cash_subscription_page(request: Request, club_id: int = Query(..
     for s in students:
         assigned = await active_discounts(db, club_id, s.parent_id, "subscriptions", student_id=s.id)
         student_data.append({"id": s.id, "name": s.name, "discipline": s.discipline, "expire_date": s.expire_date.isoformat() if s.expire_date else None, "balance_lessons": s.balance_lessons or 0, "is_frozen": bool(s.is_frozen), "status_ok": bool(s.expire_date and s.expire_date > now and not s.is_frozen and (s.balance_lessons or 0) > 0), "status_label": "Активен" if s.expire_date and s.expire_date > now and not s.is_frozen and (s.balance_lessons or 0) > 0 else "Завершён", "auto_discount_ids": [d.id for d in assigned]})
+    for item, student in zip(student_data, students):
+        debt = advance_debt_snapshot(student)
+        item.update(advance_debt_days=debt["days"], advance_debt_lessons=debt["lessons"], advance_warning=advance_purchase_warning(student, settings))
     discounts = (await db.execute(select(Discount).where(Discount.club_id == club_id, Discount.is_active.is_(True)).order_by(Discount.name))).scalars().all()
     discount_data = [{"id": d.id, "name": d.name, "kind": d.kind, "value": d.value} for d in discounts]
     return templates.TemplateResponse("admin_cash_subscription.html", {"request": request, "club": club, "club_id": club_id, "students": student_data, "disciplines": disciplines, "discounts": discounts, "discount_data": discount_data})
@@ -1234,6 +1238,7 @@ async def admin_cash_subscription(payload: WebAppCashSubscriptionPayload, db: As
     if age_error:
         raise HTTPException(status_code=400, detail=age_error)
     payment_order = PaymentOrder(id=order_id, user_id=student.parent_id or int(tg_user.get("id", 0)), student_id=student.id, club_id=club.id, discipline=discipline, amount_kopecks=price, original_amount_kopecks=original_price, discount_id=manual_discount.id if manual_discount else None, discount_name=manual_discount.name if manual_discount else None, discount_kind=manual_discount.kind if manual_discount else None, discount_value=manual_discount.value if manual_discount else None, discount_amount_kopecks=discount_amount or None, status="CONFIRMED", type="CASH_SUBSCRIPTION", provider_payment_id=f"CASH:{order_id}", lesson_count=count, days_to_add=days)
+    debt_warning = advance_purchase_warning(student, settings, html=True)
     abon_result = await add_abon(student.id, count, db, club.id, settings, days_to_add=days, discipline=discipline)
     if not abon_result:
         raise HTTPException(status_code=409, detail="Не удалось применить абонемент")
@@ -1247,7 +1252,7 @@ async def admin_cash_subscription(payload: WebAppCashSubscriptionPayload, db: As
             existing_student = await db.get(Student, existing_order.student_id) if existing_order.student_id else None
             return {"ok": True, "student": existing_student.name if existing_student else "", "expire_date": existing_student.expire_date.strftime("%Y-%m-%d") if existing_student and existing_student.expire_date else "", "balance_lessons": existing_student.balance_lessons if existing_student else 0, "order_id": existing_order.id, "idempotent": True}
         raise
-    audit_event("webapp_cash_subscription_created", club_id=club.id, actor_user_id=int(tg_user.get("id", 0)), student_id=student.id, amount_kopecks=price, discipline=discipline, lesson_count=count, days_to_add=days)
+    audit_event("webapp_cash_subscription_created", club_id=club.id, actor_user_id=int(tg_user.get("id", 0)), student_id=student.id, amount_kopecks=price, discipline=discipline, lesson_count=count, days_to_add=days, advance_debt_warning=bool(debt_warning))
 
     # The bot flow sends the cash receipt after activation. Keep the WebApp flow
     # consistent: the cashier is not the customer, so notify the athlete's
@@ -1265,7 +1270,7 @@ async def admin_cash_subscription(payload: WebAppCashSubscriptionPayload, db: As
                     type("ItemView", (), {"title": f"{str(cfg.get('name', discipline))} · {tariff_label}", "quantity": 1, "product_id": 1})()
                 ]),
                 amount_kopecks=price,
-                extra_lines=[
+                extra_lines=([debt_warning] if debt_warning else []) + [
                     f"Атлет: <b>{escape(student.name or str(student.id))}</b>",
                     f"Клуб: <b>{escape(club.name)}</b>",
                     f"Абонемент действует до: <b>{escape(str(abon_result[0]))}</b>",
@@ -1287,7 +1292,7 @@ async def admin_cash_subscription(payload: WebAppCashSubscriptionPayload, db: As
                 logger.exception("Не удалось отправить чек владельцу по наличному абонементу %s", order_id)
     finally:
         await bot.session.close()
-    return {"ok": True, "student": student.name, "expire_date": abon_result[0], "balance_lessons": student.balance_lessons, "order_id": order_id}
+    return {"ok": True, "student": student.name, "expire_date": abon_result[0], "balance_lessons": student.balance_lessons, "order_id": order_id, "advance_warning": debt_warning}
 
 
 @router.post("/admin/students")

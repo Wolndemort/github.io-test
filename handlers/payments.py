@@ -18,6 +18,7 @@ from redis.asyncio import Redis
 from services.abuse_guard import rate_limit, audit_block
 from services.audit import audit_event
 from services.order_notifications import build_owner_receipt_text, format_order_items, resolve_user_label
+from services.advance_visits import advance_purchase_warning
 from services.payment_requisites import get_payment_info_text
 from services.availability import payment_availability
 from services.staff_permissions import permissions_for_staff
@@ -1307,6 +1308,7 @@ async def final_cash_pay(
 
     # 4. Вызываем обновленную функцию начисления, передавая точные дни
     sale_student = await session.get(Student, student_id)
+    advance_warning = advance_purchase_warning(sale_student, club_settings, html=True) if sale_student else ""
     parent_user_id = getattr(sale_student, "parent_id", None)
     automatic_discounts = await active_discounts(session, club.id, parent_user_id, "subscriptions", student_id=student_id)
     original_amount_kopecks = price
@@ -1343,6 +1345,8 @@ async def final_cash_pay(
                                  lesson_count=count, days_to_add=days))
         await session.commit()
         t_label = f"Безлимит ({days} дн.)" if count == 999 else f"{count} зан. ({days} дн.)"
+        if advance_warning:
+            t_label = f"{t_label} — {advance_warning}"
 
         await callback.message.edit_text(
             f"✅ <b>Наличные успешно зачислены!</b>\n\n"

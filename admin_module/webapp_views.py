@@ -370,6 +370,65 @@ def _survey_tariffs(club: Club) -> list[dict]:
     return result
 
 
+@router.get("/webapp/admin-advance-visits", response_class=HTMLResponse)
+async def admin_advance_visits_page(
+    request: Request, club_id: int = Query(...), init_data: str | None = Query(None),
+    session: AsyncSession = Depends(get_session),
+):
+    club = await session.get(Club, club_id)
+    tg_user = await verify_webapp_staff(club, init_data, session, "cash_sale")
+    if int(tg_user.get("id", 0)) != int(club.owner_id or 0) and int(tg_user.get("id", 0)) not in SUPER_ADMIN_IDS:
+        raise HTTPException(status_code=403, detail="Только владелец клуба может менять настройки авансовых посещений")
+    settings = club.club_settings if isinstance(club.club_settings, dict) else {}
+    config = (settings.get("limits", {}) or {}).get("advance_visits", {}) or {}
+    debtors = (await session.scalars(select(Student).where(
+        Student.club_id == club_id,
+        (Student.advance_debt_days > 0) | (Student.advance_debt_lessons > 0),
+    ).order_by(Student.name))).all()
+    return templates.TemplateResponse("admin_advance_visits.html", {
+        "request": request, "club_id": club_id, "init_data": init_data or "",
+        "config": {"enabled": bool(config.get("enabled", False)), "max_debt_days": int(config.get("max_debt_days", 15) or 15), "max_debt_lessons": int(config.get("max_debt_lessons", 7) or 7)},
+        "debtors": debtors,
+    })
+
+
+@router.post("/webapp/admin-advance-visits/settings")
+async def save_admin_advance_visits(
+    request: Request, payload: dict, session: AsyncSession = Depends(get_session),
+):
+    club_id = int(payload.get("club_id", 0) or 0)
+    init_data = str(payload.get("init_data") or "")
+    club = await session.get(Club, club_id)
+    tg_user = await verify_webapp_staff(club, init_data, session, "cash_sale")
+    if int(tg_user.get("id", 0)) != int(club.owner_id or 0) and int(tg_user.get("id", 0)) not in SUPER_ADMIN_IDS:
+        raise HTTPException(status_code=403, detail="Только владелец клуба может менять настройки авансовых посещений")
+    operation_key = str(payload.get("idempotency_key") or "").strip()[:120]
+    if len(operation_key) < 16:
+        raise HTTPException(status_code=400, detail="Нужен idempotency_key")
+    claim_key = f"advance-visits:settings:{club_id}:{int(tg_user['id'])}:{operation_key}"
+    claim_token = await claim_once(claim_key, ttl=15 * 60)
+    if not claim_token:
+        raise HTTPException(status_code=409, detail="Эта настройка уже сохраняется")
+    try:
+        locked = (await session.execute(select(Club).where(Club.id == club_id).with_for_update())).scalar_one()
+        settings = copy.deepcopy(locked.club_settings or {})
+        limits = settings.setdefault("limits", {})
+        limits["advance_visits"] = {
+            "enabled": bool(payload.get("enabled", False)),
+            "max_debt_days": max(1, min(3650, int(payload.get("max_debt_days", 15)))),
+            "max_debt_lessons": max(1, min(999, int(payload.get("max_debt_lessons", 7)))),
+        }
+        locked.club_settings = settings
+        await session.commit()
+        redis = getattr(request.app.state, "redis_client", None)
+        if redis:
+            await redis.delete(f"club_config:{locked.bot_token}")
+        audit_event("advance_visits_settings_changed", club_id=club_id, action="update", object_type="club_settings", object_id=str(club_id), **limits["advance_visits"])
+        return {"ok": True, "config": limits["advance_visits"]}
+    finally:
+        await release_claim(claim_key, claim_token)
+
+
 @router.get("/webapp/admin-surveys", response_class=HTMLResponse)
 async def admin_surveys_page(request: Request, club_id: int = Query(...), init_data: str | None = Query(None), session: AsyncSession = Depends(get_session)):
     club = await session.get(Club, club_id)

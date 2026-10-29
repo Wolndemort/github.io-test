@@ -4,6 +4,7 @@ from sqlalchemy import select
 from database.db import Student, Club, VisitLog  # Сверь пути импорта под свой проект
 
 logger = logging.getLogger(__name__)
+from services.advance_visits import advance_preview, record_advance_visit
 
 
 async def process_athlete_gate_pass(
@@ -96,18 +97,29 @@ async def process_athlete_gate_pass(
             is_inside_session = True
 
     # 5. ПРОВЕРКА СРОКА ДЕЙСТВИЯ И БАЛАНСА
+    advance = advance_preview(student, now_naive, club_settings, new_session=not is_inside_session)
+    is_advance_visit = False
     expire_naive = student.expire_date.replace(tzinfo=None) if student.expire_date else None
-    if expire_naive and expire_naive < now_naive:
+    if expire_naive and expire_naive < now_naive and not is_inside_session:
+        if not advance["enabled"]:
+            return {"success": False, "message": f"❌ Срок действия абонемента истек (До: {expire_naive.strftime('%d.%m.%Y')})"}
+        if not advance["allowed"]:
+            return {"success": False, "message": f"Р›РёРјРёС‚ Р°РІР°РЅСЃРѕРІС‹С… РїРѕСЃРµС‰РµРЅРёР№ РёСЃС‡РµСЂРїР°РЅ. Р”РѕР»Рі: {advance['debt_days']} РґРЅ. / {advance['debt_lessons']} Р·Р°РЅ."}
+        record_advance_visit(student, now_naive, club_settings)
+        is_advance_visit = True
+    if expire_naive and expire_naive < now_naive and not is_inside_session and not is_advance_visit:
         return {"success": False,
                 "message": f"❌ Срок действия абонемента истек (До: {expire_naive.strftime('%d.%m.%Y')})"}
 
     balance = student.balance_lessons or 0
     is_unlimited = (balance == 999)
-    if not is_unlimited and not is_inside_session and balance <= 0:
+    if not is_advance_visit and not is_unlimited and not is_inside_session and balance <= 0:
         return {"success": False, "message": "❌ На балансе нет доступных занятий."}
 
     # 6. УПРАВЛЕНИЕ СЕССИЕЙ (Без списания уроков!)
-    if is_inside_session:
+    if is_advance_visit:
+        message_text = f"РђРІРђРќРЎРћР’Р«Р™ РџР РћРҐРћР” РїРѕСЃР»Рµ РѕРєРѕРЅС‡Р°РЅРёСЏ Р°Р±РѕРЅРµРјРµРЅС‚Р°. РќР°РєРѕРїР»РµРЅРѕ: {advance['debt_days']} РґРЅ. / {advance['debt_lessons']} Р·Р°РЅ. Р”РѕР»Рі Р±СѓРґРµС‚ СЃРїРёСЃР°РЅ РїСЂРё РїРѕРєСѓРїРє РЅРѕРІРѕРіРѕ Р°Р±РѕРЅРµРјРµРЅС‚Р°."
+    elif is_inside_session:
         visit_moscow = student.last_visit.replace(tzinfo=None) + timedelta(hours=3)
         session_end = visit_moscow + timedelta(minutes=timeout_minutes)
         session_end_str = session_end.strftime("%H:%M")
@@ -198,6 +210,11 @@ async def process_athlete_gate_pass(
         "is_was_frozen": is_was_frozen,
         "returned_early_days": returned_early_days,
         "balance": balance,
-        "is_inside_session": is_inside_session
-        ,"already_marked": is_inside_session
+        "is_inside_session": is_inside_session,
+        "already_marked": is_inside_session,
+        "is_advance_visit": is_advance_visit,
+        "advance_debt_days": int(getattr(student, "advance_debt_days", 0) or 0),
+        "advance_debt_lessons": int(getattr(student, "advance_debt_lessons", 0) or 0),
+        "advance_max_debt_days": advance["max_debt_days"],
+        "advance_max_debt_lessons": advance["max_debt_lessons"],
     }

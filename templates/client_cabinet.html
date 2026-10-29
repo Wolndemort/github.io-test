@@ -150,6 +150,7 @@
             {% if '*' in staff_permissions or 'cash_sale' in staff_permissions %}<a class="btn soft mono-action" href="/webapp/admin-product-sale?club_id={{ club_id }}">🛍 Продажа товаров</a>{% endif %}
             {% if '*' in staff_permissions or 'broadcast' in staff_permissions %}<a class="btn soft mono-action" href="/webapp/admin-broadcast?club_id={{ club_id }}">📢 Персональная рассылка</a>{% endif %}
             {% if '*' in staff_permissions or 'broadcast' in staff_permissions %}<a class="btn soft mono-action" href="/webapp/admin-surveys?club_id={{ club_id }}">📝 Опросы клиентов</a>{% endif %}
+            {% if '*' in staff_permissions %}<a class="btn soft mono-action" href="/webapp/admin-advance-visits?club_id={{ club_id }}">⚠️ Аванс посещений</a>{% endif %}
             {% if '*' in staff_permissions or 'products_view' in staff_permissions %}<a class="btn soft mono-action" href="/webapp/admin-products?club_id={{ club_id }}">📦 Склад и товары</a>{% endif %}
             {% if '*' in staff_permissions or 'cash_view' in staff_permissions %}<a class="btn soft mono-action" href="/admin/cash?club_id={{ club_id }}">💰 Касса и журнал</a><a class="btn soft mono-action" href="/webapp/admin-cash-subscription?club_id={{ club_id }}">💵 Продажа наличного абонемента</a>{% endif %}
             {% if '*' in staff_permissions or 'athletes_view' in staff_permissions %}<a class="btn soft mono-action" href="/admin/students?club_id={{ club_id }}">👥 Атлеты</a>{% endif %}

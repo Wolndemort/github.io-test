@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from database.db import PaymentOrder, CartOrder, CartItem, ClubProduct, Student, add_abon, purchase_student_freeze
 from services.audit import audit_event
 from services.order_notifications import build_owner_receipt_text, format_order_items, resolve_user_label
+from services.advance_visits import advance_purchase_warning
 
 router = Router()
 
@@ -25,6 +26,7 @@ async def manual_order_confirm(callback: types.CallbackQuery, session: AsyncSess
 
     order_id = callback.data.removeprefix("manual_order_confirm_")
     bot = callback.bot
+    advance_warning = ""
 
     if order_id.startswith("CART_"):
         order = await session.get(CartOrder, order_id, with_for_update=True)
@@ -68,6 +70,8 @@ async def manual_order_confirm(callback: types.CallbackQuery, session: AsyncSess
             extra_lines=["Способ: <b>Реквизиты</b>"],
         )
         user_text = owner_text.replace("Ручная оплата подтверждена", "Оплата подтверждена")
+        if advance_warning:
+            user_text += "\n\n" + advance_warning
         if order.user_id:
             await bot.send_message(order.user_id, user_text, parse_mode="HTML")
         audit_event("manual_order_confirmed", club_id=club.id, actor_user_id=callback.from_user.id, actor_role="owner", action="confirm", object_type="cart_order", object_id=order.id, amount_kopecks=order.amount_kopecks, method="manual")
@@ -75,6 +79,10 @@ async def manual_order_confirm(callback: types.CallbackQuery, session: AsyncSess
         order = await session.get(PaymentOrder, order_id, with_for_update=True)
         if not order or order.status != "NEW":
             return await callback.answer("Заявка уже обработана или не найдена", show_alert=True)
+        advance_warning = ""
+        if not order.type.startswith("FREEZE"):
+            student_before = await session.get(Student, order.student_id)
+            advance_warning = advance_purchase_warning(student_before, club_settings, html=True) if student_before else ""
         if order.type.startswith("FREEZE"):
             await purchase_student_freeze(order.student_id, club.id, order.days_to_add, session)
         else:
@@ -105,6 +113,8 @@ async def manual_order_confirm(callback: types.CallbackQuery, session: AsyncSess
             await bot.send_message(order.user_id, user_text, parse_mode="HTML")
         audit_event("manual_order_confirmed", club_id=club.id, actor_user_id=callback.from_user.id, actor_role="owner", action="confirm", object_type="payment_order", object_id=order.id, amount_kopecks=order.amount_kopecks, method="manual")
 
+    if advance_warning and order.user_id:
+        await bot.send_message(order.user_id, advance_warning, parse_mode="HTML")
     try:
         await callback.message.edit_text(
             (callback.message.text or callback.message.caption or "") + "\n\n✅ <b>ОДОБРЕНО</b>",
