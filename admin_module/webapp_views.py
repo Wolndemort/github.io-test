@@ -381,7 +381,8 @@ async def admin_surveys_page(request: Request, club_id: int = Query(...), init_d
     for survey in surveys:
         total = await session.scalar(select(func.count(SurveyDelivery.id)).where(SurveyDelivery.survey_id == survey.id)) or 0
         completed = await session.scalar(select(func.count(SurveyDelivery.id)).where(SurveyDelivery.survey_id == survey.id, SurveyDelivery.status == "completed")) or 0
-        cards.append({"id": survey.id, "name": survey.name, "intro_text": survey.intro_text, "trigger_days": survey.trigger_days, "filters": survey.filters or {}, "is_active": survey.is_active, "total": int(total), "completed": int(completed)})
+        filters = survey.filters or {}
+        cards.append({"id": survey.id, "name": survey.name if survey.name not in {"undefined", "null", ""} else f"Опрос без названия #{survey.id}", "intro_text": survey.intro_text if survey.intro_text not in {"undefined", "null", ""} else "Текст приглашения не был сохранён", "trigger_days": survey.trigger_days, "filters": filters, "is_active": survey.is_active and not filters.get("archived"), "archived": bool(filters.get("archived")), "total": int(total), "completed": int(completed)})
     return templates.TemplateResponse("admin_surveys.html", {"request": request, "club": club, "club_id": club_id, "surveys": cards, "disciplines": _broadcast_disciplines(club), "tariffs": _survey_tariffs(club)})
 
 
@@ -421,6 +422,8 @@ async def admin_surveys_send_now(
     survey = await session.get(Survey, survey_id)
     if not survey or survey.club_id != club_id:
         raise HTTPException(404, "Опрос не найден")
+    if (survey.filters or {}).get("archived"):
+        raise HTTPException(409, "Архивный опрос нельзя отправить")
     operation_key = str(idempotency_key or "").strip()[:120]
     if len(operation_key) < 16:
         raise HTTPException(400, "Нужен idempotency_key")
@@ -483,6 +486,101 @@ async def admin_surveys_resend(
         result = await send_survey_to_students(session, survey, student_ids, f"resend:{operation_key}:{target}")
         audit_event("survey_resend", club_id=club_id, action="send", object_type="survey", object_id=str(survey_id), target=target, selected_count=len(student_ids), sent_count=result["sent"])
         return {"ok": True, **result}
+    finally:
+        await release_claim(claim_key, claim_token)
+
+
+@router.get("/webapp/admin-surveys/{survey_id}/settings")
+async def admin_surveys_settings(
+    survey_id: int, club_id: int, init_data: str = Query(default=""),
+    session: AsyncSession = Depends(get_session),
+):
+    club = await session.get(Club, club_id)
+    await verify_webapp_staff(club, init_data, session, "broadcast")
+    survey = await session.get(Survey, survey_id)
+    if not survey or survey.club_id != club_id:
+        raise HTTPException(404, "Опрос не найден")
+    questions = (await session.scalars(select(SurveyQuestion).where(SurveyQuestion.survey_id == survey.id).order_by(SurveyQuestion.position))).all()
+    return {"id": survey.id, "name": survey.name, "intro_text": survey.intro_text, "trigger_days": survey.trigger_days, "filters": survey.filters or {}, "questions": [{"text": q.text, "kind": q.kind, "options": q.options or [], "required": q.required} for q in questions]}
+
+
+@router.post("/webapp/admin-surveys/{survey_id}/edit")
+async def admin_surveys_edit(
+    survey_id: int, club_id: int = Form(...), init_data: str = Form(...),
+    name: str = Form(...), intro_text: str = Form(...), trigger_days: int | None = Form(default=None),
+    scheduler_enabled: str = Form(default="1"), disciplines: str = Form(default="[]"),
+    tariffs: str = Form(default="[]"), require_no_renewal: str = Form(default="1"),
+    questions: str = Form(default="[]"), idempotency_key: str = Form(...),
+    session: AsyncSession = Depends(get_session),
+):
+    club = await session.get(Club, club_id)
+    tg_user = await verify_webapp_staff(club, init_data, session, "broadcast")
+    source = await session.get(Survey, survey_id)
+    if not source or source.club_id != club_id:
+        raise HTTPException(404, "Опрос не найден")
+    operation_key = str(idempotency_key or "").strip()[:120]
+    if len(operation_key) < 16:
+        raise HTTPException(400, "Нужен idempotency_key")
+    claim_key = f"survey:edit:{club_id}:{int(tg_user['id'])}:{survey_id}:{operation_key}"
+    claim_token = await claim_once(claim_key, ttl=15 * 60)
+    if not claim_token:
+        raise HTTPException(409, "Эта настройка уже сохраняется или сохранена")
+    try:
+        if scheduler_enabled == "1" and (trigger_days is None or not 1 <= int(trigger_days) <= 3650):
+            raise HTTPException(400, "Порог отсутствия должен быть от 1 до 3650 дней")
+        try:
+            discipline_values = [str(x) for x in json.loads(disciplines) if str(x)]
+            tariff_values = [str(x) for x in json.loads(tariffs) if str(x)]
+            question_values = json.loads(questions)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            raise HTTPException(400, "Некорректные настройки опроса")
+        if not isinstance(question_values, list) or not (1 <= len(question_values) <= 15):
+            raise HTTPException(400, "Нужно сохранить от 1 до 15 вопросов")
+        if not name.strip() or not intro_text.strip():
+            raise HTTPException(400, "Название и текст приглашения обязательны")
+        allowed_tariffs = {item["key"] for item in _survey_tariffs(club)}
+        filters = {"absence_days": int(trigger_days) if scheduler_enabled == "1" else None, "scheduler_enabled": scheduler_enabled == "1", "disciplines": discipline_values, "tariffs": [item for item in tariff_values if item in allowed_tariffs], "require_no_renewal": require_no_renewal == "1", "version_of": source.id}
+        replacement = Survey(club_id=club_id, name=name.strip()[:160], intro_text=intro_text.strip()[:2000], trigger_days=int(trigger_days) if scheduler_enabled == "1" else None, filters=filters, is_active=True)
+        session.add(replacement)
+        await session.flush()
+        for position, raw in enumerate(question_values):
+            if not isinstance(raw, dict) or not str(raw.get("text", "")).strip():
+                raise HTTPException(400, "У каждого вопроса должен быть текст")
+            kind = str(raw.get("kind", "single"))
+            options = raw.get("options", []) if kind != "text" else []
+            if kind == "scale" and not options:
+                options = ["1", "2", "3", "4", "5"]
+            if kind not in {"single", "multi", "scale", "text"} or (kind != "text" and not isinstance(options, list)) or (kind != "text" and not 2 <= len(options) <= 20):
+                raise HTTPException(400, "Некорректный вопрос или варианты ответа")
+            session.add(SurveyQuestion(survey_id=replacement.id, position=position, text=str(raw["text"]).strip()[:1000], kind=kind, options=[str(x)[:120] for x in options], required=bool(raw.get("required", True))))
+        source.is_active = False
+        source.filters = {**(source.filters or {}), "archived": True, "replaced_by": replacement.id}
+        await session.commit()
+        return {"ok": True, "id": replacement.id}
+    finally:
+        await release_claim(claim_key, claim_token)
+
+
+@router.post("/webapp/admin-surveys/{survey_id}/archive")
+async def admin_surveys_archive(
+    survey_id: int, club_id: int = Form(...), init_data: str = Form(...),
+    idempotency_key: str = Form(...), session: AsyncSession = Depends(get_session),
+):
+    club = await session.get(Club, club_id)
+    tg_user = await verify_webapp_staff(club, init_data, session, "broadcast")
+    survey = await session.get(Survey, survey_id)
+    if not survey or survey.club_id != club_id:
+        raise HTTPException(404, "Опрос не найден")
+    operation_key = str(idempotency_key or "").strip()[:120]
+    claim_key = f"survey:archive:{club_id}:{int(tg_user['id'])}:{survey_id}:{operation_key}"
+    claim_token = await claim_once(claim_key, ttl=15 * 60)
+    if not claim_token:
+        raise HTTPException(409, "Опрос уже удаляется или удалён")
+    try:
+        survey.is_active = False
+        survey.filters = {**(survey.filters or {}), "archived": True}
+        await session.commit()
+        return {"ok": True, "archived": True}
     finally:
         await release_claim(claim_key, claim_token)
 
