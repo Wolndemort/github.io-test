@@ -166,6 +166,9 @@
             <a class="btn soft mono-action" href="/webapp/client-cabinet/create-student?club_id={{ club_id }}">Создать атлета</a>
             <a class="btn soft mono-action" href="/webapp/client-cabinet/auth?club_id={{ club_id }}">Привязать профиль по номеру</a>
             {% endif %}
+            {% if is_staff_mode %}
+            <a class="btn soft mono-action" href="/webapp/client-cabinet/create-student?club_id={{ club_id }}">Создать своего атлета</a>
+            {% endif %}
             {% if not is_staff_mode %}
             <a class="btn soft mono-action" href="/webapp/client-cabinet/buy-subscription?club_id={{ club_id }}">💳 Купить абонемент ребёнку</a>
             <a class="btn soft mono-action" href="/webapp/client-cabinet/history?club_id={{ club_id }}">История оплат</a>
