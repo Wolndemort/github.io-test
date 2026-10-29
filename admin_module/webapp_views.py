@@ -451,16 +451,56 @@ async def admin_surveys_send_now(
         await release_claim(claim_key, claim_token)
 
 
+@router.post("/webapp/admin-surveys/{survey_id}/resend")
+async def admin_surveys_resend(
+    survey_id: int, club_id: int = Form(...), init_data: str = Form(...),
+    target: str = Form(default="not_completed"), idempotency_key: str = Form(...),
+    session: AsyncSession = Depends(get_session),
+):
+    club = await session.get(Club, club_id)
+    tg_user = await verify_webapp_staff(club, init_data, session, "broadcast")
+    survey = await session.get(Survey, survey_id)
+    if not survey or survey.club_id != club_id:
+        raise HTTPException(404, "Опрос не найден")
+    if target not in {"failed", "not_completed"}:
+        raise HTTPException(400, "Неизвестная категория повторной отправки")
+    operation_key = str(idempotency_key or "").strip()[:120]
+    if len(operation_key) < 16:
+        raise HTTPException(400, "Нужен idempotency_key")
+    claim_key = f"survey:resend:{club_id}:{int(tg_user['id'])}:{survey_id}:{target}:{operation_key}"
+    claim_token = await claim_once(claim_key, ttl=15 * 60)
+    if not claim_token:
+        raise HTTPException(409, "Эта повторная отправка уже выполняется или выполнена")
+    try:
+        statuses = ["failed"] if target == "failed" else ["sent", "started"]
+        deliveries = (await session.scalars(select(SurveyDelivery).where(
+            SurveyDelivery.club_id == club_id, SurveyDelivery.survey_id == survey_id,
+            SurveyDelivery.status.in_(statuses),
+        ))).all()
+        student_ids = list(dict.fromkeys(delivery.student_id for delivery in deliveries))
+        if not student_ids:
+            return {"ok": True, "selected": 0, "sent": 0, "failed": 0, "skipped": 0}
+        result = await send_survey_to_students(session, survey, student_ids, f"resend:{operation_key}:{target}")
+        audit_event("survey_resend", club_id=club_id, action="send", object_type="survey", object_id=str(survey_id), target=target, selected_count=len(student_ids), sent_count=result["sent"])
+        return {"ok": True, **result}
+    finally:
+        await release_claim(claim_key, claim_token)
+
+
 @router.post("/webapp/admin-surveys/create")
 async def admin_surveys_create(
     club_id: int = Form(...), init_data: str = Form(...), name: str = Form(...), intro_text: str = Form(...),
-    trigger_days: int = Form(...), disciplines: str = Form(default="[]"), tariffs: str = Form(default="[]"),
+    trigger_days: int | None = Form(default=None), scheduler_enabled: str = Form(default="1"),
+    disciplines: str = Form(default="[]"), tariffs: str = Form(default="[]"),
     require_no_renewal: str = Form(default="1"), questions: str = Form(...), session: AsyncSession = Depends(get_session),
 ):
     club = await session.get(Club, club_id)
     await verify_webapp_staff(club, init_data, session, "broadcast")
-    if not (1 <= int(trigger_days) <= 3650):
-        raise HTTPException(400, "Порог отсутствия должен быть от 1 до 3650 дней")
+    if scheduler_enabled == "1":
+        if trigger_days is None or not (1 <= int(trigger_days) <= 3650):
+            raise HTTPException(400, "Порог отсутствия должен быть от 1 до 3650 дней")
+    else:
+        trigger_days = None
     try:
         discipline_values = [str(x) for x in json.loads(disciplines) if str(x)]
         tariff_values = [str(x) for x in json.loads(tariffs) if str(x)]
@@ -471,7 +511,7 @@ async def admin_surveys_create(
         raise HTTPException(400, "Нужно добавить от 1 до 15 вопросов")
     allowed_tariffs = {item["key"] for item in _survey_tariffs(club)}
     tariff_values = [item for item in tariff_values if item in allowed_tariffs]
-    survey = Survey(club_id=club_id, name=name.strip()[:160], intro_text=intro_text.strip()[:2000], trigger_days=int(trigger_days), filters={"absence_days": int(trigger_days), "disciplines": discipline_values, "tariffs": tariff_values, "require_no_renewal": require_no_renewal == "1"}, is_active=True)
+    survey = Survey(club_id=club_id, name=name.strip()[:160], intro_text=intro_text.strip()[:2000], trigger_days=int(trigger_days) if trigger_days is not None else None, filters={"absence_days": int(trigger_days) if trigger_days is not None else None, "scheduler_enabled": scheduler_enabled == "1", "disciplines": discipline_values, "tariffs": tariff_values, "require_no_renewal": require_no_renewal == "1"}, is_active=True)
     if not survey.name or not survey.intro_text:
         raise HTTPException(400, "Название и текст приглашения обязательны")
     session.add(survey)

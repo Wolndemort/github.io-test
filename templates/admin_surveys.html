@@ -21,7 +21,7 @@ button{background:#fff;color:#111;font-weight:700}.grid{display:grid;grid-templa
 <section class="card">
 <h2>Создать автоматический опрос</h2>
 <input id="name" placeholder="Название опроса"><textarea id="intro" placeholder="Текст приглашения"></textarea>
-<div class="grid"><label>Отправить после отсутствия (дни)<input id="days" type="number" min="1" max="3650" value="30"></label><label><input id="renewal" type="checkbox" checked> Только без продления</label></div>
+<div class="grid"><label><input id="schedulerEnabled" type="checkbox" checked> Включить планировщик</label><label>Отправить после отсутствия (дни)<input id="days" type="number" min="1" max="3650" value="30"></label><label><input id="renewal" type="checkbox" checked> Только без продления</label></div>
 <p class="muted">Если дисциплины или тарифы не выбраны, подходят все. Фильтры пересчитываются каждый день.</p>
 <div class="grid"><div><b>Дисциплины</b>{% for item in disciplines %}<label class="choice"><input type="checkbox" class="discipline" value="{{item.code}}">{{item.name}}{% if not item.active %} (выключена){% endif %}</label>{% endfor %}</div>
 <div><b>Купленный тариф</b>{% for item in tariffs %}<label class="choice"><input type="checkbox" class="tariff" value="{{item.key}}">{{item.name}}</label>{% endfor %}</div></div>
@@ -30,7 +30,7 @@ button{background:#fff;color:#111;font-weight:700}.grid{display:grid;grid-templa
 <div id="questionBuilder"></div><button id="addQuestion" type="button">＋ Добавить вопрос</button>
 <button id="create" type="button">Создать опрос</button><div id="status" class="muted"></div>
 </section>
-<section class="card"><h2>Созданные опросы</h2>{% for item in surveys %}<div class="survey"><b>{{item.name}}</b> · порог {{item.trigger_days}} дн. · отправлено {{item.total}}, завершено {{item.completed}}<br><span class="muted">{{item.intro_text}}</span><div class="grid" style="margin-top:8px"><button type="button" onclick="sendSavedSurvey({{item.id}},'selected')">Отправить выбранным</button><button type="button" onclick="sendSavedSurvey({{item.id}},'filters')">Отправить по фильтрам</button><button type="button" onclick="sendSavedSurvey({{item.id}},'all')">Отправить всем</button><button type="button" onclick="toggleSavedSurvey({{item.id}},this)">{{'Выключить' if item.is_active else 'Включить'}}</button></div></div>{% else %}<p class="muted">Опросов пока нет</p>{% endfor %}</section>
+<section class="card"><h2>Созданные опросы</h2>{% for item in surveys %}<div class="survey"><b>{{item.name}}</b> · {% if item.trigger_days %}планировщик: {{item.trigger_days}} дн.{% else %}разовый, без планировщика{% endif %} · отправлено {{item.total}}, завершено {{item.completed}}<br><span class="muted">{{item.intro_text}}</span><div class="grid" style="margin-top:8px"><button type="button" onclick="sendSavedSurvey({{item.id}},'selected')">Отправить выбранным</button><button type="button" onclick="sendSavedSurvey({{item.id}},'filters')">Отправить по фильтрам</button><button type="button" onclick="sendSavedSurvey({{item.id}},'all')">Отправить всем</button><button type="button" onclick="resendSurvey({{item.id}},'not_completed')">Повторить непройденным</button><button type="button" onclick="resendSurvey({{item.id}},'failed')">Повторить недоставленным</button><button type="button" onclick="toggleSavedSurvey({{item.id}},this)">{{'Выключить' if item.is_active else 'Включить'}}</button></div></div>{% else %}<p class="muted">Опросов пока нет</p>{% endfor %}</section>
 <section class="card"><h2>Отчёт по отправкам</h2><div class="grid"><select id="reportSurvey"><option value="">Все опросы</option>{% for item in surveys %}<option value="{{item.id}}">{{item.name}}</option>{% endfor %}</select><select id="reportFilter"><option value="all">Все статусы</option><option value="completed">Пройден</option><option value="started">Начат</option><option value="sent">Не пройден</option><option value="failed">Ошибка отправки</option></select></div><button id="refreshReport">Обновить отчёт</button><div id="reportStatus" class="muted"></div><div id="reportRows"></div></section>
 <div id="detailModal" style="display:none;position:fixed;inset:0;background:#000b;padding:18px;overflow:auto"><div class="card" style="max-width:700px;margin:30px auto"><button id="closeDetail">Закрыть</button><div id="detailBody"></div></div></div>
 </div>
@@ -52,6 +52,7 @@ closeDetail.onclick=()=>detailModal.style.display='none';refreshReport.onclick=l
   const surveyName = document.getElementById('name');
   const introText = document.getElementById('intro');
   const triggerDays = document.getElementById('days');
+  const schedulerEnabled = document.getElementById('schedulerEnabled');
   const requireNoRenewal = document.getElementById('renewal');
   const createButton = document.getElementById('create');
   const createStatus = document.getElementById('status');
@@ -82,7 +83,8 @@ closeDetail.onclick=()=>detailModal.style.display='none';refreshReport.onclick=l
     form.append('init_data', initData);
     form.append('name', surveyName.value.trim());
     form.append('intro_text', introText.value.trim());
-    form.append('trigger_days', triggerDays.value);
+    form.append('trigger_days', schedulerEnabled.checked ? triggerDays.value : '');
+    form.append('scheduler_enabled', schedulerEnabled.checked ? '1' : '0');
     form.append('require_no_renewal', requireNoRenewal.checked ? '1' : '0');
     form.append('disciplines', JSON.stringify([...document.querySelectorAll('.discipline:checked')].map(x => x.value)));
     form.append('tariffs', JSON.stringify([...document.querySelectorAll('.tariff:checked')].map(x => x.value)));
@@ -130,6 +132,18 @@ closeDetail.onclick=()=>detailModal.style.display='none';refreshReport.onclick=l
       const response = await fetch(`/webapp/admin-surveys/${surveyId}/send`, {method:'POST', body:form});
       const payload = await response.json().catch(() => ({}));
       alert(response.ok ? `Отправлено: ${payload.sent}, ошибок: ${payload.failed || 0}` : (payload.detail || 'Ошибка отправки'));
+      if (response.ok) location.reload();
+    } catch (error) { alert(`Ошибка сети: ${error.message}`); }
+  };
+  window.resendSurvey = async (surveyId, target) => {
+    const label = target === 'failed' ? 'недоставленным' : 'непройденным';
+    if (!confirm(`Повторить опрос ${label}?`)) return;
+    const form = new FormData(); form.append('club_id', clubId); form.append('init_data', initData);
+    form.append('target', target); form.append('idempotency_key', `${surveyId}:resend:${target}:${crypto.randomUUID()}`);
+    try {
+      const response = await fetch(`/webapp/admin-surveys/${surveyId}/resend`, {method:'POST', body:form});
+      const payload = await response.json().catch(() => ({}));
+      alert(response.ok ? `Повторно отправлено: ${payload.sent}, ошибок: ${payload.failed || 0}` : (payload.detail || 'Ошибка повторной отправки'));
       if (response.ok) location.reload();
     } catch (error) { alert(`Ошибка сети: ${error.message}`); }
   };
