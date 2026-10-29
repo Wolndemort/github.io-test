@@ -63,6 +63,18 @@ async def start_handler(
     await state.clear()
     user_id = message.from_user.id
 
+    # Middleware may pass an ORM Club loaded in the same session. The handler
+    # commits several times below; keeping that live ORM object afterwards can
+    # trigger an implicit lazy load and MissingGreenlet. Snapshot only the
+    # fields used by /start before any rollback/commit.
+    club = SimpleNamespace(
+        id=int(club.id),
+        name=str(club.name),
+        owner_id=club.owner_id,
+        subscription_expire_at=club.subscription_expire_at,
+        club_settings=dict(club_settings or {}),
+    )
+
     # Сбрасываем только незавершённую транзакцию. Не вызываем expire_all():
     # в async SQLAlchemy это может истечь объект Club из middleware, а
     # последующее обращение к club.id/name вызовет MissingGreenlet.
