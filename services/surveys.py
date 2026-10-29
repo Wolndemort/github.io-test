@@ -163,7 +163,11 @@ async def send_survey_to_students(
     )).all()
     sent = failed = skipped = 0
     for student in students:
-        for recipient_id in await get_student_parent_ids(student.id, session):
+        recipient_ids = await get_student_parent_ids(student.id, session)
+        if not recipient_ids:
+            skipped += 1
+            continue
+        for recipient_id in recipient_ids:
             trigger_key = f"{trigger_prefix}:{student.id}:{recipient_id}"
             async with session.begin_nested():
                 delivery = SurveyDelivery(

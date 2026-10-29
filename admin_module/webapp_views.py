@@ -448,6 +448,8 @@ async def admin_surveys_send_now(
         if not selected_ids:
             raise HTTPException(400, "Не выбраны получатели")
         result = await send_survey_to_students(session, survey, selected_ids, f"manual:{operation_key}")
+        if not result["sent"] and not result["failed"] and result.get("skipped"):
+            raise HTTPException(400, "У выбранных атлетов нет привязанных Telegram-получателей")
         audit_event("survey_manual_sent", club_id=club_id, action="send", object_type="survey", object_id=str(survey.id), selected_count=len(selected_ids), sent_count=result["sent"])
         return {"ok": True, **result}
     finally:
