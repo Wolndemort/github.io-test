@@ -124,7 +124,9 @@ closeDetail.onclick=()=>detailModal.style.display='none';refreshReport.onclick=l
     document.querySelectorAll('.recipient').forEach(input => { input.checked = saved.has(input.value); });
   }
   window.sendSavedSurvey = async (surveyId, mode) => {
-    const selected = [...document.querySelectorAll('.recipient:checked')].map(input => Number(input.value));
+    const selectedIds = new Set(JSON.parse(localStorage.getItem(recipientSelectionKey) || '[]').map(Number));
+    document.querySelectorAll('.recipient').forEach(input => { if (input.checked) selectedIds.add(Number(input.value)); else selectedIds.delete(Number(input.value)); });
+    const selected = [...selectedIds];
     if (mode === 'selected' && !selected.length) return alert('Раскройте список клиентов и выберите хотя бы одного.');
     const label = mode === 'all' ? 'всем клиентам' : mode === 'filters' ? 'клиентам по фильтрам' : 'выбранным клиентам';
     if (!confirm(`Отправить сохранённый опрос ${label}?`)) return;
@@ -169,7 +171,7 @@ closeDetail.onclick=()=>detailModal.style.display='none';refreshReport.onclick=l
     const form = new FormData();
     form.append('club_id', clubId); form.append('init_data', initData); form.append('name', name);
     form.append('intro_text', intro); form.append('scheduler_enabled', scheduler ? '1' : '0');
-    form.append('trigger_days', scheduler ? days : '');
+    if (scheduler) form.append('trigger_days', days);
     form.append('disciplines', JSON.stringify(settings.filters?.disciplines || []));
     form.append('tariffs', JSON.stringify(settings.filters?.tariffs || []));
     form.append('require_no_renewal', settings.filters?.require_no_renewal === false ? '0' : '1');
@@ -214,12 +216,14 @@ closeDetail.onclick=()=>detailModal.style.display='none';refreshReport.onclick=l
   recipientSearch.addEventListener('input', () => loadRecipients().catch(error => { recipientList.textContent = error.message; }));
   recipientList.addEventListener('change', event => {
     if (!event.target.classList.contains('recipient')) return;
-    const selected = [...document.querySelectorAll('.recipient:checked')].map(input => input.value);
-    localStorage.setItem(recipientSelectionKey, JSON.stringify(selected));
+    const selected = new Set(JSON.parse(localStorage.getItem(recipientSelectionKey) || '[]').map(String));
+    if (event.target.checked) selected.add(event.target.value); else selected.delete(event.target.value);
+    localStorage.setItem(recipientSelectionKey, JSON.stringify([...selected]));
   });
   document.getElementById('selectAllRecipients').onclick = () => {
-    const selected = [...document.querySelectorAll('.recipient')].map(input => { input.checked = true; return input.value; });
-    localStorage.setItem(recipientSelectionKey, JSON.stringify(selected));
+    const selected = new Set(JSON.parse(localStorage.getItem(recipientSelectionKey) || '[]').map(String));
+    document.querySelectorAll('.recipient').forEach(input => { input.checked = true; selected.add(input.value); });
+    localStorage.setItem(recipientSelectionKey, JSON.stringify([...selected]));
   };
   loadRecipients().catch(error => { recipientList.textContent = error.message; });
 })();
