@@ -34,7 +34,7 @@ button{background:#fff;color:#111;font-weight:700}.grid{display:grid;grid-templa
 <section class="card"><button id="toggleSavedSurveys" type="button" aria-expanded="false">Активные опросы ({{ surveys|selectattr('archived', 'equalto', false)|list|length }}) <span>▾</span></button><div id="savedSurveysList" hidden style="margin-top:10px">{% for item in surveys if not item.archived %}<div class="survey"><b>{{item.name}}</b> · {% if item.trigger_days %}планировщик: {{item.trigger_days}} дн.{% else %}разовый, без планировщика{% endif %} · отправлено {{item.total}}, завершено {{item.completed}}<br><span class="muted">{{item.intro_text}}</span><div class="grid" style="margin-top:8px"><button type="button" onclick="configureSurvey({{item.id}})">Настроить</button><button type="button" onclick="sendSavedSurvey({{item.id}},'selected')">Отправить выбранным</button><button type="button" onclick="sendSavedSurvey({{item.id}},'filters')">Отправить по фильтрам</button><button type="button" onclick="sendSavedSurvey({{item.id}},'all')">Отправить всем</button><button type="button" onclick="resendSurvey({{item.id}},'not_completed')">Повторить непройденным</button><button type="button" onclick="resendSurvey({{item.id}},'failed')">Повторить недоставленным</button><button type="button" onclick="toggleSavedSurvey({{item.id}},this)">{{'Выключить' if item.is_active else 'Включить'}}</button><button type="button" class="danger-action" onclick="archiveSurvey({{item.id}})">Удалить</button></div></div>{% else %}<p class="muted">Активных опросов нет</p>{% endfor %}</div></section><section class="card"><button id="toggleArchivedSurveys" type="button" aria-expanded="false">Архивные опросы ({{ surveys|selectattr('archived')|list|length }}) <span>▾</span></button><div id="archivedSurveysList" hidden style="margin-top:10px">{% for item in surveys if item.archived %}<div class="survey"><b>{{item.name}}</b> · архивный · отправлено {{item.total}}, завершено {{item.completed}}<br><span class="muted">{{item.intro_text}}</span></div>{% else %}<p class="muted">Архивных опросов нет</p>{% endfor %}</div></section>
 <section class="card"><h2>Отчёт по отправкам</h2><div class="grid"><select id="reportSurvey"><option value="">Все опросы</option>{% for item in surveys %}<option value="{{item.id}}">{{item.name}}</option>{% endfor %}</select><select id="reportFilter"><option value="all">Все статусы</option><option value="completed">Пройден</option><option value="started">Начат</option><option value="sent">Не пройден</option><option value="failed">Ошибка отправки</option></select></div><button id="refreshReport">Обновить отчёт</button><div id="reportStatus" class="muted"></div><div id="reportRows"></div></section>
 <div id="detailModal" style="display:none;position:fixed;inset:0;background:#000b;padding:18px;overflow:auto"><div class="card" style="max-width:700px;margin:30px auto"><button id="closeDetail">Закрыть</button><div id="detailBody"></div></div></div>
-<div id="resendModal" style="display:none;position:fixed;inset:0;background:#000b;padding:18px;overflow:auto;z-index:10"><div class="card" style="max-width:700px;margin:30px auto"><h2>Выбрать атлетов для повторной отправки</h2><p class="muted">Можно выбрать любых атлетов. Поиск работает по имени и номеру телефона.</p><input id="resendSearch" placeholder="Поиск по имени или номеру"><div id="resendList" class="choice" style="max-height:50vh;overflow:auto"></div><div class="grid"><button id="cancelResend" type="button">Отмена</button><button id="confirmResend" type="button">Отправить выбранным</button></div><div id="resendStatus" class="muted"></div></div></div>
+<div id="resendModal" style="display:none;position:fixed;inset:0;background:#000b;padding:18px;overflow:auto;z-index:10"><div class="card" style="max-width:700px;margin:30px auto"><h2 id="resendModalTitle">Выбрать атлетов</h2><p class="muted">Можно выбрать любых атлетов. Поиск работает по имени и номеру телефона.</p><input id="resendSearch" placeholder="Поиск по имени или номеру"><div id="resendList" class="choice" style="max-height:50vh;overflow:auto"></div><div class="grid"><button id="cancelResend" type="button">Отмена</button><button id="confirmResend" type="button">Отправить выбранным</button></div><div id="resendStatus" class="muted"></div></div></div>
 </div>
 <script>
 const init=new URLSearchParams(location.search).get('init_data')||'',cid={{club_id}},builder=document.getElementById('questionBuilder');
@@ -159,6 +159,16 @@ closeDetail.onclick=()=>detailModal.style.display='none';refreshReport.onclick=l
     document.querySelectorAll('.recipient').forEach(input => { input.checked = saved.has(input.value); });
   }
   window.sendSavedSurvey = async (surveyId, mode) => {
+    if (mode === 'selected') {
+      resendContext = {surveyId, target: 'selected', action: 'send'};
+      resendSelectedIds = new Set();
+      document.getElementById('resendModalTitle').textContent = 'Выбрать атлетов для отправки';
+      document.getElementById('resendSearch').value = '';
+      document.getElementById('resendStatus').textContent = '';
+      document.getElementById('resendModal').style.display = 'block';
+      await loadResendRecipients();
+      return;
+    }
     const selectedIds = new Set(JSON.parse(storageGet(recipientSelectionKey) || '[]').map(Number));
     document.querySelectorAll('.recipient').forEach(input => { if (input.checked) selectedIds.add(Number(input.value)); else selectedIds.delete(Number(input.value)); });
     const selected = [...selectedIds];
@@ -185,8 +195,9 @@ closeDetail.onclick=()=>detailModal.style.display='none';refreshReport.onclick=l
     list.innerHTML = (payload.students || []).map(student => `<label class="choice"><input type="checkbox" class="resend-recipient" value="${student.id}" ${resendSelectedIds.has(Number(student.id)) ? 'checked' : ''}><span>${html(student.name)} · ${html(student.discipline || 'без дисциплины')} · получателей: ${student.recipient_count}</span></label>`).join('') || '<span class="muted">Атлеты не найдены</span>';
   }
   window.resendSurvey = async (surveyId, target) => {
-    resendContext = {surveyId, target};
+    resendContext = {surveyId, target, action: 'send'};
     resendSelectedIds = new Set();
+    document.getElementById('resendModalTitle').textContent = 'Выбрать атлетов для повторной отправки';
     document.getElementById('resendSearch').value = '';
     document.getElementById('resendStatus').textContent = '';
     document.getElementById('resendModal').style.display = 'block';
@@ -257,7 +268,7 @@ closeDetail.onclick=()=>detailModal.style.display='none';refreshReport.onclick=l
     const form = new FormData();
     form.append('club_id', clubId); form.append('init_data', initData); form.append('mode', 'selected');
     form.append('student_ids', JSON.stringify([...resendSelectedIds]));
-    form.append('idempotency_key', `${resendContext.surveyId}:resend:${resendContext.target}:${operationKey()}`);
+    form.append('idempotency_key', `${resendContext.surveyId}:${resendContext.action === 'send' && resendContext.target === 'selected' ? 'selected' : `resend:${resendContext.target}`}:${operationKey()}`);
     try {
       const response = await fetch(`/webapp/admin-surveys/${resendContext.surveyId}/send`, {method:'POST', body:form});
       const payload = await response.json().catch(() => ({}));
