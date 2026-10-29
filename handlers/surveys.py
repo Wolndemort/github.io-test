@@ -1,17 +1,46 @@
 from __future__ import annotations
 
 from datetime import datetime
+from html import escape
 
 from aiogram import F, Router, types
 from aiogram.fsm.context import FSMContext
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from database.db import SurveyAnswer
+from database.db import Club, Student, Survey, SurveyAnswer
 from handlers.states import SurveyStates
+from services.bot_registry import bots_dict
+from services.delivery import telegram_call
 from services.surveys import load_delivery, _question_keyboard
 
 router = Router()
+
+
+async def _notify_admin_completed(delivery, survey, session: AsyncSession) -> None:
+    """Notify the club owner after a survey delivery is completed."""
+    survey = survey or await session.get(Survey, delivery.survey_id)
+    club = await session.get(Club, delivery.club_id)
+    if not club or not club.owner_id or not club.bot_token:
+        return
+    bot = bots_dict.get(club.bot_token)
+    if not bot:
+        return
+    student = await session.get(Student, delivery.student_id)
+    answers_count = await session.scalar(
+        select(func.count(SurveyAnswer.id)).where(SurveyAnswer.delivery_id == delivery.id)
+    )
+    text = (
+        "✅ <b>Опрос успешно пройден</b>\n"
+        f"Атлет: <b>{escape(student.name if student else str(delivery.student_id))}</b>\n"
+        f"Опрос: <b>{escape(survey.name if survey else str(delivery.survey_id))}</b>\n"
+        f"Ответов: {int(answers_count or 0)}"
+    )
+    try:
+        await telegram_call(lambda: bot.send_message(int(club.owner_id), text, parse_mode="HTML"))
+    except Exception:
+        # Notification failure must not roll back a completed survey.
+        return
 
 
 async def _send_question(callback: types.CallbackQuery, delivery, questions, session: AsyncSession, state: FSMContext | None = None):
@@ -21,6 +50,7 @@ async def _send_question(callback: types.CallbackQuery, delivery, questions, ses
         delivery.status = "completed"
         delivery.completed_at = datetime.utcnow()
         await session.commit()
+        await _notify_admin_completed(delivery, None, session)
         await callback.message.answer("Спасибо за обратную связь! Мы обязательно её изучим 🙏")
         return
     if delivery.status == "sent":
@@ -93,6 +123,7 @@ async def survey_text_answer(message: types.Message, session: AsyncSession, stat
         delivery.status = "completed"
         delivery.completed_at = datetime.utcnow()
         await session.commit()
+        await _notify_admin_completed(delivery, _survey, session)
         return await message.answer("Спасибо за обратную связь! Мы обязательно её изучим 🙏")
     if next_question.kind == "text":
         await state.update_data(delivery_id=delivery.id, question_id=next_question.id)
