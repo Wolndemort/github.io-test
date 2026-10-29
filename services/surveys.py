@@ -144,6 +144,61 @@ async def send_scheduled_surveys() -> None:
                         await session.commit()
 
 
+async def send_survey_to_students(
+    session,
+    survey: Survey,
+    student_ids: list[int],
+    trigger_prefix: str,
+) -> dict[str, int]:
+    """Send a saved survey manually; a new trigger prefix makes repeats safe."""
+    club = await session.get(Club, survey.club_id)
+    bot = bots_dict.get(club.bot_token) if club and club.bot_token else None
+    questions = (await session.scalars(
+        select(SurveyQuestion).where(SurveyQuestion.survey_id == survey.id).order_by(SurveyQuestion.position)
+    )).all()
+    if not club or not bot or not questions:
+        return {"selected": len(student_ids), "sent": 0, "failed": len(student_ids)}
+    students = (await session.scalars(
+        select(Student).where(Student.club_id == club.id, Student.id.in_(set(student_ids)))
+    )).all()
+    sent = failed = skipped = 0
+    for student in students:
+        for recipient_id in await get_student_parent_ids(student.id, session):
+            trigger_key = f"{trigger_prefix}:{student.id}:{recipient_id}"
+            async with session.begin_nested():
+                delivery = SurveyDelivery(
+                    survey_id=survey.id, club_id=club.id, student_id=student.id,
+                    recipient_id=int(recipient_id), trigger_key=trigger_key,
+                )
+                session.add(delivery)
+                try:
+                    await session.flush()
+                except IntegrityError:
+                    delivery = None
+            if not delivery:
+                skipped += 1
+                continue
+            builder = InlineKeyboardBuilder()
+            builder.button(text="📝 Пройти опрос", callback_data=f"survey_start:{delivery.id}")
+            text = (
+                f"{survey.intro_text}\n\n"
+                f"Атлет: <b>{escape(student.name)}</b>\n"
+                "Ваши ответы помогут сделать тренировки удобнее."
+            )
+            try:
+                await telegram_pace(f"club:{club.id}")
+                await telegram_call(lambda: bot.send_message(int(recipient_id), text, parse_mode="HTML", reply_markup=builder.as_markup()))
+                delivery.status = "sent"
+                delivery.sent_at = datetime.utcnow()
+                await session.commit()
+                sent += 1
+            except Exception:
+                delivery.status = "failed"
+                await session.commit()
+                failed += 1
+    return {"selected": len(student_ids), "sent": sent, "failed": failed, "skipped": skipped}
+
+
 async def load_delivery(session, delivery_id: int, recipient_id: int):
     delivery = await session.get(SurveyDelivery, delivery_id)
     if not delivery or int(delivery.recipient_id) != int(recipient_id) or delivery.status == "completed":

@@ -38,8 +38,9 @@ from admin_module.webapp_verify import verify_telegram_data
 from database.db import Club, ClubProduct, ClubStaff, Discount, DiscountAssignment, MotivationAccrual, PaymentOrder, Student, User, VisitLog, Survey, SurveyQuestion, SurveyDelivery, SurveyAnswer, get_session, get_student_parent_ids
 from database.db import CartItem, CartOrder
 from services.audit import audit_event
-from services.broadcast import resolve_broadcast_recipients
+from services.broadcast import broadcast_recipients_for_student_search, resolve_broadcast_recipients
 from services.delivery import claim_once, forget, mark_once, release_claim, telegram_call, telegram_pace
+from services.surveys import _matches_filters, send_survey_to_students
 from services.analytics import is_subscription_active, reporting_periods
 from services.legal_documents import legal_context, legal_documents_enabled, validate_legal_data
 from services.platform_legal import platform_legal_context
@@ -382,6 +383,72 @@ async def admin_surveys_page(request: Request, club_id: int = Query(...), init_d
         completed = await session.scalar(select(func.count(SurveyDelivery.id)).where(SurveyDelivery.survey_id == survey.id, SurveyDelivery.status == "completed")) or 0
         cards.append({"id": survey.id, "name": survey.name, "intro_text": survey.intro_text, "trigger_days": survey.trigger_days, "filters": survey.filters or {}, "is_active": survey.is_active, "total": int(total), "completed": int(completed)})
     return templates.TemplateResponse("admin_surveys.html", {"request": request, "club": club, "club_id": club_id, "surveys": cards, "disciplines": _broadcast_disciplines(club), "tariffs": _survey_tariffs(club)})
+
+
+@router.get("/webapp/admin-surveys/students")
+async def admin_surveys_students(
+    club_id: int, q: str = Query(default="", max_length=120),
+    init_data: str = Query(default=""), session: AsyncSession = Depends(get_session),
+):
+    club = await session.get(Club, club_id)
+    await verify_webapp_staff(club, init_data, session, "broadcast")
+    return {"students": await broadcast_recipients_for_student_search(session, club_id, q, limit=500)}
+
+
+@router.post("/webapp/admin-surveys/{survey_id}/toggle")
+async def admin_surveys_toggle(
+    survey_id: int, club_id: int = Form(...), init_data: str = Form(...),
+    session: AsyncSession = Depends(get_session),
+):
+    club = await session.get(Club, club_id)
+    await verify_webapp_staff(club, init_data, session, "broadcast")
+    survey = await session.get(Survey, survey_id)
+    if not survey or survey.club_id != club_id:
+        raise HTTPException(404, "Опрос не найден")
+    survey.is_active = not survey.is_active
+    await session.commit()
+    return {"ok": True, "is_active": survey.is_active}
+
+
+@router.post("/webapp/admin-surveys/{survey_id}/send")
+async def admin_surveys_send_now(
+    survey_id: int, club_id: int = Form(...), init_data: str = Form(...),
+    student_ids: str = Form(default="[]"), mode: str = Form(default="selected"),
+    idempotency_key: str = Form(...), session: AsyncSession = Depends(get_session),
+):
+    club = await session.get(Club, club_id)
+    tg_user = await verify_webapp_staff(club, init_data, session, "broadcast")
+    survey = await session.get(Survey, survey_id)
+    if not survey or survey.club_id != club_id:
+        raise HTTPException(404, "Опрос не найден")
+    operation_key = str(idempotency_key or "").strip()[:120]
+    if len(operation_key) < 16:
+        raise HTTPException(400, "Нужен idempotency_key")
+    claim_key = f"survey:manual:{club_id}:{int(tg_user['id'])}:{operation_key}"
+    claim_token = await claim_once(claim_key, ttl=15 * 60)
+    if not claim_token:
+        raise HTTPException(409, "Эта отправка уже выполняется или выполнена")
+    try:
+        if mode == "all":
+            selected_ids = list((await session.scalars(select(Student.id).where(Student.club_id == club_id))).all())
+        elif mode == "filters":
+            now = reporting_periods()["local_now"].replace(tzinfo=None)
+            students = (await session.scalars(select(Student).where(Student.club_id == club_id))).all()
+            selected_ids = [student.id for student in students if (await _matches_filters(session, club, student, survey, now))[0]]
+        else:
+            try:
+                selected_ids = list(dict.fromkeys(int(value) for value in json.loads(student_ids)))
+            except (TypeError, ValueError, json.JSONDecodeError):
+                raise HTTPException(400, "Некорректный список клиентов")
+            valid_ids = set((await session.scalars(select(Student.id).where(Student.club_id == club_id, Student.id.in_(selected_ids)))).all())
+            selected_ids = [student_id for student_id in selected_ids if student_id in valid_ids]
+        if not selected_ids:
+            raise HTTPException(400, "Не выбраны получатели")
+        result = await send_survey_to_students(session, survey, selected_ids, f"manual:{operation_key}")
+        audit_event("survey_manual_sent", club_id=club_id, action="send", object_type="survey", object_id=str(survey.id), selected_count=len(selected_ids), sent_count=result["sent"])
+        return {"ok": True, **result}
+    finally:
+        await release_claim(claim_key, claim_token)
 
 
 @router.post("/webapp/admin-surveys/create")
