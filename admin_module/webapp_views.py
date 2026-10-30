@@ -6,6 +6,7 @@ import calendar
 import json
 import os
 import uuid
+from collections import Counter
 from datetime import date, datetime, timedelta, timezone
 from html import escape
 from urllib.parse import quote
@@ -720,9 +721,11 @@ async def admin_surveys_report(
     deliveries = (await session.scalars(
         select(SurveyDelivery).where(*filters).order_by(SurveyDelivery.created_at.desc()).limit(limit)
     )).all()
+    survey_by_id = {}
     rows = []
     for delivery in deliveries:
         survey = await session.get(Survey, delivery.survey_id)
+        survey_by_id[delivery.survey_id] = survey
         student = await session.get(Student, delivery.student_id)
         parent = await session.get(User, delivery.recipient_id)
         answer_count = await session.scalar(select(func.count(SurveyAnswer.id)).where(SurveyAnswer.delivery_id == delivery.id)) or 0
@@ -737,7 +740,38 @@ async def admin_surveys_report(
             "completed_at": delivery.completed_at.isoformat() if delivery.completed_at else None,
             "answer_count": int(answer_count),
         })
-    return {"rows": rows, "total": len(rows)}
+    completed_delivery_ids = [delivery.id for delivery in deliveries if delivery.status == "completed"]
+    summary = []
+    if completed_delivery_ids:
+        questions = (await session.scalars(
+            select(SurveyQuestion)
+            .where(SurveyQuestion.survey_id.in_(list(survey_by_id)))
+            .order_by(SurveyQuestion.survey_id, SurveyQuestion.position)
+        )).all()
+        answers = (await session.scalars(
+            select(SurveyAnswer).where(SurveyAnswer.delivery_id.in_(completed_delivery_ids))
+        )).all()
+        values_by_question = {}
+        for answer in answers:
+            values_by_question.setdefault(answer.question_id, []).append(answer.value)
+        for question in questions:
+            values = values_by_question.get(question.id, [])
+            counts = Counter(values)
+            ordered_values = list(question.options or [])
+            ordered_values.extend(value for value in counts if value not in ordered_values)
+            total_answers = len(values)
+            summary.append({
+                "survey_id": question.survey_id,
+                "survey_name": (survey_by_id.get(question.survey_id).name if survey_by_id.get(question.survey_id) else "Удалённый опрос"),
+                "question": question.text,
+                "kind": question.kind,
+                "total_answers": total_answers,
+                "options": [
+                    {"value": value, "count": counts.get(value, 0), "percent": round(counts.get(value, 0) * 100 / total_answers) if total_answers else 0}
+                    for value in sorted(ordered_values, key=lambda value: (-counts.get(value, 0), ordered_values.index(value)))
+                ],
+            })
+    return {"rows": rows, "total": len(rows), "summary": summary}
 
 
 @router.get("/webapp/admin-surveys/report/{delivery_id}")
