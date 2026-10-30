@@ -32,6 +32,8 @@ async def process_athlete_gate_pass(
     expected_club_id: int | None = None,
     redis=None,
     open_turnstile: bool = True,
+    require_advance_confirmation: bool = False,
+    confirm_advance: bool = False,
 ) -> dict:
     """
     Универсальный сервис контроля СКУД, сессий и разморозки.
@@ -124,6 +126,18 @@ async def process_athlete_gate_pass(
             return {"success": False, "message": f"❌ Срок действия абонемента истек (До: {expire_naive.strftime('%d.%m.%Y')})"}
         if not advance["allowed"]:
             return {"success": False, "message": f"Р›РёРјРёС‚ Р°РІР°РЅСЃРѕРІС‹С… РїРѕСЃРµС‰РµРЅРёР№ РёСЃС‡РµСЂРїР°РЅ. Р”РѕР»Рі: {advance['debt_days']} РґРЅ. / {advance['debt_lessons']} Р·Р°РЅ."}
+        if require_advance_confirmation and not confirm_advance:
+            return {
+                "success": False,
+                "requires_confirmation": True,
+                "message": (
+                    f"Абонемент закончился {expire_naive.strftime('%d.%m.%Y')}. "
+                    f"Это будет долговое посещение №{advance['debt_lessons']} "
+                    f"из {advance['max_debt_lessons']} по занятиям и "
+                    f"{advance['debt_days']} из {advance['max_debt_days']} дней."
+                ),
+                "advance": advance,
+            }
         record_advance_visit(student, now_naive, club_settings)
         is_advance_visit = True
     if expire_naive and expire_naive < now_naive and not is_inside_session and not is_advance_visit:

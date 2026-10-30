@@ -1,5 +1,5 @@
 import uuid
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from html import escape
 
 from fastapi import Depends, HTTPException, Query, Request
@@ -33,11 +33,11 @@ from services.availability import payment_availability, turnstile_enabled
 from aiogram import Bot
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from handlers.skud import trigger_dingtian_turnstile
-from services.gate_control import process_athlete_gate_pass
+from services.gate_control import _latest_real_visit, process_athlete_gate_pass
 from services.staff_permissions import staff_can, permissions_for_staff
 from services.analytics import is_subscription_active
 from services.discounts import active_discount, active_discounts, apply_discount, apply_discounts
-from services.advance_visits import advance_purchase_warning, advance_debt_snapshot
+from services.advance_visits import advance_preview, advance_purchase_warning, advance_debt_snapshot
 from services.legal_documents import legal_documents_enabled
 from middlewares.db_saas_midleware import SUPER_ADMIN_IDS
 
@@ -409,7 +409,24 @@ async def staff_checkin_search(club_id: int, q: str = Query(default=""), init_da
         pattern = f"%{q}%"
         stmt = stmt.where(Student.name.ilike(pattern) | Student.parent_phone.ilike(pattern))
     students = (await db.execute(stmt)).scalars().all()
-    return [{"id": s.id, "name": s.name, "phone": s.parent_phone or "", "active": is_subscription_active(s)} for s in students]
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    timeout_minutes = int(((club.club_settings or {}).get("limits", {}) or {}).get("session_timeout_minutes", 150) or 150)
+    rows = []
+    for s in students:
+        last_visit = await _latest_real_visit(db, s)
+        inside = bool(last_visit and timedelta(0) <= now - last_visit.replace(tzinfo=None) < timedelta(minutes=timeout_minutes))
+        preview = advance_preview(s, now, club.club_settings or {}, new_session=not inside)
+        rows.append({
+            "id": s.id, "name": s.name, "phone": s.parent_phone or "",
+            "active": is_subscription_active(s),
+            "expire_date": s.expire_date.isoformat() if s.expire_date else None,
+            "advance": {
+                "is_advance": preview["is_advance"], "debt_lessons": preview["debt_lessons"],
+                "debt_days": preview["debt_days"], "max_debt_lessons": preview["max_debt_lessons"],
+                "max_debt_days": preview["max_debt_days"], "allowed": preview["allowed"],
+            },
+        })
+    return rows
 
 
 @router.post("/webapp/staff-checkin")
@@ -426,8 +443,14 @@ async def staff_checkin(payload: dict, db: AsyncSession = Depends(get_session)):
     open_turnstile = bool(payload.get("open_turnstile", False))
     if open_turnstile and not turnstile_enabled(club.club_settings):
         raise HTTPException(status_code=400, detail="Турникет отключён администратором")
-    result = await process_athlete_gate_pass(int(payload["student_id"]), db, club.club_settings or {}, expected_club_id=club_id, open_turnstile=open_turnstile)
+    result = await process_athlete_gate_pass(
+        int(payload["student_id"]), db, club.club_settings or {}, expected_club_id=club_id,
+        open_turnstile=open_turnstile, require_advance_confirmation=True,
+        confirm_advance=bool(payload.get("confirm_advance", False)),
+    )
     if not result.get("success"):
+        if result.get("requires_confirmation"):
+            raise HTTPException(status_code=409, detail={"code": "advance_confirmation_required", "message": result["message"], "advance": result.get("advance", {})})
         raise HTTPException(status_code=409, detail=result.get("message", "Посещение не записано"))
     if not result.get("is_inside_session"):
         bot = Bot(club.bot_token)
