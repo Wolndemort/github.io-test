@@ -1206,3 +1206,41 @@ Success means that the backup can be restored into PostgreSQL. The restore-check
 Последний визит берётся из `visit_logs`, а не только из временного `students.last_visit`, который очищается после закрытия сессии. Показатель «Спящие клиенты» показывает ранее посещавших клиентов без визита 14 и более дней и не включает новых клиентов без единого визита.
 
 Диагностика на сервере: `docker compose logs --since=30m gym-api`, `docker compose exec -T gym-api alembic current`, `docker compose exec -T gym-api alembic heads`, а также проверки `/health` и `/ready` внутри контейнера API.
+## Автоматические wildcard-сертификаты для клубов
+
+CRM использует адреса клубов вида `https://{club_id}.speedycrm.ru`. Для новых клубов применяется одна wildcard-схема:
+
+- DNS `A` для `@` → `77.73.131.175`;
+- DNS `A` для `*` → `77.73.131.175`;
+- nginx принимает `speedycrm.ru` и `*.speedycrm.ru`;
+- сертификат должен содержать `speedycrm.ru` и `*.speedycrm.ru`;
+- выпуск и продление wildcard выполняются через Certbot DNS-01, а не через HTTP-01.
+
+### AEZA DNS API
+
+AEZA API v2 документирован по адресу `https://my.aeza.ru/api/v2/docs`. Для автоматического DNS-01 используются методы:
+
+- `GET /domains` — найти DNS-зону и её `domainId`;
+- `GET /domains/{domainId}/records` — прочитать записи;
+- `POST /domains/{domainId}/records` — создать TXT `_acme-challenge`;
+- `DELETE /domains/{domainId}/records/{recordId}` — удалить временную TXT-запись.
+
+Авторизация API выполняется заголовком `x-api-key`. Ключ хранится только в production `.env`:
+
+```dotenv
+AEZA_API_TOKEN=<секрет не коммитить и не передавать в чат>
+```
+
+Ключ проверяется read-only запросом до выпуска сертификата. В ходе настройки 30.10.2026 DNS-записи `@`, `*` и `_acme-challenge` в AEZA уже присутствовали, но созданный ключ вернул `401 Not authenticated` на `GET /api/v2/domains`. Пока AEZA не начнёт принимать ключ, wildcard выпускать нельзя: Certbot продолжит видеть только старый SAN-сертификат (`speedycrm.ru`, `1`, `2`, `4.speedycrm.ru`).
+
+После исправления ключа обязательная проверка:
+
+```bash
+curl -fsS -H "x-api-key: $AEZA_API_TOKEN" https://my.aeza.ru/api/v2/domains
+docker compose run --rm certbot certonly --manual --preferred-challenges dns \
+  -d speedycrm.ru -d '*.speedycrm.ru'
+docker compose restart nginx
+openssl x509 -in certbot/conf/live/speedycrm.ru/fullchain.pem -noout -ext subjectAltName
+```
+
+Финальная автоматизация должна запускать DNS-01 hook, ждать DNS propagation, удалять только созданную им TXT-запись и делать reload nginx после успешного renew. Нельзя удалять чужие `_acme-challenge` записи и нельзя менять DNS вручную на каждом новом клубе.
