@@ -412,14 +412,21 @@ async def staff_checkin_search(club_id: int, q: str = Query(default=""), init_da
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     timeout_minutes = int(((club.club_settings or {}).get("limits", {}) or {}).get("session_timeout_minutes", 150) or 150)
     rows = []
+    disciplines = (club.club_settings or {}).get("disciplines", {}) or {}
     for s in students:
         last_visit = await _latest_real_visit(db, s)
         inside = bool(last_visit and timedelta(0) <= now - last_visit.replace(tzinfo=None) < timedelta(minutes=timeout_minutes))
         preview = advance_preview(s, now, club.club_settings or {}, new_session=not inside)
+        discipline_code = str(s.discipline or "boxing")
+        discipline_cfg = disciplines.get(discipline_code, {}) if isinstance(disciplines, dict) else {}
+        discipline_name = discipline_cfg.get("name") if isinstance(discipline_cfg, dict) else None
+        remaining_lessons = int(s.balance_lessons or 0)
         rows.append({
             "id": s.id, "name": s.name, "phone": s.parent_phone or "",
             "active": is_subscription_active(s),
             "expire_date": s.expire_date.isoformat() if s.expire_date else None,
+            "discipline": discipline_name or discipline_code,
+            "remaining_lessons": remaining_lessons,
             "advance": {
                 "is_advance": preview["is_advance"], "debt_lessons": preview["debt_lessons"],
                 "debt_days": preview["debt_days"], "max_debt_lessons": preview["max_debt_lessons"],

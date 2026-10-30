@@ -13,7 +13,8 @@
         const warning = a.is_advance
           ? `<p class="advance-warning">⚠️ Абонемент закончился${s.expire_date ? `: ${safe(s.expire_date.slice(0, 10))}` : ''}. Следующее посещение пойдёт в долг: №${a.debt_lessons} из ${a.max_debt_lessons} занятий, ${a.debt_days} из ${a.max_debt_days} дней.</p>`
           : `<p class="advance-ok">✅ Абонемент действует до ${s.expire_date ? safe(s.expire_date.slice(0, 10)) : '—'}</p>`;
-        return `<div class="student"><b>${safe(s.name)}</b><br><small>${safe(s.phone)} · ${s.active ? 'Абонемент активен' : 'Абонемент закончился'}</small>${warning}<div class="actions"><button onclick="window.advanceCheck(${s.id},false)">Без турникета</button><button onclick="window.advanceCheck(${s.id},true)">С турникетом</button></div></div>`;
+        const remaining = Number(s.remaining_lessons) === 999 ? 'безлимит' : `${Number(s.remaining_lessons ?? 0)} посещений`;
+        return `<div class="student"><b>${safe(s.name)}</b><br><small>${safe(s.phone)} · ${s.active ? 'Абонемент активен' : 'Абонемент закончился'}</small><p class="student-meta">🥋 Дисциплина: ${safe(s.discipline || '—')} · Остаток: ${safe(remaining)}</p>${warning}<div class="actions"><button onclick="window.advanceCheck(${s.id},false)">Без турникета</button><button onclick="window.advanceCheck(${s.id},true)">С турникетом</button></div></div>`;
       }).join('') || '<p>Ничего не найдено</p>';
     };
     window.advanceSearch = async () => {
