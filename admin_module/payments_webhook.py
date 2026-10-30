@@ -25,7 +25,7 @@ from services.order_notifications import (
     notify_product_staff,
     resolve_user_label,
 )
-from services.advance_visits import advance_purchase_warning
+from services.advance_visits import advance_purchase_warning, advance_settlement_notice
 from aiogram import Bot
 
 
@@ -250,6 +250,7 @@ async def yookassa_webhook(request: Request, session: AsyncSession = Depends(get
         club = club_result.scalar_one_or_none()
         club_settings = club.club_settings if club else {}
         advance_warning = ""
+        settlement_notice = ""
         if not order.type.startswith("FREEZE"):
             student_before = await session.get(Student, order.student_id)
             advance_warning = advance_purchase_warning(student_before, club_settings, html=True) if student_before else ""
@@ -257,6 +258,7 @@ async def yookassa_webhook(request: Request, session: AsyncSession = Depends(get
             abon_result = await purchase_student_freeze(order.student_id, order.club_id, order.days_to_add, session)
         else:
             abon_result = await add_abon(student_id=order.student_id, lessons_count=order.lesson_count, session=session, club_id=order.club_id, club_settings=club_settings, days_to_add=order.days_to_add, discipline=order.discipline)
+            settlement_notice = advance_settlement_notice(getattr(student_before, "_advance_settlement", None), abon_result[0] if abon_result else None)
         await session.commit()
         audit_event("yookassa_webhook_confirmed", club_id=order.club_id, order_id=order.id, student_id=order.student_id, amount_kopecks=order.amount_kopecks, order_type=order.type)
         if club and club.owner_id:
@@ -279,6 +281,10 @@ async def yookassa_webhook(request: Request, session: AsyncSession = Depends(get
                     ),
                     parse_mode="HTML",
                 )
+                if settlement_notice:
+                    await bot.send_message(club.owner_id, settlement_notice, parse_mode="HTML")
+                    for parent_id in await get_student_parent_ids(order.student_id, session):
+                        await bot.send_message(parent_id, settlement_notice, parse_mode="HTML")
                 if is_freeze and order.student_id:
                     parent_text = (
                         f"❄️ <b>Заморозка оплачена</b>\n\n"

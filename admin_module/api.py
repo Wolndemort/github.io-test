@@ -28,7 +28,7 @@ from services.order_notifications import (
 )
 from services.payment_requisites import get_payment_info_text, build_payment_instruction_text
 from services.discounts import active_discount, active_discounts, apply_discount, apply_discounts
-from services.advance_visits import advance_purchase_warning, advance_debt_snapshot
+from services.advance_visits import advance_purchase_warning, advance_debt_snapshot, advance_settlement_notice
 import hmac
 import os
 import time
@@ -1242,6 +1242,7 @@ async def admin_cash_subscription(payload: WebAppCashSubscriptionPayload, db: As
     abon_result = await add_abon(student.id, count, db, club.id, settings, days_to_add=days, discipline=discipline)
     if not abon_result:
         raise HTTPException(status_code=409, detail="Не удалось применить абонемент")
+    settlement_notice = advance_settlement_notice(getattr(student, "_advance_settlement", None), abon_result[0])
     db.add(payment_order)
     try:
         await db.commit()
@@ -1270,7 +1271,7 @@ async def admin_cash_subscription(payload: WebAppCashSubscriptionPayload, db: As
                     type("ItemView", (), {"title": f"{str(cfg.get('name', discipline))} · {tariff_label}", "quantity": 1, "product_id": 1})()
                 ]),
                 amount_kopecks=price,
-                extra_lines=([debt_warning] if debt_warning else []) + [
+                extra_lines=([debt_warning] if debt_warning else []) + ([settlement_notice] if settlement_notice else []) + [
                     f"Атлет: <b>{escape(student.name or str(student.id))}</b>",
                     f"Клуб: <b>{escape(club.name)}</b>",
                     f"Абонемент действует до: <b>{escape(str(abon_result[0]))}</b>",

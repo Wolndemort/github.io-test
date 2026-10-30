@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
-from services.advance_visits import advance_preview, record_advance_visit, settle_advance_debt, advance_purchase_warning, advance_profile_notice
+from services.advance_visits import advance_preview, record_advance_visit, settle_advance_debt, advance_purchase_warning, advance_profile_notice, advance_settlement_notice
 from services.gate_control import process_athlete_gate_pass
 
 
@@ -106,6 +106,18 @@ def test_limited_package_leaves_unpaid_debt_and_unlimited_clears_only_days():
     assert result["days_consumed"] == 5
     assert result["lessons_consumed"] == 10
     assert (unlimited.advance_debt_days, unlimited.advance_debt_lessons) == (15, 0)
+
+
+def test_settlement_notice_reports_actual_consumption_and_remaining_debt():
+    text = advance_settlement_notice({
+        "debt_days_before": 4, "debt_lessons_before": 2,
+        "days_consumed": 2, "lessons_consumed": 2,
+        "debt_days_after": 2, "debt_lessons_after": 0,
+    }, "07.11.2026")
+    assert "Списано" in text
+    assert "2" in text
+    assert "Осталось долга" in text
+    assert "07.11.2026" in text
 
 
 @pytest.mark.asyncio

@@ -18,7 +18,7 @@ from redis.asyncio import Redis
 from services.abuse_guard import rate_limit, audit_block
 from services.audit import audit_event
 from services.order_notifications import build_owner_receipt_text, format_order_items, resolve_user_label
-from services.advance_visits import advance_purchase_warning
+from services.advance_visits import advance_purchase_warning, advance_settlement_notice
 from services.payment_requisites import get_payment_info_text
 from services.availability import payment_availability
 from services.staff_permissions import permissions_for_staff

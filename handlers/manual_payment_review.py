@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from database.db import PaymentOrder, CartOrder, CartItem, ClubProduct, Student, add_abon, purchase_student_freeze
 from services.audit import audit_event
 from services.order_notifications import build_owner_receipt_text, format_order_items, resolve_user_label
-from services.advance_visits import advance_purchase_warning
+from services.advance_visits import advance_purchase_warning, advance_settlement_notice
 
 router = Router()
 
@@ -27,6 +27,7 @@ async def manual_order_confirm(callback: types.CallbackQuery, session: AsyncSess
     order_id = callback.data.removeprefix("manual_order_confirm_")
     bot = callback.bot
     advance_warning = ""
+    settlement_notice = ""
 
     if order_id.startswith("CART_"):
         order = await session.get(CartOrder, order_id, with_for_update=True)
@@ -95,6 +96,7 @@ async def manual_order_confirm(callback: types.CallbackQuery, session: AsyncSess
                 days_to_add=order.days_to_add,
                 discipline=order.discipline,
             )
+            settlement_notice = advance_settlement_notice(getattr(student_before, "_advance_settlement", None), order.days_to_add)
         order.status = "CONFIRMED"
         order.provider_payment_id = order.provider_payment_id or "MANUAL:APPROVED"
         await session.commit()
@@ -111,6 +113,8 @@ async def manual_order_confirm(callback: types.CallbackQuery, session: AsyncSess
         user_text = owner_text.replace("Ручная оплата подтверждена", "Оплата подтверждена")
         if order.user_id:
             await bot.send_message(order.user_id, user_text, parse_mode="HTML")
+        if settlement_notice and order.user_id:
+            await bot.send_message(order.user_id, settlement_notice, parse_mode="HTML")
         audit_event("manual_order_confirmed", club_id=club.id, actor_user_id=callback.from_user.id, actor_role="owner", action="confirm", object_type="payment_order", object_id=order.id, amount_kopecks=order.amount_kopecks, method="manual")
 
     if advance_warning and order.user_id:

@@ -109,6 +109,24 @@ def settle_advance_debt(student, days_to_add: int, lessons_count: int, settings:
     }
 
 
+def advance_settlement_notice(settlement: dict | None, new_expire=None) -> str:
+    """Build the post-purchase alert from the actual settlement result."""
+    if not settlement or not settlement.get("debt_days_before", 0) and not settlement.get("debt_lessons_before", 0):
+        return ""
+    consumed_days = int(settlement.get("days_consumed", 0) or 0)
+    consumed_lessons = int(settlement.get("lessons_consumed", 0) or 0)
+    left_days = int(settlement.get("debt_days_after", 0) or 0)
+    left_lessons = int(settlement.get("debt_lessons_after", 0) or 0)
+    lines = [
+        "✅ <b>Авансовый долг перерасчитан</b>",
+        f"Списано из нового абонемента: <b>{consumed_lessons}</b> занятий и <b>{consumed_days}</b> дн.",
+        f"Осталось долга: <b>{left_lessons}</b> занятий и <b>{left_days}</b> дн.",
+    ]
+    if new_expire:
+        lines.append(f"Новый срок абонемента: <b>{new_expire}</b>")
+    return "\n".join(lines)
+
+
 def advance_debt_snapshot(student) -> dict:
     """Return a stable, serialisable debt snapshot for UI and notifications."""
     return {
