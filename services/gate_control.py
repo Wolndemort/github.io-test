@@ -145,17 +145,31 @@ async def process_athlete_gate_pass(
     )
     is_advance_visit = False
     expire_naive = student.expire_date.replace(tzinfo=None) if student.expire_date else None
-    if expire_naive and expire_naive < now_naive and not is_inside_session:
+    debt_candidate = bool(
+        not is_inside_session
+        and expire_naive
+        and (expire_naive < now_naive or int(getattr(student, "balance_lessons", 0) or 0) <= 0)
+    )
+    if debt_candidate:
         if not advance["enabled"]:
-            return {"success": False, "message": f"❌ Срок действия абонемента истек (До: {expire_naive.strftime('%d.%m.%Y')})"}
+            if expire_naive and expire_naive < now_naive:
+                message = f"❌ Срок действия абонемента истек (До: {expire_naive.strftime('%d.%m.%Y')})"
+            else:
+                message = "❌ Занятия на балансе закончились"
+            return {"success": False, "message": message}
         if not advance["allowed"]:
             return {"success": False, "message": f"Р›РёРјРёС‚ Р°РІР°РЅСЃРѕРІС‹С… РїРѕСЃРµС‰РµРЅРёР№ РёСЃС‡РµСЂРїР°РЅ. Р”РѕР»Рі: {advance['debt_days']} РґРЅ. / {advance['debt_lessons']} Р·Р°РЅ."}
         if require_advance_confirmation and not confirm_advance:
+            finish_reason = (
+                f"Абонемент закончился {expire_naive.strftime('%d.%m.%Y')}"
+                if expire_naive and expire_naive < now_naive
+                else "Занятия на балансе закончились"
+            )
             return {
                 "success": False,
                 "requires_confirmation": True,
                 "message": (
-                    f"Абонемент закончился {expire_naive.strftime('%d.%m.%Y')}. "
+                    f"{finish_reason}. "
                     f"Это будет долговое посещение №{advance['debt_lessons']} "
                     f"из {advance['max_debt_lessons']} по занятиям и "
                     f"{advance['debt_days']} из {advance['max_debt_days']} дней."

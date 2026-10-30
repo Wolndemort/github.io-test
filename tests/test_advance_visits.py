@@ -120,6 +120,27 @@ async def test_gate_allows_advance_visit_and_persists_debt():
 
 
 @pytest.mark.asyncio
+async def test_gate_allows_zero_balance_before_expiry_when_advance_is_enabled():
+    item = student(expire_date=datetime.now() + timedelta(days=1), balance_lessons=0)
+    db = db_for(item)
+    result = await process_athlete_gate_pass(1, db, settings(), expected_club_id=10)
+    assert result["success"] is True
+    assert result["is_advance_visit"] is True
+    assert item.advance_debt_lessons == 1
+    assert db.commit.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_gate_rejects_zero_balance_when_advance_is_disabled():
+    item = student(expire_date=datetime.now() + timedelta(days=1), balance_lessons=0)
+    db = db_for(item)
+    result = await process_athlete_gate_pass(1, db, settings(enabled=False), expected_club_id=10)
+    assert result["success"] is False
+    assert "балансе" in result["message"]
+    db.commit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_gate_rejects_when_advance_lesson_limit_is_reached():
     item = student(expire_date=datetime.now() - timedelta(days=1), advance_debt_lessons=7)
     db = db_for(item)
