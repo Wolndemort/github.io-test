@@ -43,15 +43,29 @@ def advance_config(settings: dict | None) -> dict:
     }
 
 
-def advance_preview(student, now: datetime, settings: dict | None, *, new_session: bool = True) -> dict:
+def advance_preview(
+    student,
+    now: datetime,
+    settings: dict | None,
+    *,
+    new_session: bool = True,
+    first_advance_at: datetime | None = None,
+) -> dict:
     """Return projected debt without mutating the student."""
     config = advance_config(settings)
     current_days = max(0, int(getattr(student, "advance_debt_days", 0) or 0))
     current_lessons = max(0, int(getattr(student, "advance_debt_lessons", 0) or 0))
     expiry = getattr(student, "expire_date", None)
     expiry = expiry.replace(tzinfo=None) if expiry else None
-    overdue_days = max(0, (now.date() - expiry.date()).days) if expiry and expiry < now else 0
-    projected_days = max(current_days, overdue_days)
+    # Debt days are based on actual debt visits, not on idle time after expiry.
+    # The first debt visit counts as day 1; later debt visits extend the period
+    # through the date of the latest real debt visit.
+    if first_advance_at is not None:
+        first_advance_at = first_advance_at.replace(tzinfo=None)
+        visit_period_days = max(1, (now.date() - first_advance_at.date()).days + 1)
+    else:
+        visit_period_days = 1 if current_lessons == 0 and expiry and expiry < now else 0
+    projected_days = max(current_days, visit_period_days)
     projected_lessons = current_lessons + (1 if new_session else 0)
     is_advance = bool(config["enabled"] and expiry and expiry < now and new_session)
     return {

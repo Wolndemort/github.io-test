@@ -33,7 +33,7 @@ from services.availability import payment_availability, turnstile_enabled
 from aiogram import Bot
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from handlers.skud import trigger_dingtian_turnstile
-from services.gate_control import _latest_real_visit, process_athlete_gate_pass
+from services.gate_control import _first_advance_visit, _latest_real_visit, process_athlete_gate_pass
 from services.staff_permissions import staff_can, permissions_for_staff
 from services.analytics import is_subscription_active
 from services.discounts import active_discount, active_discounts, apply_discount, apply_discounts
@@ -416,7 +416,8 @@ async def staff_checkin_search(club_id: int, q: str = Query(default=""), init_da
     for s in students:
         last_visit = await _latest_real_visit(db, s)
         inside = bool(last_visit and timedelta(0) <= now - last_visit.replace(tzinfo=None) < timedelta(minutes=timeout_minutes))
-        preview = advance_preview(s, now, club.club_settings or {}, new_session=not inside)
+        first_advance_at = await _first_advance_visit(db, s)
+        preview = advance_preview(s, now, club.club_settings or {}, new_session=not inside, first_advance_at=first_advance_at)
         discipline_code = str(s.discipline or "boxing")
         discipline_cfg = disciplines.get(discipline_code, {}) if isinstance(disciplines, dict) else {}
         discipline_name = discipline_cfg.get("name") if isinstance(discipline_cfg, dict) else None

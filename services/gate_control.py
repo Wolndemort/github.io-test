@@ -25,6 +25,23 @@ async def _latest_real_visit(db, student):
     ) or getattr(student, "last_visit", None)
 
 
+async def _first_advance_visit(db, student):
+    """Return the first real debt visit; legacy rows may have no marker."""
+    scalar = getattr(db, "scalar", None)
+    if scalar is None:
+        return None
+    return await scalar(
+        select(VisitLog.visited_at)
+        .where(
+            VisitLog.student_id == student.id,
+            VisitLog.club_id == student.club_id,
+            VisitLog.source == "advance",
+        )
+        .order_by(VisitLog.visited_at.asc())
+        .limit(1)
+    )
+
+
 async def process_athlete_gate_pass(
     student_id: int,
     db,
@@ -118,7 +135,14 @@ async def process_athlete_gate_pass(
             is_inside_session = True
 
     # 5. ПРОВЕРКА СРОКА ДЕЙСТВИЯ И БАЛАНСА
-    advance = advance_preview(student, now_naive, club_settings, new_session=not is_inside_session)
+    first_advance_at = await _first_advance_visit(db, student)
+    advance = advance_preview(
+        student,
+        now_naive,
+        club_settings,
+        new_session=not is_inside_session,
+        first_advance_at=first_advance_at,
+    )
     is_advance_visit = False
     expire_naive = student.expire_date.replace(tzinfo=None) if student.expire_date else None
     if expire_naive and expire_naive < now_naive and not is_inside_session:
@@ -225,7 +249,7 @@ async def process_athlete_gate_pass(
             student_id=student.id,
             club_id=student.club_id,
             visited_at=now_naive,
-            source="gate" if not is_inside_session else "repeat"
+            source=("advance" if is_advance_visit else "gate") if not is_inside_session else "repeat"
         ))
         await db.commit()
     except Exception as db_err:

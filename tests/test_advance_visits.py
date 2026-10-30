@@ -45,7 +45,7 @@ def test_preview_counts_overdue_days_and_next_lesson_without_mutating():
     item = student()
     result = advance_preview(item, datetime(2026, 10, 11, 12), settings(), new_session=True)
     assert result["is_advance"] is True
-    assert result["debt_days"] == 10
+    assert result["debt_days"] == 1
     assert result["debt_lessons"] == 1
     assert item.advance_debt_days == 0
 
@@ -53,9 +53,9 @@ def test_preview_counts_overdue_days_and_next_lesson_without_mutating():
 def test_record_and_settle_debt_consumes_days_and_lessons():
     item = student()
     record_advance_visit(item, datetime(2026, 10, 11, 12), settings())
-    assert (item.advance_debt_days, item.advance_debt_lessons) == (10, 1)
+    assert (item.advance_debt_days, item.advance_debt_lessons) == (1, 1)
     result = settle_advance_debt(item, 30, 8, settings())
-    assert result["days_consumed"] == 10
+    assert result["days_consumed"] == 1
     assert result["lessons_consumed"] == 1
     assert (item.advance_debt_days, item.advance_debt_lessons) == (0, 0)
 
@@ -77,6 +77,21 @@ def test_profile_notice_replaces_balance_only_while_debt_exists():
     assert "Посещения в долг: 2" in notice
     assert "спишется <b>2</b> занятия" in notice
     assert "учтётся <b>4</b> дня срока" in notice
+
+
+def test_debt_days_follow_first_and_latest_real_debt_visits_not_expiry():
+    item = student(expire_date=datetime(2026, 10, 1, 23, 59, 59))
+    first = advance_preview(item, datetime(2026, 10, 20, 10), settings(), first_advance_at=None)
+    assert first["debt_days"] == 1
+    item.advance_debt_days = first["debt_days"]
+    item.advance_debt_lessons = first["debt_lessons"]
+    later = advance_preview(
+        item,
+        datetime(2026, 10, 23, 10),
+        settings(),
+        first_advance_at=datetime(2026, 10, 20, 10),
+    )
+    assert later["debt_days"] == 4
 
 
 def test_limited_package_leaves_unpaid_debt_and_unlimited_clears_only_days():
