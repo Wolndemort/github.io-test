@@ -416,6 +416,7 @@ async def process_one_click_payment(callback: types.CallbackQuery, state: FSMCon
     # 4. Проверяем статус. Если 'succeeded' — моментально активируем абонемент
     if charge_res.get("Success") and charge_res.get("Status") == "succeeded":
         new_order.status = "CONFIRMED"
+        settlement_notice = ""
 
         # 🌟 КРИТИЧЕСКИЙ ФИКС: Передаем discipline в нашу обновленную функцию add_abon
         abon_result = await add_abon(
@@ -427,6 +428,8 @@ async def process_one_click_payment(callback: types.CallbackQuery, state: FSMCon
             days_to_add=data['days_to_add'],
             discipline=sport_type  # <--- ТЕПЕРЬ ДИСЦИПЛИНА ЗАПИШЕТСЯ КОРРЕКТНО!
         )
+        settled_student = await session.get(Student, data['student_id'])
+        settlement_notice = advance_settlement_notice(getattr(settled_student, "_advance_settlement", None), abon_result[0] if abon_result else None)
         await session.commit()
 
         if abon_result:
@@ -443,6 +446,10 @@ async def process_one_click_payment(callback: types.CallbackQuery, state: FSMCon
                 f"💳 Списано: <b>{data['price']}₽</b> с вашей сохраненной карты.\n"
                 f"📦 Абонемент (<b>{desc}</b>) успешно активирован и действует до: <b>{new_expire}</b>. 🔥"
             )
+            if settlement_notice:
+                await callback.message.answer(settlement_notice, parse_mode="HTML")
+                if club.owner_id and int(club.owner_id) != int(callback.from_user.id):
+                    await callback.bot.send_message(club.owner_id, settlement_notice, parse_mode="HTML")
         await state.clear()
     else:
         new_order.status = "REJECTED"
@@ -735,6 +742,10 @@ async def process_official_card_payment(
                         student_id=student_id, lessons_count=lesson_count, session=session,
                         club_id=club_id, club_settings=club.club_settings,
                         days_to_add=days_to_add, discipline=sport_type)
+                settlement_notice = advance_settlement_notice(
+                    getattr(await session.get(Student, student_id), "_advance_settlement", None),
+                    abon_result[0] if abon_result else None,
+                )
                 await session.commit()
 
                 if abon_result:
@@ -750,6 +761,10 @@ async def process_official_card_payment(
                         f"💳 Списано: <b>{price}₽</b> с вашей сохраненной карты.\n"
                         f"📦 Абонемент (<b>{desc}</b>) успешно активирован и действует до: <b>{new_expire}</b>. 🔥"
                     )
+                    if settlement_notice:
+                        await callback.message.answer(settlement_notice, parse_mode="HTML")
+                        if club.owner_id and int(club.owner_id) != int(callback.from_user.id):
+                            await callback.bot.send_message(club.owner_id, settlement_notice, parse_mode="HTML")
                 await state.clear()
                 return
             else:
