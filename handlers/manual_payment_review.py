@@ -70,6 +70,8 @@ async def manual_order_confirm(callback: types.CallbackQuery, session: AsyncSess
             amount_kopecks=order.amount_kopecks,
             extra_lines=["Способ: <b>Реквизиты</b>"],
         )
+        if settlement_notice:
+            owner_text += "\n\n" + settlement_notice
         user_text = owner_text.replace("Ручная оплата подтверждена", "Оплата подтверждена")
         if advance_warning:
             user_text += "\n\n" + advance_warning
