@@ -1,7 +1,7 @@
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from types import SimpleNamespace
 
-from services.analytics import build_expiry_series, build_revenue_series, build_visit_series, calculate_projected_renewal_revenue
+from services.analytics import build_expiry_series, build_registration_series, build_revenue_series, build_visit_series, calculate_projected_renewal_revenue
 
 
 def test_projected_revenue_uses_recent_expired_and_due_students_and_popular_tariff():
@@ -18,7 +18,8 @@ def test_projected_revenue_uses_recent_expired_and_due_students_and_popular_tari
     assert result["count"] == 2
     assert result["projected_revenue"] == 11000
     assert "boxing: 12 занятий" in result["tariff_name"]
-    assert result["price_source"] == "самый продаваемый подтверждённый тариф по каждому направлению"
+    assert result["price_source"] == "фактическая средняя цена подтверждённых покупок"
+    assert result["expected_revenue"] == result["projected_revenue"]
 
 
 def test_projected_revenue_rejects_reversed_period():
@@ -166,3 +167,13 @@ def test_discounted_sales_count_towards_popular_tariff():
     ]
     result = calculate_projected_renewal_revenue([student], [], payments, settings, "2026-08-01", "2026-08-31", now)
     assert result["tariffs_by_discipline"]["boxing"]["sales_count"] == 2
+
+
+def test_registration_forecast_uses_historical_weekday_average():
+    students = [
+        SimpleNamespace(created_at=datetime(2026, 8, 3, 10)),
+        SimpleNamespace(created_at=datetime(2026, 8, 10, 10)),
+    ]
+    result = build_registration_series(students, "2026-08-03", "2026-08-17", date(2026, 8, 10))
+    assert result["actual_count"] == 2
+    assert result["forecast_count"] == 1

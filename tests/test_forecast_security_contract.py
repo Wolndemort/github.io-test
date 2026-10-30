@@ -30,5 +30,5 @@ def test_forecast_forms_preserve_independent_date_windows():
 
 def test_forecast_registrations_use_the_general_window():
     source = Path("admin_module/admin_pages.py").read_text(encoding="utf-8")
-    assert "start_date <= s.created_at.date() <= finish_date" in source
+    assert "start_date <= moscow_calendar_date(s.created_at) <= finish_date" in source
     assert '"revenue_from": revenue_start' in source

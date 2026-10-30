@@ -165,7 +165,7 @@ def calculate_revenue_periods(payments: Iterable[Any], now: datetime | None = No
     return {key: round(value / 100, 2) for key, value in totals.items()}
 
 
-def calculate_projected_renewal_revenue(
+def _legacy_calculate_projected_renewal_revenue(
     students_models: Iterable[Any],
     visit_logs: Iterable[Any] | None = None,
     payments: Iterable[Any] | None = None,
@@ -174,6 +174,7 @@ def calculate_projected_renewal_revenue(
     date_to: date | str | None = None,
     now: datetime | None = None,
     visit_window_days: int = 30,
+    cart_items: Iterable[Any] | None = None,
 ) -> dict[str, Any]:
     """Estimate renewals for recently visiting athletes.
 
@@ -199,9 +200,10 @@ def calculate_projected_renewal_revenue(
     for student in students_models:
         expiry = _utc_naive(getattr(student, "expire_date", None))
         last = latest.get(getattr(student, "id", None), _utc_naive(getattr(student, "last_visit", None)))
+        expiry_day = moscow_calendar_date(expiry)
         if (
-            expiry
-            and start <= expiry.date() <= finish
+            expiry_day
+            and start <= expiry_day <= finish
             and last
             and current - timedelta(days=visit_window_days) <= last <= current
         ):
@@ -214,10 +216,32 @@ def calculate_projected_renewal_revenue(
             price = int(float(tariff.get("price", 0) or 0) * 100)
             if price > 0: configured.append((discipline, idx, tariff, price))
     sales = {}
+    sales_amounts = {}
+    student_purchase_counts = Counter()
     for payment in payments or []:
         if str(getattr(payment, "status", "CONFIRMED")) != "CONFIRMED": continue
-        key = (getattr(payment, "discipline", None), int(getattr(payment, "lesson_count", 0) or 0), int(getattr(payment, "days_to_add", 0) or 0), int(getattr(payment, "amount_kopecks", 0) or 0))
+        lesson_count = int(getattr(payment, "lesson_count", 0) or 0)
+        days_to_add = int(getattr(payment, "days_to_add", 0) or 0)
+        if lesson_count <= 0 or days_to_add <= 0: continue
+        amount = int(getattr(payment, "amount_kopecks", 0) or 0)
+        key = (getattr(payment, "discipline", None), lesson_count, days_to_add)
         sales[key] = sales.get(key, 0) + 1
+        sales_amounts[key] = sales_amounts.get(key, 0) + amount
+        if getattr(payment, "student_id", None) is not None:
+            student_purchase_counts[int(payment.student_id)] += 1
+    for item in cart_items or []:
+        if str(getattr(item, "item_type", "")) != "subscription": continue
+        payload = getattr(item, "payload", None) or {}
+        lesson_count = int(payload.get("count", 0) or 0)
+        days_to_add = int(payload.get("days", 0) or 0)
+        discipline = payload.get("discipline")
+        if lesson_count <= 0 or days_to_add <= 0: continue
+        key = (discipline, lesson_count, days_to_add)
+        quantity = max(1, int(getattr(item, "quantity", 1) or 1))
+        sales[key] = sales.get(key, 0) + quantity
+        sales_amounts[key] = sales_amounts.get(key, 0) + int(getattr(item, "unit_price_kopecks", 0) or 0) * quantity
+        if payload.get("student_id") is not None:
+            student_purchase_counts[int(payload["student_id"])] += quantity
     selected_by_discipline = {}
     selected_sales_count = {}
     for discipline in {getattr(student, "discipline", None) or "boxing" for student in candidates}:
@@ -237,6 +261,110 @@ def calculate_projected_renewal_revenue(
     tariff_label = ", ".join(f"{discipline}: {data['name']} ({data['price']:.2f} ₽)" for discipline, data in tariffs_by_discipline.items()) or "Нет настроенного тарифа"
     average_price = projected_kopecks / len(candidates) if candidates else 0
     return {"count": len(candidates), "projected_revenue": round(projected_kopecks / 100, 2), "students": candidates, "tariff_name": tariff_label, "tariff_discipline": next(iter(selected_by_discipline.values()), (None,))[0] if selected_by_discipline else None, "price": round(average_price / 100, 2), "price_source": source, "tariffs_by_discipline": tariffs_by_discipline}
+
+
+def calculate_projected_renewal_revenue(
+    students_models: Iterable[Any],
+    visit_logs: Iterable[Any] | None = None,
+    payments: Iterable[Any] | None = None,
+    club_settings: dict | None = None,
+    date_from: date | str | None = None,
+    date_to: date | str | None = None,
+    now: datetime | None = None,
+    visit_window_days: int = 30,
+    cart_items: Iterable[Any] | None = None,
+) -> dict[str, Any]:
+    """Return potential and historically weighted renewal revenue.
+
+    The legacy candidate/tariff selection remains the source of the potential
+    cohort. This wrapper corrects the money side with net paid prices from
+    both direct payments and subscription cart items, then adds a smoothed
+    repeat-purchase probability for the expected figure.
+    """
+    students = list(students_models)
+    payment_rows = list(payments or [])
+    cart_rows = list(cart_items or [])
+    result = _legacy_calculate_projected_renewal_revenue(
+        students, visit_logs, payment_rows, club_settings, date_from, date_to, now, visit_window_days
+    )
+    selected = result.get("tariffs_by_discipline", {})
+    sales = {}
+    purchase_counts = Counter()
+    for payment in payment_rows:
+        if str(getattr(payment, "status", "CONFIRMED")) != "CONFIRMED":
+            continue
+        count = int(getattr(payment, "lesson_count", 0) or 0)
+        days = int(getattr(payment, "days_to_add", 0) or 0)
+        if count <= 0 or days <= 0:
+            continue
+        key = (getattr(payment, "discipline", None), count, days)
+        sales.setdefault(key, []).append(int(getattr(payment, "amount_kopecks", 0) or 0))
+        if getattr(payment, "student_id", None) is not None:
+            purchase_counts[int(payment.student_id)] += 1
+    for item in cart_rows:
+        if str(getattr(item, "item_type", "")) != "subscription":
+            continue
+        payload = getattr(item, "payload", None) or {}
+        count = int(payload.get("count", 0) or 0)
+        days = int(payload.get("days", 0) or 0)
+        if count <= 0 or days <= 0:
+            continue
+        quantity = max(1, int(getattr(item, "quantity", 1) or 1))
+        key = (payload.get("discipline"), count, days)
+        sales.setdefault(key, []).extend([int(getattr(item, "unit_price_kopecks", 0) or 0)] * quantity)
+        if payload.get("student_id") is not None:
+            purchase_counts[int(payload["student_id"])] += quantity
+
+    price_by_discipline = {}
+    for discipline, tariff in selected.items():
+        key = (discipline, int(tariff.get("count", 0) or 0), int(tariff.get("days", 0) or 0))
+        observed = sales.get(key, [])
+        if observed:
+            tariff["price"] = round(sum(observed) / len(observed) / 100, 2)
+            tariff["price_source"] = "фактическая средняя цена"
+        price_by_discipline[discipline] = float(tariff.get("price", 0) or 0) * 100
+    candidates = result.get("students", [])
+    potential = sum(price_by_discipline.get(getattr(student, "discipline", None) or "boxing", 0) for student in candidates)
+    paying = len(purchase_counts)
+    repeat = sum(1 for count in purchase_counts.values() if count >= 2)
+    renewal_rate = ((repeat + 1) / (paying + 2)) if paying else None
+    expected = potential * renewal_rate if renewal_rate is not None else potential
+    result.update({
+        "projected_revenue": round(potential / 100, 2),
+        "expected_revenue": round(expected / 100, 2),
+        "renewal_rate": round(renewal_rate * 100, 1) if renewal_rate is not None else None,
+        "historical_purchase_count": paying,
+        "historical_repeat_count": repeat,
+        "confidence": "высокая" if paying >= 30 else ("средняя" if paying >= 10 else "низкая"),
+        "price": round(potential / len(candidates) / 100, 2) if candidates else 0,
+        "price_source": "фактическая средняя цена подтверждённых покупок" if sales else result.get("price_source"),
+    })
+    return result
+
+
+def build_registration_series(students: Iterable[Any], start: date | str, finish: date | str, today: date | None = None) -> dict[str, Any]:
+    """Return actual registrations and weekday-based new-client estimates."""
+    start = date.fromisoformat(start) if isinstance(start, str) else start
+    finish = date.fromisoformat(finish) if isinstance(finish, str) else finish
+    today = today or datetime.now(MOSCOW_TZ).date()
+    history = Counter()
+    for student in students:
+        created = moscow_calendar_date(getattr(student, "created_at", None))
+        if created and created <= today:
+            history[created] += 1
+    weekday_totals = Counter()
+    weekday_counts = Counter()
+    for day, count in history.items():
+        weekday_totals[day.weekday()] += count
+        weekday_counts[day.weekday()] += 1
+    series = []
+    for offset in range((finish - start).days + 1):
+        day = start + timedelta(days=offset)
+        actual = history.get(day, 0)
+        future = day > today
+        estimate = actual if not future else (weekday_totals[day.weekday()] / weekday_counts[day.weekday()] if weekday_counts[day.weekday()] else 0)
+        series.append({"date": day.isoformat(), "count": round(estimate, 2), "kind": "Прогноз" if future else "Факт"})
+    return {"series": series, "actual_count": sum(point["count"] for point in series if point["kind"] == "Факт"), "forecast_count": round(sum(point["count"] for point in series if point["kind"] == "Прогноз"), 2)}
 
 
 def build_expiry_series(rows: Iterable[dict[str, Any]], start: date | str, finish: date | str) -> dict[str, Any]:
@@ -281,6 +409,7 @@ def build_revenue_series(payments: Iterable[Any], cart_orders: Iterable[Any], ca
     start = date.fromisoformat(start) if isinstance(start, str) else start
     finish = date.fromisoformat(finish) if isinstance(finish, str) else finish
     today = today or datetime.now(MOSCOW_TZ).date()
+    reversed_cash_ids = {getattr(row, "reversed_entry_id", None) for row in cash_entries if getattr(row, "reversed_entry_id", None) is not None}
     actual = {}
     def add(value, at):
         day = moscow_calendar_date(at)
@@ -290,7 +419,7 @@ def build_revenue_series(payments: Iterable[Any], cart_orders: Iterable[Any], ca
     for row in cart_orders:
         if str(getattr(row, "status", "CONFIRMED")) == "CONFIRMED": add(getattr(row, "amount_kopecks", 0), getattr(row, "created_at", None))
     for row in cash_entries:
-        if str(getattr(row, "entry_type", "")).lower() == "income": add(getattr(row, "amount_kopecks", 0), getattr(row, "created_at", None))
+        if str(getattr(row, "entry_type", "")).lower() == "income" and getattr(row, "id", None) not in reversed_cash_ids: add(getattr(row, "amount_kopecks", 0), getattr(row, "created_at", None))
     weekday_totals = {}; weekday_counts = {}
     # Forecast baselines must use all available historical actuals, including
     # rows outside the selected future-only chart window.
@@ -304,7 +433,7 @@ def build_revenue_series(payments: Iterable[Any], cart_orders: Iterable[Any], ca
             day = moscow_calendar_date(getattr(row, "created_at", None))
             if day and day <= today: historical_actual[day] = historical_actual.get(day, 0) + int(getattr(row, "amount_kopecks", 0) or 0)
     for row in cash_entries:
-        if str(getattr(row, "entry_type", "")).lower() == "income":
+        if str(getattr(row, "entry_type", "")).lower() == "income" and getattr(row, "id", None) not in reversed_cash_ids:
             day = moscow_calendar_date(getattr(row, "created_at", None))
             if day and day <= today: historical_actual[day] = historical_actual.get(day, 0) + int(getattr(row, "amount_kopecks", 0) or 0)
     for day, amount in historical_actual.items():

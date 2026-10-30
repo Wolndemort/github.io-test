@@ -9,8 +9,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from admin_module.router_base import router, templates
 from admin_module.utils import get_club_id_from_host, verify_webapp_admin, verify_webapp_staff, webapp_auth_gate
 from admin_module.webapp_verify import verify_telegram_data
-from database.db import CartOrder, CashEntry, Club, PaymentOrder, Student, User, VisitLog, get_session
-from services.analytics import build_expiry_series, build_revenue_series, build_visit_series, calculate_admin_dashboard, calculate_cash_flow_periods, calculate_projected_renewal_revenue, calculate_revenue_periods, calculate_student_metrics, generate_students_excel, reporting_periods, moscow_date_boundary
+from database.db import CartItem, CartOrder, CashEntry, Club, PaymentOrder, Student, User, VisitLog, get_session
+from services.analytics import build_expiry_series, build_registration_series, build_revenue_series, build_visit_series, calculate_admin_dashboard, calculate_cash_flow_periods, calculate_projected_renewal_revenue, calculate_revenue_periods, calculate_student_metrics, generate_students_excel, reporting_periods, moscow_calendar_date, moscow_date_boundary
 from services.schedule_utils import normalize_schedule_block
 
 
@@ -182,8 +182,9 @@ async def get_forecast_page(request: Request, session: AsyncSession = Depends(ge
     visits = list((await session.execute(select(VisitLog).where(VisitLog.club_id == club_id))).scalars().all())
     payments = list((await session.execute(select(PaymentOrder).where(PaymentOrder.club_id == club_id, PaymentOrder.status == "CONFIRMED"))).scalars().all())
     cart_orders = list((await session.execute(select(CartOrder).where(CartOrder.club_id == club_id, CartOrder.status == "CONFIRMED"))).scalars().all())
+    cart_items = list((await session.execute(select(CartItem).join(CartOrder, CartOrder.id == CartItem.cart_order_id).where(CartOrder.club_id == club_id, CartOrder.status == "CONFIRMED", CartItem.item_type == "subscription"))).scalars().all())
     cash_entries = list((await session.execute(select(CashEntry).where(CashEntry.club_id == club_id))).scalars().all())
-    forecast = calculate_projected_renewal_revenue(students, visits, payments, club.club_settings if club else {}, start, finish, now)
+    forecast = calculate_projected_renewal_revenue(students, visits, payments, club.club_settings if club else {}, start, finish, now, cart_items=cart_items)
     visit_map = {}
     for visit in visits:
         if visit.student_id not in visit_map or visit.visited_at > visit_map[visit.student_id]: visit_map[visit.student_id] = visit.visited_at
@@ -219,8 +220,9 @@ async def get_forecast_page(request: Request, session: AsyncSession = Depends(ge
         else:
             age = today.year - student.birthday.year - ((today.month, today.day) < (student.birthday.month, student.birthday.day))
             age_counts["1–10" if age <= 10 else "11–15" if age <= 15 else "16+"] += 1
-    registrations = [{"date": s.created_at.date().isoformat(), "name": s.name, "discipline": s.discipline or "—"} for s in students if getattr(s, "created_at", None) and start_date <= s.created_at.date() <= finish_date]
-    return templates.TemplateResponse("forecast.html", {"request": request, "club_id": club_id, "club_name": club.name if club else "Клуб", "filters": {"date_from": start, "date_to": finish, "revenue_from": revenue_start, "revenue_to": revenue_finish, "visits_from": visits_start, "visits_to": visits_finish}, "forecast": forecast, "rows": rows, "age_counts": age_counts, "registrations": registrations})
+    registrations = [{"date": moscow_calendar_date(s.created_at).isoformat(), "name": s.name, "discipline": s.discipline or "—"} for s in students if getattr(s, "created_at", None) and start_date <= moscow_calendar_date(s.created_at) <= finish_date]
+    registration_forecast = build_registration_series(students, start_date, finish_date, today)
+    return templates.TemplateResponse("forecast.html", {"request": request, "club_id": club_id, "club_name": club.name if club else "Клуб", "filters": {"date_from": start, "date_to": finish, "revenue_from": revenue_start, "revenue_to": revenue_finish, "visits_from": visits_start, "visits_to": visits_finish}, "forecast": forecast, "rows": rows, "age_counts": age_counts, "registrations": registrations, "registration_forecast": registration_forecast})
 
 
 @router.get("/stats/export/excel")

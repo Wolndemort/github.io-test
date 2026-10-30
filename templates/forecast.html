@@ -199,7 +199,7 @@
           <div class="muted">клиентов</div>
         </div>
         <div class="card">
-          <div class="eyebrow">Прогноз выручки</div>
+          <div class="eyebrow">Потенциальная выручка</div>
           <div class="num">
             {{ '%.0f'|format(forecast.projected_revenue) }} ₽
           </div>
@@ -208,6 +208,11 @@
         <div class="card">
           <div class="eyebrow">Средний чек</div>
           <div class="num">{{ '%.0f'|format(forecast.price) }} ₽</div>
+        </div>
+        <div class="card">
+          <div class="eyebrow">Ожидаемая выручка</div>
+          <div class="num">{{ '%.0f'|format(forecast.expected_revenue) }} ₽</div>
+          <div class="muted">вероятность продления: {{ forecast.renewal_rate if forecast.renewal_rate is not none else 'нет данных' }}% · уверенность: {{ forecast.confidence }}</div>
         </div>
         <div class="card">
           <div class="eyebrow">Пиковая выручка</div>
@@ -271,6 +276,13 @@
       <section class="card">
         <div class="eyebrow">Прогноз регистраций за выбранный период</div>
         <div class="scroll"><table class="table"><tr><th>Дата регистрации</th><th>Участник</th><th>Направление</th></tr>{% for item in registrations %}<tr><td>{{ item.date }}</td><td>{{ item.name }}</td><td>{{ item.discipline }}</td></tr>{% else %}<tr><td colspan="3">Регистраций за период нет</td></tr>{% endfor %}</table></div>
+      </section>
+      <section class="card">
+        <div class="eyebrow">Новые клиенты</div>
+        <div class="grid">
+          <div><div class="num">{{ registration_forecast.actual_count|round(0)|int }}</div><div class="muted">факт за период</div></div>
+          <div><div class="num">{{ registration_forecast.forecast_count }}</div><div class="muted">ожидается до конца периода</div></div>
+        </div>
       </section>
       <section class="card queue-card">
         <details open>
