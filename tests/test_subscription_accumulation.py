@@ -75,6 +75,28 @@ async def test_expired_subscription_starts_new_balance_and_period():
 
 
 @pytest.mark.asyncio
+async def test_expired_frozen_subscription_does_not_carry_old_lessons_forward():
+    student = make_student(
+        expire_date=datetime.utcnow() - timedelta(days=1),
+        balance_lessons=2,
+        is_frozen=1,
+        frozen_at=datetime.utcnow() - timedelta(days=8),
+        frozen_days=7,
+    )
+    await add_abon(
+        student_id=1,
+        lessons_count=8,
+        session=make_session(student),
+        club_id=2,
+        club_settings={"disciplines": {"boxing": {"type": "lessons"}}, "features": {"freeze": True}},
+        days_to_add=30,
+        discipline="boxing",
+    )
+
+    assert student.balance_lessons == 8
+
+
+@pytest.mark.asyncio
 async def test_finite_tariff_replaces_existing_unlimited_balance():
     student = make_student(balance_lessons=999)
     await add_abon(
@@ -93,10 +115,10 @@ async def test_finite_tariff_replaces_existing_unlimited_balance():
 @pytest.mark.asyncio
 async def test_two_purchases_while_frozen_extend_existing_date_and_sum_lessons():
     student = make_student(
-        expire_date=datetime(2026, 8, 17, 23, 59, 59),
+        expire_date=datetime.now() + timedelta(days=10),
         balance_lessons=5,
         is_frozen=1,
-        frozen_at=datetime(2026, 7, 30, 12, 0, 0),
+        frozen_at=datetime.now() - timedelta(days=2),
         frozen_days=7,
     )
     settings = {"disciplines": {"boxing": {"type": "lessons"}}, "features": {"freeze": True}}

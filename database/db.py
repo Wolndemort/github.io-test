@@ -697,7 +697,7 @@ async def add_abon(
             student.freeze_days_entitlement = 7
 
         current_expire = student.expire_date
-        was_frozen = bool(student.is_frozen)
+        subscription_continues = bool(current_expire and current_expire > now)
         settlement = settle_advance_debt(student, days_to_add, lessons_count, club_settings)
         # Notification handlers read this in the same SQLAlchemy session after
         # the transaction succeeds; it is never persisted as a model field.
@@ -706,7 +706,7 @@ async def add_abon(
         credited_lessons = 999 if int(lessons_count or 0) == 999 else max(0, int(lessons_count or 0) - settlement["lessons_consumed"])
 
         # Если абонемент еще активен — плюсуем к дате окончания. Если просрочен — отсчет от сегодняшней полночи.
-        if current_expire and current_expire > now:
+        if subscription_continues:
             start_date = current_expire.replace(hour=0, minute=0, second=0, microsecond=0)
         else:
             start_date = now
@@ -726,7 +726,7 @@ async def add_abon(
         if lessons_count == 999:
             student.balance_lessons = 999
         else:
-            if is_lessons_tariff and not was_frozen and not (current_expire and current_expire > now):
+            if is_lessons_tariff and not subscription_continues:
                 student.balance_lessons = credited_lessons
             else:
                 current_balance = student.balance_lessons or 0
