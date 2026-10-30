@@ -1225,7 +1225,7 @@ AEZA API v2 документирован по адресу `https://my.aeza.ru/a
 - `POST /domains/{domainId}/records` — создать TXT `_acme-challenge`;
 - `DELETE /domains/{domainId}/records/{recordId}` — удалить временную TXT-запись.
 
-Авторизация API выполняется заголовком `x-api-key`. Ключ хранится только в production `.env`:
+Авторизация API выполняется заголовком `X-API-Key`. Ключ хранится в отдельном Docker Secret и передаётся только контейнеру `certbot`:
 
 ```dotenv
 AEZA_API_TOKEN=<секрет не коммитить и не передавать в чат>
@@ -1236,11 +1236,27 @@ AEZA_API_TOKEN=<секрет не коммитить и не передават�
 После исправления ключа обязательная проверка:
 
 ```bash
-curl -fsS -H "x-api-key: $AEZA_API_TOKEN" https://my.aeza.ru/api/v2/domains
-docker compose run --rm certbot certonly --manual --preferred-challenges dns \
-  -d speedycrm.ru -d '*.speedycrm.ru'
+curl -fsS -H "X-API-Key: $AEZA_API_TOKEN" https://my.aeza.ru/api/v2/domains
+docker compose run --rm --entrypoint certbot certbot certonly \
+  --non-interactive --agree-tos --manual --preferred-challenges dns \
+  --manual-auth-hook /opt/certbot/hooks/aeza_auth.sh \
+  --manual-cleanup-hook /opt/certbot/hooks/aeza_cleanup.sh \
+  --cert-name speedycrm.ru -d speedycrm.ru -d '*.speedycrm.ru'
 docker compose restart nginx
 openssl x509 -in certbot/conf/live/speedycrm.ru/fullchain.pem -noout -ext subjectAltName
 ```
 
-Финальная автоматизация должна запускать DNS-01 hook, ждать DNS propagation, удалять только созданную им TXT-запись и делать reload nginx после успешного renew. Нельзя удалять чужие `_acme-challenge` записи и нельзя менять DNS вручную на каждом новом клубе.
+Production secret stored in `secrets/aeza_api_token` is ignored by Git and mounted
+only into the certbot container as `/run/secrets/aeza_api_token`. The hooks in
+`scripts/certbot/aeza_dns.py` create and remove only their own temporary TXT
+record, then wait for public DNS propagation before returning to Certbot.
+The hook also waits for the old 300-second DNS cache to expire before the ACME
+validation. The production certificate was successfully issued on 2026-10-30
+with SAN `speedycrm.ru` and `*.speedycrm.ru`, expiring on 2027-01-28.
+The nginx entrypoint watches the certificate checksum and reloads nginx after a
+successful renewal, without mounting the Docker socket.
+
+Автоматизация запускает DNS-01 hook, ждёт DNS propagation, удаляет только
+созданную им TXT-запись и перезагружает nginx после успешного renew. Нельзя
+удалять чужие `_acme-challenge` записи и нельзя менять DNS вручную на каждом
+новом клубе.

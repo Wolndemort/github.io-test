@@ -39,3 +39,5 @@ WEB_MIGRATION_HANDOFF.md
 # Python bytecode and local caches (never commit)
 __pycache__/
 *.py[cod]
+.secrets/
+secrets/
