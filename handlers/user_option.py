@@ -32,6 +32,7 @@ import hmac
 from handlers.states import RegistrationStates, PaymentStates
 from handlers.skud import trigger_dingtian_turnstile
 from services.input_normalization import parse_user_date, normalize_ru_phone
+from services.advance_visits import advance_profile_notice
 
 
 def generate_signature(user_id, time_salt):
@@ -189,7 +190,10 @@ async def universal_profile_handler(
 
             # Баланс занятий
             balance = getattr(s, 'balance_lessons', 0)
-            if balance >= 900:
+            debt_notice = advance_profile_notice(s)
+            if debt_notice:
+                lessons_info = debt_notice
+            elif balance >= 900:
                 lessons_info = "♾️ <b>Безлимит</b>"
             elif balance > 0:
                 lessons_info = f"Баланс занятий: <b>{balance}</b>"

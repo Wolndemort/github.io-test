@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
-from services.advance_visits import advance_preview, record_advance_visit, settle_advance_debt, advance_purchase_warning
+from services.advance_visits import advance_preview, record_advance_visit, settle_advance_debt, advance_purchase_warning, advance_profile_notice
 from services.gate_control import process_athlete_gate_pass
 
 
@@ -65,6 +65,14 @@ def test_purchase_warning_is_human_and_disabled_feature_is_silent():
     assert "4" in advance_purchase_warning(item, settings())
     assert "2" in advance_purchase_warning(item, settings())
     assert advance_purchase_warning(item, settings(enabled=False)) == ""
+
+
+def test_profile_notice_replaces_balance_only_while_debt_exists():
+    assert advance_profile_notice(student()) == ""
+    notice = advance_profile_notice(student(advance_debt_days=4, advance_debt_lessons=2))
+    assert "Посещения в долг: 2" in notice
+    assert "спишется <b>2</b> занятия" in notice
+    assert "учтётся <b>4</b> дня срока" in notice
 
 
 def test_limited_package_leaves_unpaid_debt_and_unlimited_clears_only_days():

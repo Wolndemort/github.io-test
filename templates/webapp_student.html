@@ -35,7 +35,11 @@
 <div class="mono-card">
     <div class="mono-grid-2 student-meta">
         <div class="mono-pill"><div class="label">Абонемент</div><div class="value">{{ student.expire_date.strftime('%d.%m.%Y') if student.expire_date else 'не указан' }}</div></div>
+        {% if student.advance_debt_lessons or student.advance_debt_days %}
+        <div class="mono-pill" style="border-color:#a33"><div class="label">⚠️ Посещения в долг</div><div class="value">{{ student.advance_debt_lessons or 0 }}</div><div class="label">Тариф с занятиями: −{{ student.advance_debt_lessons or 0 }} занятий · Безлимит: −{{ student.advance_debt_days or 0 }} дн. срока</div></div>
+        {% else %}
         <div class="mono-pill"><div class="label">Баланс</div><div class="value">{{ student.balance_lessons if student.balance_lessons is not none else 0 }}</div></div>
+        {% endif %}
         <div class="mono-pill">
             <div class="label">Статус</div>
             <div class="value student-status {% if student.is_frozen %}warn{% elif student.expire_date and student.expire_date > now %}ok{% else %}bad{% endif %}">

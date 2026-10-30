@@ -100,6 +100,30 @@ def advance_debt_snapshot(student) -> dict:
     }
 
 
+def advance_profile_notice(student) -> str:
+    """Compact client-facing debt status; empty until debt actually exists."""
+    debt_days = max(0, int(getattr(student, "advance_debt_days", 0) or 0))
+    debt_lessons = max(0, int(getattr(student, "advance_debt_lessons", 0) or 0))
+    if debt_days <= 0 and debt_lessons <= 0:
+        return ""
+    lesson_word = "занятие" if debt_lessons == 1 else "занятия" if debt_lessons in {2, 3, 4} else "занятий"
+    day_word = "день" if debt_days == 1 else "дня" if debt_days in {2, 3, 4} else "дней"
+    lesson_text = (
+        f"тариф с занятиями — спишется <b>{debt_lessons}</b> "
+        f"{lesson_word}"
+        if debt_lessons > 0 else "тариф с занятиями — долг не сформирован"
+    )
+    unlimited_text = (
+        f"безлимит — учтётся <b>{debt_days}</b> "
+        f"{day_word} срока"
+        if debt_days > 0 else "безлимит — срок не уменьшится"
+    )
+    return (
+        f"⚠️ <b>Посещения в долг: {debt_lessons}</b>\n"
+        f"При покупке нового абонемента: {lesson_text}; {unlimited_text}."
+    )
+
+
 def advance_purchase_warning(student, settings: dict | None, *, html: bool = False) -> str:
     """Explain to a payer that the next purchase will settle an advance debt."""
     if not advance_config(settings)["enabled"]:

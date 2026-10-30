@@ -13,6 +13,7 @@ from admin_module.utils import is_staff_or_owner
 from database.db import User, LegalAcceptance, Student, StudentParent, Club
 from services.audit import audit_event
 from services.legal_documents import legal_documents_enabled
+from services.advance_visits import advance_profile_notice
 
 router = Router()
 
@@ -231,6 +232,9 @@ async def start_handler(
             status = f"🔴 <b>ИСТЕК</b> (<code>{student.expire_date.strftime('%d.%m.%Y')}</code>)"
 
         status_text = f"👤 Атлет: <b>{student.name}</b>\n📊 Статус абонемента: {status}"
+        debt_notice = advance_profile_notice(student)
+        if debt_notice:
+            status_text += f"\n{debt_notice}"
 
         # === ФИКС ТИПОВОЙ ОШИБКИ TYPEERROR ===
         current_user = SimpleNamespace(user_id=user_id, club_id=club.id)

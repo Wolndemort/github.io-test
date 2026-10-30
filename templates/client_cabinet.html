@@ -102,7 +102,7 @@
                 <div>
                     <div class="name">{{ student.name }}</div>
                     <div class="muted">
-                        Баланс: {{ student.balance_lessons if student.balance_lessons is not none else 0 }}
+                        {% if student.advance_debt_lessons or student.advance_debt_days %}⚠️ Долг: {{ student.advance_debt_lessons or 0 }} посещ. · тариф: −{{ student.advance_debt_lessons or 0 }} зан. · безлимит: −{{ student.advance_debt_days or 0 }} дн. срока{% else %}Баланс: {{ student.balance_lessons if student.balance_lessons is not none else 0 }}{% endif %}
                         · Абонемент: {{ student.expire_date.strftime('%d.%m.%Y') if student.expire_date else 'не указан' }}
                         · Бесплатных заморозок: {{ student.can_freeze if student.can_freeze is not none else 0 }}
                     </div>
