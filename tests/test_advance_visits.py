@@ -60,11 +60,15 @@ def test_record_and_settle_debt_consumes_days_and_lessons():
     assert (item.advance_debt_days, item.advance_debt_lessons) == (0, 0)
 
 
-def test_purchase_warning_is_human_and_disabled_feature_is_silent():
+def test_purchase_warning_is_human_and_existing_debt_survives_feature_toggle():
     item = student(advance_debt_days=4, advance_debt_lessons=2)
     assert "4" in advance_purchase_warning(item, settings())
     assert "2" in advance_purchase_warning(item, settings())
-    assert advance_purchase_warning(item, settings(enabled=False)) == ""
+    assert "4" in advance_purchase_warning(item, settings(enabled=False))
+    result = settle_advance_debt(item, 30, 8, settings(enabled=False))
+    assert result["days_consumed"] == 4
+    assert result["lessons_consumed"] == 2
+    assert (item.advance_debt_days, item.advance_debt_lessons) == (0, 0)
 
 
 def test_profile_notice_replaces_balance_only_while_debt_exists():

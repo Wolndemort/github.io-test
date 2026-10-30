@@ -75,11 +75,12 @@ def record_advance_visit(student, now: datetime, settings: dict | None) -> dict:
 
 def settle_advance_debt(student, days_to_add: int, lessons_count: int, settings: dict | None) -> dict:
     """Consume debt from a newly purchased subscription while holding the student lock."""
-    config = advance_config(settings)
     debt_days = max(0, int(getattr(student, "advance_debt_days", 0) or 0))
     debt_lessons = max(0, int(getattr(student, "advance_debt_lessons", 0) or 0))
-    days_consumed = min(debt_days, max(0, int(days_to_add or 0))) if config["enabled"] else 0
-    lessons_consumed = (debt_lessons if int(lessons_count or 0) == 999 else min(debt_lessons, max(0, int(lessons_count or 0)))) if config["enabled"] else 0
+    # Once debt exists it is a real accounting obligation. It must be settled
+    # even if the club later disables creation of new advance visits.
+    days_consumed = min(debt_days, max(0, int(days_to_add or 0)))
+    lessons_consumed = debt_lessons if int(lessons_count or 0) == 999 else min(debt_lessons, max(0, int(lessons_count or 0)))
     student.advance_debt_days = debt_days - days_consumed
     student.advance_debt_lessons = debt_lessons - lessons_consumed
     return {
@@ -126,8 +127,6 @@ def advance_profile_notice(student) -> str:
 
 def advance_purchase_warning(student, settings: dict | None, *, html: bool = False) -> str:
     """Explain to a payer that the next purchase will settle an advance debt."""
-    if not advance_config(settings)["enabled"]:
-        return ""
     debt = advance_debt_snapshot(student)
     if not debt["days"] and not debt["lessons"]:
         return ""
