@@ -212,7 +212,8 @@ if (tg) tg.onEvent('mainButtonClicked', function() {
     }
     const authenticate = () => bm.authenticate({ reason: "Подтвердите личность для прохода" }, (isAuthenticated, biometricToken) => {
         if (isAuthenticated) {
-            fetch('/webapp/open-turnstile', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ student_id: parseInt(selectedStudentId), biometric_token: biometricToken || "verified_by_device", init_data: tg.initData }) })
+            if (!biometricToken) { showError('Telegram не вернул подтверждение Face ID. Попробуйте ещё раз или обратитесь к администратору.'); return; }
+            fetch('/webapp/open-turnstile', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ student_id: parseInt(selectedStudentId), biometric_token: biometricToken, init_data: tg.initData }) })
             .then(res => res.json())
             .then(data => { if (data.success) { tg.showAlert(data.message || "Проход обработан"); setTimeout(() => tg.close(), 1500); } else { tg.showAlert("Не удалось оформить проход: " + data.message); } });
         } else {

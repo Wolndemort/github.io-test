@@ -386,7 +386,7 @@ async def scanner_scan(
         await bot.send_message(club.owner_id, admin_text, parse_mode="HTML")
         for parent_id in await get_student_parent_ids(student_id, session):
             await bot.send_message(parent_id,
-                                   f"❗ <b>{result['club_name']}</b>: {result['student_name']} вошел в зал.",
+                                   f"❗ <b>{result['club_name']}</b>: {result['student_name']} вошел в зал.\n{result['message']}",
                                    parse_mode="HTML")
     finally:
         await bot.session.close()

@@ -870,7 +870,7 @@ async def _handle_qr_scan_data(
     if res["parent_id"]:
         try:
             for parent_id in await get_student_parent_ids(scanned_id, session):
-                await message.bot.send_message(chat_id=parent_id, text=f"❗ <b>{res['club_name']}</b>: {res['student_name']} вошел в зал.", parse_mode="HTML")
+                await message.bot.send_message(chat_id=parent_id, text=f"❗ <b>{res['club_name']}</b>: {res['student_name']} вошел в зал.\n{res['message']}", parse_mode="HTML")
             if res.get("is_was_frozen") and club.owner_id and int(club.owner_id) != int(message.from_user.id):
                 await message.bot.send_message(
                     chat_id=club.owner_id,

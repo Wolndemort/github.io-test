@@ -47,13 +47,18 @@ async def open_webapp_turnstile(payload: BiometricCheckIn, request: Request, db:
     tg_user = verify_telegram_data(payload.init_data, club.bot_token)
     if not tg_user or "id" not in tg_user:
         raise HTTPException(status_code=403, detail="Ошибка безопасности: неверные данные WebApp")
-    if int(tg_user["id"]) not in await get_student_parent_ids(student.id, db):
+    telegram_user_id = int(tg_user["id"])
+    if telegram_user_id not in await get_student_parent_ids(student.id, db):
         raise HTTPException(status_code=403, detail="Доступ запрещён: вы не родитель этого атлета")
-    # Telegram на части клиентов после успешного authenticate() не возвращает
-    # строковый токен. WebApp уже получил подтверждение isAuthenticated=True и
-    # отправляет совместимый маркер verified_by_device. Нельзя отклонять такой
-    # проход: иначе клиентский Face ID ломается, тогда как staff-pass работает.
-    if not payload.biometric_token:
+    biometric_enabled = await db.scalar(
+        select(User.is_biometric_enabled).where(User.user_id == telegram_user_id)
+    )
+    if not biometric_enabled:
+        raise HTTPException(status_code=403, detail="Сначала активируйте Face ID на этом устройстве")
+    # Наличие строки нельзя считать доказательством Face ID: старый клиент
+    # отправлял маркер ``verified_by_device``, который можно подделать вручную.
+    # Telegram должен вернуть непустой реальный токен authenticate().
+    if not payload.biometric_token or payload.biometric_token == "verified_by_device":
         raise HTTPException(status_code=403, detail="Для прохода обязательно подтверждение Face ID")
     # Доступ к этому endpoint уже подтверждён валидным Telegram init_data,
     # а результат Face ID приходит из Telegram WebApp callback. Флаг
@@ -71,7 +76,7 @@ async def open_webapp_turnstile(payload: BiometricCheckIn, request: Request, db:
             bots_dict = getattr(request.app.state, "bots_dict", {})
             bot = bots_dict.get(club.bot_token)
             if bot:
-                notice = f"🔔 <b>{club.name}</b>: {res['student_name']} вошёл в зал (Face ID/WebApp)."
+                notice = f"🔔 <b>{club.name}</b>: {res['student_name']} вошёл в зал (Face ID/WebApp).\n{res['message']}"
                 for parent_id in await get_student_parent_ids(student.id, db):
                     await bot.send_message(chat_id=parent_id, text=notice, parse_mode="HTML")
                 if club.owner_id and int(club.owner_id) != int(tg_user["id"]):

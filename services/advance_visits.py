@@ -6,14 +6,40 @@ from datetime import datetime
 
 DEFAULT_MAX_DEBT_DAYS = 15
 DEFAULT_MAX_DEBT_LESSONS = 7
+MAX_DEBT_DAYS = 3650
+MAX_DEBT_LESSONS = 999
+
+
+def _safe_int(value, default: int, minimum: int, maximum: int) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError, OverflowError):
+        parsed = default
+    return max(minimum, min(maximum, parsed))
+
+
+def _safe_bool(value, default: bool = False) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off", ""}:
+            return False
+    return default
 
 
 def advance_config(settings: dict | None) -> dict:
-    raw = (settings or {}).get("limits", {}).get("advance_visits", {}) or {}
+    settings = settings if isinstance(settings, dict) else {}
+    limits = settings.get("limits", {})
+    limits = limits if isinstance(limits, dict) else {}
+    raw = limits.get("advance_visits", {})
+    raw = raw if isinstance(raw, dict) else {}
     return {
-        "enabled": bool(raw.get("enabled", False)),
-        "max_debt_days": max(0, int(raw.get("max_debt_days", DEFAULT_MAX_DEBT_DAYS) or DEFAULT_MAX_DEBT_DAYS)),
-        "max_debt_lessons": max(0, int(raw.get("max_debt_lessons", DEFAULT_MAX_DEBT_LESSONS) or DEFAULT_MAX_DEBT_LESSONS)),
+        "enabled": _safe_bool(raw.get("enabled", False)),
+        "max_debt_days": _safe_int(raw.get("max_debt_days"), DEFAULT_MAX_DEBT_DAYS, 0, MAX_DEBT_DAYS),
+        "max_debt_lessons": _safe_int(raw.get("max_debt_lessons"), DEFAULT_MAX_DEBT_LESSONS, 0, MAX_DEBT_LESSONS),
     }
 
 

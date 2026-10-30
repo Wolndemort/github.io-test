@@ -1,10 +1,28 @@
 import logging
 from datetime import datetime, timedelta, timezone
-from sqlalchemy import select
+from html import escape
+from sqlalchemy import or_, select
 from database.db import Student, Club, VisitLog  # Сверь пути импорта под свой проект
 
 logger = logging.getLogger(__name__)
 from services.advance_visits import advance_preview, record_advance_visit
+
+
+async def _latest_real_visit(db, student):
+    """Read the source-of-truth visit while keeping legacy test doubles safe."""
+    scalar = getattr(db, "scalar", None)
+    if scalar is None:
+        return getattr(student, "last_visit", None)
+    return await scalar(
+        select(VisitLog.visited_at)
+        .where(
+            VisitLog.student_id == student.id,
+            VisitLog.club_id == student.club_id,
+            or_(VisitLog.source.is_(None), VisitLog.source != "repeat"),
+        )
+        .order_by(VisitLog.visited_at.desc())
+        .limit(1)
+    ) or getattr(student, "last_visit", None)
 
 
 async def process_athlete_gate_pass(
@@ -48,13 +66,14 @@ async def process_athlete_gate_pass(
 
     # Строго наивное UTC-время сервера для Postgres
     now_naive = datetime.now(timezone.utc).replace(tzinfo=None)
-    student_name = str(student.name)
+    student_name = escape(str(student.name))
+    last_real_visit = await _latest_real_visit(db, student)
 
     # 2. АНТИ-СПАМ (Защита от флуда тапов)
     # 2. АНТИ-СПАМ (Защита от флуда тапов)
     # ИСПРАВЛЕНО: Защита от дефолтных пустых значений у новых пользователей
-    if student.last_visit is not None:
-        last_visit_naive = student.last_visit.replace(tzinfo=None)
+    if last_real_visit is not None:
+        last_visit_naive = last_real_visit.replace(tzinfo=None)
 
         # Если время визита из будущего или равно стартовой эпохе (баг инициализации БД), пропускаем
         if last_visit_naive.year > 2000:
@@ -91,8 +110,8 @@ async def process_athlete_gate_pass(
     # 4. КОНТРОЛЬ СЕССИИ (Таймаут из JSONB)
     timeout_minutes = club_settings.get("limits", {}).get("session_timeout_minutes", 150)
     is_inside_session = False
-    if student.last_visit:
-        last_visit_naive = student.last_visit.replace(tzinfo=None)
+    if last_real_visit:
+        last_visit_naive = last_real_visit.replace(tzinfo=None)
         if timedelta(0) <= now_naive - last_visit_naive < timedelta(minutes=timeout_minutes):
             is_inside_session = True
 
@@ -120,7 +139,7 @@ async def process_athlete_gate_pass(
     if is_advance_visit:
         message_text = f"РђРІРђРќРЎРћР’Р«Р™ РџР РћРҐРћР” РїРѕСЃР»Рµ РѕРєРѕРЅС‡Р°РЅРёСЏ Р°Р±РѕРЅРµРјРµРЅС‚Р°. РќР°РєРѕРїР»РµРЅРѕ: {advance['debt_days']} РґРЅ. / {advance['debt_lessons']} Р·Р°РЅ. Р”РѕР»Рі Р±СѓРґРµС‚ СЃРїРёСЃР°РЅ РїСЂРё РїРѕРєСѓРїРє РЅРѕРІРѕРіРѕ Р°Р±РѕРЅРµРјРµРЅС‚Р°."
     elif is_inside_session:
-        visit_moscow = student.last_visit.replace(tzinfo=None) + timedelta(hours=3)
+        visit_moscow = last_real_visit.replace(tzinfo=None) + timedelta(hours=3)
         session_end = visit_moscow + timedelta(minutes=timeout_minutes)
         session_end_str = session_end.strftime("%H:%M")
         message_text = f"Повторный проход. Сессия активна до {session_end_str}."

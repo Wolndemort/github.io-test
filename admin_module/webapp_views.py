@@ -41,6 +41,7 @@ from services.audit import audit_event
 from services.broadcast import broadcast_recipients_for_student_search, resolve_broadcast_recipients
 from services.delivery import claim_once, forget, mark_once, release_claim, telegram_call, telegram_pace
 from services.surveys import _matches_filters, send_survey_to_students
+from services.advance_visits import advance_config
 from services.analytics import is_subscription_active, reporting_periods
 from services.legal_documents import legal_context, legal_documents_enabled, validate_legal_data
 from services.platform_legal import platform_legal_context
@@ -376,18 +377,20 @@ async def admin_advance_visits_page(
     session: AsyncSession = Depends(get_session),
 ):
     club = await session.get(Club, club_id)
+    if not init_data:
+        return telegram_init_gate('/webapp/admin-advance-visits', club_id, 'Откройте авансовые посещения из Telegram')
     tg_user = await verify_webapp_staff(club, init_data, session, "cash_sale")
     if int(tg_user.get("id", 0)) != int(club.owner_id or 0) and int(tg_user.get("id", 0)) not in SUPER_ADMIN_IDS:
         raise HTTPException(status_code=403, detail="Только владелец клуба может менять настройки авансовых посещений")
     settings = club.club_settings if isinstance(club.club_settings, dict) else {}
-    config = (settings.get("limits", {}) or {}).get("advance_visits", {}) or {}
+    config = advance_config(settings)
     debtors = (await session.scalars(select(Student).where(
         Student.club_id == club_id,
         (Student.advance_debt_days > 0) | (Student.advance_debt_lessons > 0),
     ).order_by(Student.name))).all()
     return templates.TemplateResponse("admin_advance_visits.html", {
         "request": request, "club_id": club_id, "init_data": init_data or "",
-        "config": {"enabled": bool(config.get("enabled", False)), "max_debt_days": int(config.get("max_debt_days", 15) or 15), "max_debt_lessons": int(config.get("max_debt_lessons", 7) or 7)},
+        "config": config,
         "debtors": debtors,
     })
 
@@ -413,11 +416,11 @@ async def save_admin_advance_visits(
         locked = (await session.execute(select(Club).where(Club.id == club_id).with_for_update())).scalar_one()
         settings = copy.deepcopy(locked.club_settings or {})
         limits = settings.setdefault("limits", {})
-        limits["advance_visits"] = {
-            "enabled": bool(payload.get("enabled", False)),
-            "max_debt_days": max(1, min(3650, int(payload.get("max_debt_days", 15)))),
-            "max_debt_lessons": max(1, min(999, int(payload.get("max_debt_lessons", 7)))),
-        }
+        limits["advance_visits"] = advance_config({"limits": {"advance_visits": {
+            "enabled": payload.get("enabled", False),
+            "max_debt_days": payload.get("max_debt_days", 15),
+            "max_debt_lessons": payload.get("max_debt_lessons", 7),
+        }}})
         locked.club_settings = settings
         await session.commit()
         redis = getattr(request.app.state, "redis_client", None)
@@ -496,7 +499,12 @@ async def admin_surveys_send_now(
         elif mode == "filters":
             now = reporting_periods()["local_now"].replace(tzinfo=None)
             students = (await session.scalars(select(Student).where(Student.club_id == club_id))).all()
-            selected_ids = [student.id for student in students if (await _matches_filters(session, club, student, survey, now))[0]]
+            latest_visits = dict((await session.execute(
+                select(VisitLog.student_id, func.max(VisitLog.visited_at))
+                .where(VisitLog.club_id == club_id)
+                .group_by(VisitLog.student_id)
+            )).all())
+            selected_ids = [student.id for student in students if (await _matches_filters(session, club, student, survey, now, latest_visits))[0]]
         else:
             try:
                 selected_ids = list(dict.fromkeys(int(value) for value in json.loads(student_ids)))

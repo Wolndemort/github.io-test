@@ -5,12 +5,12 @@ from html import escape
 
 from aiogram import types
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 
 from database.db import (
     AsyncSessionLocal, Club, PaymentOrder, Student, Survey, SurveyDelivery,
-    SurveyQuestion, get_student_parent_ids,
+    SurveyQuestion, VisitLog, get_student_parent_ids,
 )
 from services.analytics import reporting_periods
 from services.audit import audit_event
@@ -21,8 +21,20 @@ from services.delivery import telegram_call, telegram_pace
 CONFIRMED_STATUSES = ("CONFIRMED", "SUCCEEDED", "PAID")
 
 
-def _last_activity(student: Student) -> datetime | None:
-    value = student.last_visit or student.created_at
+async def _last_activity(session, student: Student) -> datetime | None:
+    """Return a real visit date, not the nullable Student cache.
+
+    ``Student.last_visit`` is a legacy/cache field and is empty for many
+    existing athletes.  ``VisitLog`` is the source of truth for inactivity;
+    creating a student must never count as a visit.
+    """
+    value = await session.scalar(
+        select(VisitLog.visited_at)
+        .where(VisitLog.student_id == student.id, VisitLog.club_id == student.club_id)
+        .order_by(VisitLog.visited_at.desc())
+        .limit(1)
+    )
+    value = value or student.last_visit
     return value.replace(tzinfo=None) if value else None
 
 
@@ -55,9 +67,13 @@ async def _purchased_tariff_keys(session, club: Club, student: Student) -> set[s
     return keys
 
 
-async def _matches_filters(session, club: Club, student: Student, survey: Survey, today: datetime) -> tuple[bool, str]:
+async def _matches_filters(
+    session, club: Club, student: Student, survey: Survey, today: datetime,
+    activity_by_student: dict[int, datetime] | None = None,
+) -> tuple[bool, str]:
     filters = survey.filters or {}
-    activity = _last_activity(student)
+    activity = activity_by_student.get(student.id) if activity_by_student is not None else await _last_activity(session, student)
+    activity = activity or student.last_visit
     if not activity:
         return False, "no_activity"
     inactive_days = max(0, (today.date() - activity.date()).days)
@@ -103,13 +119,18 @@ async def send_scheduled_surveys() -> None:
             if not bot:
                 continue
             students = (await session.scalars(select(Student).where(Student.club_id == club.id))).all()
+            latest_visits = dict((await session.execute(
+                select(VisitLog.student_id, func.max(VisitLog.visited_at))
+                .where(VisitLog.club_id == club.id)
+                .group_by(VisitLog.student_id)
+            )).all())
             questions = (await session.scalars(
                 select(SurveyQuestion).where(SurveyQuestion.survey_id == survey.id).order_by(SurveyQuestion.position)
             )).all()
             if not questions:
                 continue
             for student in students:
-                matches, cycle_key = await _matches_filters(session, club, student, survey, now)
+                matches, cycle_key = await _matches_filters(session, club, student, survey, now, latest_visits)
                 if not matches:
                     continue
                 for recipient_id in await get_student_parent_ids(student.id, session):
