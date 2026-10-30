@@ -36,6 +36,7 @@ def test_admin_and_coach_have_explicit_qr_entry_and_permission():
 def test_qr_scanner_stays_open_until_explicit_stop():
     page = (ROOT / "templates/scanner.html").read_text(encoding="utf-8")
     assert "scanner.start" in page
+    assert "facingMode: 'user'" in page
     assert "scanner.stop" in page
     assert "tg?.close();" in page
     assert "document.getElementById('stop').onclick" in page

@@ -56,13 +56,13 @@
       status.className = ''; status.textContent = 'Запрашиваем доступ к камере…';
       try {
         try {
-          await Promise.race([scanner.start({ facingMode: 'environment' }, config, onScanSuccess), timeout(10000)]);
+          await Promise.race([scanner.start({ facingMode: 'user' }, config, onScanSuccess), timeout(10000)]);
         } catch (primaryError) {
           try { await scanner.stop(); } catch (_) {}
           const cameras = await Promise.race([Html5Qrcode.getCameras(), timeout(8000)]);
           if (!cameras?.length) throw primaryError;
-          const rear = cameras.find(camera => /back|rear|environment|задн/i.test(camera.label || '')) || cameras[0];
-          await Promise.race([scanner.start(rear.id, config, onScanSuccess), timeout(10000)]);
+          const front = cameras.find(camera => /front|user|facetime|перед/i.test(camera.label || '')) || cameras[0];
+          await Promise.race([scanner.start(front.id, config, onScanSuccess), timeout(10000)]);
         }
         status.textContent = 'Наведите камеру на QR-код';
       } catch (error) {
