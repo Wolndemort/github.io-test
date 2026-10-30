@@ -35,7 +35,7 @@ from handlers import start, user_option, buttons, payments, admin_option, super_
 from handlers.surveys import router as surveys_router
 from handlers.buttons import get_profile_keyboard
 from services.bot_registry import bots_dict, register_existing_bots, close_all_bots
-from services.scheduler_jobs import saas_daily_morning_check, check_abon_mailing, send_onboarding_reminders, send_daily_report_to_admins, send_backup_to_admin, send_work_schedule_notice, send_stock_reminder_notice, expire_student_freezes, send_discount_reminders
+from services.scheduler_jobs import saas_daily_morning_check, check_abon_mailing, send_onboarding_reminders, send_daily_report_to_admins, send_backup_to_admin, send_work_schedule_notice, send_stock_reminder_notice, send_advance_debt_morning_notice, expire_student_freezes, send_discount_reminders
 from services.surveys import send_scheduled_surveys
 from services.scheduler_jobs import send_club_subscription_expiry_reminders
 from services.saas_billing import process_saas_auto_renewals
@@ -125,6 +125,7 @@ async def lifespan(app: FastAPI):
 
     # Утренний блок (10:00) — Проверка ДР, прогульщиков и рассылка по абонементам
     scheduler.add_job(saas_daily_morning_check, 'cron', hour=10, minute=0, id="daily_morning_notifications", replace_existing=True, coalesce=True, max_instances=1, misfire_grace_time=3600)
+    scheduler.add_job(send_advance_debt_morning_notice, 'cron', hour=8, minute=30, id="advance_debt_morning_warning", replace_existing=True, coalesce=True, max_instances=1, misfire_grace_time=3600)
     # Вторую массовую рассылку запускаем после напоминаний о датах рождения.
     scheduler.add_job(check_abon_mailing, 'cron', hour=10, minute=5, id="expiring_pass_notifications", replace_existing=True, coalesce=True, max_instances=1, misfire_grace_time=3600)
     scheduler.add_job(send_onboarding_reminders, 'cron', hour=10, minute=10, id="onboarding_retention_notifications", replace_existing=True, coalesce=True, max_instances=1, misfire_grace_time=3600)

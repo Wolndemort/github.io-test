@@ -36,6 +36,7 @@ from services.order_notifications import notify_stock_reminders
 from services.analytics import calculate_admin_dashboard, calculate_daily_business_report, reporting_periods, is_subscription_active
 from services.bot_registry import bots_dict
 from services.audit import audit_event
+from services.advance_visits import advance_config
 
 MOSCOW_TZ = ZoneInfo("Europe/Moscow")
 
@@ -352,6 +353,69 @@ async def send_stock_reminder_notice(bucket: str):
             except Exception as exc:
                 await _notification_forget(reminder_key)
                 logger.error("Не удалось отправить напоминание по складу club=%s: %s", club.id, exc)
+
+
+def _format_advance_debt_notice(club_name: str, students: list[Student]) -> str:
+    lines = [
+        "🚨 <b>УТРЕННЕЕ ПРЕДУПРЕЖДЕНИЕ: посещения в долг</b>",
+        f"🏟 <b>{escape(club_name)}</b>",
+        "",
+        "Перед открытием смены проверьте должников:",
+    ]
+    for student in students:
+        expired = student.expire_date.strftime("%d.%m.%Y") if student.expire_date else "дата не указана"
+        debt_days = max(0, int(student.advance_debt_days or 0))
+        debt_lessons = max(0, int(student.advance_debt_lessons or 0))
+        lines.append(
+            f"• <b>{escape(student.name)}</b> — <b>{debt_lessons}</b> "
+            f"посещ. в долг · долг <b>{debt_days} дн.</b> · абонемент истёк {expired}"
+        )
+    lines.extend([
+        "",
+        "⚠️ Новый абонемент сначала погасит этот долг. Учитывайте это при продаже.",
+    ])
+    return "\n".join(lines)
+
+
+async def send_advance_debt_morning_notice() -> None:
+    """Send the opening-shift warning to the owner, managers and cashiers."""
+    periods = reporting_periods()
+    today = periods["local_now"].date().isoformat()
+    async with AsyncSessionLocal() as session:
+        clubs = (await session.execute(select(Club).where(Club.subscription_expire_at >= periods["now"]))).scalars().all()
+        for club in clubs:
+            settings = club.club_settings if isinstance(club.club_settings, dict) else {}
+            if not advance_config(settings)["enabled"] or not club.bot_token:
+                continue
+            bot = bots_dict.get(club.bot_token)
+            if not bot:
+                continue
+            debtors = list((await session.execute(
+                select(Student).where(
+                    Student.club_id == club.id,
+                    (Student.advance_debt_lessons > 0) | (Student.advance_debt_days > 0),
+                ).order_by(Student.advance_debt_lessons.desc(), Student.name.asc())
+            )).scalars().all())
+            if not debtors:
+                continue
+            staff_ids = await session.execute(select(ClubStaff.telegram_id).where(
+                ClubStaff.club_id == club.id,
+                ClubStaff.is_active.is_(True),
+                ClubStaff.role.in_(["manager", "cashier"]),
+            ))
+            recipients = {int(club.owner_id)} if club.owner_id else set()
+            recipients.update(int(staff_id) for staff_id in staff_ids.scalars().all() if staff_id)
+            text = _format_advance_debt_notice(club.name or "Клуб", debtors)
+            for recipient_id in recipients:
+                notification_key = f"notify:advance-debt:{club.id}:{today}:{recipient_id}"
+                if not await _notification_once(notification_key, ttl=48 * 3600):
+                    continue
+                try:
+                    await bot.send_message(chat_id=recipient_id, text=text, parse_mode="HTML")
+                    await asyncio.sleep(0.03)
+                except Exception as exc:
+                    await _notification_forget(notification_key)
+                    logger.warning("Не удалось отправить предупреждение о долгах club=%s chat=%s: %s", club.id, recipient_id, exc)
 
 
 async def send_work_schedule_notice(mode: str):
