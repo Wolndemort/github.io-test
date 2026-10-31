@@ -69,6 +69,10 @@ async def super_admin_main(
         web_app=types.WebAppInfo(url=f"{BASE_URL.rstrip('/')}/platform/privacy"),
     ))
     builder.row(types.InlineKeyboardButton(
+        text="✅ Согласие на обработку данных",
+        web_app=types.WebAppInfo(url=f"{BASE_URL.rstrip('/')}/platform/consent"),
+    ))
+    builder.row(types.InlineKeyboardButton(
         text="📜 Оферта для клубов",
         web_app=types.WebAppInfo(url=f"{BASE_URL.rstrip('/')}/platform/oferta"),
     ))

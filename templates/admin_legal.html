@@ -6,16 +6,19 @@
 <section class="mono-card" style="padding:16px">
   <div id="status" class="muted" style="margin-bottom:12px">Эти реквизиты принадлежат клубу и используются только для документов этого клуба.</div>
   <p style="margin:0 0 14px">Проверить отображение: <a href="/privacy?club_id={{ club_id }}" target="_blank" rel="noopener">Политика конфиденциальности</a> · <a href="/oferta?club_id={{ club_id }}" target="_blank" rel="noopener">Публичная оферта</a></p>
-  <p style="margin:0 0 14px">Документы платформы: <a href="/platform/privacy" target="_blank" rel="noopener">Политика SpeedyCRM</a> · <a href="/platform/oferta" target="_blank" rel="noopener">Оферта для клубов</a></p>
+  <p style="margin:0 0 14px">Документы платформы: <a href="/platform/privacy" target="_blank" rel="noopener">Политика SpeedyCRM</a> · <a href="/platform/consent" target="_blank" rel="noopener">Согласие на обработку данных</a> · <a href="/platform/oferta" target="_blank" rel="noopener">Оферта для клубов</a></p>
   <div style="display:grid;gap:10px">
-    {% for field, label in [("provider_name", "Полное наименование"), ("provider_type", "Форма: ИП/ООО/самозанятый"), ("inn", "ИНН"), ("ogrn", "ОГРН/ОГРНИП"), ("legal_address", "Юридический адрес"), ("club_address", "Адрес клуба"), ("email", "Email"), ("phone", "Телефон"), ("updated_at", "Дата редакции"), ("privacy_operator", "Оператор персональных данных")] %}
+    {% for field, label in [("provider_name", "Полное наименование"), ("provider_type", "Форма: ИП/ООО/самозанятый"), ("inn", "ИНН"), ("ogrn", "ОГРН/ОГРНИП"), ("legal_address", "Юридический адрес"), ("club_address", "Адрес клуба"), ("email", "Email"), ("phone", "Телефон"), ("privacy_operator", "Оператор персональных данных")] %}
     <label style="display:grid;gap:4px;font-size:12px;color:#777">{{ label }}<input data-field="{{ field }}" list="{{ 'providerTypes' if field == 'provider_type' else '' }}" value="{{ legal.get(field, '')|e }}" style="padding:10px;border:1px solid #444;border-radius:8px"></label>
     {% endfor %}
-    <label style="display:grid;gap:4px;font-size:12px;color:#777">Версия документов <input id="documentVersion" value="{{ legal.get('document_version', '1.0')|e }}" placeholder="Например: 1.0" style="padding:10px;border:1px solid #444;border-radius:8px"><small>Изменяйте при существенной редакции текста.</small></label>
+    <label style="display:grid;gap:4px;font-size:12px;color:#777">Версия документов <input id="documentVersion" data-field="document_version" value="{{ legal.get('document_version', '1.0')|e }}" placeholder="Например: 1.0" style="padding:10px;border:1px solid #444;border-radius:8px"><small>Изменяйте при существенной редакции текста.</small></label>
+    <label style="display:grid;gap:4px;font-size:12px;color:#777">Текст политики клуба <textarea data-field="privacy_text" maxlength="20000" rows="8" placeholder="Если заполнить, этот текст будет показан вместо базовой политики клуба.">{{ legal.get('privacy_text', '')|e }}</textarea></label>
+    <label style="display:grid;gap:4px;font-size:12px;color:#777">Текст оферты клуба <textarea data-field="offer_text" maxlength="20000" rows="8" placeholder="Если заполнить, этот текст будет показан вместо базовой оферты клуба.">{{ legal.get('offer_text', '')|e }}</textarea></label>
     <p class="muted" style="margin:0">Последнее сохранение: {{ legal.get('updated_at') or 'ещё не сохранялось' }}. Дата проставляется сервером автоматически.</p>
     <datalist id="providerTypes"><option value="ИП"><option value="ООО"><option value="Самозанятый"><option value="Физическое лицо"></datalist>
-    <label style="display:flex;gap:8px;align-items:center"><input id="legal-enabled" type="checkbox" {% if legal.get('enabled', False) %}checked{% endif %}> Публиковать юридические документы и запрашивать согласие при /start</label>
-    <button class="mono-action" id="toggle-legal" type="button" onclick="toggleLegal()"></button>
+    <label style="display:flex;gap:8px;align-items:center"><input id="privacy-enabled" data-doc-toggle="privacy" type="checkbox" {% if legal.get('privacy_enabled', legal.get('enabled', False)) %}checked{% endif %}> Публиковать политику конфиденциальности</label>
+    <label style="display:flex;gap:8px;align-items:center"><input id="offer-enabled" data-doc-toggle="offer" type="checkbox" {% if legal.get('offer_enabled', legal.get('enabled', False)) %}checked{% endif %}> Публиковать публичную оферту</label>
+    <input id="legal-enabled" type="hidden" value="1">
     <button class="mono-action" type="button" onclick="saveLegal()">Сохранить</button>
     <button class="mono-action" type="button" onclick="deleteLegal()" style="color:#a33">Удалить все реквизиты</button>
   </div>
@@ -23,12 +26,8 @@
 <script>
 const tg=window.Telegram?.WebApp; tg?.ready(); tg?.expand();
 const statusEl=document.getElementById('status');
-const legalEnabled=document.getElementById('legal-enabled');
-const toggleLegalButton=document.getElementById('toggle-legal');
-function refreshLegalToggle(){toggleLegalButton.textContent=legalEnabled.checked?'Отключить публикацию':'Включить публикацию';}
-function toggleLegal(){legalEnabled.checked=!legalEnabled.checked;refreshLegalToggle();saveLegal();}
-legalEnabled.addEventListener('change',refreshLegalToggle); refreshLegalToggle();
-async function send(path){const body={init_data:tg?.initData||'',enabled:document.getElementById('legal-enabled').checked};document.querySelectorAll('[data-field]').forEach(x=>body[x.dataset.field]=x.value);const r=await fetch(path+'?club_id={{ club_id }}',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const d=await r.json();if(!r.ok)throw new Error(d.detail||'Не удалось сохранить');return d}
+function toggleLegal(){saveLegal();}
+async function send(path){const body={init_data:tg?.initData||'',enabled:true,privacy_enabled:document.getElementById('privacy-enabled').checked,offer_enabled:document.getElementById('offer-enabled').checked};document.querySelectorAll('[data-field]').forEach(x=>body[x.dataset.field]=x.value);const r=await fetch(path+'?club_id={{ club_id }}',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const d=await r.json();if(!r.ok)throw new Error(d.detail||'Не удалось сохранить');return d}
 async function saveLegal(){try{await send('/webapp/admin-legal/save');statusEl.textContent='Сохранено';}catch(e){statusEl.textContent=e.message}}
 async function deleteLegal(){if(!confirm('Удалить все юридические реквизиты этого клуба?'))return;try{await send('/webapp/admin-legal/delete');document.querySelectorAll('[data-field]').forEach(x=>x.value='');statusEl.textContent='Реквизиты удалены, используются значения по умолчанию.'}catch(e){statusEl.textContent=e.message}}
 </script>

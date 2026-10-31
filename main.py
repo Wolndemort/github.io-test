@@ -11,6 +11,7 @@ from services.analytics import calculate_daily_business_report, calculate_admin_
 from datetime import timedelta, time, timezone
 from zoneinfo import ZoneInfo
 import logging as logging
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from database.db import Subscription, PaymentOrder, User
 import sys
 try:
@@ -54,6 +55,36 @@ logger.add('logs/bot_log.log', rotation='1 MB', retention='10 days', compression
 logger = logging.getLogger("uvicorn.error")
 
 
+class _SensitiveAccessLogFilter(logging.Filter):
+    """Remove Telegram initData and credentials from uvicorn access logs."""
+
+    _sensitive = {"init_data", "token", "api_key", "x-api-key"}
+
+    def filter(self, record):
+        args = getattr(record, "args", ())
+        if isinstance(args, tuple) and len(args) >= 3 and isinstance(args[2], str):
+            parts = urlsplit(args[2])
+            if parts.query:
+                clean_query = urlencode(
+                    [(key, "[REDACTED]" if key.casefold() in self._sensitive else value)
+                    for key, value in parse_qsl(parts.query, keep_blank_values=True)
+                    ]
+                )
+                updated = list(args)
+                updated[2] = urlunsplit((parts.scheme, parts.netloc, parts.path, clean_query, parts.fragment))
+                record.args = tuple(updated)
+        return True
+
+
+def _install_sensitive_access_log_filter():
+    access_logger = logging.getLogger("uvicorn.access")
+    if not any(isinstance(item, _SensitiveAccessLogFilter) for item in access_logger.filters):
+        access_logger.addFilter(_SensitiveAccessLogFilter())
+
+
+_install_sensitive_access_log_filter()
+
+
 def _scrub_sentry_event(event, hint):
     """Do not send Telegram initData or credentials to Sentry."""
     request = event.get("request")
@@ -89,6 +120,9 @@ BASE_URL = "https://speedycrm.ru"
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Uvicorn may install its handlers after module import; install again at
+    # startup so init_data can never appear in production access logs.
+    _install_sensitive_access_log_filter()
     # --- ЭТО БЫВШИЙ STARTUP ---
     logger.info("🚀 Инициализация системы SaaS Webhooks...")
     await init_db()

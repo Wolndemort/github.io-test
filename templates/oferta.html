@@ -58,6 +58,9 @@
 <body class="mono-theme">
     <main class="container">
         <h1>Публичная оферта</h1>
+        {% if offer_text %}
+        <div style="white-space:pre-wrap">{{ offer_text|e|replace('\n', '<br>')|safe }}</div>
+        {% else %}
         <p><strong>Исполнитель:</strong> {{ provider_type }} {{ provider_name }}</p>
         <p><strong>ИНН:</strong> {{ inn }} · <strong>ОГРН/ОГРНИП:</strong> {{ ogrn }}</p>
         <p><strong>Юридический адрес:</strong> {{ legal_address }}</p>
@@ -106,6 +109,7 @@
 
         <h2>8. Контакты</h2>
         <p>Email для связи по всем вопросам: <strong>{{ email }}</strong><br>Телефон: <strong>{{ phone }}</strong></p>
+        {% endif %}
     </main>
 
     <script>

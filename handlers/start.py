@@ -12,7 +12,7 @@ from handlers.buttons import admin_keyboard, get_profile_keyboard
 from admin_module.utils import is_staff_or_owner
 from database.db import User, LegalAcceptance, Student, StudentParent, Club
 from services.audit import audit_event
-from services.legal_documents import legal_documents_enabled
+from services.legal_documents import legal_acceptance_version, legal_document_enabled, legal_documents_enabled
 from services.advance_visits import advance_profile_notice
 
 router = Router()
@@ -109,19 +109,22 @@ async def start_handler(
     # 2. ПРОВЕРКА ЮРИДИЧЕСКОГО СОГЛАСИЯ
     legal_accepted = False
     if legal_documents_enabled(club_settings):
-        legal_accepted = bool(await session.scalar(
-            select(LegalAcceptance.id).where(
+        current_legal_version = legal_acceptance_version(club_settings)
+        accepted_version = await session.scalar(
+            select(LegalAcceptance.document_version).where(
                 LegalAcceptance.user_id == user_id,
                 LegalAcceptance.club_id == club.id,
             )
-        ))
+        )
+        # A changed club document version requires fresh acceptance.
+        legal_accepted = accepted_version == current_legal_version
         # Preserve legacy acceptance only for the legacy user's own club;
         # never carry a global acceptance into another club.
-        if not legal_accepted and db_user.is_accepted and db_user.club_id == club.id:
+        if accepted_version is None and db_user.is_accepted and db_user.club_id == club.id:
             session.add(LegalAcceptance(
                 user_id=user_id,
                 club_id=club.id,
-                document_version=str((club_settings.get("legal") or {}).get("document_version") or "1.0"),
+                document_version=current_legal_version,
             ))
             await session.commit()
             legal_accepted = True
@@ -130,14 +133,16 @@ async def start_handler(
         base_url = f"https://{club_id}.speedycrm.ru"
 
         inline_builder = InlineKeyboardBuilder()
-        inline_builder.row(types.InlineKeyboardButton(
-            text="📄  Политика конфиденциальности",
-            web_app=types.WebAppInfo(url=f"{base_url}/privacy")
-        ))
-        inline_builder.row(types.InlineKeyboardButton(
-            text="📜 Публичная оферта",
-            web_app=types.WebAppInfo(url=f"{base_url}/oferta")
-        ))
+        if legal_document_enabled(club_settings, "privacy"):
+            inline_builder.row(types.InlineKeyboardButton(
+                text="📄  Политика конфиденциальности",
+                web_app=types.WebAppInfo(url=f"{base_url}/privacy")
+            ))
+        if legal_document_enabled(club_settings, "offer"):
+            inline_builder.row(types.InlineKeyboardButton(
+                text="📜 Публичная оферта",
+                web_app=types.WebAppInfo(url=f"{base_url}/oferta")
+            ))
         inline_builder.row(types.InlineKeyboardButton(
             text="✅ Принять и продолжить",
             callback_data="accept_legal_rules"
@@ -322,11 +327,13 @@ async def accept_legal_handler(
             session.add(LegalAcceptance(
                 user_id=user_id,
                 club_id=club.id,
-                document_version=str((club_settings.get("legal") or {}).get("document_version") or "1.0"),
+                document_version=legal_acceptance_version(club_settings),
             ))
         # Keep the old column updated for compatibility with old tooling; it
         # is no longer used as the club-scoped authorization decision.
-        await session.execute(update(User).where(User.user_id == user_id).values(is_accepted=True))
+        await session.execute(
+            update(User).where(User.user_id == user_id, User.club_id == club.id).values(is_accepted=True)
+        )
         await session.commit()
 
         # 2. Уведомление и удаление сообщения с офертой

@@ -39,7 +39,7 @@ from services.staff_permissions import staff_can, permissions_for_staff
 from services.analytics import is_subscription_active
 from services.discounts import active_discount, active_discounts, apply_discount, apply_discounts
 from services.advance_visits import advance_preview, advance_purchase_warning, advance_debt_snapshot
-from services.legal_documents import legal_documents_enabled
+from services.legal_documents import legal_document_enabled, legal_documents_enabled
 from middlewares.db_saas_midleware import SUPER_ADMIN_IDS
 
 
@@ -622,6 +622,8 @@ async def get_client_cabinet_page(request: Request, club_id: int, init_data: str
             "user_name": (user.full_name if user else None) or tg_user.get("first_name", ""),
             "profile_discount": profile_discount,
             "legal_enabled": legal_documents_enabled(settings),
+            "privacy_enabled": legal_document_enabled(settings, "privacy"),
+            "offer_enabled": legal_document_enabled(settings, "offer"),
             "turnstile_enabled": turnstile_enabled(settings),
             "freeze_enabled": bool(settings.get("features", {}).get("freeze", True)),
             "now": datetime.now(),

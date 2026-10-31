@@ -44,7 +44,7 @@ from services.delivery import claim_once, forget, mark_once, release_claim, tele
 from services.surveys import _matches_filters, send_survey_to_students
 from services.advance_visits import advance_config
 from services.analytics import is_subscription_active, reporting_periods
-from services.legal_documents import legal_context, legal_documents_enabled, validate_legal_data
+from services.legal_documents import legal_context, legal_document_enabled, legal_documents_enabled, validate_legal_data
 from services.platform_legal import platform_legal_context
 from admin_module.api import audit_actor_context
 from admin_module.api import (
@@ -2219,7 +2219,9 @@ async def get_privacy_page(request: Request, session: AsyncSession = Depends(get
     """РЎС‚СЂР°РЅРёС†Р° РїРѕР»РёС‚РёРєРё РєРѕРЅС„РёРґРµРЅС†РёР°Р»СЊРЅРѕСЃС‚Рё РґР»СЏ WebApp"""
     club_id = get_club_id_from_host(request)
     club = (await session.execute(select(Club).where(Club.id == club_id))).scalar_one_or_none() if club_id else None
-    if club and not legal_documents_enabled(club.club_settings):
+    if not club:
+        raise HTTPException(status_code=404, detail="Клуб для юридических документов не найден")
+    if not legal_document_enabled(club.club_settings, "privacy"):
         raise HTTPException(status_code=404, detail="Юридические документы отключены клубом")
     return templates.TemplateResponse("privacy.html", {"request": request, **legal_context(club)})
 
@@ -2229,7 +2231,9 @@ async def get_oferta_page(request: Request, session: AsyncSession = Depends(get_
     """РЎС‚СЂР°РЅРёС†Р° РїСѓР±Р»РёС‡РЅРѕР№ РѕС„РµСЂС‚С‹ РґР»СЏ WebApp"""
     club_id = get_club_id_from_host(request)
     club = (await session.execute(select(Club).where(Club.id == club_id))).scalar_one_or_none() if club_id else None
-    if club and not legal_documents_enabled(club.club_settings):
+    if not club:
+        raise HTTPException(status_code=404, detail="Клуб для юридических документов не найден")
+    if not legal_document_enabled(club.club_settings, "offer"):
         raise HTTPException(status_code=404, detail="Юридические документы отключены клубом")
     return templates.TemplateResponse("oferta.html", {"request": request, **legal_context(club)})
 
@@ -2237,6 +2241,24 @@ async def get_oferta_page(request: Request, session: AsyncSession = Depends(get_
 @router.get("/platform-oferta", response_class=HTMLResponse)
 async def get_platform_oferta_page(request: Request):
     """Immutable SaaS license offer for club owners."""
+    return templates.TemplateResponse("platform_oferta.html", {"request": request, **platform_legal_context()})
+
+
+@router.get("/platform/privacy", response_class=HTMLResponse)
+async def get_platform_privacy_page(request: Request):
+    """Public platform privacy policy used by the super-admin flow."""
+    return templates.TemplateResponse("platform_privacy.html", {"request": request, **platform_legal_context()})
+
+
+@router.get("/platform/consent", response_class=HTMLResponse)
+async def get_platform_consent_page(request: Request):
+    """Static platform consent for club owners and administrators."""
+    return templates.TemplateResponse("platform_consent.html", {"request": request, **platform_legal_context()})
+
+
+@router.get("/platform/oferta", response_class=HTMLResponse)
+async def get_platform_oferta_alias(request: Request):
+    """Stable alias for links issued by the super-admin flow."""
     return templates.TemplateResponse("platform_oferta.html", {"request": request, **platform_legal_context()})
 
 
@@ -2259,18 +2281,20 @@ async def save_admin_legal(request: Request, club_id: int = Query(...), session:
     club = (await session.execute(select(Club).where(Club.id == club_id).with_for_update())).scalar_one()
     if not isinstance(payload.get("enabled", True), bool):
         raise HTTPException(status_code=400, detail="Поле публикации должно быть логическим")
-    fields = ("provider_name", "provider_type", "inn", "ogrn", "legal_address", "club_address", "email", "phone", "document_version", "privacy_operator")
-    allowed = {"init_data", "enabled", *fields}
+    fields = ("provider_name", "provider_type", "inn", "ogrn", "legal_address", "club_address", "email", "phone", "document_version", "privacy_operator", "privacy_text", "offer_text")
+    allowed = {"init_data", "enabled", "privacy_enabled", "offer_enabled", *fields}
     if set(payload) - allowed:
         raise HTTPException(status_code=400, detail="Передано неизвестное поле юридических документов")
     settings = dict(club.club_settings or {})
-    fields = ("provider_name", "provider_type", "inn", "ogrn", "legal_address", "club_address", "email", "phone", "document_version", "updated_at", "privacy_operator")
+    fields = ("provider_name", "provider_type", "inn", "ogrn", "legal_address", "club_address", "email", "phone", "document_version", "updated_at", "privacy_operator", "privacy_text", "offer_text")
     legal = {field: str(payload.get(field, "") or "").strip()[:500] for field in fields}
     provider_types = {"ип": "ИП", "ооо": "ООО", "самозанятый": "Самозанятый", "физическое лицо": "Физическое лицо"}
     legal["provider_type"] = provider_types.get(legal["provider_type"].casefold(), legal["provider_type"])
     legal["document_version"] = legal["document_version"] or "1.0"
     legal["updated_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
-    legal["enabled"] = bool(payload.get("enabled", True))
+    legal["privacy_enabled"] = bool(payload.get("privacy_enabled", payload.get("enabled", True)))
+    legal["offer_enabled"] = bool(payload.get("offer_enabled", payload.get("enabled", True)))
+    legal["enabled"] = legal["privacy_enabled"] or legal["offer_enabled"]
     # platform_name belongs to the immutable SaaS offer, never to the club form
     legal.pop("platform_name", None)
     if legal["enabled"]:

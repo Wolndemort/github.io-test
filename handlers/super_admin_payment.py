@@ -61,6 +61,12 @@ async def show_pay_menu(callback: types.CallbackQuery):
         text="📄 Оферта SaaS-лицензии", url=f"{BASE_URL.rstrip('/')}/platform-oferta")
     )
     builder.row(types.InlineKeyboardButton(
+        text="📄 Политика платформы", url=f"{BASE_URL.rstrip('/')}/platform/privacy")
+    )
+    builder.row(types.InlineKeyboardButton(
+        text="✅ Согласие на обработку данных", url=f"{BASE_URL.rstrip('/')}/platform/consent")
+    )
+    builder.row(types.InlineKeyboardButton(
         text="⬅️ Назад в админку", callback_data="admin")
     )
     builder.adjust(1)
@@ -121,6 +127,8 @@ async def send_subscription_invoice(callback: types.CallbackQuery, club: "Club",
     await callback.message.answer(
         f"Оплата лицензии клуба «{club.name}» на {days} дней: {price_amount / 100:.0f} ₽.",
         reply_markup=types.InlineKeyboardMarkup(inline_keyboard=[
+            [types.InlineKeyboardButton(text="📄 Политика платформы", url=f"{BASE_URL.rstrip('/')}/platform/privacy")],
+            [types.InlineKeyboardButton(text="✅ Согласие на обработку данных", url=f"{BASE_URL.rstrip('/')}/platform/consent")],
             [types.InlineKeyboardButton(text="📄 Оферта SaaS-лицензии", url=f"{BASE_URL.rstrip('/')}/platform-oferta")],
             [types.InlineKeyboardButton(text="💳 Перейти к официальной оплате", url=result["PaymentURL"])],
             [types.InlineKeyboardButton(text="↩️ Назад", callback_data="admin")],
