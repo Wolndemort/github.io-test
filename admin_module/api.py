@@ -278,7 +278,9 @@ def _student_age(student: Student) -> int | None:
 def _tariff_age_error(student: Student, tariff: dict, discipline_name: str) -> str | None:
     min_age = max(0, int(tariff.get("min_age", 0) or 0))
     age = _student_age(student)
-    if min_age <= 0 or age is None or age >= min_age:
+    if age is None:
+        return "⚠️ Укажите дату рождения атлета перед покупкой абонемента."
+    if min_age <= 0 or age >= min_age:
         return None
     return (
         f"⚠️ <b>Доступ ограничен по возрасту!</b>\n\n"
@@ -1034,7 +1036,7 @@ async def admin_update_student(
         student.balance_lessons = payload.balance_lessons
     if payload.birthday is not None:
         if payload.birthday == "":
-            student.birthday = None
+            raise HTTPException(status_code=400, detail="Дата рождения атлета обязательна")
         else:
             try:
                 birthday = parse_user_date(payload.birthday)
@@ -1323,6 +1325,9 @@ async def admin_create_student(
                 birthday = parse_user_date(payload.birthday)
         except ValueError:
             raise HTTPException(status_code=400, detail="Некорректная дата рождения")
+
+    if birthday is None:
+        raise HTTPException(status_code=400, detail="Дата рождения атлета обязательна")
 
     name = payload.name.strip()
     phone_key = _student_identity_phone(payload.phone)

@@ -45,7 +45,7 @@ async def accrue_finished_lessons(now: datetime | None = None) -> int:
             day_start = datetime.combine(today, datetime.min.time(), tzinfo=MOSCOW).astimezone(timezone.utc).replace(tzinfo=None)
             day_end = datetime.combine(today + timedelta(days=1), datetime.min.time(), tzinfo=MOSCOW).astimezone(timezone.utc).replace(tzinfo=None)
             visit_rows = (await session.execute(
-                select(VisitLog, Student.discipline).join(Student, Student.id == VisitLog.student_id).where(
+                select(VisitLog, Student.discipline, Student.birthday).join(Student, Student.id == VisitLog.student_id).where(
                     VisitLog.club_id == club.id, VisitLog.visited_at >= day_start, VisitLog.visited_at < day_end,
                 )
             )).all()
@@ -53,10 +53,10 @@ async def accrue_finished_lessons(now: datetime | None = None) -> int:
             early_minutes = max(0, min(240, int(motivation.get("early_entry_minutes", 60) or 60)))
             late_minutes = max(0, min(15, int(motivation.get("late_entry_minutes", 15) or 15)))
             assignments = {}
-            for visit, discipline in visit_rows:
+            for visit, discipline, birthday in visit_rows:
                 if str(visit.source or "").strip().lower() == "repeat":
                     continue
-                lesson = nearest_lesson_for_visit(visit.visited_at, lessons, discipline, early_minutes=early_minutes, late_minutes=late_minutes)
+                lesson = nearest_lesson_for_visit(visit.visited_at, lessons, discipline, birthday, early_minutes=early_minutes, late_minutes=late_minutes)
                 if lesson:
                     assignments[visit.id] = lesson
             for lesson in lessons:
@@ -67,7 +67,7 @@ async def accrue_finished_lessons(now: datetime | None = None) -> int:
                 occurrence_key = f"{club.id}:{today.isoformat()}:{lesson['discipline']}:{lesson['index']}:{time_text}"
                 if await session.scalar(select(MotivationAccrual.id).where(MotivationAccrual.occurrence_key == occurrence_key)):
                     continue
-                student_ids = {visit.student_id for visit, discipline in visit_rows if discipline == lesson["discipline"] and assignments.get(visit.id) is lesson}
+                student_ids = {visit.student_id for visit, discipline, birthday in visit_rows if discipline == lesson["discipline"] and assignments.get(visit.id) is lesson}
                 rule = _rules_for(lesson, len(student_ids))
                 if not rule:
                     continue

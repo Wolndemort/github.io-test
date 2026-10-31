@@ -208,7 +208,9 @@ async def process_kids_limit(
         # Тянем актуальные данные ребенка из Postgres
         student_res = await session.execute(select(Student).where(Student.id == student_id))
         student = student_res.scalar_one_or_none()
-        if student and student.birthday:
+        if student:
+            if not student.birthday:
+                return await callback.answer("Укажите дату рождения атлета перед покупкой абонемента.", show_alert=True)
             today = date.today()
             # Честный расчет возраста ребенка в годах с учетом месяца и дня рождения
             student_age = today.year - student.birthday.year - (

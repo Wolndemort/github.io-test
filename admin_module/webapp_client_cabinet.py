@@ -100,7 +100,9 @@ def _student_age(student: Student) -> int | None:
 def _tariff_age_error(student: Student, tariff: dict, discipline_name: str) -> str | None:
     min_age = max(0, int(tariff.get("min_age", 0) or 0))
     age = _student_age(student)
-    if min_age <= 0 or age is None or age >= min_age:
+    if age is None:
+        return "⚠️ Укажите дату рождения атлета перед покупкой абонемента."
+    if min_age <= 0 or age >= min_age:
         return None
     return (
         f"⚠️ <b>Доступ ограничен по возрасту!</b>\n\n"
@@ -688,6 +690,8 @@ async def webapp_create_student_submit(payload: WebAppCreateStudentPayload, db: 
             birthday = parse_user_date(payload.birthday)
         except ValueError:
             raise HTTPException(status_code=400, detail="Некорректная дата рождения")
+    if birthday is None:
+        raise HTTPException(status_code=400, detail="Дата рождения атлета обязательна")
     existing = (await db.execute(select(Student).where(Student.club_id == club.id, Student.parent_id == user_id))).scalars().all()
     duplicate = next((student for student in existing if student.name.strip().casefold() == name.casefold() and student.birthday == birthday), None)
     if duplicate:

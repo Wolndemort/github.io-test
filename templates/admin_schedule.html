@@ -114,6 +114,9 @@ button,.copy-btn{background:#fff!important;color:#090909!important;font-weight:7
   <div class="row">
     <input id="time" placeholder="18:00" autocomplete="off">
     <input id="duration" type="number" min="15" max="240" value="60" placeholder="Длительность, мин.">
+    <label><input id="ageRestriction" type="checkbox"> Возрастная группа</label>
+    <input id="ageMin" type="number" min="0" max="100" placeholder="Возраст от">
+    <input id="ageMax" type="number" min="0" max="100" placeholder="Возраст до">
     <input id="coach" placeholder="Информация" autocomplete="off">
   </div>
   <button id="saveBtn" type="button">Добавить</button>
@@ -144,6 +147,9 @@ const daySelect = document.getElementById('day');
 const list = document.getElementById('list');
 const timeInput = document.getElementById('time');
 const durationInput = document.getElementById('duration');
+const ageRestrictionInput = document.getElementById('ageRestriction');
+const ageMinInput = document.getElementById('ageMin');
+const ageMaxInput = document.getElementById('ageMax');
 const effectiveDateInput = document.getElementById('effectiveDate');
 const coachInput = document.getElementById('coach');
 const coachStaffInput = document.getElementById('coachStaff');
@@ -223,7 +229,7 @@ function render() {
         <div class="card lesson">
           <div class="meta">
             <div class="title"><strong>${x.time || '00:00'}</strong> — ${lessonComment(x) || 'Без комментария'}</div>
-            <div class="sub">${x.duration_minutes || x.duration || 60} мин. · ${x.max_slots ? `Лимит: ${x.max_slots}` : 'Без лимита'}${assignedTrainerNames(x).length ? ` · Тренер: ${assignedTrainerNames(x).join(', ')}` : ''}</div>
+            <div class="sub">${x.duration_minutes || x.duration || 60} мин. · ${x.max_slots ? `Лимит: ${x.max_slots}` : 'Без лимита'}${x.age_restriction_enabled ? ` · Возраст: ${x.age_min}–${x.age_max ?? '∞'} лет` : ' · Возраст без ограничений'}${assignedTrainerNames(x).length ? ` · Тренер: ${assignedTrainerNames(x).join(', ')}` : ''}</div>
           </div>
           <div class="actions">
             <button type="button" onclick="edit(${i})">Изменить</button>
@@ -242,6 +248,9 @@ function edit(i) {
   idx = i;
   timeInput.value = x.time || '';
   durationInput.value = x.duration_minutes || x.duration || 60;
+  ageRestrictionInput.checked = Boolean(x.age_restriction_enabled);
+  ageMinInput.value = x.age_min ?? '';
+  ageMaxInput.value = x.age_max ?? '';
   coachInput.value = lessonComment(x);
   if (coachStaffInput) [...coachStaffInput.options].forEach(option => option.selected = (x.coach_staff_ids || (x.coach_staff_id ? [x.coach_staff_id] : [])).includes(Number(option.value)));
   saveBtn.textContent = 'Сохранить';
@@ -256,7 +265,7 @@ async function send(action, extra = {}) {
     day: daySelect.value,
     index: idx,
     effective_date: effectiveDateInput.value,
-    lesson: action === 'copy_day' ? null : { time: timeInput.value, coach: coachInput.value, duration_minutes: Number(durationInput.value || 60) },
+    lesson: action === 'copy_day' ? null : { time: timeInput.value, coach: coachInput.value, duration_minutes: Number(durationInput.value || 60), age_restriction_enabled: ageRestrictionInput.checked, age_min: ageMinInput.value === '' ? 0 : Number(ageMinInput.value), age_max: ageMaxInput.value === '' ? null : Number(ageMaxInput.value) },
     coach_staff_ids: coachStaffInput ? [...coachStaffInput.selectedOptions].map(option => Number(option.value)) : null,
     ...extra,
   };

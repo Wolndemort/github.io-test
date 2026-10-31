@@ -39,6 +39,19 @@ def normalize_schedule_block(schedule_data) -> dict[str, list[dict]]:
                 normalized_lesson["motivation_rules"] = [
                     dict(rule) for rule in raw_rules if isinstance(rule, dict)
                 ]
+            if "age_restriction_enabled" in lesson or "age_min" in lesson or "age_max" in lesson:
+                normalized_lesson["age_restriction_enabled"] = bool(lesson.get("age_restriction_enabled", False))
+                try:
+                    age_min = max(0, int(lesson.get("age_min", 0) or 0))
+                except (TypeError, ValueError):
+                    age_min = 0
+                raw_age_max = lesson.get("age_max")
+                try:
+                    age_max = None if raw_age_max in (None, "") else max(age_min, int(raw_age_max))
+                except (TypeError, ValueError):
+                    age_max = None
+                normalized_lesson["age_min"] = age_min
+                normalized_lesson["age_max"] = age_max
             if "duration_minutes" in lesson or "duration" in lesson:
                 raw_duration = lesson.get("duration_minutes", lesson.get("duration", 60))
                 try:

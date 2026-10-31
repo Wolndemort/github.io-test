@@ -66,6 +66,8 @@ async def process_athlete_gate_pass(
     student = student_res.scalar_one_or_none()
     if not student:
         return {"success": False, "message": "Атлет не найден в базе данных."}
+    if hasattr(student, "birthday") and not student.birthday:
+        return {"success": False, "message": "Укажите дату рождения атлета в профиле перед проходом."}
 
     # QR/WebApp запрос должен работать только внутри клуба, из которого он пришёл.
     if expected_club_id is not None and student.club_id != expected_club_id:

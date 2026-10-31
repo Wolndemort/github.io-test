@@ -1,4 +1,5 @@
 import os
+from services.age_rules import age_matches, age_on
 from services.schedule_utils import normalize_schedule_block
 from services.motivation_schedule import motivation_bonus, nearest_lesson_for_visit, occurrence_ended, remember_schedule_change, schedule_versions, visit_matches_lesson
 
@@ -24,6 +25,14 @@ def test_schedule_normalizer_preserves_multiple_coaches():
 def test_schedule_normalizer_preserves_motivation_rules_when_schedule_is_saved():
     schedule = normalize_schedule_block({"mon": [{"time": "18:00", "motivation_rules": [{"min_students": 1, "max_students": 10, "rate_kopecks": 500}]}]})
     assert schedule["mon"][0]["motivation_rules"][0]["rate_kopecks"] == 500
+
+
+def test_age_is_calculated_from_birthday_on_the_visit_date():
+    birthday = date(2014, 9, 10)
+    assert age_on(birthday, date(2026, 9, 9)) == 11
+    assert age_on(birthday, date(2026, 9, 10)) == 12
+    assert age_matches(birthday, date(2026, 9, 10), enabled=True, minimum=12, maximum=13)
+    assert not age_matches(None, date(2026, 9, 10), enabled=True, minimum=12, maximum=13)
 
 
 def test_occurrences_create_one_payable_row_per_assigned_coach():
@@ -52,9 +61,17 @@ def test_nearest_same_discipline_lesson_wins_over_a_later_lesson():
         {"date": date(2026, 9, 3), "time": "18:00", "duration_minutes": 60, "discipline": "jiu_jitsu"},
         {"date": date(2026, 9, 3), "time": "17:00", "duration_minutes": 60, "discipline": "boxing"},
     ]
-    selected = nearest_lesson_for_visit(datetime(2026, 9, 3, 14, 18), lessons, "jiu_jitsu")
+    selected = nearest_lesson_for_visit(datetime(2026, 9, 3, 14, 18), lessons, "jiu_jitsu", date(2014, 9, 3))
     assert selected["time"] == "17:00"
     assert nearest_lesson_for_visit(datetime(2026, 9, 3, 12, 0), lessons, "jiu_jitsu") is None
+
+
+def test_nearest_lesson_rejects_age_mismatch_and_missing_birthday():
+    lessons = [{"date": date(2026, 9, 3), "time": "17:00", "duration_minutes": 60, "discipline": "jiu_jitsu", "age_restriction_enabled": True, "age_min": 6, "age_max": 9}]
+    visit = datetime(2026, 9, 3, 14, 10)
+    assert nearest_lesson_for_visit(visit, lessons, "jiu_jitsu", date(2018, 9, 3)) is not None
+    assert nearest_lesson_for_visit(visit, lessons, "jiu_jitsu", date(2014, 9, 3)) is None
+    assert nearest_lesson_for_visit(visit, lessons, "jiu_jitsu", None) is None
 
 
 def test_visit_window_accepts_a_fifteen_minute_late_entry_by_default():

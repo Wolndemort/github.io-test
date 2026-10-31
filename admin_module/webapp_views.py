@@ -1938,6 +1938,16 @@ async def change_admin_schedule(payload: ScheduleChangePayload, session: AsyncSe
         }
         if previous_lesson.get("motivation_rules") is not None:
             item["motivation_rules"] = copy.deepcopy(previous_lesson["motivation_rules"])
+        age_enabled = bool(lesson.get("age_restriction_enabled", previous_lesson.get("age_restriction_enabled", False)))
+        try:
+            age_min = int(lesson.get("age_min", previous_lesson.get("age_min", 0)) or 0)
+            raw_age_max = lesson.get("age_max", previous_lesson.get("age_max"))
+            age_max = None if raw_age_max in (None, "") else int(raw_age_max)
+        except (TypeError, ValueError):
+            raise HTTPException(400, "Возраст должен быть указан целыми годами")
+        if age_min < 0 or age_min > 100 or (age_max is not None and (age_max < age_min or age_max > 100)):
+            raise HTTPException(400, "Некорректный возрастной диапазон")
+        item.update({"age_restriction_enabled": age_enabled, "age_min": age_min, "age_max": age_max})
         selected_staff_ids = payload.coach_staff_ids if payload.coach_staff_ids is not None else ([payload.coach_staff_id] if payload.coach_staff_id is not None else None)
         if selected_staff_ids is not None:
             if not is_admin:
@@ -1977,8 +1987,19 @@ async def change_admin_schedule(payload: ScheduleChangePayload, session: AsyncSe
         left_end = left_start + int(left.get("duration_minutes", 60) or 60)
         for right in normalized_lessons[left_index + 1:]:
             right_start = int(right["time"][:2]) * 60 + int(right["time"][3:5])
-            if right_start < left_end:
-                raise HTTPException(409, "У одной дисциплины есть пересекающиеся занятия; укажите разное время")
+            right_end = right_start + int(right.get("duration_minutes", 60) or 60)
+            time_overlaps = right_start < left_end and left_start < right_end
+            left_restricted = bool(left.get("age_restriction_enabled"))
+            right_restricted = bool(right.get("age_restriction_enabled"))
+            left_max = left.get("age_max")
+            right_max = right.get("age_max")
+            ages_overlap = not (
+                left_restricted and right_restricted
+                and left_max is not None and right_max is not None
+                and (int(left_max) < int(right.get("age_min", 0) or 0) or int(right_max) < int(left.get("age_min", 0) or 0))
+            )
+            if time_overlaps and ages_overlap:
+                raise HTTPException(409, "У одной дисциплины пересекаются время и возрастные группы")
     lessons.sort(key=lambda x: str(x.get("time", "99:99")))
     schedule[payload.day] = lessons; block["schedule"] = schedule; disciplines[payload.discipline] = block; settings["disciplines"] = disciplines
     _remember_motivation_schedule_change(settings, previous_disciplines, disciplines, effective_date)

@@ -5,6 +5,7 @@ from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from services.schedule_utils import normalize_schedule_block
+from services.age_rules import age_matches
 
 MOTIVATION_WEEKDAYS = {"mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5, "sun": 6}
 MOTIVATION_TZ = ZoneInfo("Europe/Moscow")
@@ -101,6 +102,9 @@ def scheduled_lessons(settings, day):
                 "time": str(lesson.get("time", ""))[:5],
                 "duration_minutes": max(15, min(240, int(lesson.get("duration_minutes", 60) or 60))),
                 "motivation_rules": lesson.get("motivation_rules") or [],
+                "age_restriction_enabled": bool(lesson.get("age_restriction_enabled", False)),
+                "age_min": int(lesson.get("age_min", 0) or 0),
+                "age_max": lesson.get("age_max"),
             })
     return result
 
@@ -137,11 +141,18 @@ def lesson_visit_distance(visit_at, lesson):
     return abs((visit_at.astimezone(MOTIVATION_TZ) - lesson_start(lesson)).total_seconds())
 
 
-def nearest_lesson_for_visit(visit_at, lessons, discipline, *, early_minutes=60, late_minutes=15):
+def nearest_lesson_for_visit(visit_at, lessons, discipline, birthday=None, *, early_minutes=60, late_minutes=15):
+    if visit_at and visit_at.tzinfo is None:
+        visit_date = visit_at.replace(tzinfo=timezone.utc).astimezone(MOTIVATION_TZ).date()
+    elif visit_at:
+        visit_date = visit_at.astimezone(MOTIVATION_TZ).date()
+    else:
+        visit_date = date.today()
     candidates = [
         lesson for lesson in lessons
         if lesson.get("discipline") == discipline
         and visit_matches_lesson(visit_at, lesson, early_minutes=early_minutes, late_minutes=late_minutes)
+        and age_matches(birthday, visit_date, enabled=lesson.get("age_restriction_enabled", False), minimum=lesson.get("age_min", 0), maximum=lesson.get("age_max"))
     ]
     return min(candidates, key=lambda lesson: lesson_visit_distance(visit_at, lesson)) if candidates else None
 
