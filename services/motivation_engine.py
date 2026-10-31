@@ -7,6 +7,7 @@ from sqlalchemy import select
 
 from database.db import AsyncSessionLocal, Club, ClubStaff, MotivationAccrual, Student, VisitLog
 from services.bot_registry import bots_dict
+from services.motivation_schedule import lesson_duration, lesson_start, lesson_visit_distance, scheduled_lessons, visit_matches_lesson
 
 MOSCOW = ZoneInfo("Europe/Moscow")
 DAY_KEYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
@@ -29,6 +30,64 @@ def _rules_for(lesson: dict, student_count: int) -> dict | None:
 
 
 async def accrue_finished_lessons(now: datetime | None = None) -> int:
+    """Accrue only completed scheduled lessons from unique gate visits."""
+    now_local = (now or datetime.now(MOSCOW)).astimezone(MOSCOW)
+    today = now_local.date()
+    added = 0
+    created_items = []
+    async with AsyncSessionLocal() as session:
+        clubs = (await session.execute(select(Club).where(Club.subscription_expire_at >= datetime.now(timezone.utc).replace(tzinfo=None)))).scalars().all()
+        for club in clubs:
+            settings = club.club_settings if isinstance(club.club_settings, dict) else {}
+            lessons = scheduled_lessons(settings, today)
+            if not lessons:
+                continue
+            day_start = datetime.combine(today, datetime.min.time(), tzinfo=MOSCOW).astimezone(timezone.utc).replace(tzinfo=None)
+            day_end = datetime.combine(today + timedelta(days=1), datetime.min.time(), tzinfo=MOSCOW).astimezone(timezone.utc).replace(tzinfo=None)
+            visit_rows = (await session.execute(
+                select(VisitLog, Student.discipline).join(Student, Student.id == VisitLog.student_id).where(
+                    VisitLog.club_id == club.id, VisitLog.visited_at >= day_start, VisitLog.visited_at < day_end,
+                )
+            )).all()
+            motivation = settings.get("motivation") if isinstance(settings.get("motivation"), dict) else {}
+            early_minutes = max(0, min(240, int(motivation.get("early_entry_minutes", 60) or 60)))
+            late_minutes = max(0, min(60, int(motivation.get("late_entry_minutes", 20) or 20)))
+            assignments = {}
+            for visit, discipline in visit_rows:
+                if str(visit.source or "").strip().lower() == "repeat":
+                    continue
+                candidates = [lesson for lesson in lessons if lesson["discipline"] == discipline and visit_matches_lesson(visit.visited_at, lesson, early_minutes=early_minutes, late_minutes=late_minutes)]
+                if candidates:
+                    assignments[visit.id] = min(candidates, key=lambda item: lesson_visit_distance(visit.visited_at, item))
+            for lesson in lessons:
+                started = lesson_start(lesson)
+                if now_local < started + timedelta(minutes=lesson_duration(lesson)) or not lesson["staff_ids"]:
+                    continue
+                time_text = lesson["time"]
+                occurrence_key = f"{club.id}:{today.isoformat()}:{lesson['discipline']}:{lesson['index']}:{time_text}"
+                if await session.scalar(select(MotivationAccrual.id).where(MotivationAccrual.occurrence_key == occurrence_key)):
+                    continue
+                student_ids = {visit.student_id for visit, discipline in visit_rows if discipline == lesson["discipline"] and assignments.get(visit.id) is lesson}
+                rule = _rules_for(lesson, len(student_ids))
+                if not rule:
+                    continue
+                accrual = MotivationAccrual(
+                    club_id=club.id, discipline=lesson["discipline"], occurrence_key=occurrence_key,
+                    occurrence_date=today, start_time=time_text, student_count=len(student_ids),
+                    rule_min_students=int(rule["min_students"]), rule_max_students=int(rule["max_students"]),
+                    rate_kopecks=int(rule["rate_kopecks"]), staff_ids=lesson["staff_ids"],
+                )
+                session.add(accrual)
+                staff_rows = (await session.execute(select(ClubStaff).where(ClubStaff.club_id == club.id, ClubStaff.id.in_(lesson["staff_ids"])))).scalars().all()
+                created_items.append((club, accrual, staff_rows, now_local))
+                added += 1
+        await session.commit()
+        for club, accrual, staff_rows, created_at in created_items:
+            await _notify_accrual(session, club, accrual, staff_rows, created_at)
+    return added
+
+
+async def _legacy_accrue_finished_lessons(now: datetime | None = None) -> int:
     now_local = (now or datetime.now(MOSCOW)).astimezone(MOSCOW)
     today = now_local.date()
     weekday = DAY_KEYS[today.weekday()]
@@ -91,6 +150,16 @@ async def motivation_accrual_job():
 
 
 def _next_training(club, staff_id: int, after: datetime) -> str | None:
+    settings = club.club_settings if isinstance(club.club_settings, dict) else {}
+    for offset in range(1, 15):
+        day = (after + timedelta(days=offset)).date()
+        for lesson in scheduled_lessons(settings, day):
+            if staff_id in lesson["staff_ids"]:
+                return f"{day.strftime('%d.%m')} в {lesson['time']} · {lesson['discipline']}"
+    return None
+
+
+def _legacy_next_training(club, staff_id: int, after: datetime) -> str | None:
     settings = club.club_settings if isinstance(club.club_settings, dict) else {}
     day_keys = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
     for offset in range(1, 15):

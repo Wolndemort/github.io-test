@@ -65,6 +65,7 @@ from services.motivation_schedule import (
     motivation_bonus as _fixed_motivation_bonus,
     motivation_occurrences as _motivation_occurrences,
     occurrence_ended as _motivation_occurrence_ended,
+    visit_matches_lesson as _motivation_visit_matches_lesson,
     remember_schedule_change as _remember_motivation_schedule_change,
 )
 from middlewares.db_saas_midleware import SUPER_ADMIN_IDS
@@ -108,18 +109,18 @@ def _attendee_count(visit_rows, occurrence):
         hour, minute = (int(x) for x in occurrence["time"].split(":", 1))
     except (ValueError, AttributeError):
         return 0
-    slot_minutes = hour * 60 + minute
     students = set()
+    lesson = dict(occurrence)
+    lesson["date"] = occurrence["date"]
     for visit, discipline in visit_rows:
+        if str(getattr(visit, "source", "") or "").strip().lower() == "repeat":
+            continue
         if str(discipline or "") != str(occurrence["discipline"]):
             continue
         visited = visit.visited_at
         if not visited or _motivation_local_date(visited) != occurrence["date"]:
             continue
-        local_visited = visited.replace(tzinfo=timezone.utc).astimezone(_MOTIVATION_TZ) if visited.tzinfo is None else visited.astimezone(_MOTIVATION_TZ)
-        duration = max(15, min(240, int(occurrence.get("duration_minutes", 60) or 60)))
-        visit_minutes = local_visited.hour * 60 + local_visited.minute
-        if slot_minutes - 60 <= visit_minutes <= slot_minutes + duration + 60:
+        if _motivation_visit_matches_lesson(visited, lesson, early_minutes=60, late_minutes=20):
             students.add(visit.student_id)
     return len(students)
 

@@ -1,6 +1,6 @@
 import os
 from services.schedule_utils import normalize_schedule_block
-from services.motivation_schedule import motivation_bonus, occurrence_ended, remember_schedule_change, schedule_versions
+from services.motivation_schedule import motivation_bonus, occurrence_ended, remember_schedule_change, schedule_versions, visit_matches_lesson
 
 os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
 
@@ -31,6 +31,17 @@ def test_occurrence_ends_after_start_plus_duration():
     occurrence = {"date": date(2026, 9, 3), "time": "18:00", "duration_minutes": 90}
     assert occurrence_ended(occurrence, datetime(2026, 9, 3, 19, 29)) is False
     assert occurrence_ended(occurrence, datetime(2026, 9, 3, 19, 31)) is True
+
+
+def test_visit_window_uses_duration_and_twenty_minute_late_limit():
+    lesson = {"date": date(2026, 9, 3), "time": "18:00", "duration_minutes": 90}
+    assert visit_matches_lesson(datetime(2026, 9, 3, 15, 0), lesson) is True  # 18:00 MSK
+    assert visit_matches_lesson(datetime(2026, 9, 3, 16, 51), lesson) is False  # 19:51 MSK
+
+
+def test_visit_window_rejects_repeat_is_handled_by_engine_contract():
+    lesson = {"date": date(2026, 9, 3), "time": "18:00", "duration_minutes": 60}
+    assert visit_matches_lesson(datetime(2026, 9, 3, 16, 20), lesson) is True
 
 
 def test_schedule_history_uses_old_snapshot_before_change_and_new_after_change():
@@ -64,6 +75,13 @@ def test_attendee_count_deduplicates_student_and_uses_moscow_time():
     rows = [(visit, "boxing"), (visit, "boxing")]
     occurrence = {"date": date(2026, 9, 1), "discipline": "boxing", "time": "00:00"}
     assert _attendee_count(rows, occurrence) == 1
+
+
+def test_attendee_count_ignores_repeat_gate_passes():
+    repeat = SimpleNamespace(student_id=12, visited_at=datetime(2026, 8, 31, 21, 5), source="repeat")
+    rows = [(repeat, "boxing")]
+    occurrence = {"date": date(2026, 9, 1), "discipline": "boxing", "time": "00:00"}
+    assert _attendee_count(rows, occurrence) == 0
 
 
 def test_scheduled_rate_prefers_weekday_weekend_and_falls_back_to_staff_rate():

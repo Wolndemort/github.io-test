@@ -1299,3 +1299,21 @@ successful renewal, without mounting the Docker socket.
 созданную им TXT-запись и перезагружает nginx после успешного renew. Нельзя
 удалять чужие `_acme-challenge` записи и нельзя менять DNS вручную на каждом
 новом клубе.
+
+## Coach motivation: completed scheduled lessons
+
+Coach accruals are created only after the scheduled lesson has ended. The end
+time is calculated from the lesson start and its `duration_minutes` (15--240
+minutes, with 60 minutes as the default); the old fixed 15-minute trigger is
+not used.
+
+Gate visits are assigned to one closest lesson of the same discipline. The
+default window is 60 minutes before the start through 20 minutes after the
+scheduled end. A club may override these values in `club_settings.motivation`
+with `early_entry_minutes` and `late_entry_minutes`. Visits with
+`source=repeat` are never counted, and a student is counted once per lesson.
+
+The scheduler uses the effective historical schedule for the Moscow calendar
+date, so changing a schedule does not rewrite past occurrences. The unique
+occurrence key prevents duplicate accruals when the one-minute job runs again.
+No database migration is required for these changes.
