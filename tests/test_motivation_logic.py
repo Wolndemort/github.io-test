@@ -21,6 +21,11 @@ def test_schedule_normalizer_preserves_multiple_coaches():
     assert schedule["mon"][0]["coach_staff_ids"] == [7, 8]
 
 
+def test_schedule_normalizer_preserves_motivation_rules_when_schedule_is_saved():
+    schedule = normalize_schedule_block({"mon": [{"time": "18:00", "motivation_rules": [{"min_students": 1, "max_students": 10, "rate_kopecks": 500}]}]})
+    assert schedule["mon"][0]["motivation_rules"][0]["rate_kopecks"] == 500
+
+
 def test_occurrences_create_one_payable_row_per_assigned_coach():
     settings = {"disciplines": {"boxing": {"schedule": {"mon": [{"time": "18:00", "coach_staff_ids": [7, 8]}]}}}}
     rows = _motivation_occurrences(settings, date(2026, 8, 31), date(2026, 8, 31))

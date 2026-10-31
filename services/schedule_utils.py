@@ -34,6 +34,11 @@ def normalize_schedule_block(schedule_data) -> dict[str, list[dict]]:
                 "max_slots": max(0, max_slots),
                 "taken_slots": max(0, taken_slots),
             }
+            raw_rules = lesson.get("motivation_rules")
+            if isinstance(raw_rules, list):
+                normalized_lesson["motivation_rules"] = [
+                    dict(rule) for rule in raw_rules if isinstance(rule, dict)
+                ]
             if "duration_minutes" in lesson or "duration" in lesson:
                 raw_duration = lesson.get("duration_minutes", lesson.get("duration", 60))
                 try:

@@ -1574,7 +1574,7 @@ async def save_admin_motivation_rules(payload: dict, session: AsyncSession = Dep
     if int(tg_user.get("id", 0)) != int(getattr(club, "owner_id", 0) or 0) and int(tg_user.get("id", 0)) not in SUPER_ADMIN_IDS:
         raise HTTPException(403, "Только администратор может менять мотивацию")
     discipline = str(payload.get("discipline", "")).strip(); day = str(payload.get("day", "")).strip(); index = int(payload.get("index", -1))
-    settings = dict(club.club_settings or {}); block = dict(settings.get("disciplines", {}).get(discipline, {})); lessons = list((block.get("schedule", {}) or {}).get(day, []))
+    settings = dict(club.club_settings or {}); previous_disciplines = copy.deepcopy(settings.get("disciplines", {})); block = dict(settings.get("disciplines", {}).get(discipline, {})); lessons = list((block.get("schedule", {}) or {}).get(day, []))
     if index < 0 or index >= len(lessons): raise HTTPException(404, "Занятие не найдено")
     rules = []
     for raw in payload.get("rules", []) or []:
@@ -1584,6 +1584,8 @@ async def save_admin_motivation_rules(payload: dict, session: AsyncSession = Dep
     rules.sort(key=lambda item: item["min_students"])
     lessons[index] = dict(lessons[index]); lessons[index]["motivation_rules"] = rules; block["schedule"] = dict(block.get("schedule", {})); block["schedule"][day] = lessons
     settings["disciplines"] = dict(settings.get("disciplines", {})); settings["disciplines"][discipline] = block; club.club_settings = settings
+    _remember_motivation_schedule_change(settings, previous_disciplines, settings["disciplines"], datetime.now(_MOTIVATION_TZ).date())
+    club.club_settings = settings
     await session.commit(); return {"success": True, "rules": rules}
 
 @router.get("/webapp/staff-motivation", response_class=HTMLResponse)
@@ -1927,11 +1929,15 @@ async def change_admin_schedule(payload: ScheduleChangePayload, session: AsyncSe
             parsed_duration = 60
         if parsed_duration < 15 or parsed_duration > 240:
             raise HTTPException(400, "Длительность должна быть от 15 до 240 минут")
+        raw_time = str(lesson.get("time", "00:00")).strip()[:5]
+        previous_lesson = lessons[payload.index] if payload.action == "update" and payload.index is not None and 0 <= payload.index < len(lessons) else {}
         item = {
-            "time": str(lesson.get("time", "00:00"))[:5],
+            "time": raw_time,
             "coach": str(lesson.get("info", lesson.get("coach", "")))[:100],
             "duration_minutes": parsed_duration,
         }
+        if previous_lesson.get("motivation_rules") is not None:
+            item["motivation_rules"] = copy.deepcopy(previous_lesson["motivation_rules"])
         selected_staff_ids = payload.coach_staff_ids if payload.coach_staff_ids is not None else ([payload.coach_staff_id] if payload.coach_staff_id is not None else None)
         if selected_staff_ids is not None:
             if not is_admin:
@@ -1948,7 +1954,6 @@ async def change_admin_schedule(payload: ScheduleChangePayload, session: AsyncSe
             # `coach` is the free-form lesson information/comment. The
             # assigned trainers live only in coach_staff_ids and must not
             # overwrite that comment.
-            previous_lesson = lessons[payload.index] if payload.action == "update" and payload.index is not None and 0 <= payload.index < len(lessons) else {}
             previous_comment = str(previous_lesson.get("coach", "")).strip()
             assigned_names = {str(names[x]).strip().casefold() for x in selected_staff_ids}
             if previous_comment.casefold() in assigned_names or previous_comment.casefold() == ", ".join(names[x] for x in selected_staff_ids).casefold():
@@ -1961,10 +1966,19 @@ async def change_admin_schedule(payload: ScheduleChangePayload, session: AsyncSe
         hour_minute = str(item["time"]).split(":")
         if len(hour_minute) != 2 or not all(part.isdigit() for part in hour_minute) or not (0 <= int(hour_minute[0]) <= 23 and 0 <= int(hour_minute[1]) <= 59):
             raise HTTPException(400, "Время должно быть в формате ЧЧ:ММ")
+        item["time"] = f"{int(hour_minute[0]):02d}:{int(hour_minute[1]):02d}"
         if payload.action == "add": lessons.append(item)
         elif payload.index is not None and 0 <= payload.index < len(lessons): lessons[payload.index] = item
         else: raise HTTPException(400, "Р—Р°РЅСЏС‚РёРµ РЅРµ РЅР°Р№РґРµРЅРѕ")
     else: raise HTTPException(400, "РќРµРёР·РІРµСЃС‚РЅРѕРµ РґРµР№СЃС‚РІРёРµ")
+    normalized_lessons = normalize_schedule_block({payload.day: lessons}).get(payload.day, [])
+    for left_index, left in enumerate(normalized_lessons):
+        left_start = int(left["time"][:2]) * 60 + int(left["time"][3:5])
+        left_end = left_start + int(left.get("duration_minutes", 60) or 60)
+        for right in normalized_lessons[left_index + 1:]:
+            right_start = int(right["time"][:2]) * 60 + int(right["time"][3:5])
+            if right_start < left_end:
+                raise HTTPException(409, "У одной дисциплины есть пересекающиеся занятия; укажите разное время")
     lessons.sort(key=lambda x: str(x.get("time", "99:99")))
     schedule[payload.day] = lessons; block["schedule"] = schedule; disciplines[payload.discipline] = block; settings["disciplines"] = disciplines
     _remember_motivation_schedule_change(settings, previous_disciplines, disciplines, effective_date)
