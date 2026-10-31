@@ -48,6 +48,8 @@ def test_cart_is_separate_page_with_quantity_controls_and_product_limit():
     assert "data-plus" in cart
     assert "x.item_type==='product'?Number(x.max||0):999" in cart
     assert "x[i].quantity<max" in cart
+    assert "cart-image" in cart
+    assert "image_url" in Path("templates/shop.html").read_text(encoding="utf-8")
 
 
 def test_service_quantities_are_processed_by_checkout_and_webhook():

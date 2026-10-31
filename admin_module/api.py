@@ -31,6 +31,7 @@ from services.order_notifications import (
 from services.payment_requisites import get_payment_info_text, build_payment_instruction_text
 from services.discounts import active_discount, active_discounts, apply_discount, apply_discounts
 from services.advance_visits import advance_purchase_warning, advance_debt_snapshot, advance_settlement_notice
+from services.availability import payment_availability
 import hmac
 import os
 import time
