@@ -39,6 +39,8 @@ async def accrue_finished_lessons(now: datetime | None = None) -> int:
         clubs = (await session.execute(select(Club).where(Club.subscription_expire_at >= datetime.now(timezone.utc).replace(tzinfo=None)))).scalars().all()
         for club in clubs:
             settings = club.club_settings if isinstance(club.club_settings, dict) else {}
+            if not settings.get("features", {}).get("motivation_accruals", True):
+                continue
             lessons = scheduled_lessons(settings, today)
             if not lessons:
                 continue

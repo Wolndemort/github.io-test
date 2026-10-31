@@ -10,7 +10,13 @@ DEFAULT_CLUB_SETTINGS = {
         "subscription_expiry_reminders": True,  # Заканчивается абонемент
         "birthday_greetings": True,  # Поздравления с ДР
         "absence_reminders": True,  # Прогульщики
-        "work_schedule_reminders": True  # График работы клуба
+        "work_schedule_reminders": True,  # График работы клуба
+        "survey_scheduler": True,
+        "advance_debt_reminders": True,
+        "discount_reminders": True,
+        "onboarding_reminders": True,
+        "daily_reports": True,
+        "motivation_accruals": True,
     },
 
     # 2. Тексты и контакты (Для каждого клуба свои)

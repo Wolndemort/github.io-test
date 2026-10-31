@@ -102,6 +102,9 @@ async def send_discount_reminders():
     async with AsyncSessionLocal() as session:
         rows = (await session.execute(select(Discount, DiscountAssignment, Club, User, Student).join(DiscountAssignment, DiscountAssignment.discount_id == Discount.id).join(Club, Club.id == Discount.club_id).outerjoin(User, User.user_id == DiscountAssignment.user_id).outerjoin(Student, Student.id == DiscountAssignment.student_id).where(Discount.is_active.is_(True)))).all()
         for discount, assignment, club, user, student in rows:
+            settings = club.club_settings if isinstance(club.club_settings, dict) else {}
+            if not settings.get("features", {}).get("discount_reminders", True):
+                continue
             recipient_id = assignment.user_id or getattr(student, "parent_id", None)
             if discount.starts_at and discount.starts_at > today:
                 continue
@@ -385,6 +388,8 @@ async def send_advance_debt_morning_notice() -> None:
         clubs = (await session.execute(select(Club).where(Club.subscription_expire_at >= periods["now"]))).scalars().all()
         for club in clubs:
             settings = club.club_settings if isinstance(club.club_settings, dict) else {}
+            if not settings.get("features", {}).get("advance_debt_reminders", True):
+                continue
             if not advance_config(settings)["enabled"] or not club.bot_token:
                 continue
             bot = bots_dict.get(club.bot_token)
@@ -566,6 +571,8 @@ async def send_onboarding_reminders():
             bot = bots_dict.get(club.bot_token) if club else None
             if not club or not bot or not club.subscription_expire_at:
                 continue
+            if not (club.club_settings or {}).get("features", {}).get("onboarding_reminders", True):
+                continue
             parent_ids = await get_student_parent_ids(student.id, session)
             if not parent_ids:
                 continue
@@ -628,6 +635,9 @@ async def send_daily_report_to_admins():
     for club in clubs:
         notification_key = None
         try:
+            settings = club.club_settings if isinstance(club.club_settings, dict) else {}
+            if not settings.get("features", {}).get("daily_reports", True):
+                continue
             bot = bots_dict.get(club.bot_token)
             if not bot or not club.owner_id:
                 continue
