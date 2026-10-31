@@ -1,6 +1,6 @@
 import os
 from services.schedule_utils import normalize_schedule_block
-from services.motivation_schedule import motivation_bonus, occurrence_ended, remember_schedule_change, schedule_versions, visit_matches_lesson
+from services.motivation_schedule import motivation_bonus, nearest_lesson_for_visit, occurrence_ended, remember_schedule_change, schedule_versions, visit_matches_lesson
 
 os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
 
@@ -33,15 +33,28 @@ def test_occurrence_ends_after_start_plus_duration():
     assert occurrence_ended(occurrence, datetime(2026, 9, 3, 19, 31)) is True
 
 
-def test_visit_window_uses_duration_and_twenty_minute_late_limit():
+def test_visit_window_uses_duration_and_fifteen_minute_late_limit():
     lesson = {"date": date(2026, 9, 3), "time": "18:00", "duration_minutes": 90}
     assert visit_matches_lesson(datetime(2026, 9, 3, 15, 0), lesson) is True  # 18:00 MSK
     assert visit_matches_lesson(datetime(2026, 9, 3, 16, 51), lesson) is False  # 19:51 MSK
+    assert visit_matches_lesson(datetime(2026, 9, 3, 16, 15), lesson, late_minutes=15) is True  # 19:15 MSK
+    assert visit_matches_lesson(datetime(2026, 9, 3, 16, 16), lesson, late_minutes=15) is False  # 19:16 MSK
 
 
-def test_visit_window_rejects_repeat_is_handled_by_engine_contract():
+def test_nearest_same_discipline_lesson_wins_over_a_later_lesson():
+    lessons = [
+        {"date": date(2026, 9, 3), "time": "17:00", "duration_minutes": 60, "discipline": "jiu_jitsu"},
+        {"date": date(2026, 9, 3), "time": "18:00", "duration_minutes": 60, "discipline": "jiu_jitsu"},
+        {"date": date(2026, 9, 3), "time": "17:00", "duration_minutes": 60, "discipline": "boxing"},
+    ]
+    selected = nearest_lesson_for_visit(datetime(2026, 9, 3, 14, 18), lessons, "jiu_jitsu")
+    assert selected["time"] == "17:00"
+    assert nearest_lesson_for_visit(datetime(2026, 9, 3, 12, 0), lessons, "jiu_jitsu") is None
+
+
+def test_visit_window_accepts_a_fifteen_minute_late_entry_by_default():
     lesson = {"date": date(2026, 9, 3), "time": "18:00", "duration_minutes": 60}
-    assert visit_matches_lesson(datetime(2026, 9, 3, 16, 20), lesson) is True
+    assert visit_matches_lesson(datetime(2026, 9, 3, 15, 15), lesson) is True  # 18:15 MSK
 
 
 def test_schedule_history_uses_old_snapshot_before_change_and_new_after_change():

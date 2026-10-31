@@ -120,7 +120,7 @@ def _attendee_count(visit_rows, occurrence):
         visited = visit.visited_at
         if not visited or _motivation_local_date(visited) != occurrence["date"]:
             continue
-        if _motivation_visit_matches_lesson(visited, lesson, early_minutes=60, late_minutes=20):
+        if _motivation_visit_matches_lesson(visited, lesson, early_minutes=60, late_minutes=15):
             students.add(visit.student_id)
     return len(students)
 

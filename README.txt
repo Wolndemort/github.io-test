@@ -1308,7 +1308,7 @@ minutes, with 60 minutes as the default); the old fixed 15-minute trigger is
 not used.
 
 Gate visits are assigned to one closest lesson of the same discipline. The
-default window is 60 minutes before the start through 20 minutes after the
+default window is 60 minutes before the start through 15 minutes after the
 scheduled end. A club may override these values in `club_settings.motivation`
 with `early_entry_minutes` and `late_entry_minutes`. Visits with
 `source=repeat` are never counted, and a student is counted once per lesson.

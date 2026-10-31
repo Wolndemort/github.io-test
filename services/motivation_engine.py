@@ -7,7 +7,7 @@ from sqlalchemy import select
 
 from database.db import AsyncSessionLocal, Club, ClubStaff, MotivationAccrual, Student, VisitLog
 from services.bot_registry import bots_dict
-from services.motivation_schedule import lesson_duration, lesson_start, lesson_visit_distance, scheduled_lessons, visit_matches_lesson
+from services.motivation_schedule import lesson_duration, lesson_start, nearest_lesson_for_visit, scheduled_lessons
 
 MOSCOW = ZoneInfo("Europe/Moscow")
 DAY_KEYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
@@ -51,14 +51,14 @@ async def accrue_finished_lessons(now: datetime | None = None) -> int:
             )).all()
             motivation = settings.get("motivation") if isinstance(settings.get("motivation"), dict) else {}
             early_minutes = max(0, min(240, int(motivation.get("early_entry_minutes", 60) or 60)))
-            late_minutes = max(0, min(60, int(motivation.get("late_entry_minutes", 20) or 20)))
+            late_minutes = max(0, min(15, int(motivation.get("late_entry_minutes", 15) or 15)))
             assignments = {}
             for visit, discipline in visit_rows:
                 if str(visit.source or "").strip().lower() == "repeat":
                     continue
-                candidates = [lesson for lesson in lessons if lesson["discipline"] == discipline and visit_matches_lesson(visit.visited_at, lesson, early_minutes=early_minutes, late_minutes=late_minutes)]
-                if candidates:
-                    assignments[visit.id] = min(candidates, key=lambda item: lesson_visit_distance(visit.visited_at, item))
+                lesson = nearest_lesson_for_visit(visit.visited_at, lessons, discipline, early_minutes=early_minutes, late_minutes=late_minutes)
+                if lesson:
+                    assignments[visit.id] = lesson
             for lesson in lessons:
                 started = lesson_start(lesson)
                 if now_local < started + timedelta(minutes=lesson_duration(lesson)) or not lesson["staff_ids"]:

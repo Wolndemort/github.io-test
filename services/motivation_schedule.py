@@ -120,7 +120,7 @@ def lesson_duration(lesson):
     return max(15, min(240, int(lesson.get("duration_minutes", 60) or 60)))
 
 
-def visit_matches_lesson(visit_at, lesson, *, early_minutes=60, late_minutes=20):
+def visit_matches_lesson(visit_at, lesson, *, early_minutes=60, late_minutes=15):
     if not visit_at:
         return False
     if visit_at.tzinfo is None:
@@ -135,6 +135,15 @@ def lesson_visit_distance(visit_at, lesson):
     if visit_at.tzinfo is None:
         visit_at = visit_at.replace(tzinfo=timezone.utc)
     return abs((visit_at.astimezone(MOTIVATION_TZ) - lesson_start(lesson)).total_seconds())
+
+
+def nearest_lesson_for_visit(visit_at, lessons, discipline, *, early_minutes=60, late_minutes=15):
+    candidates = [
+        lesson for lesson in lessons
+        if lesson.get("discipline") == discipline
+        and visit_matches_lesson(visit_at, lesson, early_minutes=early_minutes, late_minutes=late_minutes)
+    ]
+    return min(candidates, key=lambda lesson: lesson_visit_distance(visit_at, lesson)) if candidates else None
 
 
 def motivation_occurrences(settings, start, end):
