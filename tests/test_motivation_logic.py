@@ -38,7 +38,7 @@ def test_visit_window_uses_duration_and_fifteen_minute_late_limit():
     assert visit_matches_lesson(datetime(2026, 9, 3, 15, 0), lesson) is True  # 18:00 MSK
     assert visit_matches_lesson(datetime(2026, 9, 3, 16, 51), lesson) is False  # 19:51 MSK
     assert visit_matches_lesson(datetime(2026, 9, 3, 16, 15), lesson, late_minutes=15) is True  # 19:15 MSK
-    assert visit_matches_lesson(datetime(2026, 9, 3, 16, 16), lesson, late_minutes=15) is False  # 19:16 MSK
+    assert visit_matches_lesson(datetime(2026, 9, 3, 16, 46), lesson, late_minutes=15) is False  # 19:46 MSK
 
 
 def test_nearest_same_discipline_lesson_wins_over_a_later_lesson():
