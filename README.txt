@@ -1317,3 +1317,30 @@ The scheduler uses the effective historical schedule for the Moscow calendar
 date, so changing a schedule does not rewrite past occurrences. The unique
 occurrence key prevents duplicate accruals when the one-minute job runs again.
 No database migration is required for these changes.
+## Актуальная матрица планировщиков (2026-10-31)
+
+В приложении зарегистрировано 18 активных задач APScheduler. Время указано по Москве:
+
+- 08:30 — предупреждение администраторам о посещениях в долг;
+- 10:00 — утренние уведомления (день рождения, отсутствие даты рождения, отсутствие абонемента, поздравления и удержание);
+- 10:05 — окончание абонементов и остаток занятий;
+- 10:10 — онбординг после покупки;
+- каждая минута — начисления мотивации тренерам;
+- 11:00 по субботам, воскресеньям и понедельникам — график работы клуба;
+- 10:00 и 18:00 — напоминания по складу;
+- 10:15 — жизненный цикл скидок;
+- 10:20 — уведомления о SaaS-подписке клуба;
+- 10:25 — автоматические опросы после отсутствия;
+- 22:00 — ежедневный отчёт владельцу;
+- каждые 1–5 минут — закрытие сессий и завершение заморозок;
+- каждый час — SaaS-автопродление;
+- 23:00 — резервная копия.
+
+В сайд-боте в разделе `Настройки → ⏰ Планировщики` доступны 12 переключателей:
+
+`birthday_missing_reminders`, `subscription_expiry_reminders`, `birthday_greetings`,
+`absence_reminders`, `work_schedule_reminders`, `stock_reminders`, `survey_scheduler`,
+`advance_debt_reminders`, `discount_reminders`, `onboarding_reminders`, `daily_reports`,
+`motivation_accruals`.
+
+Переключатели хранятся в `club.club_settings["features"]`, действуют отдельно для каждого клуба и по умолчанию включены. Системные задачи закрытия сессий, завершения заморозок, SaaS-биллинга и резервного копирования через клубные настройки не отключаются.
