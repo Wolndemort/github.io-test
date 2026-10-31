@@ -189,9 +189,11 @@ async def client_cart(request: Request, club_id: int = Query(...), init_data: st
         return telegram_init_gate('/webapp/cart', club_id, 'РћС‚РєСЂРѕР№С‚Рµ РєРѕСЂР·РёРЅСѓ РёР· Telegram')
     if not club or not verify_telegram_data(init_data, club.bot_token):
         raise HTTPException(403, "Р”РѕСЃС‚СѓРї Р·Р°РїСЂРµС‰С‘РЅ")
+    products = (await session.execute(select(ClubProduct).where(ClubProduct.club_id == club_id, ClubProduct.is_active.is_(True)))).scalars().all()
+    product_data = [{"id": p.id, "image_url": p.image_url, "price_kopecks": p.price_kopecks, "stock": p.stock} for p in products]
     payment_modes = payment_availability(club.club_settings)
     payment_info = get_payment_info_text(club.club_settings or {})
-    return templates.TemplateResponse("cart.html", {"request": request, "club": club, "club_id": club_id, "payment_modes": payment_modes, "sbp_enabled": payment_modes["sbp"], "online_enabled": payment_modes["online"], "payment_info": payment_info})
+    return templates.TemplateResponse("cart.html", {"request": request, "club": club, "club_id": club_id, "products": product_data, "payment_modes": payment_modes, "sbp_enabled": payment_modes["sbp"], "online_enabled": payment_modes["online"], "payment_info": payment_info})
 
 def _broadcast_disciplines(club: Club, students: list[Student] | None = None) -> list[dict]:
     settings = club.club_settings if isinstance(club.club_settings, dict) else {}

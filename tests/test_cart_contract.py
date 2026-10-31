@@ -46,7 +46,7 @@ def test_cart_is_separate_page_with_quantity_controls_and_product_limit():
     routes = {(route.path, method) for route in router.routes for method in (getattr(route, "methods", None) or {"GET"})}
     assert ("/webapp/cart", "GET") in routes
     assert "data-plus" in cart
-    assert "x.item_type==='product'?Number(x.max||0):999" in cart
+    assert "x.item_type==='product'?Number(x.max||product?.stock||0):999" in cart
     assert "x[i].quantity<max" in cart
     assert "cart-image" in cart
     assert "image_url" in Path("templates/shop.html").read_text(encoding="utf-8")
