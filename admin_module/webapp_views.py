@@ -1451,6 +1451,10 @@ async def change_admin_tariff(payload: TariffChangePayload, request: Request, se
         except (TypeError, ValueError):
             return int(default)
 
+    def _as_max_age(value):
+        parsed = _as_int(value, 0)
+        return parsed if parsed > 0 else None
+
     if payload.action == "toggle_active":
         block["active"] = not bool(block.get("active", True))
     elif payload.action == "toggle_type":
@@ -1493,7 +1497,7 @@ async def change_admin_tariff(payload: TariffChangePayload, request: Request, se
         return {"success": True, "copied_from": source_disc}
     elif payload.action == "add":
         tariff = payload.tariff or {}
-        tariffs.append({"price": _as_float(tariff.get("price", 0)), "days": max(1, _as_int(tariff.get("days", 30), 30)), "count": 999 if block.get("type") == "unlimited" else max(0, _as_int(tariff.get("count", 0), 0)), "min_age": max(0, _as_int(tariff.get("min_age", 0), 0)), "active": True})
+        tariffs.append({"price": _as_float(tariff.get("price", 0)), "days": max(1, _as_int(tariff.get("days", 30), 30)), "count": 999 if block.get("type") == "unlimited" else max(0, _as_int(tariff.get("count", 0), 0)), "min_age": max(0, _as_int(tariff.get("min_age", 0), 0)), "max_age": _as_max_age(tariff.get("max_age")), "active": True})
     elif payload.action in {"update", "delete"}:
         if payload.index is None or payload.index < 0 or payload.index >= len(tariffs):
             raise HTTPException(400, "????? ?? ??????")
@@ -1509,10 +1513,10 @@ async def change_admin_tariff(payload: TariffChangePayload, request: Request, se
         else:
             tariff = payload.tariff or {}
             old_active = bool(tariffs[payload.index].get("active", True))
-            tariffs[payload.index] = {"price": _as_float(tariff.get("price", 0)), "days": max(1, _as_int(tariff.get("days", 30), 30)), "count": 999 if block.get("type") == "unlimited" else max(0, _as_int(tariff.get("count", 0), 0)), "min_age": max(0, _as_int(tariff.get("min_age", 0), 0)), "active": old_active}
+            tariffs[payload.index] = {"price": _as_float(tariff.get("price", 0)), "days": max(1, _as_int(tariff.get("days", 30), 30)), "count": 999 if block.get("type") == "unlimited" else max(0, _as_int(tariff.get("count", 0), 0)), "min_age": max(0, _as_int(tariff.get("min_age", 0), 0)), "max_age": _as_max_age(tariff.get("max_age")), "active": old_active}
     else:
         raise HTTPException(400, "??????????? ????????")
-    if any(_as_float(t.get("price", 0)) <= 0 or _as_int(t.get("days", 0)) <= 0 or _as_int(t.get("count", 0)) < 0 or _as_int(t.get("min_age", 0)) < 0 or _as_int(t.get("min_age", 0)) > 100 for t in tariffs):
+    if any(_as_float(t.get("price", 0)) <= 0 or _as_int(t.get("days", 0)) <= 0 or _as_int(t.get("count", 0)) < 0 or _as_int(t.get("min_age", 0)) < 0 or _as_int(t.get("min_age", 0)) > 100 or (t.get("max_age") is not None and (_as_int(t.get("max_age", 0)) < _as_int(t.get("min_age", 0)) or _as_int(t.get("max_age", 0)) > 100)) for t in tariffs):
         raise HTTPException(400, "????, ???? ? ?????????? ?????? ???? ??????????????")
     block["tariffs"] = tariffs
     disciplines[payload.discipline] = block
@@ -1871,6 +1875,8 @@ async def change_admin_schedule(payload: ScheduleChangePayload, session: AsyncSe
     block = dict(disciplines.get(payload.discipline, {}))
     if not block:
         raise HTTPException(404, "Дисциплина не найдена")
+    if payload.action in {"add", "update", "copy_day", "copy_from"} and not any(bool(item.get("active", True)) for item in (block.get("tariffs", []) or []) if isinstance(item, dict)):
+        raise HTTPException(409, "Сначала создайте активный тариф для этой дисциплины")
     if payload.day not in {"mon", "tue", "wed", "thu", "fri", "sat", "sun"}:
         raise HTTPException(400, "Некорректный день недели")
     schedule = normalize_schedule_block(block.get("schedule", {}))

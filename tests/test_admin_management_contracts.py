@@ -482,8 +482,9 @@ async def test_admin_schedule_copy_day_duplicates_existing_lessons(monkeypatch):
             "id": 7,
             "club_settings": {
                 "disciplines": {
-                    "boxing": {
-                        "name": "🥊 Бокс",
+                        "boxing": {
+                            "name": "🥊 Бокс",
+                            "tariffs": [{"price": 100, "days": 30, "count": 8, "active": True}],
                         "schedule": {
                             "mon": [{"time": "10:00", "coach": "Тренер А", "max_slots": 12}],
                             "tue": [],
@@ -556,15 +557,17 @@ async def test_admin_schedule_copy_from_discipline_duplicates_entire_schedule(mo
             "id": 7,
             "club_settings": {
                 "disciplines": {
-                    "jiu_jitsu": {
-                        "name": "Джиу-джитсу",
+                        "jiu_jitsu": {
+                            "name": "Джиу-джитсу",
+                            "tariffs": [{"price": 100, "days": 30, "count": 8, "active": True}],
                         "schedule": {
                             "mon": [{"time": "10:00", "coach": "Тренер А", "max_slots": 12}],
                             "tue": [{"time": "12:00", "coach": "Тренер Б", "max_slots": 8}],
                         },
                     },
-                    "grappling": {
-                        "name": "Грэпплинг",
+                        "grappling": {
+                            "name": "Грэпплинг",
+                            "tariffs": [{"price": 100, "days": 30, "count": 8, "active": True}],
                         "schedule": {
                             "mon": [],
                             "tue": [],

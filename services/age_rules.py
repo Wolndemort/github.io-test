@@ -18,3 +18,10 @@ def age_matches(birthday: date | None, on_date: date, *, enabled=False, minimum=
     minimum = max(0, int(minimum or 0))
     maximum = None if maximum in (None, "") else max(minimum, int(maximum))
     return age >= minimum and (maximum is None or age <= maximum)
+
+
+def tariff_age_matches(birthday: date | None, on_date: date, tariff: dict) -> bool:
+    minimum = max(0, int(tariff.get("min_age", 0) or 0))
+    raw_maximum = tariff.get("max_age")
+    maximum = None if raw_maximum in (None, "") else int(raw_maximum)
+    return age_matches(birthday, on_date, enabled=minimum > 0 or maximum is not None, minimum=minimum, maximum=maximum)

@@ -12,6 +12,7 @@
         .card { background: #fff; border: 1px solid #d9d9d9; border-radius: 20px; padding: 16px; box-shadow: 0 10px 28px rgba(0,0,0,.04); }
         label { display:block; margin-bottom: 10px; font-size: 13px; color: #666; }
         input, select { width: 100%; box-sizing: border-box; padding: 12px; margin-top: 5px; border-radius: 10px; border: 1px solid #ccc; font-size: 16px; background: #fff; color: #111; }
+        input.invalid { border: 2px solid #dc2626; background: #fff1f2; }
         .actions { display:grid; gap:10px; margin-top: 14px; }
         .btn { display:block; text-align:center; text-decoration:none; padding: 14px 16px; border-radius: 14px; border: 1px solid #111; font-weight: 700; }
         .btn.dark { background: #111; color: #fff; }
@@ -96,6 +97,17 @@ birthdayNative.addEventListener('change', () => {
 document.getElementById('saveBtn').onclick = async (e) => {
     e.preventDefault();
     syncNative();
+    const required = [document.getElementById('name'), document.getElementById('phone'), birthdayInput];
+    required.forEach(input => input.classList.toggle('invalid', !input.value.trim()));
+    if (document.getElementById('name').value.trim().split(/\s+/).filter(Boolean).length < 2) {
+        document.getElementById('name').classList.add('invalid');
+        alert('Укажите имя и фамилию атлета');
+        return;
+    }
+    if (required.some(input => !input.value.trim())) {
+        alert('Заполните имя и фамилию, телефон и дату рождения');
+        return;
+    }
     const payload = {
         init_data: tg?.initData || new URLSearchParams(location.search).get('init_data') || '',
         club_id: {{ club_id }},

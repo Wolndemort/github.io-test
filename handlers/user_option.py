@@ -22,7 +22,7 @@ from services.schedule_utils import normalize_schedule_block
 from services.visit_history import attach_student_names, group_completed_sessions, summarize_payment_entry, moscow_str
 from aiogram.fsm.context import FSMContext
 from aiogram.types import InlineKeyboardButton, BufferedInputFile
-from datetime import timedelta, timezone
+from datetime import date, timedelta, timezone
 from aiogram import Router, F, types
 from aiogram.exceptions import TelegramBadRequest
 from datetime import datetime
@@ -1045,7 +1045,7 @@ async def start_birthday_edit(callback: types.CallbackQuery, state: FSMContext, 
     await state.update_data(edit_birthday_student_id=student_id)
     await state.set_state(RegistrationStates.waiting_for_birthday_edit)
     await callback.message.edit_text(
-        f"Атлет: <b>{student.name}</b>\n\nВведите дату в формате ДД.ММ.ГГГГ или отправьте 0, чтобы удалить дату:",
+        f"Атлет: <b>{student.name}</b>\n\nВведите дату в формате ДД.ММ.ГГГГ. Дата обязательна:",
         parse_mode="HTML"
     )
     await callback.answer()
@@ -1055,13 +1055,12 @@ async def start_birthday_edit(callback: types.CallbackQuery, state: FSMContext, 
 async def save_birthday_edit(message: types.Message, state: FSMContext, session: AsyncSession):
     value = (message.text or "").strip()
     birthday = None
-    if value != "0":
-        try:
-            birthday = parse_user_date(value)
-            if birthday > datetime.now().date() or birthday.year < 1900:
-                raise ValueError
-        except ValueError:
-            return await message.answer("❌ Введите корректную дату ДД.ММ.ГГГГ или 0 для удаления.")
+    try:
+        birthday = parse_user_date(value)
+        if birthday > datetime.now().date() or birthday.year < 1900:
+            raise ValueError
+    except ValueError:
+        return await message.answer("❌ Введите корректную дату ДД.ММ.ГГГГ. Дата обязательна.")
     data = await state.get_data()
     student = await session.get(Student, data.get("edit_birthday_student_id"), with_for_update=True)
     linked = await session.scalar(select(StudentParent.student_id).where(StudentParent.student_id == student.id, StudentParent.parent_id == message.from_user.id))
@@ -1071,7 +1070,7 @@ async def save_birthday_edit(message: types.Message, state: FSMContext, session:
     student.birthday = birthday
     await session.commit()
     await state.clear()
-    await message.answer("✅ Дата рождения сохранена." if birthday else "✅ Дата рождения удалена.")
+    await message.answer("✅ Дата рождения сохранена.")
 
 
 # ШАГ 2: Поймали имя -> Запрашиваем ДЕНЬ РОЖДЕНИЯ
@@ -1092,7 +1091,7 @@ async def process_athlete_name(message: types.Message, state: FSMContext):
     await message.answer(
         f"✅ Имя сохранено: <b>{message.text}</b>\n\n"
         f"Введите <b>день рождения атлета</b> в формате ДД.ММ.ГГГГ\n"
-        f"<i>(например: 15.08.2012 или напишите '0', если неизвестно):</i>",
+        f"<i>(например: 15.08.2012):</i>",
         parse_mode="HTML"
     )
 
@@ -1107,16 +1106,14 @@ async def process_athlete_birthday(
         club_settings: dict
 ):
     birthday_text = message.text.strip()
-    birthday_date = None
-    if birthday_text != "0":
-        try:
-            # Валидируем формат даты
-            birthday_date = parse_user_date(birthday_text)
-        except ValueError:
-            return await message.answer(
-                "❌ Неверный формат! Введите дату строго в формате ДД.ММ.ГГГГ (например: 25.10.2015)\n"
-                "Или напишите '0', если дата рождения неизвестна:"
-            )
+    try:
+        birthday_date = parse_user_date(birthday_text)
+        if birthday_date > date.today() or birthday_date.year < 1900:
+            raise ValueError
+    except ValueError:
+        return await message.answer(
+            "❌ Неверный формат! Введите дату строго в формате ДД.ММ.ГГГГ (например: 25.10.2015). Дата обязательна:"
+        )
 
     # Достаем данные из стейта
     data = await state.get_data()

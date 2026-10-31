@@ -1,5 +1,5 @@
 import os
-from services.age_rules import age_matches, age_on
+from services.age_rules import age_matches, age_on, tariff_age_matches
 from services.schedule_utils import normalize_schedule_block
 from services.motivation_schedule import motivation_bonus, nearest_lesson_for_visit, occurrence_ended, remember_schedule_change, schedule_versions, visit_matches_lesson
 
@@ -33,6 +33,8 @@ def test_age_is_calculated_from_birthday_on_the_visit_date():
     assert age_on(birthday, date(2026, 9, 10)) == 12
     assert age_matches(birthday, date(2026, 9, 10), enabled=True, minimum=12, maximum=13)
     assert not age_matches(None, date(2026, 9, 10), enabled=True, minimum=12, maximum=13)
+    assert tariff_age_matches(birthday, date(2026, 9, 10), {"min_age": 12, "max_age": 13})
+    assert not tariff_age_matches(date(2000, 1, 1), date(2026, 9, 10), {"min_age": 12, "max_age": 13})
 
 
 def test_occurrences_create_one_payable_row_per_assigned_coach():

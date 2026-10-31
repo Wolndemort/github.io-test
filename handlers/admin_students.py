@@ -15,6 +15,7 @@ from database.db import Club, PaymentOrder, Student, User
 from handlers.states import AdminManualAdd
 from services.input_normalization import normalize_ru_phone, parse_user_date
 from services.staff_permissions import permissions_for_staff
+from services.age_rules import tariff_age_matches
 
 
 router = Router()
@@ -71,11 +72,10 @@ async def manual_add_phone(message: types.Message, state: FSMContext):
 async def manual_add_birthday(message: types.Message, state: FSMContext, club_settings: dict):
     value = (message.text or "").strip()
     birthday = None
-    if value != "0":
-        try:
-            birthday = parse_user_date(value)
-        except ValueError:
-            return await message.answer("Введите корректную дату ДД.ММ.ГГГГ или 0.")
+    try:
+        birthday = parse_user_date(value)
+    except ValueError:
+        return await message.answer("Введите корректную дату ДД.ММ.ГГГГ. Дата обязательна.")
     await state.update_data(birthday=birthday.isoformat() if birthday else None)
     disciplines = {
         code: info for code, info in (club_settings.get("disciplines", {}) or {}).items()
@@ -139,6 +139,9 @@ async def _finish_manual_add(
         if tariff_idx < 0 or tariff_idx >= len(tariffs):
             return await callback.answer("Тариф не найден.", show_alert=True)
         tariff = tariffs[tariff_idx]
+        if not tariff_age_matches(birthday, datetime.now().date(), tariff):
+            await state.clear()
+            return await callback.answer("Возраст атлета не соответствует выбранному тарифу.", show_alert=True)
         count = int(tariff.get("count", 0) or 0)
         expire_date = datetime.now() + timedelta(days=int(tariff.get("days", 30) or 30))
 

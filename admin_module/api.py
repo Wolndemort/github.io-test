@@ -19,6 +19,7 @@ from services.analytics import (
     moscow_weekday,
 )
 from services.schedule_utils import normalize_schedule_block
+from services.age_rules import tariff_age_matches
 from services.order_notifications import (
     build_owner_receipt_text,
     build_staff_alert_text,
@@ -277,14 +278,17 @@ def _student_age(student: Student) -> int | None:
 
 def _tariff_age_error(student: Student, tariff: dict, discipline_name: str) -> str | None:
     min_age = max(0, int(tariff.get("min_age", 0) or 0))
+    raw_max_age = tariff.get("max_age")
+    max_age = None if raw_max_age in (None, "") else max(min_age, int(raw_max_age))
     age = _student_age(student)
     if age is None:
         return "⚠️ Укажите дату рождения атлета перед покупкой абонемента."
-    if min_age <= 0 or age >= min_age:
+    if tariff_age_matches(student.birthday, date.today(), tariff):
         return None
+    age_range = f"от {min_age} лет" if max_age is None else f"от {min_age} до {max_age} лет"
     return (
         f"⚠️ <b>Доступ ограничен по возрасту!</b>\n\n"
-        f"На тариф секции <b>{escape(discipline_name)}</b> принимаются атлеты строго с <b>{min_age} лет</b>.\n"
+        f"На тариф секции <b>{escape(discipline_name)}</b> принимаются атлеты <b>{age_range}</b>.\n"
         f"Сейчас атлету <b>{escape(student.name)}</b> исполнилось <b>{age} лет</b>."
     )
 
@@ -1025,6 +1029,8 @@ async def admin_update_student(
         name = payload.name.strip()
         if not name:
             raise HTTPException(status_code=400, detail="Имя атлета не может быть пустым")
+        if len(name.split()) < 2:
+            raise HTTPException(status_code=400, detail="Укажите имя и фамилию атлета")
         if len(name) > 150:
             raise HTTPException(status_code=400, detail="Имя атлета слишком длинное")
         student.name = name
@@ -1088,7 +1094,7 @@ async def admin_update_student(
         student.discipline = discipline_code or student.discipline
     if payload.parent_phone is not None:
         if not payload.parent_phone.strip():
-            student.parent_phone = None
+            raise HTTPException(status_code=400, detail="Телефон родителя обязателен")
         else:
             normalized_phone = normalize_ru_phone(payload.parent_phone)
             if not normalized_phone:
@@ -1330,7 +1336,11 @@ async def admin_create_student(
         raise HTTPException(status_code=400, detail="Дата рождения атлета обязательна")
 
     name = payload.name.strip()
+    if len(name.split()) < 2:
+        raise HTTPException(status_code=400, detail="Укажите имя и фамилию атлета")
     phone_key = _student_identity_phone(payload.phone)
+    if not phone_key:
+        raise HTTPException(status_code=400, detail="Телефон родителя обязателен")
     existing_students = (await db.execute(select(Student).where(Student.club_id == club.id))).scalars().all()
     duplicate = next((student for student in existing_students
                       if student.name.strip().casefold() == name.casefold()

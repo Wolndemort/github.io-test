@@ -27,6 +27,7 @@ from services.audit import audit_event
 from services.abuse_guard import rate_limit, audit_block
 from services.yookassa_client import YooKassaClient
 from services.input_normalization import normalize_ru_phone
+from services.age_rules import tariff_age_matches
 from services.visit_history import attach_student_names, group_completed_sessions, summarize_payment_entry
 from services.payment_requisites import get_payment_info_text, build_payment_instruction_text
 from services.availability import payment_availability, turnstile_enabled
@@ -99,14 +100,17 @@ def _student_age(student: Student) -> int | None:
 
 def _tariff_age_error(student: Student, tariff: dict, discipline_name: str) -> str | None:
     min_age = max(0, int(tariff.get("min_age", 0) or 0))
+    raw_max_age = tariff.get("max_age")
+    max_age = None if raw_max_age in (None, "") else max(min_age, int(raw_max_age))
     age = _student_age(student)
     if age is None:
         return "⚠️ Укажите дату рождения атлета перед покупкой абонемента."
-    if min_age <= 0 or age >= min_age:
+    if tariff_age_matches(student.birthday, date.today(), tariff):
         return None
+    age_range = f"от {min_age} лет" if max_age is None else f"от {min_age} до {max_age} лет"
     return (
         f"⚠️ <b>Доступ ограничен по возрасту!</b>\n\n"
-        f"На тариф секции <b>{escape(discipline_name)}</b> принимаются атлеты строго с <b>{min_age} лет</b>.\n"
+        f"На тариф секции <b>{escape(discipline_name)}</b> принимаются атлеты <b>{age_range}</b>.\n"
         f"Сейчас атлету <b>{escape(student.name)}</b> исполнилось <b>{age} лет</b>."
     )
 
@@ -683,6 +687,8 @@ async def webapp_create_student_submit(payload: WebAppCreateStudentPayload, db: 
     name = payload.name.strip()
     if not name:
         raise HTTPException(status_code=400, detail="Введите имя атлета")
+    if len(name.split()) < 2:
+        raise HTTPException(status_code=400, detail="Укажите имя и фамилию атлета")
     birthday = None
     if payload.birthday:
         from services.input_normalization import parse_user_date
@@ -697,6 +703,8 @@ async def webapp_create_student_submit(payload: WebAppCreateStudentPayload, db: 
     if duplicate:
         raise HTTPException(status_code=409, detail="Такой атлет уже есть")
     primary_phone = normalize_ru_phone(payload.phone) if payload.phone else None
+    if not primary_phone:
+        raise HTTPException(status_code=400, detail="Телефон родителя обязателен")
     secondary_phone = normalize_ru_phone(payload.phone_secondary) if payload.phone_secondary else None
     if payload.phone and not primary_phone:
         raise HTTPException(status_code=400, detail="Некорректный номер родителя")

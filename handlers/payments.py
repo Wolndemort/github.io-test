@@ -23,6 +23,7 @@ from services.payment_requisites import get_payment_info_text
 from services.availability import payment_availability
 from services.staff_permissions import permissions_for_staff
 from services.discounts import active_discount, active_discounts, apply_discount, apply_discounts
+from services.age_rules import tariff_age_matches
 
 
 router = Router()
@@ -218,7 +219,7 @@ async def process_kids_limit(
             # Достаем возрастной лимит из выбранного тарифа
             min_age_limit = selected_tariff.get("min_age", 0)
             # Перехват: если ребенок слишком мал для этого тарифа
-            if student_age < min_age_limit:
+            if not tariff_age_matches(student.birthday, today, selected_tariff):
                 await callback.answer()  # Сразу гасим часики на кнопке
                 # 🧠 УМНЫЙ СУПЕР-ПОДБОР: Сканируем весь JSONB-конфиг клуба на предмет альтернатив
                 available_disciplines = []
