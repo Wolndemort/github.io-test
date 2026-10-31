@@ -22,6 +22,7 @@ from services.order_notifications import (
     build_owner_receipt_text,
     build_staff_alert_text,
     format_order_items,
+    notify_advance_debt_settlement,
     notify_product_staff,
     resolve_user_label,
 )
@@ -282,9 +283,7 @@ async def yookassa_webhook(request: Request, session: AsyncSession = Depends(get
                     parse_mode="HTML",
                 )
                 if settlement_notice:
-                    await bot.send_message(club.owner_id, settlement_notice, parse_mode="HTML")
-                    for parent_id in await get_student_parent_ids(order.student_id, session):
-                        await bot.send_message(parent_id, settlement_notice, parse_mode="HTML")
+                    await notify_advance_debt_settlement(bot, club, session, order.student_id, settlement_notice)
                 if is_freeze and order.student_id:
                     parent_text = (
                         f"❄️ <b>Заморозка оплачена</b>\n\n"

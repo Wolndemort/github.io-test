@@ -17,7 +17,7 @@ from handlers.states import PaymentStates
 from redis.asyncio import Redis
 from services.abuse_guard import rate_limit, audit_block
 from services.audit import audit_event
-from services.order_notifications import build_owner_receipt_text, format_order_items, resolve_user_label
+from services.order_notifications import build_owner_receipt_text, format_order_items, notify_advance_debt_settlement, resolve_user_label
 from services.advance_visits import advance_purchase_warning, advance_settlement_notice
 from services.payment_requisites import get_payment_info_text
 from services.availability import payment_availability
@@ -452,7 +452,10 @@ async def process_one_click_payment(callback: types.CallbackQuery, state: FSMCon
             if settlement_notice:
                 await callback.message.answer(settlement_notice, parse_mode="HTML")
                 if club.owner_id and int(club.owner_id) != int(callback.from_user.id):
-                    await callback.bot.send_message(club.owner_id, settlement_notice, parse_mode="HTML")
+                    await notify_advance_debt_settlement(
+                        callback.bot, club, session, data['student_id'], settlement_notice,
+                        exclude_ids={int(callback.from_user.id)},
+                    )
         await state.clear()
     else:
         new_order.status = "REJECTED"
@@ -767,7 +770,10 @@ async def process_official_card_payment(
                     if settlement_notice:
                         await callback.message.answer(settlement_notice, parse_mode="HTML")
                         if club.owner_id and int(club.owner_id) != int(callback.from_user.id):
-                            await callback.bot.send_message(club.owner_id, settlement_notice, parse_mode="HTML")
+                            await notify_advance_debt_settlement(
+                                callback.bot, club, session, student_id, settlement_notice,
+                                exclude_ids={int(callback.from_user.id)},
+                            )
                 await state.clear()
                 return
             else:

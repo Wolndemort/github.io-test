@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from database.db import PaymentOrder, CartOrder, CartItem, ClubProduct, Student, add_abon, purchase_student_freeze
 from services.audit import audit_event
-from services.order_notifications import build_owner_receipt_text, format_order_items, resolve_user_label
+from services.order_notifications import build_owner_receipt_text, format_order_items, notify_advance_debt_settlement, resolve_user_label
 from services.advance_visits import advance_purchase_warning, advance_settlement_notice
 
 router = Router()
@@ -28,6 +28,7 @@ async def manual_order_confirm(callback: types.CallbackQuery, session: AsyncSess
     bot = callback.bot
     advance_warning = ""
     settlement_notice = ""
+    settlement_events: list[tuple[int, str]] = []
 
     if order_id.startswith("CART_"):
         order = await session.get(CartOrder, order_id, with_for_update=True)
@@ -54,6 +55,13 @@ async def manual_order_confirm(callback: types.CallbackQuery, session: AsyncSess
                         days_to_add=int(payload.get("days", 30)),
                         discipline=payload.get("discipline"),
                     )
+                    cart_student = await session.get(Student, int(payload["student_id"]))
+                    cart_notice = advance_settlement_notice(
+                        getattr(cart_student, "_advance_settlement", None),
+                        cart_student.expire_date if cart_student else None,
+                    )
+                    if cart_notice:
+                        settlement_events.append((int(payload["student_id"]), cart_notice))
             elif item.item_type == "freeze":
                 payload = item.payload or {}
                 for _ in range(max(1, int(item.quantity or 1))):
@@ -114,9 +122,21 @@ async def manual_order_confirm(callback: types.CallbackQuery, session: AsyncSess
         )
         user_text = owner_text.replace("Ручная оплата подтверждена", "Оплата подтверждена")
         if order.user_id:
+            if settlement_events:
+                user_text += "\n\n" + "\n\n".join(item[1] for item in settlement_events)
             await bot.send_message(order.user_id, user_text, parse_mode="HTML")
+        for settled_student_id, settled_notice in settlement_events:
+            await notify_advance_debt_settlement(
+                bot, club, session, settled_student_id, settled_notice,
+                exclude_ids={int(order.user_id)} if order.user_id else set(),
+            )
         if settlement_notice and order.user_id:
             await bot.send_message(order.user_id, settlement_notice, parse_mode="HTML")
+        if settlement_notice:
+            await notify_advance_debt_settlement(
+                bot, club, session, order.student_id, settlement_notice,
+                exclude_ids={int(order.user_id)} if order.user_id else set(),
+            )
         audit_event("manual_order_confirmed", club_id=club.id, actor_user_id=callback.from_user.id, actor_role="owner", action="confirm", object_type="payment_order", object_id=order.id, amount_kopecks=order.amount_kopecks, method="manual")
 
     if advance_warning and order.user_id:

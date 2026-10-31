@@ -24,6 +24,7 @@ from services.order_notifications import (
     build_owner_receipt_text,
     build_staff_alert_text,
     format_order_items,
+    notify_advance_debt_settlement,
     notify_product_staff,
     resolve_user_label,
 )
@@ -1269,6 +1270,11 @@ async def admin_cash_subscription(payload: WebAppCashSubscriptionPayload, db: As
     parent_ids = await get_student_parent_ids(student.id, db)
     bot = Bot(club.bot_token)
     try:
+        if settlement_notice:
+            excluded = {int(item) for item in parent_ids}
+            if club.owner_id:
+                excluded.add(int(club.owner_id))
+            await notify_advance_debt_settlement(bot, club, db, student.id, settlement_notice, exclude_ids=excluded)
         tariff_label = f"Безлимит ({days} дн.)" if count == 999 else f"{count} зан. ({days} дн.)"
         parent_label = await resolve_user_label(db, parent_ids[0], empty_label="Плательщик") if parent_ids else "Администратор клуба"
         receipt = build_owner_receipt_text(

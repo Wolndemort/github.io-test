@@ -128,3 +128,37 @@ async def notify_stock_reminders(bot: Bot, club: Club, session, text: str) -> No
             )
         except Exception:
             continue
+
+
+async def notify_advance_debt_settlement(
+    bot: Bot,
+    club: Club,
+    session,
+    student_id: int,
+    text: str,
+    *,
+    exclude_ids: set[int] | None = None,
+) -> None:
+    """Notify the owner, relevant sales staff and the athlete's parents."""
+    from database.db import get_student_parent_ids
+
+    excluded = {int(item) for item in (exclude_ids or set())}
+    targets: set[int] = set()
+    if club.owner_id:
+        targets.add(int(club.owner_id))
+    staff_rows = (
+        await session.execute(
+            select(ClubStaff).where(
+                ClubStaff.club_id == club.id,
+                ClubStaff.is_active.is_(True),
+                ClubStaff.role.in_(("manager", "cashier")),
+            )
+        )
+    ).scalars().all()
+    targets.update(int(row.telegram_id) for row in staff_rows if row.telegram_id)
+    targets.update(int(item) for item in await get_student_parent_ids(student_id, session))
+    for telegram_id in sorted(targets - excluded):
+        try:
+            await bot.send_message(chat_id=telegram_id, text=text, parse_mode="HTML")
+        except Exception:
+            continue
