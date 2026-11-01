@@ -755,8 +755,16 @@ async def admin_surveys_report(
             select(SurveyAnswer).where(SurveyAnswer.delivery_id.in_(completed_delivery_ids))
         )).all()
         values_by_question = {}
+        respondents_by_question_value = {}
         for answer in answers:
             values_by_question.setdefault(answer.question_id, []).append(answer.value)
+            delivery_row = next((row for row in rows if row["id"] == answer.delivery_id), None)
+            if delivery_row:
+                respondents_by_question_value.setdefault((answer.question_id, answer.value), []).append({
+                    "student_name": delivery_row["student_name"],
+                    "recipient_name": delivery_row["recipient_name"],
+                    "delivery_id": answer.delivery_id,
+                })
         for question in questions:
             values = values_by_question.get(question.id, [])
             counts = Counter(values)
@@ -770,7 +778,12 @@ async def admin_surveys_report(
                 "kind": question.kind,
                 "total_answers": total_answers,
                 "options": [
-                    {"value": value, "count": counts.get(value, 0), "percent": round(counts.get(value, 0) * 100 / total_answers) if total_answers else 0}
+                    {
+                        "value": value,
+                        "count": counts.get(value, 0),
+                        "percent": round(counts.get(value, 0) * 100 / total_answers) if total_answers else 0,
+                        "respondents": respondents_by_question_value.get((question.id, value), []),
+                    }
                     for value in sorted(ordered_values, key=lambda value: (-counts.get(value, 0), ordered_values.index(value)))
                 ],
             })

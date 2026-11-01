@@ -22,5 +22,14 @@ def test_manual_and_resend_routes_have_redis_claims_and_new_trigger_keys():
     assert "survey:manual:" in views
     assert "survey:resend:" in views
     assert "trigger_prefix" in service
+
+
+def test_survey_summary_exposes_respondents_for_each_answer_option():
+    views = (ROOT / "admin_module/webapp_views.py").read_text(encoding="utf-8")
+    template = (ROOT / "templates/admin_surveys.html").read_text(encoding="utf-8")
+    assert 'respondents_by_question_value' in views
+    assert '"respondents": respondents_by_question_value' in views
+    assert 'class="answer-breakdown"' in template
+    assert 'o.respondents' in template
     assert "Повторить непройденным" in template
     assert "Повторить недоставленным" in template
