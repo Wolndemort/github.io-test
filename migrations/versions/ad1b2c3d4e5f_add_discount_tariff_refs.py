@@ -8,7 +8,11 @@ branch_labels = None
 depends_on = None
 
 def upgrade():
-    op.add_column("discounts", sa.Column("tariff_refs", sa.JSON(), nullable=False, server_default="[]"))
+    inspector = sa.inspect(op.get_bind())
+    if "tariff_refs" not in {column["name"] for column in inspector.get_columns("discounts")}:
+        op.add_column("discounts", sa.Column("tariff_refs", sa.JSON(), nullable=False, server_default="[]"))
 
 def downgrade():
-    op.drop_column("discounts", "tariff_refs")
+    inspector = sa.inspect(op.get_bind())
+    if "tariff_refs" in {column["name"] for column in inspector.get_columns("discounts")}:
+        op.drop_column("discounts", "tariff_refs")
