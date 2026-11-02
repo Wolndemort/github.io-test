@@ -208,6 +208,8 @@ async def process_athlete_gate_pass(
     # попытку. При успешном открытии ниже будет тот же commit, что и раньше.
     if is_advance_visit:
         message_text = "🔴 " + message_text
+    if birthday_warning:
+        message_text = "⚠️ Дата рождения не указана — проход отмечен администратором. Клиенту нужно заполнить её в кабинете.\n" + message_text
     relay_config = dict(club_settings.get("turnstile", {}) or {})
     turnstile_status = "ℹ️ СКУД отключен"
     if open_turnstile and relay_config.get("enabled", False):

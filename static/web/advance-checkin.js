@@ -28,7 +28,7 @@
       status.textContent = 'Сохраняем…';
       const response = await fetch('/webapp/staff-checkin', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({club_id:clubId, student_id:id, open_turnstile:open, confirm_advance:confirmed, init_data:init})});
       const payload = await response.json().catch(() => ({}));
-      if (response.ok) { showAlert(payload.already_marked ? 'Посещение уже отмечено' : 'Посещение успешно отмечено', `${payload.birthday_warning ? '⚠️ Дата рождения не указана — проход разрешён администратором. Заполните её в кабинете клиента.\n\n' : ''}${payload.turnstile || ''}\n${payload.message || 'Сессия активна'}`, !!payload.already_marked); return; }
+      if (response.ok) { showAlert(payload.already_marked ? 'Посещение уже отмечено' : 'Посещение успешно отмечено', `${payload.turnstile || ''}\n${payload.message || 'Сессия активна'}`, !!payload.already_marked); return; }
       const detail = payload.detail || {};
       if (detail.code === 'advance_confirmation_required' && window.confirm(`⚠️ ${detail.message}\n\nОтметить это посещение в долг?`)) return window.advanceCheck(id, open, true);
       showAlert('Не удалось отметить', detail.message || detail || 'Ошибка сохранения', true);
