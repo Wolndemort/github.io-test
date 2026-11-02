@@ -228,6 +228,7 @@ class DiscountChangePayload(BaseModel):
     user_id: int | None = None
     student_id: int | None = None
     idempotency_key: str | None = None
+    student_ids: list[int] = []
 
 class AdminSaleMethodPayload(BaseModel):
     init_data: str
