@@ -26,6 +26,7 @@ def test_discount_assignment_collapse_uses_stable_selector_and_keeps_dates():
     page = (ROOT / "templates/admin_discounts.html").read_text(encoding="utf-8")
     views = (ROOT / "admin_module/webapp_views.py").read_text(encoding="utf-8")
     assert "textContent.includes('Уже привязаны')" in page
+    assert "assigned-discounts.collapsed" in page
     assert '"starts_at": discount.starts_at.strftime' in views
     assert '"ends_at": discount.ends_at.strftime' in views
 

@@ -2,7 +2,7 @@
 <html lang="ru"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Скидки</title><script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>body{font-family:sans-serif;background:#090909;color:#fff;padding:14px}.wrap{max-width:900px;margin:auto}.card{background:#151515;border:1px solid #333;border-radius:14px;padding:16px;margin:12px 0}input,select,textarea,button{box-sizing:border-box;padding:10px;margin:4px 0;border-radius:8px;border:1px solid #555;background:#111;color:#fff;width:100%}button{background:#fff;color:#111;font-weight:bold}.grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}.client{border-top:1px solid #333;padding:10px 0;display:grid;grid-template-columns:1fr 120px;gap:8px}.muted{color:#aaa;font-size:13px}.danger{background:#511d1d;color:#fff}</style>
-<style>.back{display:block;text-align:center;text-decoration:none;padding:11px;border-radius:10px;background:#fff;color:#111;font-weight:bold}.form-heading{display:flex;align-items:center;justify-content:space-between;gap:10px}.form-heading h2,.form-heading h3{margin:0}.form-heading button{width:auto;white-space:nowrap}.discount-form-body[hidden]{display:none}</style>
+<style>.back{display:block;text-align:center;text-decoration:none;padding:11px;border-radius:10px;background:#fff;color:#111;font-weight:bold}.form-heading{display:flex;align-items:center;justify-content:space-between;gap:10px}.form-heading h2,.form-heading h3{margin:0}.form-heading button{width:auto;white-space:nowrap}.discount-form-body[hidden]{display:none}.assigned-discounts.collapsed> :not(.form-heading){display:none!important}</style>
 <div class="wrap">
 {% include "_staff_back_button.html" %}
 <script>
@@ -34,9 +34,10 @@ document.addEventListener('DOMContentLoaded',()=>{
   const cards=document.querySelectorAll('.wrap > .card');
   const discountToggle=cards[1]?.querySelector('button');
   if(discountToggle && discountToggle.getAttribute('aria-expanded')==='true') discountToggle.click();
-  const assignedCard=[...cards].find(card=>card.textContent.includes('Уже привязаны'));
+  const assignedCard=[...cards].find(card=>card.querySelector('h3')?.textContent.includes('Уже привязаны'));
   const assignedTitle=assignedCard?.querySelector('h3');
   if(!assignedCard||!assignedTitle)return;
+  assignedCard.classList.add('assigned-discounts');
   const heading=document.createElement('div');
   heading.className='form-heading';
   heading.innerHTML='<h3>'+assignedTitle.textContent+'</h3><button type="button" aria-expanded="false">Развернуть</button>';
@@ -44,8 +45,10 @@ document.addEventListener('DOMContentLoaded',()=>{
   const parts=[...assignedCard.children].filter(node=>node!==heading);
   const button=heading.querySelector('button');
   parts.forEach(node=>node.hidden=true);
+  assignedCard.classList.add('collapsed');
   button.onclick=()=>{
     const expanded=button.getAttribute('aria-expanded')==='true';
+    assignedCard.classList.toggle('collapsed',expanded);
     parts.forEach(node=>node.hidden=expanded);
     button.setAttribute('aria-expanded',String(!expanded));
     button.textContent=expanded?'Развернуть':'Свернуть';
