@@ -21,6 +21,11 @@
         .mono-action { display: block; text-decoration: none; padding: 15px 16px; border-radius: 16px; border: 1px solid #111; color: #111; background: #fff; font-weight: 700; margin: 10px 0; }
         .cardlist { display: grid; gap: 10px; }
         .hint { color:#666; font-size:14px; line-height:1.5; }
+        .birthday-required { display:none; background:#fff8df; border:2px solid #e5c76b; border-radius:18px; padding:15px; margin:12px 0; text-align:left; }
+        .birthday-required.show { display:block; }
+        .birthday-required input { width:100%; box-sizing:border-box; padding:12px; margin-top:8px; border:1px solid #c8a947; border-radius:10px; font-size:16px; }
+        .birthday-required button { width:100%; padding:13px; margin-top:10px; border:0; border-radius:12px; background:#111; color:#fff; font-weight:700; }
+        .birthday-feedback { margin-top:8px; color:#16803c; font-weight:700; }
         .top, .student-card, .mono-action, .btn, #setup-biometry-box {
             overflow-wrap: anywhere;
             word-break: break-word;
@@ -54,11 +59,19 @@
     <p style="color:#666;" id="status-hint">Выберите атлета для прохода:</p>
     <div id="students-list">
         {% for student in students %}
-        <button type="button" class="student-card" id="card-{{ student.id }}" data-student-id="{{ student.id }}" data-student-name="{{ student.name }}">
+        <button type="button" class="student-card" id="card-{{ student.id }}" data-student-id="{{ student.id }}" data-student-name="{{ student.name }}" data-birthday="{{ student.birthday.isoformat() if student.birthday else '' }}">
             <h3 style="margin:0 0 6px 0;">{{ student.name }}</h3>
             <p style="margin:0;color:#666;">Баланс: {{ student.balance_lessons }} занятий</p>
         </button>
         {% endfor %}
+    </div>
+    <div id="birthday-required" class="birthday-required" aria-live="polite">
+        <b>⚠️ Укажите дату рождения атлета</b>
+        <p style="margin:7px 0 0;color:#765500;line-height:1.4">Это нужно для проверки возрастной группы. Займёт около 30 секунд.</p>
+        <label for="birthday-input" style="display:block;margin-top:10px;color:#765500;font-size:13px">Дата рождения</label>
+        <input id="birthday-input" type="date">
+        <button id="birthday-save" type="button">Сохранить и продолжить</button>
+        <div id="birthday-feedback" class="birthday-feedback"></div>
     </div>
 </div>
 <script>
@@ -86,7 +99,12 @@ if (!tg) {
 const bm = tg?.BiometricManager;
 const serverBiometryEnabled = {{ 'true' if biometric_enabled else 'false' }};
 let selectedStudentId = null;
+let selectedStudentBirthday = '';
 let isBiometricReady = false;
+const birthdayBox = document.getElementById('birthday-required');
+const birthdayInput = document.getElementById('birthday-input');
+const birthdaySave = document.getElementById('birthday-save');
+const birthdayFeedback = document.getElementById('birthday-feedback');
 function showBiometryFallback() {
     document.getElementById('setup-biometry-box')?.style.setProperty('display', 'none');
     document.getElementById('biometry-fallback')?.style.setProperty('display', 'block');
@@ -190,8 +208,19 @@ function setupBiometrics() {
 }
 function selectStudent(studentId, studentName) {
     selectedStudentId = studentId;
+    const selectedCard = document.getElementById(`card-${studentId}`);
+    selectedStudentBirthday = selectedCard?.dataset.birthday || '';
     document.querySelectorAll('.student-card').forEach(c => c.classList.remove('selected-card'));
-    document.getElementById(`card-${studentId}`).classList.add('selected-card');
+    selectedCard?.classList.add('selected-card');
+    if (!selectedStudentBirthday) {
+        birthdayInput.value = '';
+        birthdayFeedback.textContent = '';
+        birthdayBox.classList.add('show');
+        tg?.MainButton.hide();
+        document.getElementById('status-hint').textContent = 'Сначала укажите дату рождения атлета — это займёт около 30 секунд.';
+        return;
+    }
+    birthdayBox.classList.remove('show');
     if (!tg) return;
     if (!bm || (!bm.isAccessGranted && !serverBiometryEnabled)) {
         tg.showAlert("Face ID недоступен. Используйте QR-пропуск из меню бота.");
@@ -202,6 +231,33 @@ function selectStudent(studentId, studentName) {
     tg.MainButton.color = "#111111";
     tg.MainButton.show();
 }
+birthdaySave?.addEventListener('click', async () => {
+    if (!selectedStudentId || !birthdayInput.value) {
+        birthdayInput?.focus();
+        return;
+    }
+    birthdaySave.disabled = true;
+    birthdayFeedback.textContent = 'Сохраняем…';
+    try {
+        const response = await fetch('/webapp/client-cabinet/student/birthday', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({init_data: tg?.initData || '', club_id: {{ club_id }}, student_id: Number(selectedStudentId), birthday: birthdayInput.value})
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.detail || 'Не удалось сохранить дату рождения');
+        selectedStudentBirthday = data.birthday || birthdayInput.value;
+        document.getElementById(`card-${selectedStudentId}`)?.setAttribute('data-birthday', selectedStudentBirthday);
+        birthdayFeedback.textContent = 'Спасибо! Дата сохранена. Теперь можно открыть проход.';
+        birthdayBox.classList.remove('show');
+        document.getElementById('status-hint').textContent = 'Дата сохранена. Нажмите кнопку прохода для подтверждения Face ID.';
+        if (tg) tg.MainButton.show();
+    } catch (error) {
+        birthdayFeedback.textContent = error.message || 'Не удалось сохранить дату рождения';
+    } finally {
+        birthdaySave.disabled = false;
+    }
+});
 if (tg) tg.onEvent('mainButtonClicked', function() {
     if (!selectedStudentId) return;
     tg.MainButton.disable();

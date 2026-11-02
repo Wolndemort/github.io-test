@@ -89,3 +89,13 @@ def test_client_subscription_flow_supports_secondary_parent_links():
     block = source[start:end]
     assert "StudentParent.parent_id == user.user_id" in block
     assert "StudentParent.parent_id == user_id" in block
+
+
+def test_client_face_id_flow_collects_missing_birthday_inline_without_redirect():
+    source = (ROOT / "admin_module/webapp_client_cabinet.py").read_text(encoding="utf-8")
+    page = (ROOT / "templates/biometric_pass.html").read_text(encoding="utf-8")
+    assert '@router.post("/webapp/client-cabinet/student/birthday")' in source
+    assert "birthday-required" in page
+    assert "fetch('/webapp/client-cabinet/student/birthday'" in page
+    assert "Спасибо! Дата сохранена" in page
+    assert "birthdayBox.classList.remove('show')" in page
