@@ -52,3 +52,10 @@ def test_manual_survey_selection_is_previewed_and_confirmed():
     assert "Проверка получателей" in survey
     assert "Подтвердить и отправить" in survey
     assert "Сначала выберите хотя бы одного атлета" not in survey
+
+
+def test_survey_report_refreshes_without_page_reload():
+    survey = (ROOT / "templates/admin_surveys.html").read_text(encoding="utf-8")
+    assert "Обновляем отчёт без перезагрузки страницы" in survey
+    assert "setInterval" in survey
+    assert "loadReport().catch" in survey

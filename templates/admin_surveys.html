@@ -126,6 +126,14 @@ closeDetail.onclick=()=>detailModal.style.display='none';refreshReport.onclick=l
 })();
 </script>
 <script>
+// Обновляем отчёт без перезагрузки страницы, пока вкладка открыта.
+setInterval(() => {
+  if (document.visibilityState === 'visible' && typeof loadReport === 'function') {
+    loadReport().catch(() => {});
+  }
+}, 10000);
+</script>
+<script>
 (() => {
   // Этот блок отвечает за действия сохранённых опросов. Он намеренно
   // содержит собственные ссылки на редактор и storage: первый скрипт
