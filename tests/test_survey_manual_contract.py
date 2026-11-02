@@ -42,6 +42,7 @@ def test_answer_options_link_to_prefilled_broadcast_recipients():
     assert "/webapp/admin-broadcast?club_id={{club_id}}&student_ids=" in survey
     assert "initialIds" in broadcast
     assert "prefill_student_ids" in views and "student_ids: str = Query" in views
+    assert "student_ids='+encodeURIComponent(ids.join(','))+'&init_data='" in survey
 
 
 def test_manual_survey_selection_is_previewed_and_confirmed():
