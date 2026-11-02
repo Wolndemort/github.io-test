@@ -19,6 +19,9 @@ def test_active_session_can_be_cancelled_only_by_admin_with_confirmation():
     assert '@router.post("/webapp/admin/visits/{student_id}/cancel")' in pages
     assert "with_for_update=True" in pages
     assert "active_visit_cancelled" in pages
+    assert "Посещение отменено" in pages
+    assert "get_student_parent_ids" in pages
+    assert "telegram_call" in pages
     assert "Отменить текущее посещение?" in admin
     assert "activeSessionCountdown" in student
     assert "data-session-until" in student

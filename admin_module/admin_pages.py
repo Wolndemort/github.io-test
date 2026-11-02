@@ -1,6 +1,8 @@
 import io
 from datetime import date, datetime, timedelta, timezone
+from html import escape
 
+from aiogram import Bot
 from fastapi import Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, StreamingResponse
 from sqlalchemy import func, or_, select
@@ -9,10 +11,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from admin_module.router_base import router, templates
 from admin_module.utils import get_club_id_from_host, verify_webapp_admin, verify_webapp_staff, webapp_auth_gate
 from admin_module.webapp_verify import verify_telegram_data
-from database.db import CartItem, CartOrder, CashEntry, Club, PaymentOrder, Student, User, VisitLog, get_session
+from database.db import CartItem, CartOrder, CashEntry, Club, PaymentOrder, Student, User, VisitLog, get_session, get_student_parent_ids
 from services.analytics import build_expiry_series, build_registration_series, build_revenue_series, build_visit_series, calculate_admin_dashboard, calculate_cash_flow_periods, calculate_projected_renewal_revenue, calculate_revenue_periods, calculate_student_metrics, generate_students_excel, reporting_periods, moscow_calendar_date, moscow_date_boundary
 from services.schedule_utils import normalize_schedule_block
 from services.audit import audit_event
+from services.delivery import telegram_call
 
 
 def _forecast_date_range(date_from: str | None, date_to: str | None, default_start: date, default_finish: date) -> tuple[str, str, date, date]:
@@ -115,7 +118,7 @@ async def cancel_active_visit(
 ):
     """Cancel only the currently active check-in and restore its accounting."""
     club = await session.get(Club, club_id)
-    await verify_webapp_admin(club, init_data)
+    actor = await verify_webapp_admin(club, init_data)
     student = await session.get(Student, student_id, with_for_update=True)
     if not student or student.club_id != club_id:
         raise HTTPException(status_code=404, detail="Атлет не найден")
@@ -171,6 +174,30 @@ async def cancel_active_visit(
         )
     await session.commit()
     audit_event("active_visit_cancelled", club_id=club_id, action="cancel", object_type="student", object_id=student_id)
+    actor_name = escape(str(actor.get("first_name") or actor.get("username") or "администратор"))
+    entered_at = active_visit.visited_at.replace(tzinfo=None).strftime("%d.%m.%Y %H:%M")
+    parent_ids = await get_student_parent_ids(student.id, session)
+    recipients = {int(parent_id) for parent_id in parent_ids}
+    if club.owner_id:
+        recipients.add(int(club.owner_id))
+    bot = Bot(club.bot_token)
+    try:
+        client_text = (
+            f"↩️ <b>Посещение отменено</b>\nАтлет: <b>{escape(student.name)}</b>\n"
+            f"Вход: {entered_at}\nПосещение отменено администратором. Занятие не списано."
+        )
+        admin_text = (
+            f"↩️ <b>Посещение отменено</b>\nАтлет: <b>{escape(student.name)}</b>\n"
+            f"Вход: {entered_at}\nАдминистратор: {actor_name}\nСписание не произведено."
+        )
+        for recipient_id in recipients:
+            text = admin_text if club.owner_id and int(recipient_id) == int(club.owner_id) else client_text
+            try:
+                await telegram_call(lambda recipient_id=recipient_id, text=text: bot.send_message(recipient_id, text, parse_mode="HTML"))
+            except Exception:
+                continue
+    finally:
+        await bot.session.close()
     return {"ok": True, "student_id": student_id, "deleted_logs": len(deleted_logs)}
 
 
