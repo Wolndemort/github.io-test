@@ -26,6 +26,9 @@ def test_staff_search_exposes_discipline_and_remaining_visits():
     page = (ROOT / "static/web/advance-checkin.js").read_text(encoding="utf-8")
     assert '"discipline": discipline_name or discipline_code' in source
     assert '"remaining_lessons": remaining_lessons' in source
+    assert "can_edit_birthday" in source
+    assert "birthday-edit-button" in page
+    assert "client-cabinet/student/birthday" in page
     assert "Остаток" in page
     assert "Дисциплина" in page
 

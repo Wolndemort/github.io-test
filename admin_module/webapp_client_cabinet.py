@@ -418,6 +418,7 @@ async def staff_checkin_search(club_id: int, q: str = Query(default=""), init_da
     students = (await db.execute(stmt)).scalars().all()
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     timeout_minutes = int(((club.club_settings or {}).get("limits", {}) or {}).get("session_timeout_minutes", 150) or 150)
+    can_edit_birthday = int(club.owner_id or 0) == user_id or user_id in {int(value) for value in SUPER_ADMIN_IDS} or bool(staff and staff_can(staff, "athletes_manage"))
     rows = []
     disciplines = (club.club_settings or {}).get("disciplines", {}) or {}
     for s in students:
@@ -436,6 +437,7 @@ async def staff_checkin_search(club_id: int, q: str = Query(default=""), init_da
             "discipline": discipline_name or discipline_code,
             "remaining_lessons": remaining_lessons,
             "birthday_missing": not bool(s.birthday),
+            "can_edit_birthday": can_edit_birthday,
             "advance": {
                 "is_advance": preview["is_advance"], "debt_lessons": preview["debt_lessons"],
                 "debt_days": preview["debt_days"], "max_debt_lessons": preview["max_debt_lessons"],
@@ -836,11 +838,17 @@ async def update_client_student_birthday(payload: WebAppStudentBirthdayPayload, 
         raise HTTPException(status_code=403, detail="Доступ запрещён")
     user_id = int(tg_user.get("id", 0))
     student = await db.get(Student, payload.student_id, with_for_update=True)
+    staff = await db.scalar(select(ClubStaff).where(
+        ClubStaff.club_id == payload.club_id,
+        ClubStaff.telegram_id == user_id,
+        ClubStaff.is_active.is_(True),
+    ))
+    can_edit_as_staff = int(club.owner_id or 0) == user_id or user_id in {int(value) for value in SUPER_ADMIN_IDS} or bool(staff and staff_can(staff, "athletes_manage"))
     linked = await db.scalar(select(StudentParent.student_id).where(
         StudentParent.student_id == payload.student_id,
         StudentParent.parent_id == user_id,
     ))
-    if not student or student.club_id != payload.club_id or (student.parent_id != user_id and not linked):
+    if not student or student.club_id != payload.club_id or (not can_edit_as_staff and student.parent_id != user_id and not linked):
         raise HTTPException(status_code=403, detail="Атлет не найден")
     try:
         birthday = parse_user_date(payload.birthday)
