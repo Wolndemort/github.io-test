@@ -733,7 +733,7 @@ async def admin_surveys_report(
         parent = await session.get(User, delivery.recipient_id)
         answer_count = await session.scalar(select(func.count(SurveyAnswer.id)).where(SurveyAnswer.delivery_id == delivery.id)) or 0
         rows.append({
-            "id": delivery.id, "survey_id": delivery.survey_id,
+            "id": delivery.id, "survey_id": delivery.survey_id, "student_id": delivery.student_id,
             "survey_name": survey.name if survey else "Удалённый опрос",
             "student_name": student.name if student else "Удалённый атлет",
             "recipient_name": (parent.full_name if parent and parent.full_name else str(delivery.recipient_id)),
@@ -762,6 +762,7 @@ async def admin_surveys_report(
             if delivery_row:
                 respondents_by_question_value.setdefault((answer.question_id, answer.value), []).append({
                     "student_name": delivery_row["student_name"],
+                    "student_id": delivery_row["student_id"],
                     "recipient_name": delivery_row["recipient_name"],
                     "delivery_id": answer.delivery_id,
                 })
