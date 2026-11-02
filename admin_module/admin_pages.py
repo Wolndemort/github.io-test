@@ -3,7 +3,7 @@ from datetime import date, datetime, timedelta, timezone
 
 from fastapi import Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, StreamingResponse
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from admin_module.router_base import router, templates
@@ -12,6 +12,7 @@ from admin_module.webapp_verify import verify_telegram_data
 from database.db import CartItem, CartOrder, CashEntry, Club, PaymentOrder, Student, User, VisitLog, get_session
 from services.analytics import build_expiry_series, build_registration_series, build_revenue_series, build_visit_series, calculate_admin_dashboard, calculate_cash_flow_periods, calculate_projected_renewal_revenue, calculate_revenue_periods, calculate_student_metrics, generate_students_excel, reporting_periods, moscow_calendar_date, moscow_date_boundary
 from services.schedule_utils import normalize_schedule_block
+from services.audit import audit_event
 
 
 def _forecast_date_range(date_from: str | None, date_to: str | None, default_start: date, default_finish: date) -> tuple[str, str, date, date]:
@@ -103,6 +104,74 @@ else location.replace(location.pathname+'?club_id=' + encodeURIComponent(new URL
     active_sessions.sort(key=lambda x: x["time_passed_mins"])
     past_sessions.sort(key=lambda x: x["last_visit"], reverse=True)
     return templates.TemplateResponse("admin.html", {"request": request, "club_id": club_id, "active_sessions": active_sessions, "past_sessions": past_sessions, "timeout_minutes": timeout_minutes, "filters": {"date_from": date_from or "", "date_to": date_to or ""}, **calculate_admin_dashboard(students, visit_logs=visit_logs)})
+
+
+@router.post("/webapp/admin/visits/{student_id}/cancel")
+async def cancel_active_visit(
+    student_id: int,
+    club_id: int = Query(...),
+    init_data: str = Query(...),
+    session: AsyncSession = Depends(get_session),
+):
+    """Cancel only the currently active check-in and restore its accounting."""
+    club = await session.get(Club, club_id)
+    await verify_webapp_admin(club, init_data)
+    student = await session.get(Student, student_id, with_for_update=True)
+    if not student or student.club_id != club_id:
+        raise HTTPException(status_code=404, detail="Атлет не найден")
+    timeout_minutes = int(((club.club_settings or {}).get("limits", {}) or {}).get("session_timeout_minutes", 150) or 150)
+    now_local = reporting_periods()["now"]
+    active_visit = (await session.execute(
+        select(VisitLog)
+        .where(
+            VisitLog.club_id == club_id,
+            VisitLog.student_id == student_id,
+            or_(VisitLog.source.is_(None), VisitLog.source != "repeat"),
+        )
+        .order_by(VisitLog.visited_at.desc())
+        .limit(1)
+        .with_for_update()
+    )).scalar_one_or_none()
+    if not active_visit or not active_visit.visited_at or now_local - active_visit.visited_at.replace(tzinfo=None) >= timedelta(minutes=timeout_minutes):
+        raise HTTPException(status_code=409, detail="Активная сессия уже закончилась")
+
+    deleted_logs = (await session.execute(
+        select(VisitLog).where(
+            VisitLog.club_id == club_id,
+            VisitLog.student_id == student_id,
+            VisitLog.visited_at >= active_visit.visited_at,
+        )
+    )).scalars().all()
+    deleted_advance = any(log.source == "advance" for log in deleted_logs)
+    for log in deleted_logs:
+        await session.delete(log)
+
+    previous_visit = await session.scalar(
+        select(VisitLog.visited_at)
+        .where(
+            VisitLog.club_id == club_id,
+            VisitLog.student_id == student_id,
+            VisitLog.visited_at < active_visit.visited_at,
+            or_(VisitLog.source.is_(None), VisitLog.source != "repeat"),
+        )
+        .order_by(VisitLog.visited_at.desc())
+        .limit(1)
+    )
+    student.last_visit = previous_visit
+    if deleted_advance:
+        remaining_advance = list((await session.scalars(
+            select(VisitLog.visited_at)
+            .where(VisitLog.club_id == club_id, VisitLog.student_id == student_id, VisitLog.source == "advance")
+            .order_by(VisitLog.visited_at.asc())
+        )).all())
+        student.advance_debt_lessons = len(remaining_advance)
+        student.advance_debt_days = (
+            max(1, (remaining_advance[-1].date() - remaining_advance[0].date()).days + 1)
+            if remaining_advance else 0
+        )
+    await session.commit()
+    audit_event("active_visit_cancelled", club_id=club_id, action="cancel", object_type="student", object_id=student_id)
+    return {"ok": True, "student_id": student_id, "deleted_logs": len(deleted_logs)}
 
 
 @router.get("/revenue", response_class=HTMLResponse)

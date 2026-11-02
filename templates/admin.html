@@ -99,6 +99,7 @@
                     {% if session.parent_id %}
                     <button type="button" class="tg-link" onclick="openChat(event, {{ session.parent_id }})">💬 Чат</button>
                     {% endif %}
+                    <button type="button" class="tg-link cancel-visit" data-student-id="{{ session.student_id }}">↩️ Отменить посещение</button>
                 </div>
             </div>
             {% else %}
@@ -294,6 +295,23 @@
             }
             return false;
         }
+
+        document.querySelectorAll('.cancel-visit').forEach(button => button.addEventListener('click', async event => {
+            event.preventDefault();
+            event.stopPropagation();
+            if (!confirm('Отменить текущее посещение? Оно не будет списано и человек исчезнет из списка «Сейчас в зале».')) return;
+            button.disabled = true;
+            const params = new URLSearchParams({club_id: '{{ club_id }}', init_data: window.Telegram?.WebApp?.initData || ''});
+            try {
+                const response = await fetch(`/webapp/admin/visits/${button.dataset.studentId}/cancel?${params}`, {method: 'POST'});
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok) throw new Error(data.detail || 'Не удалось отменить посещение');
+                location.reload();
+            } catch (error) {
+                button.disabled = false;
+                alert(error.message);
+            }
+        }));
     </script>
     </div>
     <script src="/static/js/scroll_top.js"></script>

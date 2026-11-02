@@ -50,7 +50,7 @@
         <div class="mono-pill"><div class="label">Freezes</div><div class="value">{{ student.can_freeze if student.can_freeze is not none else 0 }}</div></div>
     </div>
     {% if active_session %}
-    <div class="mono-pill" style="margin-top:10px;border-color:#16803c"><div class="label">Активная сессия</div><div class="value">до {{ active_until|moscow_time }} · ↓ 1 занятие за новый вход</div><div class="label">Осталось сейчас: {{ 'Безлимит' if student.balance_lessons == 999 else (student.balance_lessons if student.balance_lessons is not none else 0) }}</div></div>
+    <div class="mono-pill" style="margin-top:10px;border-color:#16803c"><div class="label">Активная сессия</div><div class="value">до <span id="activeSessionUntil" data-session-until="{{ active_until.isoformat() }}Z">{{ active_until|moscow_time }}</span> · <span id="activeSessionCountdown">осталось —</span></div><div class="label">Осталось сейчас: {{ 'Безлимит' if student.balance_lessons == 999 else (student.balance_lessons if student.balance_lessons is not none else 0) }}</div></div>
     {% endif %}
 </div>
 <div class="mono-card">
@@ -87,4 +87,9 @@
         <p>Пока нет завершенных сессий.</p>
     {% endif %}
 </div>
+{% endblock %}
+{% block scripts %}
+<script>
+(() => { const until=document.getElementById('activeSessionUntil'), countdown=document.getElementById('activeSessionCountdown'); if(!until||!countdown)return; const target=new Date(until.dataset.sessionUntil).getTime(); const tick=()=>{const left=Math.max(0,target-Date.now()),minutes=Math.floor(left/60000),seconds=Math.floor(left/1000)%60;countdown.textContent=left?'осталось '+minutes+':'+String(seconds).padStart(2,'0'):'сессия завершена';if(left)setTimeout(tick,1000)};tick(); })();
+</script>
 {% endblock %}

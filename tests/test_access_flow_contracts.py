@@ -12,6 +12,18 @@ def test_session_close_is_scheduled_and_decrements_one_lesson_but_preserves_unli
     assert "student.last_visit = None" in source
 
 
+def test_active_session_can_be_cancelled_only_by_admin_with_confirmation():
+    pages = (ROOT / "admin_module/admin_pages.py").read_text(encoding="utf-8")
+    admin = (ROOT / "templates/admin.html").read_text(encoding="utf-8")
+    student = (ROOT / "templates/webapp_student.html").read_text(encoding="utf-8")
+    assert '@router.post("/webapp/admin/visits/{student_id}/cancel")' in pages
+    assert "with_for_update=True" in pages
+    assert "active_visit_cancelled" in pages
+    assert "Отменить текущее посещение?" in admin
+    assert "activeSessionCountdown" in student
+    assert "data-session-until" in student
+
+
 def test_manual_and_qr_checkins_share_the_same_gate_service():
     admin = (ROOT / "handlers/admin_option.py").read_text(encoding="utf-8")
     user = (ROOT / "handlers/user_option.py").read_text(encoding="utf-8")
