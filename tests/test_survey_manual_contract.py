@@ -31,6 +31,8 @@ def test_survey_summary_exposes_respondents_for_each_answer_option():
     assert '"respondents": respondents_by_question_value' in views
     assert 'class="answer-breakdown"' in template
     assert 'o.respondents' in template
+    assert "Повторить непройденным" in template
+    assert "Повторить недоставленным" in template
 
 def test_answer_options_link_to_prefilled_broadcast_recipients():
     views = (ROOT / "admin_module/webapp_views.py").read_text(encoding="utf-8")
@@ -39,5 +41,3 @@ def test_answer_options_link_to_prefilled_broadcast_recipients():
     assert '"student_id": delivery_row["student_id"]' in views
     assert "/webapp/admin-broadcast?club_id={{club_id}}&student_ids=" in survey
     assert "initialIds" in broadcast
-    assert "Повторить непройденным" in template
-    assert "Повторить недоставленным" in template
