@@ -302,3 +302,6 @@ closeDetail.onclick=()=>detailModal.style.display='none';refreshReport.onclick=l
 const originalRenderSummary=window.renderSummary;
 if(originalRenderSummary){window.renderSummary=function(items){originalRenderSummary(items);document.querySelectorAll('#reportSummary .answer-breakdown').forEach((details,index)=>{const option=items.flatMap(item=>item.options||[])[index];const ids=(option?.respondents||[]).map(row=>row.student_id).filter(Boolean);if(ids.length){const link=document.createElement('a');link.className='answer-broadcast';link.href='/webapp/admin-broadcast?club_id={{club_id}}&student_ids='+encodeURIComponent(ids.join(','));link.textContent='В персональную рассылку';details.appendChild(link)}})}};
 </script>
+<script>
+document.addEventListener('DOMContentLoaded',()=>{const move=()=>document.querySelectorAll('.answer-broadcast').forEach(link=>{link.style.display='inline-block';link.style.marginLeft='12px';link.style.padding='3px 8px';link.style.border='1px solid #777';link.style.borderRadius='7px';link.style.color='inherit';link.style.textDecoration='none';const summary=link.closest('details')?.querySelector('summary');if(summary&&!summary.contains(link))summary.appendChild(link)});move();new MutationObserver(move).observe(document.getElementById('reportSummary')||document.body,{childList:true,subtree:true});});
+</script>
