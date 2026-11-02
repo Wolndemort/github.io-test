@@ -1371,7 +1371,7 @@ async def change_admin_discount(payload: DiscountChangePayload, session: AsyncSe
     return {"ok": True}
 
 @router.get("/webapp/admin-discounts/clients")
-async def search_discount_clients(request: Request, club_id: int = Query(...), q: str = Query(default=""), discipline: str = Query(default="all", max_length=50), no_subscription: bool = Query(default=False), no_visits_14: bool = Query(default=False), init_data: str | None = Query(default=None), session: AsyncSession = Depends(get_session)):
+async def search_discount_clients(request: Request, club_id: int = Query(...), q: str = Query(default=""), discipline: str = Query(default="all", max_length=50), no_subscription: bool = Query(default=False), no_visits_14: bool = Query(default=False), age_min: int | None = Query(default=None, ge=0, le=100), age_max: int | None = Query(default=None, ge=0, le=100), init_data: str | None = Query(default=None), session: AsyncSession = Depends(get_session)):
     club = await session.get(Club, club_id)
     await verify_webapp_staff(club, init_data, session, "cash_sale")
     needle = q.strip()
@@ -1393,14 +1393,24 @@ async def search_discount_clients(request: Request, club_id: int = Query(...), q
             Student.parent_phone_secondary.ilike(f"%{needle}%"),
         ))
     students = (await session.execute(query)).scalars().all()
+    if age_min is not None or age_max is not None:
+        today = date.today()
+        def student_age(student):
+            if not student.birthday:
+                return None
+            return today.year - student.birthday.year - ((today.month, today.day) < (student.birthday.month, student.birthday.day))
+        students = [student for student in students if student_age(student) is not None and (age_min is None or student_age(student) >= age_min) and (age_max is None or student_age(student) <= age_max)]
+    if age_min is not None and age_max is not None and age_min > age_max:
+        raise HTTPException(400, "Минимальный возраст не может быть больше максимального")
     result = []
     for student in students:
         parent_ids = set(await get_student_parent_ids(student.id, session))
         parent = await session.get(User, student.parent_id) if student.parent_id else None
         assigned = (await session.scalars(select(DiscountAssignment.discount_id).where(DiscountAssignment.student_id == student.id, DiscountAssignment.club_id == club_id))).all()
         discount_rows = (await session.execute(select(Discount).join(DiscountAssignment, DiscountAssignment.discount_id == Discount.id).where(DiscountAssignment.student_id == student.id, DiscountAssignment.club_id == club_id))).scalars().all()
-        result.append({"student_id": student.id, "user_id": student.parent_id, "name": student.name, "parent_name": parent.full_name if parent else "", "phone": student.parent_phone or student.parent_phone_secondary or "", "discipline": student.discipline or "", "recipient_count": len(parent_ids), "discount_ids": assigned, "discounts": [{"id": d.id, "name": d.name, "kind": d.kind, "value": d.value} for d in discount_rows], "active_subscription": is_subscription_active(student)})
-    return {"clients": result, "disciplines": _broadcast_disciplines(club, students), "filters": {"discipline": discipline, "no_subscription": no_subscription, "no_visits_14": no_visits_14}}
+        age = student_age(student) if 'student_age' in locals() else None
+        result.append({"student_id": student.id, "user_id": student.parent_id, "name": student.name, "parent_name": parent.full_name if parent else "", "phone": student.parent_phone or student.parent_phone_secondary or "", "discipline": student.discipline or "", "age": age, "recipient_count": len(parent_ids), "discount_ids": assigned, "discounts": [{"id": d.id, "name": d.name, "kind": d.kind, "value": d.value} for d in discount_rows], "active_subscription": is_subscription_active(student)})
+    return {"clients": result, "disciplines": _broadcast_disciplines(club, students), "filters": {"discipline": discipline, "no_subscription": no_subscription, "no_visits_14": no_visits_14, "age_min": age_min, "age_max": age_max}}
 
 
 @router.post("/webapp/admin-tariffs/change")

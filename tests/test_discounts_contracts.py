@@ -40,6 +40,16 @@ def test_broadcast_logs_real_telegram_delivery_error():
     views = (ROOT / "admin_module/webapp_views.py").read_text(encoding="utf-8")
     assert 'logger.warning(f"Не удалось отправить Web-рассылку' in views
 
+def test_discount_assignment_has_broadcast_style_filters_and_bulk_payload():
+    page = (ROOT / "templates/admin_discounts.html").read_text(encoding="utf-8")
+    api = (ROOT / "admin_module/api.py").read_text(encoding="utf-8")
+    views = (ROOT / "admin_module/webapp_views.py").read_text(encoding="utf-8")
+    assert "discountFilterDiscipline" in page
+    assert "discountNoSubscription" in page and "discountNoVisits" in page
+    assert "discountAgeMin" in page and "discountAgeMax" in page
+    assert "student_ids: list[int]" in api
+    assert "age_min: int | None" in views and "age_max: int | None" in views
+
 
 def test_bot_discount_fsm_uses_the_same_club_settings_key_and_supports_cashier():
     panel = (ROOT / "handlers/admin_settings_panel.py").read_text(encoding="utf-8")
