@@ -34,7 +34,7 @@ document.addEventListener('DOMContentLoaded',()=>{
   const cards=document.querySelectorAll('.wrap > .card');
   const discountToggle=cards[1]?.querySelector('button');
   if(discountToggle && discountToggle.getAttribute('aria-expanded')==='true') discountToggle.click();
-  const assignedCard=cards[2];
+  const assignedCard=[...cards].find(card=>card.textContent.includes('Уже привязаны'));
   const assignedTitle=assignedCard?.querySelector('h3');
   if(!assignedCard||!assignedTitle)return;
   const heading=document.createElement('div');

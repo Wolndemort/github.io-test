@@ -1204,6 +1204,8 @@ async def webapp_admin_discounts_page(request: Request, club_id: int = Query(...
             "student_id": assignment.student_id,
             "kind": discount.kind,
             "value": discount.value,
+            "starts_at": discount.starts_at.strftime("%d.%m.%Y") if discount.starts_at else None,
+            "ends_at": discount.ends_at.strftime("%d.%m.%Y") if discount.ends_at else None,
         })
     return templates.TemplateResponse("admin_discounts.html", {"request": request, "club": club, "club_id": club_id, "discounts": discounts, "assigned_discounts": assigned_discounts})
 

@@ -22,6 +22,13 @@ def test_web_discount_changes_send_idempotency_key():
     assert "idempotency_key: str | None = None" in api
     assert "idempotency_key:operationKey()" in page
 
+def test_discount_assignment_collapse_uses_stable_selector_and_keeps_dates():
+    page = (ROOT / "templates/admin_discounts.html").read_text(encoding="utf-8")
+    views = (ROOT / "admin_module/webapp_views.py").read_text(encoding="utf-8")
+    assert "textContent.includes('Уже привязаны')" in page
+    assert '"starts_at": discount.starts_at.strftime' in views
+    assert '"ends_at": discount.ends_at.strftime' in views
+
 
 def test_bot_discount_fsm_uses_the_same_club_settings_key_and_supports_cashier():
     panel = (ROOT / "handlers/admin_settings_panel.py").read_text(encoding="utf-8")
