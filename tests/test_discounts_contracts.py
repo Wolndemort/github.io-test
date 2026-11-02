@@ -30,6 +30,12 @@ def test_discount_assignment_collapse_uses_stable_selector_and_keeps_dates():
     assert '"starts_at": discount.starts_at.strftime' in views
     assert '"ends_at": discount.ends_at.strftime' in views
 
+def test_broadcast_shows_selected_recipients_and_keeps_send_button_visible():
+    page = (ROOT / "templates/admin_broadcast.html").read_text(encoding="utf-8")
+    assert "position:fixed" in page and ".selected-preview" in page
+    assert "Проверка получателей" in page
+    assert "selectedDetails" in page
+
 
 def test_bot_discount_fsm_uses_the_same_club_settings_key_and_supports_cashier():
     panel = (ROOT / "handlers/admin_settings_panel.py").read_text(encoding="utf-8")
