@@ -16,6 +16,12 @@ def test_web_discount_management_has_shared_settings_and_both_value_types():
     assert 'data-del' in page and "Удалить" in page
     assert "admin-discounts" in cabinet
 
+def test_web_discount_changes_send_idempotency_key():
+    api = (ROOT / "admin_module/api.py").read_text(encoding="utf-8")
+    page = (ROOT / "templates/admin_discounts.html").read_text(encoding="utf-8")
+    assert "idempotency_key: str | None = None" in api
+    assert "idempotency_key:operationKey()" in page
+
 
 def test_bot_discount_fsm_uses_the_same_club_settings_key_and_supports_cashier():
     panel = (ROOT / "handlers/admin_settings_panel.py").read_text(encoding="utf-8")

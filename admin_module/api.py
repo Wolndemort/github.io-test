@@ -227,6 +227,7 @@ class DiscountChangePayload(BaseModel):
     discount: dict | None = None
     user_id: int | None = None
     student_id: int | None = None
+    idempotency_key: str | None = None
 
 class AdminSaleMethodPayload(BaseModel):
     init_data: str
