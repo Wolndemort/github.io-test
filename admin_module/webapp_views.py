@@ -208,13 +208,18 @@ def _broadcast_disciplines(club: Club, students: list[Student] | None = None) ->
 
 
 @router.get("/webapp/admin-broadcast", response_class=HTMLResponse)
-async def admin_broadcast_page(request: Request, club_id: int = Query(...), init_data: str | None = Query(None), session: AsyncSession = Depends(get_session)):
+async def admin_broadcast_page(request: Request, club_id: int = Query(...), student_ids: str = Query(default=""), init_data: str | None = Query(None), session: AsyncSession = Depends(get_session)):
     club = await session.get(Club, club_id)
     if not init_data:
         return telegram_init_gate('/webapp/admin-broadcast', club_id, 'Откройте рассылку из Telegram')
     await verify_webapp_staff(club, init_data, session, "broadcast")
     discounts = (await session.scalars(select(Discount).where(Discount.club_id == club_id, Discount.is_active.is_(True)).order_by(Discount.name))).all()
-    return templates.TemplateResponse("admin_broadcast.html", {"request": request, "club": club, "club_id": club_id, "discounts": discounts})
+    try:
+        requested_ids = list(dict.fromkeys(int(value) for value in student_ids.split(",") if value.strip()))
+    except ValueError:
+        requested_ids = []
+    valid_ids = set((await session.scalars(select(Student.id).where(Student.club_id == club_id, Student.id.in_(requested_ids)))).all()) if requested_ids else set()
+    return templates.TemplateResponse("admin_broadcast.html", {"request": request, "club": club, "club_id": club_id, "discounts": discounts, "prefill_student_ids": sorted(valid_ids)})
 
 
 @router.get("/webapp/admin-broadcast/students")
