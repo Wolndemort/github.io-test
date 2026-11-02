@@ -556,7 +556,7 @@ async def process_manual_checkin(
     # 2. Передаем задачу нашему универсальному сервису прохода!
     res = await process_athlete_gate_pass(
         student_id, session, club_settings, expected_club_id=club.id, redis=redis,
-        open_turnstile=use_relay
+        open_turnstile=use_relay, require_birthday=False
     )
     audit_event(
         "manual_checkin",

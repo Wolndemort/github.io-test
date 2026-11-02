@@ -845,6 +845,7 @@ async def _handle_qr_scan_data(
             club_settings,
             expected_club_id=club.id,
             redis=redis,
+            require_birthday=False,
         )
     except Exception as gate_error:
         logger.exception("Сбой обработчика прохода для athlete=%s: %s", scanned_id, gate_error)

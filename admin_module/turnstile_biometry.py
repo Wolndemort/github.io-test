@@ -28,7 +28,7 @@ async def open_turnstile(
     club_res = await db.execute(select(Club.club_settings).where(Club.id == club_id))
     club_settings = club_res.scalar() or {}
     redis = getattr(request.app.state, "redis_client", None)
-    res = await process_athlete_gate_pass(student_id, db, club_settings, expected_club_id=club_id, redis=redis)
+    res = await process_athlete_gate_pass(student_id, db, club_settings, expected_club_id=club_id, redis=redis, require_birthday=False)
     if not res["success"]:
         return {"success": False, "message": res["message"]}
     return {"success": True, "message": f"{res['message']} | {res['turnstile_status']}"}

@@ -70,7 +70,7 @@ async def test_parse_qr_scan_new_session_success(mock_gate_service, mock_gen_sig
     # 3. Проверки
     # Проверяем, что хендлер честно вызвал наш центральный сервис с правильным id ученика
     mock_gate_service.assert_called_once_with(
-        1, session, club_settings, expected_club_id=1, redis=redis
+        1, session, club_settings, expected_club_id=1, redis=redis, require_birthday=False
     )
 
     # Проверяем, что бот вывел админу/родителю сообщение об успешном проходе
@@ -119,7 +119,7 @@ async def test_parse_qr_scan_inside_session_success(mock_gate_service, mock_gen_
 
     # Проверки
     mock_gate_service.assert_called_once_with(
-        1, session, club_settings, expected_club_id=1, redis=redis
+        1, session, club_settings, expected_club_id=1, redis=redis, require_birthday=False
     )
 
     args, kwargs = message.answer.call_args

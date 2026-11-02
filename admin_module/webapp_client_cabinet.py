@@ -16,6 +16,7 @@ from admin_module.schemas import (
     WebAppActionPayload,
     WebAppBindPhonePayload,
     WebAppCreateStudentPayload,
+    WebAppStudentBirthdayPayload,
     WebAppBuySubscriptionPayload,
     AdminFreezePayload,
 )
@@ -26,7 +27,7 @@ from database.db import Club, ClubStaff, PaymentOrder, CartOrder, CartItem, Stud
 from services.audit import audit_event
 from services.abuse_guard import rate_limit, audit_block
 from services.yookassa_client import YooKassaClient
-from services.input_normalization import normalize_ru_phone
+from services.input_normalization import normalize_ru_phone, parse_user_date
 from services.age_rules import tariff_age_matches
 from services.visit_history import attach_student_names, group_completed_sessions, summarize_payment_entry
 from services.payment_requisites import get_payment_info_text, build_payment_instruction_text
@@ -434,6 +435,7 @@ async def staff_checkin_search(club_id: int, q: str = Query(default=""), init_da
             "expire_date": s.expire_date.isoformat() if s.expire_date else None,
             "discipline": discipline_name or discipline_code,
             "remaining_lessons": remaining_lessons,
+            "birthday_missing": not bool(s.birthday),
             "advance": {
                 "is_advance": preview["is_advance"], "debt_lessons": preview["debt_lessons"],
                 "debt_days": preview["debt_days"], "max_debt_lessons": preview["max_debt_lessons"],
@@ -459,7 +461,7 @@ async def staff_checkin(payload: dict, db: AsyncSession = Depends(get_session)):
         raise HTTPException(status_code=400, detail="Турникет отключён администратором")
     result = await process_athlete_gate_pass(
         int(payload["student_id"]), db, club.club_settings or {}, expected_club_id=club_id,
-        open_turnstile=open_turnstile, require_advance_confirmation=True,
+        open_turnstile=open_turnstile, require_birthday=False, require_advance_confirmation=True,
         confirm_advance=bool(payload.get("confirm_advance", False)),
     )
     if not result.get("success"):
@@ -822,6 +824,34 @@ async def webapp_freeze_submit(payload: WebAppActionPayload, db: AsyncSession = 
         finally:
             await bot.session.close()
     return {"ok": True, "new_expire": new_expire.strftime("%d.%m.%Y")}
+
+
+@router.post("/webapp/client-cabinet/student/birthday")
+async def update_client_student_birthday(payload: WebAppStudentBirthdayPayload, db: AsyncSession = Depends(get_session)):
+    club = await db.get(Club, payload.club_id)
+    if not club or not club.bot_token:
+        raise HTTPException(status_code=404, detail="Клуб не найден")
+    tg_user = verify_telegram_data(payload.init_data, club.bot_token)
+    if not tg_user:
+        raise HTTPException(status_code=403, detail="Доступ запрещён")
+    user_id = int(tg_user.get("id", 0))
+    student = await db.get(Student, payload.student_id, with_for_update=True)
+    linked = await db.scalar(select(StudentParent.student_id).where(
+        StudentParent.student_id == payload.student_id,
+        StudentParent.parent_id == user_id,
+    ))
+    if not student or student.club_id != payload.club_id or (student.parent_id != user_id and not linked):
+        raise HTTPException(status_code=403, detail="Атлет не найден")
+    try:
+        birthday = parse_user_date(payload.birthday)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="Укажите корректную дату рождения")
+    if birthday is None:
+        raise HTTPException(status_code=400, detail="Дата рождения обязательна")
+    student.birthday = birthday
+    await db.commit()
+    audit_event("client_birthday_updated", club_id=club.id, actor_user_id=user_id, action="update", object_type="student", object_id=student.id)
+    return {"ok": True, "birthday": birthday.isoformat()}
 
 
 @router.get("/webapp/client-cabinet/student", response_class=HTMLResponse)

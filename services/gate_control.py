@@ -49,6 +49,7 @@ async def process_athlete_gate_pass(
     expected_club_id: int | None = None,
     redis=None,
     open_turnstile: bool = True,
+    require_birthday: bool = True,
     require_advance_confirmation: bool = False,
     confirm_advance: bool = False,
 ) -> dict:
@@ -66,7 +67,8 @@ async def process_athlete_gate_pass(
     student = student_res.scalar_one_or_none()
     if not student:
         return {"success": False, "message": "Атлет не найден в базе данных."}
-    if hasattr(student, "birthday") and not student.birthday:
+    birthday_warning = bool(hasattr(student, "birthday") and not student.birthday)
+    if birthday_warning and require_birthday:
         return {"success": False, "message": "Укажите дату рождения атлета в профиле перед проходом."}
 
     # QR/WebApp запрос должен работать только внутри клуба, из которого он пришёл.
@@ -292,4 +294,5 @@ async def process_athlete_gate_pass(
         "advance_debt_lessons": int(getattr(student, "advance_debt_lessons", 0) or 0),
         "advance_max_debt_days": advance["max_debt_days"],
         "advance_max_debt_lessons": advance["max_debt_lessons"],
+        "birthday_warning": birthday_warning,
     }

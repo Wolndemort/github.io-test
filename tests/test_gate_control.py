@@ -98,6 +98,23 @@ async def test_gate_opens_new_session_and_logs_visit():
 
 
 @pytest.mark.asyncio
+async def test_client_gate_requires_birthday_but_staff_override_only_warns():
+    student = make_student(birthday=None)
+    club = SimpleNamespace(id=10, name="РљР»СѓР±")
+
+    client_db = make_db(student, club)
+    blocked = await process_athlete_gate_pass(1, client_db, {}, expected_club_id=10)
+    assert blocked["success"] is False
+    client_db.commit.assert_not_awaited()
+
+    staff_student = make_student(birthday=None)
+    staff_db = make_db(staff_student, club)
+    allowed = await process_athlete_gate_pass(1, staff_db, {}, expected_club_id=10, require_birthday=False)
+    assert allowed["success"] is True
+    assert allowed["birthday_warning"] is True
+
+
+@pytest.mark.asyncio
 async def test_gate_rejects_rapid_repeat():
     recent_visit = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(seconds=2)
     student = make_student(last_visit=recent_visit)

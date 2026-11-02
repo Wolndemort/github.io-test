@@ -382,7 +382,8 @@ async def scanner_scan(
 
     redis = getattr(request.app.state, "redis_client", None)
     result = await process_athlete_gate_pass(
-        student_id, session, club.club_settings or {}, expected_club_id=club.id, redis=redis
+        student_id, session, club.club_settings or {}, expected_club_id=club.id, redis=redis,
+        require_birthday=False,
     )
     if not result["success"]:
         return {"success": False, "message": result["message"]}

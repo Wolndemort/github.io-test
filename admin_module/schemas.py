@@ -70,6 +70,13 @@ class WebAppCreateStudentPayload(BaseModel):
     discipline: str | None = None
 
 
+class WebAppStudentBirthdayPayload(BaseModel):
+    init_data: str
+    club_id: int
+    student_id: int
+    birthday: str
+
+
 class WebAppHistoryQuery(BaseModel):
     init_data: str
     club_id: int
