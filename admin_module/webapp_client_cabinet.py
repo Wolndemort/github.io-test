@@ -441,7 +441,8 @@ async def staff_checkin_search(club_id: int, q: str = Query(default=""), init_da
             "advance": {
                 "is_advance": preview["is_advance"], "debt_lessons": preview["debt_lessons"],
                 "debt_days": preview["debt_days"], "max_debt_lessons": preview["max_debt_lessons"],
-                "max_debt_days": preview["max_debt_days"], "allowed": preview["allowed"],
+                "max_debt_days": preview["max_debt_days"], "current_debt_lessons": preview["current_debt_lessons"],
+                "current_debt_days": preview["current_debt_days"], "limit_exceeded": preview["limit_exceeded"], "allowed": preview["allowed"],
             },
         })
     return rows

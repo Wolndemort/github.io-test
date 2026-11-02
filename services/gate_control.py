@@ -162,6 +162,10 @@ async def process_athlete_gate_pass(
                 message = "❌ Занятия на балансе закончились"
             return {"success": False, "message": message}
         if not advance["allowed"]:
+            if advance.get("limit_exceeded"):
+                current_days = advance.get("current_debt_days", advance["debt_days"])
+                current_lessons = advance.get("current_debt_lessons", advance["debt_lessons"])
+                return {"success": False, "message": f"Лимит авансовых посещений уменьшен. Текущий долг: {current_days} дн. / {current_lessons} зан., новый лимит: {advance['max_debt_days']} дн. / {advance['max_debt_lessons']} зан. Проход закрыт до покупки абонемента."}
             return {"success": False, "message": f"Р›РёРјРёС‚ Р°РІР°РЅСЃРѕРІС‹С… РїРѕСЃРµС‰РµРЅРёР№ РёСЃС‡РµСЂРїР°РЅ. Р”РѕР»Рі: {advance['debt_days']} РґРЅ. / {advance['debt_lessons']} Р·Р°РЅ."}
         if require_advance_confirmation and not confirm_advance:
             finish_reason = (

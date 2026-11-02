@@ -60,6 +60,16 @@ def test_record_and_settle_debt_consumes_days_and_lessons():
     assert (item.advance_debt_days, item.advance_debt_lessons) == (0, 0)
 
 
+def test_lowering_limit_blocks_existing_debt_without_rewriting_it():
+    item = student(advance_debt_days=2, advance_debt_lessons=5)
+    result = advance_preview(item, datetime(2026, 10, 11, 12), settings(days=15, lessons=3), new_session=True)
+    assert result["limit_exceeded"] is True
+    assert result["allowed"] is False
+    assert result["debt_days"] == 2
+    assert result["debt_lessons"] == 5
+    assert (item.advance_debt_days, item.advance_debt_lessons) == (2, 5)
+
+
 def test_purchase_warning_is_human_and_existing_debt_survives_feature_toggle():
     item = student(advance_debt_days=4, advance_debt_lessons=2)
     assert "4" in advance_purchase_warning(item, settings())

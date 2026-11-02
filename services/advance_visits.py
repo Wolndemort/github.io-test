@@ -70,13 +70,19 @@ def advance_preview(
     projected_days = max(current_days, visit_period_days)
     projected_lessons = current_lessons + (1 if new_session else 0)
     is_advance = bool(config["enabled"] and debt_candidate and new_session)
+    limit_exceeded = current_days > config["max_debt_days"] or current_lessons > config["max_debt_lessons"]
+    displayed_days = current_days if limit_exceeded else projected_days
+    displayed_lessons = current_lessons if limit_exceeded else projected_lessons
     return {
         "enabled": config["enabled"],
         "is_advance": is_advance,
-        "debt_days": projected_days,
-        "debt_lessons": projected_lessons,
+        "debt_days": displayed_days,
+        "debt_lessons": displayed_lessons,
+        "current_debt_days": current_days,
+        "current_debt_lessons": current_lessons,
         "max_debt_days": config["max_debt_days"],
         "max_debt_lessons": config["max_debt_lessons"],
+        "limit_exceeded": limit_exceeded,
         "allowed": (not is_advance) or (projected_days <= config["max_debt_days"] and projected_lessons <= config["max_debt_lessons"]),
     }
 
