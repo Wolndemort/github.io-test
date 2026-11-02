@@ -36,6 +36,10 @@ def test_broadcast_shows_selected_recipients_and_keeps_send_button_visible():
     assert "Проверка получателей" in page
     assert "selectedDetails" in page
 
+def test_broadcast_logs_real_telegram_delivery_error():
+    views = (ROOT / "admin_module/webapp_views.py").read_text(encoding="utf-8")
+    assert 'logger.warning(f"Не удалось отправить Web-рассылку' in views
+
 
 def test_bot_discount_fsm_uses_the_same_club_settings_key_and_supports_cashier():
     panel = (ROOT / "handlers/admin_settings_panel.py").read_text(encoding="utf-8")

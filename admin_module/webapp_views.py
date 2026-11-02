@@ -350,7 +350,7 @@ async def admin_broadcast_send(
                 except Exception as exc:
                     await forget(delivery_key)
                     failed += 1
-                    logger.warning("Не удалось отправить Web-рассылку recipient=%s club=%s: %s", recipient_id, club_id, exc)
+                    logger.warning(f"Не удалось отправить Web-рассылку recipient={recipient_id} club={club_id}: {exc}")
         finally:
             await bot.session.close()
         audit_event("web_broadcast_sent", **await audit_actor_context(session, club, tg_user, "webapp/admin-broadcast"), club_id=club_id, action="send", object_type="broadcast", object_id=operation_key, recipient_count=delivered, selected_count=len(selected_ids), failed_count=failed, has_media=bool(media))
