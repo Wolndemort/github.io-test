@@ -976,8 +976,9 @@ async def admin_confirm_payment(
          and int(tariff.get("days", 30) or 30) == days_to_add),
         {},
     )
+    selected_tariff_idx = next((i for i, tariff in enumerate(discipline_cfg.get("tariffs", [])) if tariff == selected_tariff), -1)
     original_amount_kopecks = int(round(float(selected_tariff.get("price", 0) or 0) * 100))
-    discount = await active_discount(session, club.id, callback.from_user.id, "subscriptions", student_id)
+    discount = await active_discount(session, club.id, callback.from_user.id, "subscriptions", student_id, tariff=(target_discipline, selected_tariff_idx, selected_tariff))
     amount_kopecks, discount_amount_kopecks = apply_discount(original_amount_kopecks, discount)
 
     # 4. ЛОГИКА ЗАЧИСЛЕНИЯ абонемента в СУБД (Передаем дисциплину!)
@@ -1334,7 +1335,8 @@ async def final_cash_pay(
     sale_student = await session.get(Student, student_id)
     advance_warning = advance_purchase_warning(sale_student, club_settings, html=True) if sale_student else ""
     parent_user_id = getattr(sale_student, "parent_id", None)
-    automatic_discounts = await active_discounts(session, club.id, parent_user_id, "subscriptions", student_id=student_id)
+    tariff_idx = next((i for i, tariff in enumerate((club_settings.get("disciplines", {}).get(sport_type, {}) or {}).get("tariffs", [])) if tariff == selected_tariff), -1)
+    automatic_discounts = await active_discounts(session, club.id, parent_user_id, "subscriptions", student_id=student_id, tariff=(sport_type, tariff_idx, selected_tariff))
     original_amount_kopecks = price
     price, applied_discounts = apply_discounts(price, automatic_discounts)
     primary_discount = applied_discounts[0][0] if applied_discounts else None

@@ -1242,9 +1242,10 @@ async def admin_cash_subscription(payload: WebAppCashSubscriptionPayload, db: As
     price = int(tariff.get("price", 0) or 0) * 100
     original_price = price
     selected_discount_ids = list(dict.fromkeys(payload.discount_ids or ([payload.discount_id] if payload.discount_id else [])))
-    automatic = await active_discounts(db, club.id, student.parent_id, "subscriptions", student_id=student.id)
+    automatic = await active_discounts(db, club.id, student.parent_id, "subscriptions", student_id=student.id, tariff=(discipline, payload.tariff_idx, tariff))
     selected_discount_ids = list(dict.fromkeys([d.id for d in automatic] + selected_discount_ids))
     manual_discounts = list((await db.scalars(select(Discount).where(Discount.club_id == club.id, Discount.id.in_(selected_discount_ids), Discount.is_active.is_(True), Discount.scope.in_(["subscriptions", "all"])).order_by(Discount.priority, Discount.id))).all()) if selected_discount_ids else []
+    manual_discounts = [d for d in manual_discounts if not d.tariff_refs or any(str(r.get("discipline")) == discipline and int(r.get("tariff_idx", -1)) == payload.tariff_idx and str(r.get("price", "")) == str(tariff.get("price", "")) and int(r.get("count", 0) or 0) == count and int(r.get("days", 30) or 30) == days for r in (d.tariff_refs or []))]
     if selected_discount_ids and len(manual_discounts) != len(selected_discount_ids):
         raise HTTPException(status_code=400, detail="Некорректная скидка для абонемента")
     price, applied_discounts = apply_discounts(price, manual_discounts)
@@ -1863,7 +1864,7 @@ async def cart_checkout(payload: CartCheckoutPayload, request: Request, session:
                 if age_error:
                     raise HTTPException(400, age_error)
                 price = int(float(t.get("price", 0)) * 100)
-                line_original = price * qty; raw_discount_ids = [int(x) for x in raw.get("discount_ids", [])]; line_discounts = await active_discounts(session, club.id, int(tg_user["id"]), "subscriptions", student.id, raw_discount_ids or None)
+                line_original = price * qty; raw_discount_ids = [int(x) for x in raw.get("discount_ids", [])]; line_discounts = await active_discounts(session, club.id, int(tg_user["id"]), "subscriptions", student.id, raw_discount_ids or None, tariff=(str(raw.get("sport_type")), idx, t))
                 line_total, line_applied = apply_discounts(line_original, line_discounts); original_total += line_original; total += line_total; applied_discounts.extend(line_applied)
                 normalized.append(("subscription", t, {"student_id": student.id, "discipline": raw.get("sport_type"), "price": price, "quantity": qty}))
             else:

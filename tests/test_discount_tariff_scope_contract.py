@@ -1,0 +1,34 @@
+from types import SimpleNamespace
+
+from services.discounts import discount_applies_to_tariff, tariff_ref
+
+
+def _discount(refs):
+    return SimpleNamespace(tariff_refs=refs)
+
+
+def test_tariff_discount_matches_only_the_creation_snapshot():
+    tariff = {"price": 6000, "count": 999, "days": 30}
+    refs = [tariff_ref("boxing", 1, tariff)]
+    discount = _discount(refs)
+
+    assert discount_applies_to_tariff(discount, "boxing", 1, tariff)
+    assert not discount_applies_to_tariff(discount, "boxing", 0, tariff)
+    assert not discount_applies_to_tariff(discount, "boxing", 1, {**tariff, "price": 7000})
+    assert not discount_applies_to_tariff(discount, "jiu_jitsu", 1, tariff)
+
+
+def test_legacy_unrestricted_discount_remains_unrestricted():
+    discount = _discount([])
+    assert discount_applies_to_tariff(discount, "boxing", 0, {"price": 1000, "count": 8, "days": 30})
+
+
+def test_discount_schema_and_checkout_paths_are_tariff_scoped():
+    from pathlib import Path
+    root = Path(__file__).parents[1]
+    model = (root / "database/db.py").read_text(encoding="utf-8")
+    create = (root / "admin_module/webapp_views.py").read_text(encoding="utf-8")
+    assert "tariff_refs" in model
+    assert "tariff_ref(discipline, idx, tariffs[idx])" in create
+    assert "tariff=(payload.sport_type, payload.tariff_idx, selected_tariff)" in (root / "admin_module/webapp_client_cabinet.py").read_text(encoding="utf-8")
+    assert "tariff=(str(raw.get(\"sport_type\")), idx, t)" in (root / "admin_module/api.py").read_text(encoding="utf-8")

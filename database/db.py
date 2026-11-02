@@ -70,6 +70,8 @@ class Discount(Base):
     starts_at: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     ends_at: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="1")
+    # Snapshot of eligible subscription tariffs from the club config at creation time.
+    tariff_refs: Mapped[list] = mapped_column(JSONB, default=list, server_default="[]", nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, server_default="now()")
 
 class DiscountAssignment(Base):

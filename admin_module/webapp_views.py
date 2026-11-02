@@ -56,7 +56,7 @@ from admin_module.api import (
 from services.order_notifications import resolve_user_label
 from services.schedule_utils import normalize_schedule_block
 from services.payment_requisites import get_payment_info_text
-from services.discounts import active_discounts, apply_discounts
+from services.discounts import active_discounts, apply_discounts, tariff_ref
 from services.availability import payment_availability
 from services.staff_permissions import staff_can
 from services.motivation_schedule import (
@@ -1259,7 +1259,19 @@ async def change_admin_discount(payload: DiscountChangePayload, session: AsyncSe
         ends_at = parse_day("ends_at")
         if starts_at and ends_at and ends_at < starts_at:
             raise HTTPException(400, "Дата окончания не может быть раньше даты начала")
-        session.add(Discount(club_id=club.id, name=str(raw.get("name", "")).strip()[:120] or "Без названия", kind=kind, value=int(round(value * 100)) if kind == "fixed" else int(round(value)), scope=scope, comment=str(raw.get("comment", "")).strip()[:500], starts_at=starts_at, ends_at=ends_at))
+        tariff_refs = raw.get("tariff_refs") or []
+        if tariff_refs and scope != "subscriptions":
+            raise HTTPException(400, "Ограничение по тарифам доступно только для скидок на абонементы")
+        config_tariffs = (club.club_settings or {}).get("disciplines", {}) or {}
+        normalized_refs = []
+        for ref in tariff_refs:
+            discipline = str(ref.get("discipline", ""))
+            idx = int(ref.get("tariff_idx", -1))
+            tariffs = (config_tariffs.get(discipline) or {}).get("tariffs", [])
+            if idx < 0 or idx >= len(tariffs):
+                raise HTTPException(400, "Выбранный тариф больше не существует")
+            normalized_refs.append(tariff_ref(discipline, idx, tariffs[idx]))
+        session.add(Discount(club_id=club.id, name=str(raw.get("name", "")).strip()[:120] or "Без названия", kind=kind, value=int(round(value * 100)) if kind == "fixed" else int(round(value)), scope=scope, comment=str(raw.get("comment", "")).strip()[:500], starts_at=starts_at, ends_at=ends_at, tariff_refs=normalized_refs))
     elif payload.action == "bulk_assign":
         discount = await session.get(Discount, payload.index)
         selected_ids = list(dict.fromkeys(int(value) for value in (payload.student_ids or [])))
