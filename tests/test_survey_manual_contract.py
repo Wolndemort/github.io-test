@@ -42,3 +42,13 @@ def test_answer_options_link_to_prefilled_broadcast_recipients():
     assert "/webapp/admin-broadcast?club_id={{club_id}}&student_ids=" in survey
     assert "initialIds" in broadcast
     assert "prefill_student_ids" in views and "student_ids: str = Query" in views
+
+
+def test_manual_survey_selection_is_previewed_and_confirmed():
+    survey = (ROOT / "templates/admin_surveys.html").read_text(encoding="utf-8")
+    assert 'id="selectedRecipientsPreview"' in survey
+    assert 'id="resendSelectedPreview"' in survey
+    assert "savedRecipientIds" in survey
+    assert "Проверка получателей" in survey
+    assert "Подтвердить и отправить" in survey
+    assert "Сначала выберите хотя бы одного атлета" not in survey

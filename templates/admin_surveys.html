@@ -14,6 +14,7 @@ button{background:#fff;color:#111;font-weight:700}.grid{display:grid;grid-templa
 .question-head{display:flex;gap:8px;align-items:center}.question-head b{flex:1}.question-head button{width:auto;background:#511d1d;color:#fff}
 .option-row{display:flex;gap:6px}.option-row button{width:auto;background:#511d1d;color:#fff}.back{display:flex;justify-content:center;color:#111;background:#fff;border-radius:16px;padding:14px;text-decoration:none;font-weight:700}
 .danger-action{width:auto!important;background:#6b1d1d!important;color:#fff!important;border-color:#9b3b3b!important}
+.selected-preview{border:1px solid #53657a;border-radius:10px;padding:10px;margin:8px 0;background:#111b26;line-height:1.45}
 @media(max-width:600px){.grid{grid-template-columns:1fr}}
 </style>
 </head>
@@ -27,7 +28,7 @@ button{background:#fff;color:#111;font-weight:700}.grid{display:grid;grid-templa
 <p class="muted">Если дисциплины или тарифы не выбраны, подходят все. Фильтры пересчитываются каждый день.</p>
 <div class="grid"><div><b>Дисциплины</b>{% for item in disciplines %}<label class="choice"><input type="checkbox" class="discipline" value="{{item.code}}">{{item.name}}{% if not item.active %} (выключена){% endif %}</label>{% endfor %}</div>
 <div><b>Купленный тариф</b>{% for item in tariffs %}<label class="choice"><input type="checkbox" class="tariff" value="{{item.key}}">{{item.name}}</label>{% endfor %}</div></div>
-<details class="card" style="margin:12px 0;background:#101010"><summary><b>Клиенты для ручной отправки</b></summary><p class="muted">Выберите конкретного клиента для теста. Это не меняет фильтры планировщика.</p><input id="recipientSearch" placeholder="Поиск по имени или номеру"><div id="recipientList" class="choice"></div><button id="selectAllRecipients" type="button">Выбрать всех найденных</button></details>
+<details class="card" style="margin:12px 0;background:#101010"><summary><b>Клиенты для ручной отправки</b></summary><p class="muted">Выберите конкретных клиентов. Выбор сохранится для следующего опроса, а поиск его не сбрасывает.</p><div id="selectedRecipientsPreview" class="selected-preview muted">Выбранные атлеты не выбраны</div><input id="recipientSearch" placeholder="Поиск по имени или номеру"><div id="recipientList" class="choice"></div><button id="selectAllRecipients" type="button">Выбрать всех найденных</button></details>
 <h3>Вопросы</h3><p class="muted">Добавьте вопросы обычными полями. Клиент увидит их в Telegram по очереди.</p>
 <div id="questionBuilder"></div><button id="addQuestion" type="button">＋ Добавить вопрос</button>
 <button id="create" type="button">Создать опрос</button><button id="cancelEdit" type="button" style="display:none;background:#555;color:#fff">Отмена редактирования</button><div id="status" class="muted"></div>
@@ -35,7 +36,7 @@ button{background:#fff;color:#111;font-weight:700}.grid{display:grid;grid-templa
 <section class="card"><button id="toggleSavedSurveys" type="button" aria-expanded="false">Активные опросы ({{ surveys|selectattr('archived', 'equalto', false)|list|length }}) <span>▾</span></button><div id="savedSurveysList" hidden style="margin-top:10px">{% for item in surveys if not item.archived %}<div class="survey"><b>{{item.name}}</b> · {% if item.trigger_days %}планировщик: {{item.trigger_days}} дн.{% else %}разовый, без планировщика{% endif %} · отправлено {{item.total}}, завершено {{item.completed}}<br><span class="muted">{{item.intro_text}}</span><div class="grid" style="margin-top:8px"><button type="button" onclick="configureSurvey({{item.id}})">Настроить</button><button type="button" onclick="sendSavedSurvey({{item.id}},'selected')">Отправить выбранным</button><button type="button" onclick="sendSavedSurvey({{item.id}},'filters')">Отправить по фильтрам</button><button type="button" onclick="sendSavedSurvey({{item.id}},'all')">Отправить всем</button><button type="button" onclick="resendSurvey({{item.id}},'not_completed')">Повторить непройденным</button><button type="button" onclick="resendSurvey({{item.id}},'failed')">Повторить недоставленным</button><button type="button" onclick="toggleSavedSurvey({{item.id}},this)">{{'Выключить' if item.is_active else 'Включить'}}</button><button type="button" class="danger-action" onclick="archiveSurvey({{item.id}})">Удалить</button></div></div>{% else %}<p class="muted">Активных опросов нет</p>{% endfor %}</div></section><section class="card"><button id="toggleArchivedSurveys" type="button" aria-expanded="false">Архивные опросы ({{ surveys|selectattr('archived')|list|length }}) <span>▾</span></button><div id="archivedSurveysList" hidden style="margin-top:10px">{% for item in surveys if item.archived %}<div class="survey"><b>{{item.name}}</b> · архивный · отправлено {{item.total}}, завершено {{item.completed}}<br><span class="muted">{{item.intro_text}}</span></div>{% else %}<p class="muted">Архивных опросов нет</p>{% endfor %}</div></section>
 <section class="card"><h2>Отчёт по отправкам</h2><div class="grid"><select id="reportSurvey"><option value="">Все опросы</option>{% for item in surveys %}<option value="{{item.id}}">{{item.name}}</option>{% endfor %}</select><select id="reportFilter"><option value="all">Все статусы</option><option value="completed">Пройден</option><option value="started">Начат</option><option value="sent">Не пройден</option><option value="failed">Ошибка отправки</option></select></div><button id="refreshReport">Обновить отчёт</button><div id="reportStatus" class="muted"></div><div id="reportRows"></div></section>
 <div id="detailModal" style="display:none;position:fixed;inset:0;background:#000b;padding:18px;overflow:auto"><div class="card" style="max-width:700px;margin:30px auto"><button id="closeDetail">Закрыть</button><div id="detailBody"></div></div></div>
-<div id="resendModal" style="display:none;position:fixed;inset:0;background:#000b;padding:18px;overflow:auto;z-index:10"><div class="card" style="max-width:700px;margin:30px auto"><h2 id="resendModalTitle">Выбрать атлетов</h2><p class="muted">Можно выбрать любых атлетов. Поиск работает по имени и номеру телефона.</p><input id="resendSearch" placeholder="Поиск по имени или номеру"><div id="resendList" class="choice" style="max-height:50vh;overflow:auto"></div><div class="grid"><button id="cancelResend" type="button">Отмена</button><button id="confirmResend" type="button">Отправить выбранным</button></div><div id="resendStatus" class="muted"></div></div></div>
+<div id="resendModal" style="display:none;position:fixed;inset:0;background:#000b;padding:18px;overflow:auto;z-index:10"><div class="card" style="max-width:700px;margin:30px auto"><h2 id="resendModalTitle">Проверка получателей</h2><p id="resendModalHint" class="muted">Проверьте, кому будет отправлен опрос.</p><div id="resendSelectedPreview" class="selected-preview muted"></div><input id="resendSearch" placeholder="Поиск по имени или номеру"><div id="resendList" class="choice" style="max-height:50vh;overflow:auto"></div><div class="grid"><button id="cancelResend" type="button">Отмена</button><button id="confirmResend" type="button">Подтвердить и отправить</button></div><div id="resendStatus" class="muted"></div></div></div>
 </div>
 <section class="card"><h2>Самые частые ответы</h2><div id="reportSummary" class="muted">Выберите опрос и нажмите «Обновить отчёт».</div></section>
 <script>
@@ -153,23 +154,48 @@ closeDetail.onclick=()=>detailModal.style.display='none';refreshReport.onclick=l
   const recipientSelectionKey = `survey-recipient-selection:${clubId}`;
   let resendContext = null;
   let resendSelectedIds = new Set();
+  const recipientNames = new Map();
+  const savedRecipientIds = () => new Set(JSON.parse(storageGet(recipientSelectionKey) || '[]').map(String));
   const html = value => String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
+  function renderSavedPreview() {
+    const ids = [...savedRecipientIds()];
+    const preview = document.getElementById('selectedRecipientsPreview');
+    if (!preview) return;
+    preview.className = ids.length ? 'selected-preview' : 'selected-preview muted';
+    preview.innerHTML = ids.length
+      ? `<b>Выбрано: ${ids.length}</b><br><span class="muted">${ids.map((id, i) => `${i + 1}. ${html(recipientNames.get(id) || `Атлет #${id}`)}`).join('<br>')}</span>`
+      : 'Выбранные атлеты не выбраны';
+  }
+  function renderResendPreview() {
+    const preview = document.getElementById('resendSelectedPreview');
+    if (!preview) return;
+    const ids = [...resendSelectedIds];
+    preview.innerHTML = ids.length
+      ? `<b>Получателей: ${ids.length}</b><br><span class="muted">${ids.map((id, i) => `${i + 1}. ${html(recipientNames.get(String(id)) || `Атлет #${id}`)}`).join('<br>')}</span>`
+      : '<span class="muted">Получатели не выбраны</span>';
+  }
   async function loadRecipients() {
     const query = new URLSearchParams({club_id: clubId, init_data: initData, q: recipientSearch.value});
     const response = await fetch('/webapp/admin-surveys/students?' + query);
     const payload = await response.json();
     if (!response.ok) { recipientList.textContent = payload.detail || 'Не удалось загрузить клиентов'; return; }
+    (payload.students || []).forEach(student => recipientNames.set(String(student.id), student.name));
     recipientList.innerHTML = (payload.students || []).map(student => `<label class="choice"><input type="checkbox" class="recipient" value="${student.id}"><span>${html(student.name)} · ${html(student.discipline || 'без дисциплины')} · получателей: ${student.recipient_count}</span></label>`).join('') || '<span class="muted">Клиенты не найдены</span>';
-    const saved = new Set(JSON.parse(storageGet(recipientSelectionKey) || '[]').map(String));
+    const saved = savedRecipientIds();
     document.querySelectorAll('.recipient').forEach(input => { input.checked = saved.has(input.value); });
+    renderSavedPreview();
   }
   window.sendSavedSurvey = async (surveyId, mode) => {
     if (mode === 'selected') {
+      resendSelectedIds = new Set([...savedRecipientIds()].map(Number));
       resendContext = {surveyId, target: 'selected', action: 'send'};
-      resendSelectedIds = new Set();
-      document.getElementById('resendModalTitle').textContent = 'Выбрать атлетов для отправки';
+      document.getElementById('resendModalTitle').textContent = resendSelectedIds.size ? 'Проверка получателей' : 'Выберите получателей';
+      document.getElementById('resendModalHint').textContent = resendSelectedIds.size
+        ? 'Это именно сохранённый список выбранных атлетов. При необходимости его можно скорректировать ниже.'
+        : 'Сохранённого списка нет. Выберите атлетов сейчас — опрос уже создан и будет отправлен только после подтверждения.';
       document.getElementById('resendSearch').value = '';
       document.getElementById('resendStatus').textContent = '';
+      renderResendPreview();
       document.getElementById('resendModal').style.display = 'block';
       await loadResendRecipients();
       return;
@@ -197,12 +223,15 @@ closeDetail.onclick=()=>detailModal.style.display='none';refreshReport.onclick=l
     const payload = await response.json().catch(() => ({}));
     const list = document.getElementById('resendList');
     if (!response.ok) { list.textContent = payload.detail || 'Не удалось загрузить атлетов'; return; }
+    (payload.students || []).forEach(student => recipientNames.set(String(student.id), student.name));
     list.innerHTML = (payload.students || []).map(student => `<label class="choice"><input type="checkbox" class="resend-recipient" value="${student.id}" ${resendSelectedIds.has(Number(student.id)) ? 'checked' : ''}><span>${html(student.name)} · ${html(student.discipline || 'без дисциплины')} · получателей: ${student.recipient_count}</span></label>`).join('') || '<span class="muted">Атлеты не найдены</span>';
+    renderResendPreview();
   }
   window.resendSurvey = async (surveyId, target) => {
     resendContext = {surveyId, target, action: 'send'};
     resendSelectedIds = new Set();
-    document.getElementById('resendModalTitle').textContent = 'Выбрать атлетов для повторной отправки';
+    document.getElementById('resendModalTitle').textContent = 'Проверка получателей повторной отправки';
+    document.getElementById('resendModalHint').textContent = 'Выберите получателей повторной отправки и подтвердите список.';
     document.getElementById('resendSearch').value = '';
     document.getElementById('resendStatus').textContent = '';
     document.getElementById('resendModal').style.display = 'block';
@@ -264,6 +293,7 @@ closeDetail.onclick=()=>detailModal.style.display='none';refreshReport.onclick=l
     if (!event.target.classList.contains('resend-recipient')) return;
     const id = Number(event.target.value);
     if (event.target.checked) resendSelectedIds.add(id); else resendSelectedIds.delete(id);
+    renderResendPreview();
   });
   document.getElementById('cancelResend').onclick = () => { document.getElementById('resendModal').style.display = 'none'; };
   document.getElementById('confirmResend').onclick = async () => {
@@ -278,7 +308,8 @@ closeDetail.onclick=()=>detailModal.style.display='none';refreshReport.onclick=l
       const response = await fetch(`/webapp/admin-surveys/${resendContext.surveyId}/send`, {method:'POST', body:form});
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) { document.getElementById('resendStatus').textContent = payload.detail || 'Ошибка повторной отправки'; return; }
-      alert(`Повторно отправлено: ${payload.sent}, ошибок: ${payload.failed || 0}, без получателя: ${payload.skipped || 0}`);
+      const prefix = resendContext.target === 'selected' ? 'Отправлено' : 'Повторно отправлено';
+      alert(`${prefix}: ${payload.sent}, ошибок: ${payload.failed || 0}, без получателя: ${payload.skipped || 0}`);
       location.reload();
     } catch (error) { document.getElementById('resendStatus').textContent = `Ошибка сети: ${error.message}`; }
     finally { button.disabled = false; }
@@ -289,12 +320,16 @@ closeDetail.onclick=()=>detailModal.style.display='none';refreshReport.onclick=l
     const selected = new Set(JSON.parse(storageGet(recipientSelectionKey) || '[]').map(String));
     if (event.target.checked) selected.add(event.target.value); else selected.delete(event.target.value);
     storageSet(recipientSelectionKey, JSON.stringify([...selected]));
+    renderSavedPreview();
   });
   document.getElementById('selectAllRecipients').onclick = () => {
     const selected = new Set(JSON.parse(storageGet(recipientSelectionKey) || '[]').map(String));
     document.querySelectorAll('.recipient').forEach(input => { input.checked = true; selected.add(input.value); });
     storageSet(recipientSelectionKey, JSON.stringify([...selected]));
+    renderSavedPreview();
   };
+  const recipientPicker = document.getElementById('recipientSearch')?.closest('details');
+  if (savedRecipientIds().size && recipientPicker) recipientPicker.open = true;
   loadRecipients().catch(error => { recipientList.textContent = error.message; });
 })();
 </script>
