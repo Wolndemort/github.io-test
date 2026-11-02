@@ -50,6 +50,11 @@ def test_discount_assignment_has_broadcast_style_filters_and_bulk_payload():
     assert "student_ids: list[int]" in api
     assert "age_min: int | None" in views and "age_max: int | None" in views
 
+def test_discount_assignment_reports_push_delivery_result():
+    views = (ROOT / "admin_module/webapp_views.py").read_text(encoding="utf-8")
+    assert '"notifications_sent": notifications_sent' in views
+    assert '"notifications_failed": notifications_failed' in views
+
 
 def test_bot_discount_fsm_uses_the_same_club_settings_key_and_supports_cashier():
     panel = (ROOT / "handlers/admin_settings_panel.py").read_text(encoding="utf-8")

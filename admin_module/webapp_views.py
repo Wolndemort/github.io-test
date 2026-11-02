@@ -1225,6 +1225,8 @@ async def change_admin_discount(payload: DiscountChangePayload, session: AsyncSe
             raise HTTPException(409, "Эта операция уже выполняется или была выполнена")
     changed_students = []
     assignment_changed = False
+    notifications_sent = 0
+    notifications_failed = 0
     if payload.action == "delete":
         discount = await session.get(Discount, payload.index) if payload.index else None
         if not discount or discount.club_id != club.id:
@@ -1351,24 +1353,28 @@ async def change_admin_discount(payload: DiscountChangePayload, session: AsyncSe
                     action_word = "привязана" if payload.action in {"assign", "bulk_assign"} else "отвязана"
                     target_note = f" к атлету: <b>{escape(', '.join(sorted(target_names)))}</b>" if target_names else " к вашему профилю"
                     await telegram_call(lambda: bot.send_message(notification_id, f"🏷️ Скидка «{escape(discount_label)}» {action_word}{target_note}.{start_note}", parse_mode="HTML"))
-                except Exception:
+                    notifications_sent += 1
+                except Exception as exc:
                     await forget(delivery_key)
-                    raise
+                    notifications_failed += 1
+                    logger.warning(f"Не удалось отправить push о скидке recipient={notification_id} club={club.id}: {exc}")
             if payload.action == "unassign" and club.owner_id and int(club.owner_id) not in notification_targets:
                 owner_key = f"discount:assignment:{operation_key}:owner:{club.owner_id}"
                 if await mark_once(owner_key):
                     try:
                         await telegram_pace(f"club:{club.id}")
                         await telegram_call(lambda: bot.send_message(club.owner_id, f"🏷️ Скидка «{escape(discount_label)}» отвязана от клиента.", parse_mode="HTML"))
-                    except Exception:
+                    except Exception as exc:
                         await forget(owner_key)
-                        raise
+                        notifications_failed += 1
+                        logger.warning(f"Не удалось отправить push владельцу о скидке recipient={club.owner_id} club={club.id}: {exc}")
         except Exception:
-            logger.warning("Не удалось отправить уведомление о скидке club=%s", club.id)
+            notifications_failed += 1
+            logger.warning(f"Не удалось подготовить уведомление о скидке club={club.id}")
         finally:
             if bot:
                 await bot.session.close()
-    return {"ok": True}
+    return {"ok": True, "notifications_sent": notifications_sent, "notifications_failed": notifications_failed}
 
 @router.get("/webapp/admin-discounts/clients")
 async def search_discount_clients(request: Request, club_id: int = Query(...), q: str = Query(default=""), discipline: str = Query(default="all", max_length=50), no_subscription: bool = Query(default=False), no_visits_14: bool = Query(default=False), age_min: int | None = Query(default=None, ge=0, le=100), age_max: int | None = Query(default=None, ge=0, le=100), init_data: str | None = Query(default=None), session: AsyncSession = Depends(get_session)):
