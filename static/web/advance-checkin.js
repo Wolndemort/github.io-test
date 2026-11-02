@@ -18,11 +18,29 @@
         return `<div class="student"><b>${safe(s.name)}</b><br><small>${safe(s.phone)} · ${s.active ? 'Абонемент активен' : 'Абонемент закончился'}</small><p class="student-meta">🥋 Дисциплина: ${safe(s.discipline || '—')} · Остаток: ${safe(remaining)}</p>${birthdayWarning}${warning}<div class="actions"><button onclick="window.advanceCheck(${s.id},false)">Без турникета</button><button onclick="window.advanceCheck(${s.id},true)">С турникетом</button></div></div>`;
       }).join('') || '<p>Ничего не найдено</p>';
     };
+    let latestRows = [];
+    const renderSessionDetails = () => {
+      list.querySelectorAll('.session-details').forEach(node => node.remove());
+      list.querySelectorAll('.student').forEach((card, index) => {
+        const row = latestRows[index];
+        if (!row?.session_active) return;
+        const until = new Date(row.session_until).getTime();
+        const box = document.createElement('div');
+        box.className = 'session-details';
+        box.style = 'margin:8px 0;padding:9px;border:1px solid #16803c;border-radius:8px;background:#effaf1;color:#176b2c';
+        box.innerHTML = `🟢 Сессия активна с ${new Date(row.session_started_at).toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'})} · до ${new Date(row.session_until).toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'})}<br><b data-session-countdown>Осталось —</b><br><button type="button" data-cancel-session="${row.id}" style="width:auto;padding:7px 10px;background:#fff;color:#8b1e1e;border:1px solid #c88;border-radius:7px;margin-top:6px">↩️ Отменить посещение</button>`;
+        card.querySelector('.student-meta')?.after(box);
+        const tick = () => { const left=Math.max(0, until-Date.now()), minutes=Math.floor(left/60000), seconds=Math.floor(left/1000)%60; const target=box.querySelector('[data-session-countdown]'); if(target) target.textContent=left?`Осталось ${minutes}:${String(seconds).padStart(2,'0')}`:'Сессия завершена'; if(left) setTimeout(tick,1000); };
+        tick();
+      });
+    };
     window.advanceSearch = async () => {
       const q = searchInput.value;
       const response = await fetch(`/webapp/staff-checkin/search?club_id=${clubId}&q=${encodeURIComponent(q)}&init_data=${encodeURIComponent(init)}`);
       if (!response.ok) { status.textContent = 'Нет доступа'; return; }
-      render(await response.json());
+      latestRows = await response.json();
+      render(latestRows);
+      renderSessionDetails();
     };
     window.advanceCheck = async (id, open, confirmed = false) => {
       status.textContent = 'Сохраняем…';
@@ -48,6 +66,19 @@
         result.textContent = ' ✅ Дата сохранена';
         setTimeout(window.advanceSearch, 500);
       } catch (error) { result.textContent = ` ${error.message || 'Ошибка сохранения'}`; save.disabled = false; }
+    });
+    list.addEventListener('click', async event => {
+      const button = event.target.closest('[data-cancel-session]');
+      if (!button) return;
+      event.preventDefault();
+      if (!window.confirm('Отменить текущее посещение? Занятие не будет списано.')) return;
+      button.disabled = true;
+      try {
+        const response = await fetch(`/webapp/admin/visits/${button.dataset.cancelSession}/cancel?club_id=${clubId}&init_data=${encodeURIComponent(init)}`, {method:'POST'});
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.detail || 'Не удалось отменить посещение');
+        await window.advanceSearch();
+      } catch (error) { button.disabled = false; window.showAlert('Не удалось отменить посещение', error.message, true); }
     });
     searchInput.oninput = () => { clearTimeout(window.advanceSearchTimer); window.advanceSearchTimer = setTimeout(window.advanceSearch, 250); };
     window.advanceSearch();

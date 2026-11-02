@@ -438,6 +438,9 @@ async def staff_checkin_search(club_id: int, q: str = Query(default=""), init_da
             "remaining_lessons": remaining_lessons,
             "birthday_missing": not bool(s.birthday),
             "can_edit_birthday": can_edit_birthday,
+            "session_active": inside,
+            "session_started_at": last_visit.isoformat() + "Z" if inside and last_visit else None,
+            "session_until": (last_visit.replace(tzinfo=None) + timedelta(minutes=timeout_minutes)).isoformat() + "Z" if inside and last_visit else None,
             "advance": {
                 "is_advance": preview["is_advance"], "debt_lessons": preview["debt_lessons"],
                 "debt_days": preview["debt_days"], "max_debt_lessons": preview["max_debt_lessons"],

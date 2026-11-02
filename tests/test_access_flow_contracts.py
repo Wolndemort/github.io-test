@@ -27,6 +27,16 @@ def test_active_session_can_be_cancelled_only_by_admin_with_confirmation():
     assert "data-session-until" in student
 
 
+def test_staff_checkin_shows_live_session_and_uses_same_cancel_endpoint():
+    cabinet = (ROOT / "admin_module/webapp_client_cabinet.py").read_text(encoding="utf-8")
+    checkin = (ROOT / "static/web/advance-checkin.js").read_text(encoding="utf-8")
+    assert '"session_active": inside' in cabinet
+    assert '"session_until"' in cabinet
+    assert "renderSessionDetails" in checkin
+    assert "data-cancel-session" in checkin
+    assert "/webapp/admin/visits/" in checkin
+
+
 def test_manual_and_qr_checkins_share_the_same_gate_service():
     admin = (ROOT / "handlers/admin_option.py").read_text(encoding="utf-8")
     user = (ROOT / "handlers/user_option.py").read_text(encoding="utf-8")

@@ -118,7 +118,7 @@ async def cancel_active_visit(
 ):
     """Cancel only the currently active check-in and restore its accounting."""
     club = await session.get(Club, club_id)
-    actor = await verify_webapp_admin(club, init_data)
+    actor = await verify_webapp_staff(club, init_data, session, "manual_checkin")
     student = await session.get(Student, student_id, with_for_update=True)
     if not student or student.club_id != club_id:
         raise HTTPException(status_code=404, detail="Атлет не найден")
