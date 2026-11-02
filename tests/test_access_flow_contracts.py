@@ -91,6 +91,17 @@ def test_client_subscription_flow_supports_secondary_parent_links():
     assert "StudentParent.parent_id == user_id" in block
 
 
+def test_client_subscription_requires_birthday_and_updates_it_inline():
+    source = (ROOT / "admin_module/webapp_client_cabinet.py").read_text(encoding="utf-8")
+    page = (ROOT / "templates/webapp_buy_subscription.html").read_text(encoding="utf-8")
+    assert '"birthday_required"' in source
+    assert "birthday_by_student" in source
+    assert 'id="birthdayNotice"' in page
+    assert 'id="saveBirthday"' in page
+    assert "birthdayByStudent" in page
+    assert "Сначала укажите дату рождения атлета." in page
+
+
 def test_client_face_id_flow_collects_missing_birthday_inline_without_redirect():
     source = (ROOT / "admin_module/webapp_client_cabinet.py").read_text(encoding="utf-8")
     page = (ROOT / "templates/biometric_pass.html").read_text(encoding="utf-8")

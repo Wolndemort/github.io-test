@@ -23,7 +23,7 @@
   <a class="back staff-back-button" href="/webapp/client-cabinet?club_id={{ club_id }}">← В рабочий кабинет</a>
   <section class="hero"><div class="muted">Касса · абонементы</div><h1>Продажа наличного абонемента</h1><div class="muted">Выберите атлета, дисциплину, тариф и применяемые скидки.</div></section>
   <section class="card"><div class="label">Атлеты клуба · поиск по имени</div><input id="search" class="search" placeholder="Поиск атлета"><div id="students">{% for student in students %}<button type="button" class="student server-student" data-student-id="{{ student.id }}" onclick="pick({{ student.id }})"><b>{{ '✓' if student.status_ok else '✕' }} {{ student.name }}</b><br><span class="muted">{{ student.status_label }} · {{ student.discipline or 'Без дисциплины' }}{% if student.expire_date %} · до {{ student.expire_date[:10] }}{% endif %}</span></button>{% endfor %}{% if not students %}<div class="muted" style="margin-top:12px">Атлеты не найдены</div>{% endif %}</div></section>
-  <section id="sale" class="card" hidden><div id="selected" class="selected"></div><div class="form-grid">
+  <section id="sale" class="card" hidden><div id="selected" class="selected"></div><div id="birthdayNotice" class="notice" hidden style="background:#fff4ce;color:#765500;border:1px solid #e5c76b"><b>⚠️ У атлета не указана дата рождения.</b><br><span>Продажу можно завершить, но возрастную группу нужно проверить.</span>{% if birthday_edit_allowed %}<div style="display:flex;gap:8px;align-items:end;flex-wrap:wrap;margin-top:8px"><label style="flex:1;min-width:180px">Дата рождения<input id="birthdayInput" type="date" max="{{ now.strftime('%Y-%m-%d') if now is defined else '' }}" style="width:100%;padding:9px;border:1px solid #c8a947;border-radius:8px"></label><button id="saveBirthday" type="button" class="button" style="width:auto">Сохранить дату</button></div><div id="birthdayStatus" class="muted"></div>{% endif %}</div><div class="form-grid">
     <label class="label">Дисциплина<select id="discipline" class="select"></select></label>
     <label class="label">Тариф<select id="tariff" class="select"></select></label>
     <label class="label full">Скидки<br><select id="discount" class="select discount" multiple size="4"><option value="">Без скидки</option>{% for d in discounts %}<option value="{{ d.id }}">{{ d.name }}</option>{% endfor %}</select></label>
@@ -45,5 +45,14 @@ const nativeRandomUUID=crypto.randomUUID.bind(crypto); crypto.randomUUID=()=>sal
 const advanceWarning=document.createElement('div'); advanceWarning.className='notice full'; advanceWarning.hidden=true; advanceWarning.style='background:#ffe1e1;color:#9b111e;font-weight:700'; sale.querySelector('.form-grid').insertBefore(advanceWarning,submit);
 const originalPick=pick; pick=function(id){saleIdempotencyKey=''; originalPick(id); advanceWarning.textContent=selected?.advance_warning||''; advanceWarning.hidden=!selected?.advance_warning;};
 render();
+</script>
+<script>
+const birthdayNotice=document.getElementById('birthdayNotice');
+const birthdayInput=document.getElementById('birthdayInput');
+const birthdayStatus=document.getElementById('birthdayStatus');
+const saveBirthday=document.getElementById('saveBirthday');
+const salePickWithBirthday=pick;
+pick=function(id){salePickWithBirthday(id);const item=students.find(s=>s.id===id);if(!birthdayNotice||!item)return;birthdayNotice.hidden=Boolean(item.birthday);if(birthdayInput)birthdayInput.value=item.birthday||'';};
+if(saveBirthday)saveBirthday.onclick=async()=>{if(!selected||!birthdayInput.value)return birthdayStatus.textContent='Укажите дату рождения.';saveBirthday.disabled=true;birthdayStatus.textContent='Сохраняем…';try{const response=await fetch('/webapp/client-cabinet/student/birthday',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({init_data:init,club_id:{{ club_id }},student_id:selected.id,birthday:birthdayInput.value})});const data=await response.json().catch(()=>({}));if(!response.ok)throw new Error(data.detail||'Не удалось сохранить дату');selected.birthday=birthdayInput.value;const item=students.find(s=>s.id===selected.id);if(item)item.birthday=birthdayInput.value;birthdayNotice.hidden=true;birthdayStatus.textContent='Дата рождения сохранена.';}catch(error){birthdayStatus.textContent=error.message;}finally{saveBirthday.disabled=false;}};
 </script>
 </body></html>

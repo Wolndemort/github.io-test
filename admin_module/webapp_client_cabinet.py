@@ -983,7 +983,8 @@ async def webapp_buy_subscription_page(request: Request, club_id: int, init_data
     payment_info = get_payment_info_text(settings)
     discounts_by_student = {s.id: [{"kind": d.kind, "value": d.value, "name": d.name} for d in await active_discounts(db, club_id, user.user_id, "subscriptions", student_id=s.id)] for s in students}
     advance_by_student = {s.id: {**advance_debt_snapshot(s), "warning": advance_purchase_warning(s, settings)} for s in students}
-    return templates.TemplateResponse("webapp_buy_subscription.html", {"request": request, "club": club, "club_id": club_id, "students": students, "disciplines": disciplines, "discounts_by_student": discounts_by_student, "advance_by_student": advance_by_student, "payment_modes": payment_modes, "sbp_enabled": payment_modes["sbp"], "online_enabled": payment_modes["online"], "payment_info": payment_info})
+    birthday_by_student = {str(s.id): (s.birthday.isoformat() if s.birthday else "") for s in students}
+    return templates.TemplateResponse("webapp_buy_subscription.html", {"request": request, "club": club, "club_id": club_id, "students": students, "birthday_by_student": birthday_by_student, "disciplines": disciplines, "discounts_by_student": discounts_by_student, "advance_by_student": advance_by_student, "payment_modes": payment_modes, "sbp_enabled": payment_modes["sbp"], "online_enabled": payment_modes["online"], "payment_info": payment_info})
 
 
 @router.post("/webapp/client-cabinet/buy-subscription")
@@ -1012,6 +1013,8 @@ async def webapp_buy_subscription_submit(payload: WebAppBuySubscriptionPayload, 
     if payload.tariff_idx < 0 or payload.tariff_idx >= len(tariffs) or not tariffs[payload.tariff_idx].get("active", True):
         raise HTTPException(status_code=400, detail="Тариф недоступен")
     selected_tariff = tariffs[payload.tariff_idx]
+    if not student.birthday:
+        raise HTTPException(status_code=409, detail={"code": "birthday_required", "message": "Укажите дату рождения атлета перед покупкой."})
     price = selected_tariff.get("price")
     days = selected_tariff.get("days", 30)
     count = selected_tariff.get("count", 0)

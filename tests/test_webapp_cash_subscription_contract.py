@@ -36,3 +36,13 @@ def test_cash_subscription_builds_order_before_extending_subscription():
     abon_pos = api.index("abon_result = await add_abon(")
     assert order_pos < abon_pos
     assert "db.add(payment_order)" in api
+
+
+def test_cash_sale_allows_admin_to_finish_without_birthday_and_offers_inline_update():
+    api = (ROOT / "admin_module/api.py").read_text(encoding="utf-8")
+    page = (ROOT / "templates/admin_cash_subscription.html").read_text(encoding="utf-8")
+    assert '"birthday": s.birthday.isoformat() if s.birthday else None' in api
+    assert "if age_error and student.birthday:" in api
+    assert 'id="birthdayNotice"' in page
+    assert 'id="saveBirthday"' in page
+    assert "/webapp/client-cabinet/student/birthday" in page

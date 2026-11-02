@@ -1188,7 +1188,7 @@ async def admin_cash_subscription_page(request: Request, club_id: int = Query(..
     club = await db.get(Club, club_id)
     if not init_data:
         return telegram_init_gate("/webapp/admin-cash-subscription", club_id, "Откройте продажу наличного абонемента из Telegram")
-    await verify_webapp_staff(club, init_data, db, "cash_view")
+    tg_user = await verify_webapp_staff(club, init_data, db, "cash_view")
     students = (await db.execute(select(Student).where(Student.club_id == club_id).order_by(Student.name))).scalars().all()
     settings = club.club_settings or {}
     disciplines = settings.get("disciplines", {})
@@ -1196,13 +1196,18 @@ async def admin_cash_subscription_page(request: Request, club_id: int = Query(..
     student_data = []
     for s in students:
         assigned = await active_discounts(db, club_id, s.parent_id, "subscriptions", student_id=s.id)
-        student_data.append({"id": s.id, "name": s.name, "discipline": s.discipline, "expire_date": s.expire_date.isoformat() if s.expire_date else None, "balance_lessons": s.balance_lessons or 0, "is_frozen": bool(s.is_frozen), "status_ok": bool(s.expire_date and s.expire_date > now and not s.is_frozen and (s.balance_lessons or 0) > 0), "status_label": "Активен" if s.expire_date and s.expire_date > now and not s.is_frozen and (s.balance_lessons or 0) > 0 else "Завершён", "auto_discount_ids": [d.id for d in assigned]})
+        student_data.append({"id": s.id, "name": s.name, "discipline": s.discipline, "birthday": s.birthday.isoformat() if s.birthday else None, "expire_date": s.expire_date.isoformat() if s.expire_date else None, "balance_lessons": s.balance_lessons or 0, "is_frozen": bool(s.is_frozen), "status_ok": bool(s.expire_date and s.expire_date > now and not s.is_frozen and (s.balance_lessons or 0) > 0), "status_label": "Активен" if s.expire_date and s.expire_date > now and not s.is_frozen and (s.balance_lessons or 0) > 0 else "Завершён", "auto_discount_ids": [d.id for d in assigned]})
     for item, student in zip(student_data, students):
         debt = advance_debt_snapshot(student)
         item.update(advance_debt_days=debt["days"], advance_debt_lessons=debt["lessons"], advance_warning=advance_purchase_warning(student, settings))
     discounts = (await db.execute(select(Discount).where(Discount.club_id == club_id, Discount.is_active.is_(True)).order_by(Discount.name))).scalars().all()
     discount_data = [{"id": d.id, "name": d.name, "kind": d.kind, "value": d.value} for d in discounts]
-    return templates.TemplateResponse("admin_cash_subscription.html", {"request": request, "club": club, "club_id": club_id, "students": student_data, "disciplines": disciplines, "discounts": discounts, "discount_data": discount_data})
+    user_id = int(tg_user.get("id", 0))
+    birthday_edit_allowed = user_id == int(club.owner_id or 0) or user_id in {int(value) for value in SUPER_ADMIN_IDS}
+    if not birthday_edit_allowed:
+        staff = (await db.execute(select(ClubStaff).where(ClubStaff.club_id == club.id, ClubStaff.telegram_id == user_id, ClubStaff.is_active.is_(True)))).scalar_one_or_none()
+        birthday_edit_allowed = bool(staff_can(staff, "athletes_manage"))
+    return templates.TemplateResponse("admin_cash_subscription.html", {"request": request, "club": club, "club_id": club_id, "students": student_data, "disciplines": disciplines, "discounts": discounts, "discount_data": discount_data, "birthday_edit_allowed": birthday_edit_allowed})
 
 
 @router.post("/webapp/admin-cash-subscription")
@@ -1248,7 +1253,10 @@ async def admin_cash_subscription(payload: WebAppCashSubscriptionPayload, db: As
     if count < 1 or days < 1 or price <= 0:
         raise HTTPException(status_code=400, detail="Некорректный тариф")
     age_error = _tariff_age_error(student, tariff, cfg.get("name", discipline))
-    if age_error:
+    # Администратор может завершить продажу, даже если дата рождения ещё не
+    # заполнена. Возрастная проверка при этом не обходится: если дата есть,
+    # несоответствие возрасту по-прежнему блокирует продажу.
+    if age_error and student.birthday:
         raise HTTPException(status_code=400, detail=age_error)
     payment_order = PaymentOrder(id=order_id, user_id=student.parent_id or int(tg_user.get("id", 0)), student_id=student.id, club_id=club.id, discipline=discipline, amount_kopecks=price, original_amount_kopecks=original_price, discount_id=manual_discount.id if manual_discount else None, discount_name=manual_discount.name if manual_discount else None, discount_kind=manual_discount.kind if manual_discount else None, discount_value=manual_discount.value if manual_discount else None, discount_amount_kopecks=discount_amount or None, status="CONFIRMED", type="CASH_SUBSCRIPTION", provider_payment_id=f"CASH:{order_id}", lesson_count=count, days_to_add=days)
     debt_warning = advance_purchase_warning(student, settings, html=True)

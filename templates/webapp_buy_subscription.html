@@ -30,6 +30,11 @@
             </select>
         </label>
     </div>
+    <div id="birthdayNotice" style="display:none;margin-top:12px;padding:10px;border:1px solid #e5c76b;border-radius:12px;background:#fff8df;color:#765500;">
+        <b>⚠️ Укажите дату рождения атлета</b>
+        <div style="display:flex;gap:8px;align-items:end;flex-wrap:wrap;margin-top:8px;"><label style="flex:1;min-width:180px;">Дата рождения<input id="birthdayInput" type="date" max="{{ now.strftime('%Y-%m-%d') if now is defined else '' }}" style="width:100%;padding:10px;margin-top:4px;box-sizing:border-box;"></label><button id="saveBirthday" type="button" class="mono-action dark" style="width:auto;">Сохранить дату</button></div>
+        <div id="birthdayStatus" style="margin-top:6px;"></div>
+    </div>
     <label style="display:block;margin-top:12px;">Тариф
         <select id="tariff" style="width:100%;padding:12px;margin-top:6px;"></select>
     </label>
@@ -64,10 +69,13 @@
 const disciplines = {{ disciplines | tojson }};
 const discountsByStudent = {{ discounts_by_student | tojson }};
 const advanceByStudent = {{ advance_by_student | tojson }};
+const birthdayByStudent = {{ birthday_by_student | tojson }};
 const sportSelect = document.getElementById('sport');
 const tariffSelect = document.getElementById('tariff');
 const studentSelect = document.getElementById('student');
 const advanceWarning = document.createElement('div'); advanceWarning.style='display:none;margin-top:10px;padding:10px;border-radius:10px;background:#ffe1e1;color:#9b111e;font-weight:700'; studentSelect.closest('.mono-card').appendChild(advanceWarning);
+const birthdayNotice=document.getElementById('birthdayNotice'), birthdayInput=document.getElementById('birthdayInput'), birthdayStatus=document.getElementById('birthdayStatus'), saveBirthday=document.getElementById('saveBirthday');
+function renderBirthdayNotice(){const value=birthdayByStudent[studentSelect.value]||'';birthdayNotice.style.display=value?'none':'block';birthdayInput.value=value;}
 function renderAdvanceWarning(){const item=advanceByStudent[studentSelect.value]||{}; advanceWarning.textContent=item.warning||''; advanceWarning.style.display=item.warning?'block':'none';}
 function renderTariffs() {
   const tariffs = (disciplines[sportSelect.value] || {}).tariffs || [];
@@ -94,9 +102,11 @@ function renderTariffs() {
 function renderPricePreview(){const t=(disciplines[sportSelect.value]?.tariffs||[])[Number(tariffSelect.value)||0];if(!t)return;let amount=Number(t.price)*100;const ds=discountsByStudent[studentSelect.value]||[];for(const d of ds)amount=d.kind==='percent'?Math.round(amount*(100-Number(d.value))/100):Math.max(0,amount-Number(d.value));const el=document.getElementById('pricePreview');if(el)el.textContent='К оплате: '+(amount/100).toFixed(2)+' ₽'+(ds.length?' · автоматическая скидка применена':'')}
 sportSelect.addEventListener('change', renderTariffs);
 tariffSelect.addEventListener('change', renderPricePreview);studentSelect.addEventListener('change', renderPricePreview);
-renderTariffs(); renderAdvanceWarning(); studentSelect.addEventListener('change', renderAdvanceWarning);
+renderTariffs(); renderAdvanceWarning(); renderBirthdayNotice(); studentSelect.addEventListener('change', renderAdvanceWarning); studentSelect.addEventListener('change', renderBirthdayNotice);
+saveBirthday.addEventListener('click',async()=>{if(!birthdayInput.value)return birthdayStatus.textContent='Укажите дату рождения.';saveBirthday.disabled=true;birthdayStatus.textContent='Сохраняем…';try{const response=await fetch('/webapp/client-cabinet/student/birthday',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({init_data:window.Telegram?.WebApp?.initData||'',club_id:{{ club_id }},student_id:Number(studentSelect.value),birthday:birthdayInput.value})});const data=await response.json().catch(()=>({}));if(!response.ok)throw new Error(data.detail?.message||data.detail||'Не удалось сохранить дату');birthdayByStudent[studentSelect.value]=birthdayInput.value;birthdayNotice.style.display='none';birthdayStatus.textContent='Дата рождения сохранена. Теперь можно продолжить покупку.';}catch(error){birthdayStatus.textContent=error.message;}finally{saveBirthday.disabled=false;}});
 document.getElementById('create').addEventListener('click', async () => {
   const button = document.getElementById('create');
+  if (!(birthdayByStudent[studentSelect.value]||'')) { birthdayNotice.style.display='block'; birthdayStatus.textContent='Сначала укажите дату рождения атлета.'; birthdayInput.focus(); return; }
   button.disabled = true;
   const items = JSON.parse(localStorage.getItem('speedy_cart') || '[]');
   const selected = (disciplines[sportSelect.value].tariffs || [])[Number(tariffSelect.value)];
@@ -107,6 +117,7 @@ document.getElementById('create').addEventListener('click', async () => {
 });
 document.getElementById('buyNow').addEventListener('click', async () => {
   const button = document.getElementById('buyNow');
+  if (!(birthdayByStudent[studentSelect.value]||'')) { birthdayNotice.style.display='block'; birthdayStatus.textContent='Сначала укажите дату рождения атлета.'; birthdayInput.focus(); return; }
   button.disabled = true;
   const payload = {
     init_data: window.Telegram?.WebApp?.initData || '',
@@ -131,7 +142,7 @@ document.getElementById('buyNow').addEventListener('click', async () => {
   } else if (res.ok && data.review_required) {
     document.getElementById('msg').innerText = data.message || 'Заявка отправлена администратору.';
   } else {
-    alert(data.detail || 'Ошибка');
+    alert(data.detail?.message || data.detail || 'Ошибка');
     button.disabled = false;
   }
 });
