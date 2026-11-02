@@ -110,8 +110,20 @@ def test_discount_notifications_are_scheduled_and_idempotent():
     main = (ROOT / "main.py").read_text(encoding="utf-8")
     views = (ROOT / "admin_module/webapp_views.py").read_text(encoding="utf-8")
     assert "send_discount_reminders" in jobs
-    assert "notify:discount-monthly" in jobs
-    assert "notify:discount-expiry" in jobs
+    assert "notify:discount-{reminder_kind}" in jobs
+    assert 'reminder_kind = "expiry"' in jobs
     assert "_notification_once" in jobs
     assert "discount_reminders" in main
+
+def test_discount_lifecycle_notifications_have_separate_idempotency_keys():
+    jobs = (ROOT / "services/scheduler_jobs.py").read_text(encoding="utf-8")
+    assert 'key = f"notify:discount-{reminder_kind}:' in jobs
+    assert 'reminder_kind = "active"' in jobs
+    assert 'reminder_kind = "expiry"' in jobs
+
+def test_broadcast_validates_media_before_persisting_discount_assignment():
+    views = (ROOT / "admin_module/webapp_views.py").read_text(encoding="utf-8")
+    validation = views.index("Можно отправить только JPG, PNG, WEBP или MP4")
+    assignment_commit = views.index("await session.commit()", validation)
+    assert validation < assignment_commit
     assert "уведомление о скидке" in views

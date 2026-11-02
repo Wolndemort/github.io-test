@@ -293,6 +293,12 @@ async def admin_broadcast_send(
             raise HTTPException(400, "Добавьте текст, фото или видео")
         if len(message_text) > (1024 if media else 4096):
             raise HTTPException(400, "Сообщение слишком длинное")
+        content = await media.read() if media else None
+        if content and len(content) > 20 * 1024 * 1024:
+            raise HTTPException(400, "Файл слишком большой: максимум 20 МБ")
+        media_type = (media.content_type or "").lower() if media else ""
+        if media and media_type not in {"image/jpeg", "image/png", "image/webp", "video/mp4", "video/quicktime"}:
+            raise HTTPException(400, "Можно отправить только JPG, PNG, WEBP или MP4")
         students = list((await session.scalars(select(Student).where(Student.club_id == club_id, Student.id.in_(selected_ids)))).all())
         if len(students) != len(selected_ids):
             raise HTTPException(400, "В списке есть атлеты другого клуба")
@@ -324,12 +330,6 @@ async def admin_broadcast_send(
                 if not exists:
                     session.add(DiscountAssignment(club_id=club_id, discount_id=broadcast_discount.id, student_id=student.id))
             await session.commit()
-        content = await media.read() if media else None
-        if content and len(content) > 20 * 1024 * 1024:
-            raise HTTPException(400, "Файл слишком большой: максимум 20 МБ")
-        media_type = (media.content_type or "").lower() if media else ""
-        if media and media_type not in {"image/jpeg", "image/png", "image/webp", "video/mp4", "video/quicktime"}:
-            raise HTTPException(400, "Можно отправить только JPG, PNG, WEBP или MP4")
         bot = Bot(club.bot_token)
         delivered = 0
         failed = 0

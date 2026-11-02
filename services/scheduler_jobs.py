@@ -97,7 +97,6 @@ async def send_club_subscription_expiry_reminders() -> None:
 
 async def send_discount_reminders():
     """Notify clients and responsible club staff about discount lifecycle."""
-    _discount_notification_kinds = ("notify:discount-monthly", "notify:discount-expiry")
     today = reporting_periods()["local_now"].date()
     async with AsyncSessionLocal() as session:
         rows = (await session.execute(select(Discount, DiscountAssignment, Club, User, Student).join(DiscountAssignment, DiscountAssignment.discount_id == Discount.id).join(Club, Club.id == Discount.club_id).outerjoin(User, User.user_id == DiscountAssignment.user_id).outerjoin(Student, Student.id == DiscountAssignment.student_id).where(Discount.is_active.is_(True)))).all()
@@ -127,9 +126,10 @@ async def send_discount_reminders():
                 reminder_kind = "expiry"
                 text = f"⏳ <b>Скидка заканчивается</b>\n\n{escape(discount.name)} — {value}.\nДействует до: <code>{discount.ends_at.strftime('%d.%m.%Y')}</code>."
             else:
-                reminder_kind = "monthly"
+                reminder_kind = "active"
                 text = f"🏷️ <b>Ваша скидка активна</b>\n\n{escape(discount.name)} — <b>{value}</b>.\nДействует до: <code>{discount.ends_at.strftime('%d.%m.%Y') if discount.ends_at else 'без срока'}</code>."
-            if not await _notification_once(key, ttl=35 * 86400):
+            key = f"notify:discount-{reminder_kind}:{club.id}:{recipient_id}:{discount.id}:{discount.starts_at}:{discount.ends_at}"
+            if not await _notification_once(key, ttl=35 * 86400 if reminder_kind == "active" else 3 * 86400):
                 continue
             try:
                 await bot.send_message(int(recipient_id), text, parse_mode="HTML")
