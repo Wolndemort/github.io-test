@@ -35,14 +35,15 @@ async def active_discount(session: AsyncSession, club_id: int, user_id: int | No
     today = date.today()
     assignees = [x for x in ((DiscountAssignment.user_id == user_id) if user_id is not None else None, (DiscountAssignment.student_id == student_id) if student_id is not None else None) if x is not None]
     recipient_filter = or_(Discount.is_global.is_(True), or_(*assignees)) if assignees else Discount.is_global.is_(True)
-    discounts = list((await session.scalars(select(Discount).outerjoin(DiscountAssignment, (DiscountAssignment.discount_id == Discount.id) & (DiscountAssignment.club_id == club_id)).where(
+    rows = list((await session.scalars(select(Discount).outerjoin(DiscountAssignment, (DiscountAssignment.discount_id == Discount.id) & (DiscountAssignment.club_id == club_id)).where(
         Discount.club_id == club_id,
         Discount.is_active.is_(True),
         recipient_filter,
         Discount.scope.in_([scope, "all"]),
         (Discount.starts_at.is_(None) | (Discount.starts_at <= today)),
         (Discount.ends_at.is_(None) | (Discount.ends_at >= today)),
-    ).distinct().order_by(Discount.id.desc()))).all())
+    ).order_by(Discount.id.desc()))).all())
+    discounts = list({discount.id: discount for discount in rows}.values())
     if tariff:
         discounts = filter_tariff_discounts(discounts, *tariff)
     return discounts[0] if discounts else None
@@ -59,7 +60,8 @@ async def active_discounts(session: AsyncSession, club_id: int, user_id: int | N
     )
     if ids:
         query = query.where(Discount.id.in_(ids))
-    discounts = list((await session.scalars(query.distinct().order_by(Discount.priority.asc(), Discount.kind.desc(), Discount.id.asc()))).all())
+    rows = list((await session.scalars(query.order_by(Discount.priority.asc(), Discount.kind.desc(), Discount.id.asc()))).all())
+    discounts = list({discount.id: discount for discount in rows}.values())
     if tariff:
         discounts = filter_tariff_discounts(discounts, *tariff)
     return discounts
