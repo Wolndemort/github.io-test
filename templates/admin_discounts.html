@@ -4,6 +4,17 @@
 <style>body{font-family:sans-serif;background:#090909;color:#fff;padding:14px}.wrap{max-width:900px;margin:auto}.card{background:#151515;border:1px solid #333;border-radius:14px;padding:16px;margin:12px 0}input,select,textarea,button{box-sizing:border-box;padding:10px;margin:4px 0;border-radius:8px;border:1px solid #555;background:#111;color:#fff;width:100%}button{background:#fff;color:#111;font-weight:bold}.grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}.client{border-top:1px solid #333;padding:10px 0;display:grid;grid-template-columns:1fr 120px;gap:8px}.muted{color:#aaa;font-size:13px}.danger{background:#511d1d;color:#fff}</style>
 <style>.back{display:block;text-align:center;text-decoration:none;padding:11px;border-radius:10px;background:#fff;color:#111;font-weight:bold}.form-heading{display:flex;align-items:center;justify-content:space-between;gap:10px}.form-heading h2,.form-heading h3{margin:0}.form-heading button{width:auto;white-space:nowrap}.discount-form-body[hidden]{display:none}.assigned-discounts.collapsed> :not(.form-heading){display:none!important}</style>
 <div class="wrap">
+<script>
+document.addEventListener('DOMContentLoaded',()=>setTimeout(()=>{
+  const search=document.getElementById('searchClients'), query=document.getElementById('clientQuery'), clients=document.getElementById('clients'), discount=document.getElementById('assignmentDiscount');
+  if(!search||!query||!clients||!discount)return;
+  const selected=new Set();
+  const render=rows=>{clients.innerHTML=(rows||[]).map(c=>{const assigned=(c.discount_ids||[]).includes(Number(discount.value));return `<div class="client"><label><input type="checkbox" data-bulk-student="${c.student_id}" ${assigned?'disabled':''} ${selected.has(c.student_id)?'checked':''}> <b>${c.name}</b>${assigned?' <span class="muted">✅ Уже привязана</span>':''}<br><span class="muted">${c.phone||'номер не указан'}</span></label></div>`}).join('')||'<p class="muted">Ничего не найдено</p>';clients.querySelectorAll('[data-bulk-student]').forEach(box=>box.onchange=()=>{const id=Number(box.dataset.bulkStudent);box.checked?selected.add(id):selected.delete(id)});};
+  search.onclick=async()=>{const p=new URLSearchParams({club_id:cid,q:query.value,init_data:tg.initData});const filters=window.discountClientFilters?.();if(filters)filters.split('&').forEach(x=>{const [k,v]=x.split('=');if(k&&k!=='discipline')p.set(k,decodeURIComponent(v||''))});const r=await fetch('/webapp/admin-discounts/clients?'+p),d=await r.json();if(r.ok)render(d.clients||[]);};
+  let bulk=[...document.querySelectorAll('button')].find(b=>b.textContent.includes('Привязать выбранным')); if(!bulk){bulk=document.createElement('button');bulk.type='button';bulk.textContent='Привязать выбранным';search.after(bulk)}
+  bulk.onclick=async()=>{if(!selected.size)return alert('Выберите хотя бы одного атлета');const ids=[...selected];const r=await fetch('/webapp/admin-discounts/change',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({init_data:tg.initData,club_id:cid,action:'bulk_assign',index:Number(discount.value),student_ids:ids,idempotency_key:(crypto.randomUUID?crypto.randomUUID():`bulk-${Date.now()}`)})});const d=await r.json().catch(()=>({}));if(!r.ok)return alert(d.detail||'Не удалось привязать скидку');ids.forEach(id=>selected.delete(id));alert(`Привязано: ${d.changed_count||ids.length}. Push доставлен: ${d.notifications_sent||0}.`);search.click();};
+},0));
+</script>
 {% include "_staff_back_button.html" %}
 <script>
 document.addEventListener('DOMContentLoaded',()=>{
