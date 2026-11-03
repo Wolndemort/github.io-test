@@ -307,7 +307,7 @@ def discipline(club_settings: dict):
     return builder.as_markup()
 
 
-def get_pay_options_kb(discipline_cfg: dict, sport_type: str) -> types.InlineKeyboardMarkup:
+def get_pay_options_kb(discipline_cfg: dict, sport_type: str, discount_by_idx: dict | None = None) -> types.InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     tariffs = discipline_cfg.get("tariffs", [])
     d_type = discipline_cfg.get("type", "lessons")
@@ -319,10 +319,25 @@ def get_pay_options_kb(discipline_cfg: dict, sport_type: str) -> types.InlineKey
         days = tariff.get("days")
         count = tariff.get("count")
 
+        discount = (discount_by_idx or {}).get(idx)
+        display_price = price
+        discount_suffix = ""
+        if discount:
+            original_kopecks = int(round(float(price or 0) * 100))
+            if discount.get("kind") == "percent":
+                discounted_kopecks = int(round(original_kopecks * (100 - int(discount.get("value", 0))) / 100))
+                discount_label = f"{discount.get('value')}%"
+            else:
+                discounted_kopecks = max(0, original_kopecks - int(discount.get("value", 0)))
+                discount_label = f"{int(discount.get('value', 0)) / 100:g} ₽"
+            if discounted_kopecks < original_kopecks:
+                display_price = f"{discounted_kopecks / 100:g}₽"
+                discount_suffix = f" → {display_price} · скидка {discount_label}"
+
         if d_type == "unlimited" or count == 999:
-            btn_text = f"♾ Безлимит {days} дн. — {price}₽"
+            btn_text = f"♾ Безлимит {days} дн. — {price}₽{discount_suffix}"
         else:
-            btn_text = f"🔢 {count} зан. / {days} дн. — {price}₽"
+            btn_text = f"🔢 {count} зан. / {days} дн. — {price}₽{discount_suffix}"
 
         # ВАЖНО: Передаем ИНДЕКС тарифа: set_tariff_[sport_type]_[idx]
         builder.row(types.InlineKeyboardButton(
@@ -330,7 +345,7 @@ def get_pay_options_kb(discipline_cfg: dict, sport_type: str) -> types.InlineKey
             callback_data=f"set_tariff_{sport_type}_{idx}"
         ))
 
-    builder.row(types.InlineKeyboardButton(text="⬅️ В главное меню", callback_data="begin"))
+    builder.row(types.InlineKeyboardButton(text="⬅️ К дисциплине", callback_data=f"section_{sport_type}"))
     return builder.as_markup()
 
 

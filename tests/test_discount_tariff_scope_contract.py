@@ -128,3 +128,16 @@ def test_discount_audit_covers_every_price_and_notification_surface():
     assert "refreshCartPreview" in cart
     assert "discount_ids" in product
     assert "notify:club-discount-start" in jobs and "notify:club-discount-expired" in jobs
+
+
+def test_bot_tariff_menu_shows_discount_and_returns_to_discipline():
+    from pathlib import Path
+    root = Path(__file__).parents[1]
+    buttons = (root / "handlers/buttons.py").read_text(encoding="utf-8")
+    payments = (root / "handlers/payments.py").read_text(encoding="utf-8")
+    page = (root / "templates/admin_discounts.html").read_text(encoding="utf-8")
+    assert "discount_by_idx" in buttons
+    assert "скидка {discount_label}" in buttons
+    assert 'callback_data=f"section_{sport_type}"' in buttons
+    assert "_tariff_discount_map" in payments
+    assert "window.change=async function" in page

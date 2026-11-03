@@ -60,6 +60,23 @@ document.addEventListener('DOMContentLoaded',()=>{const search=document.getEleme
 </script>
 <script>
 document.addEventListener('DOMContentLoaded',()=>{
+  const originalChange=window.change;
+  if(!originalChange)return;
+  window.change=async function(action,index,discount,user_id=null,student_id=null){
+    if(action!=='toggle')return originalChange(action,index,discount,user_id,student_id);
+    try{
+      const r=await fetch('/webapp/admin-discounts/change',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({init_data:tg.initData,club_id:cid,action,index,user_id:user_id||null,student_id:student_id||null,discount,idempotency_key:operationKey()})});
+      const x=await r.json();if(!r.ok)return alert(x.detail||'Ошибка');
+      const del=document.querySelector(`[data-del="${index}"]`),row=del?.parentElement;if(!row)return;
+      const button=[...row.querySelectorAll('button')].find(b=>b.textContent==='Включить'||b.textContent==='Выключить');
+      const enabled=button?.textContent==='Включить';if(button)button.textContent=enabled?'Выключить':'Включить';
+      const state=[...row.querySelectorAll('.muted')].find(s=>s.textContent.includes('ВКЛ')||s.textContent.includes('ВЫКЛ'));if(state)state.textContent=enabled?' · ВКЛ':' · ВЫКЛ';
+    }catch(e){alert('Не удалось выполнить операцию: '+e.message)}
+  };
+});
+</script>
+<script>
+document.addEventListener('DOMContentLoaded',()=>{
   const meta={{ discounts|map(attribute='id')|list|tojson }};
   const add=document.getElementById('addDiscount');
   if(add){

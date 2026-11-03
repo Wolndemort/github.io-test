@@ -29,6 +29,17 @@ from services.age_rules import tariff_age_matches
 router = Router()
 
 
+async def _tariff_discount_map(session: AsyncSession, club: Club, user_id: int, student_id: int | None, sport_type: str, discipline_cfg: dict) -> dict:
+    result = {}
+    for idx, tariff in enumerate(discipline_cfg.get("tariffs", []) or []):
+        if not tariff.get("active", True):
+            continue
+        discount = await active_discount(session, club.id, user_id, "subscriptions", student_id, tariff=(sport_type, idx, tariff))
+        if discount:
+            result[idx] = {"kind": discount.kind, "value": discount.value, "name": discount.name}
+    return result
+
+
 async def _subscription_price(session: AsyncSession, club: Club, user_id: int, student_id: int | None, sport_type: str, tariff_idx: int, tariff: dict):
     """Return the current price after the tariff-scoped discount check."""
     original = int(round(float(tariff.get("price", 0) or 0) * 100))
@@ -144,7 +155,7 @@ async def select_athlete_handler(
 
 
 @router.callback_query(F.data.startswith('set_at_'))
-async def athlete_chosen_handler(callback: types.CallbackQuery, state: FSMContext, club_settings: dict):
+async def athlete_chosen_handler(callback: types.CallbackQuery, state: FSMContext, club_settings: dict, session: AsyncSession, club: Club):
     parts = callback.data.split('_')
     target = parts[2]
     student_id = callback.from_user.id if target == "me" else int(target)
@@ -173,7 +184,8 @@ async def athlete_chosen_handler(callback: types.CallbackQuery, state: FSMContex
         return await callback.answer("❌ Ошибка: Выбранное направление временно недоступно.", show_alert=True)
 
     # Формируем клавиатуру тарифов (8 зан, 12 зан, безлимит)
-    markup = get_pay_options_kb(discipline_cfg, sport_type)
+    discount_by_idx = await _tariff_discount_map(session, club, callback.from_user.id, student_id, sport_type, discipline_cfg)
+    markup = get_pay_options_kb(discipline_cfg, sport_type, discount_by_idx)
 
     await callback.message.edit_text(
         text=f"🥋 Секция: <b>{discipline_cfg.get('name', 'Спорт')}</b>\n"
@@ -364,16 +376,17 @@ async def process_kids_limit(
 
 
 @router.callback_query(F.data == "back_to_tariffs")
-async def back_to_tariffs(callback: types.CallbackQuery, state: FSMContext, club_settings: dict):
+async def back_to_tariffs(callback: types.CallbackQuery, state: FSMContext, club_settings: dict, session: AsyncSession, club: Club):
     data = await state.get_data()
     sport_type = data.get("sport_type")
     discipline_cfg = (club_settings.get("disciplines", {}) or {}).get(sport_type, {}) if sport_type else {}
     if not sport_type or not discipline_cfg or not discipline_cfg.get("active", True):
         return await callback.answer("Направление больше недоступно. Выберите его заново.", show_alert=True)
+    discount_by_idx = await _tariff_discount_map(session, club, callback.from_user.id, data.get("student_id"), sport_type, discipline_cfg)
     await callback.message.edit_text(
         f"🥋 Секция: <b>{discipline_cfg.get('name', 'Спорт')}</b>\n\n"
         "Выберите тарифный план:",
-        reply_markup=get_pay_options_kb(discipline_cfg, sport_type),
+        reply_markup=get_pay_options_kb(discipline_cfg, sport_type, discount_by_idx),
         parse_mode="HTML",
     )
     await callback.answer()
