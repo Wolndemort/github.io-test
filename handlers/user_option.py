@@ -187,9 +187,9 @@ async def universal_profile_handler(
                 target_text = "абонементы и товары"
             else:
                 target_text = "подходящие абонементы"
-            status_text += f"\n\n🎉 <b>Вам доступна скидка!</b>\n🏷️ <b>{escape(profile_discount.name)}</b> — <b>{discount_value}</b>\n📌 На: {escape(target_text)}"
+            status_text += f"\n\n🟨🟨🟨🟨🟨\n🎉 <b>ВАМ ДОСТУПНА СКИДКА!</b> 🎉\n🏷️ <b>{escape(profile_discount.name)}</b>\n💥 <b>РАЗМЕР СКИДКИ: {discount_value}</b>\n📌 <b>ДЕЙСТВУЕТ НА:</b> {escape(target_text)}"
             if profile_discount.ends_at:
-                status_text += f"\n⏳ Действует до <code>{profile_discount.ends_at.strftime('%d.%m.%Y')}</code>"
+                status_text += f"\n⏳ <b>ДЕЙСТВУЕТ ДО: {profile_discount.ends_at.strftime('%d.%m.%Y')}</b>\n🟨🟨🟨🟨🟨"
         for s in students:
             is_frozen_val = int(getattr(s, 'is_frozen', 0) or 0)
 

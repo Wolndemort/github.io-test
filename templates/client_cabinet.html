@@ -98,7 +98,7 @@
     </div>
 
     {% if not is_staff_mode %}
-    {% if profile_discount %}<div class="card mono-card" style="border-color:#b59b45;background:#fffbe8;color:#171717;"><b>🏷️ Ваша скидка: {{ profile_discount.name }}</b><div>{{ (profile_discount.value / 100) if profile_discount.kind == 'fixed' else profile_discount.value }}{% if profile_discount.kind == 'percent' %}%{% else %} ₽{% endif %} · {{ profile_discount.scope }}</div>{% if profile_discount.ends_at %}<div>Действует до <span class="discount-countdown" data-until="{{ profile_discount.ends_at.isoformat() }}T23:59:59">—</span></div>{% endif %}</div>{% endif %}
+    {% if profile_discount %}<div class="card mono-card" style="border:2px solid #e0ad00;background:#fff3a6;color:#171717;box-shadow:0 0 18px rgba(245,190,0,.35);font-size:17px;"><div style="font-size:22px;font-weight:900;color:#9b111e;">🎉 ВАМ ДОСТУПНА СКИДКА! 🎉</div><div style="font-size:19px;font-weight:900;margin-top:6px;">🏷️ {{ profile_discount.name }}</div><div style="font-size:20px;font-weight:900;color:#9b111e;margin-top:4px;">💥 {{ (profile_discount.value / 100) if profile_discount.kind == 'fixed' else profile_discount.value }}{% if profile_discount.kind == 'percent' %}%{% else %} ₽{% endif %}</div><div style="font-weight:800;margin-top:4px;">Действует на: {{ profile_discount.scope }}</div>{% if profile_discount.ends_at %}<div style="font-weight:900;margin-top:4px;">⏳ До: <span class="discount-countdown" data-until="{{ profile_discount.ends_at.isoformat() }}T23:59:59">—</span></div>{% endif %}</div>{% endif %}
     <div class="card mono-card">
         <div class="section-title mono-kicker"><div class="name">Профили атлетов</div><span>детализация</span></div>
         {% if students %}
