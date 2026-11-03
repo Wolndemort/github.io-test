@@ -1213,7 +1213,23 @@ async def webapp_admin_discounts_page(request: Request, club_id: int = Query(...
             "starts_at": discount.starts_at.strftime("%d.%m.%Y") if discount.starts_at else None,
             "ends_at": discount.ends_at.strftime("%d.%m.%Y") if discount.ends_at else None,
         })
-    return templates.TemplateResponse("admin_discounts.html", {"request": request, "club": club, "club_id": club_id, "discounts": discounts, "assigned_discounts": assigned_discounts})
+    tariff_options = []
+    for discipline, cfg in ((club.club_settings or {}).get("disciplines", {}) or {}).items():
+        if not isinstance(cfg, dict) or not cfg.get("active", True):
+            continue
+        for tariff_idx, tariff in enumerate(cfg.get("tariffs", []) or []):
+            if not isinstance(tariff, dict) or not tariff.get("active", True):
+                continue
+            tariff_options.append({
+                "discipline": discipline,
+                "discipline_name": cfg.get("name", discipline),
+                "tariff_idx": tariff_idx,
+                "count": int(tariff.get("count", 0) or 0),
+                "days": int(tariff.get("days", 30) or 30),
+                "price": tariff.get("price", 0),
+                "unlimited": int(tariff.get("count", 0) or 0) == 999,
+            })
+    return templates.TemplateResponse("admin_discounts.html", {"request": request, "club": club, "club_id": club_id, "discounts": discounts, "assigned_discounts": assigned_discounts, "tariff_options": tariff_options})
 
 @router.post("/webapp/admin-discounts/change")
 async def change_admin_discount(payload: DiscountChangePayload, session: AsyncSession = Depends(get_session)):

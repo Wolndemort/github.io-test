@@ -32,3 +32,7 @@ def test_discount_schema_and_checkout_paths_are_tariff_scoped():
     assert "tariff_ref(discipline, idx, tariffs[idx])" in create
     assert "tariff=(payload.sport_type, payload.tariff_idx, selected_tariff)" in (root / "admin_module/webapp_client_cabinet.py").read_text(encoding="utf-8")
     assert "tariff=(str(raw.get(\"sport_type\")), idx, t)" in (root / "admin_module/api.py").read_text(encoding="utf-8")
+    page = (root / "templates/admin_discounts.html").read_text(encoding="utf-8")
+    assert "tariffDiscipline" in page
+    assert "tariffChoice" in page
+    assert "tariff_options|tojson" in page
