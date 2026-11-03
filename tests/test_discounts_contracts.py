@@ -136,7 +136,10 @@ def test_discount_is_visible_in_web_countdown_and_telegram_profile():
     assert "profile_discount" in cabinet
     assert "discount-countdown" in web
     assert "setInterval(tick,1000)" in web
-    assert "Ваша скидка" in bot
+    assert "ВАМ ДОСТУПНА СКИДКА" in bot
+
+    assert "Действует на:" in web
+    assert "buy-subscription?club_id={{ club_id }}" in web
 
 def test_discount_notifications_are_scheduled_and_idempotent():
     jobs = (ROOT / "services/scheduler_jobs.py").read_text(encoding="utf-8")
