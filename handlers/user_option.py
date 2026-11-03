@@ -16,7 +16,7 @@ from config import secret_key
 from sqlalchemy import select, or_
 from sqlalchemy import func
 from handlers.buttons import get_main_menu_keyboard, get_profile_keyboard, get_section_menu_kb
-from services.discounts import active_discount
+from services.discounts import active_discount, apply_discount
 from admin_module.utils import is_staff_or_owner
 from services.schedule_utils import normalize_schedule_block
 from services.visit_history import attach_student_names, group_completed_sessions, summarize_payment_entry, moscow_str
@@ -172,9 +172,24 @@ async def universal_profile_handler(
         status_text = f"🏰 Клуб: <b>{club.name}</b>\n🔍 <b>Ваши профили:</b>\n"
         if profile_discount:
             discount_value = f"{profile_discount.value}%" if profile_discount.kind == "percent" else f"{profile_discount.value / 100:g} ₽"
-            status_text += f"\n🏷️ <b>Ваша скидка:</b> {profile_discount.name} — <b>{discount_value}</b>"
+            refs = profile_discount.tariff_refs or []
+            if refs:
+                targets = []
+                disciplines = (club_settings.get("disciplines", {}) or {})
+                for ref in refs:
+                    discipline_name = (disciplines.get(str(ref.get("discipline")), {}) or {}).get("name", ref.get("discipline", "тариф"))
+                    count = int(ref.get("count", 0) or 0)
+                    targets.append(f"{discipline_name}: {'безлимит' if count == 999 else f'{count} зан.'} / {int(ref.get('days', 30) or 30)} дн.")
+                target_text = "; ".join(targets)
+            elif profile_discount.scope == "products":
+                target_text = "товары"
+            elif profile_discount.scope == "all":
+                target_text = "абонементы и товары"
+            else:
+                target_text = "подходящие абонементы"
+            status_text += f"\n\n🎉 <b>Вам доступна скидка!</b>\n🏷️ <b>{escape(profile_discount.name)}</b> — <b>{discount_value}</b>\n📌 На: {escape(target_text)}"
             if profile_discount.ends_at:
-                status_text += f" до <code>{profile_discount.ends_at.strftime('%d.%m.%Y')}</code>"
+                status_text += f"\n⏳ Действует до <code>{profile_discount.ends_at.strftime('%d.%m.%Y')}</code>"
         for s in students:
             is_frozen_val = int(getattr(s, 'is_frozen', 0) or 0)
 
@@ -524,7 +539,7 @@ async def universal_section_handler(
 
 
 @router.callback_query(F.data.startswith('price_'))
-async def universal_price_handler(callback: types.CallbackQuery, club_settings: dict):
+async def universal_price_handler(callback: types.CallbackQuery, club_settings: dict, session: AsyncSession, club: Club):
     code = callback.data.split('_')[1]
     discipline = club_settings.get("disciplines", {}).get(code)
 
@@ -545,7 +560,7 @@ async def universal_price_handler(callback: types.CallbackQuery, club_settings: 
         if not tariffs:
             price_text += "Тарифы пока не добавлены."
 
-        for t in tariffs:
+        for idx, t in enumerate(tariffs):
             count = t.get('count', '?')
             price = t.get('price', '—')
             days = t.get('days')
@@ -553,7 +568,17 @@ async def universal_price_handler(callback: types.CallbackQuery, club_settings: 
 
             # Если дни есть — пишем (30 дн.), если нет — просто пропускаем этот кусок
             days_info = f" ({days} дн.)" if days else ""
-            price_text += f"• {count_label} — {price}₽{days_info}\n"
+            line = f"• {count_label} — {price}₽{days_info}"
+            try:
+                original_kopecks = int(round(float(price) * 100))
+                discount = await active_discount(session, club.id, callback.from_user.id, "subscriptions", tariff=(code, idx, t))
+                discounted_kopecks, saved = apply_discount(original_kopecks, discount)
+                if discount and saved:
+                    discount_value = f"{discount.value}%" if discount.kind == "percent" else f"{discount.value / 100:g} ₽"
+                    line += f" → <b>{discounted_kopecks / 100:g}₽</b> (скидка {discount_value})"
+            except (TypeError, ValueError):
+                pass
+            price_text += line + "\n"
 
     await callback.message.edit_text(
         text=price_text,
