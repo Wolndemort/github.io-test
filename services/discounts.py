@@ -71,15 +71,18 @@ async def active_discounts(session: AsyncSession, club_id: int, user_id: int | N
     return discounts
 
 def apply_discounts(amount_kopecks: int, discounts: list[Discount]):
+    """Apply one eligible discount; personal discounts take precedence over club-wide ones."""
+    if not discounts:
+        return amount_kopecks, []
+    personal = [discount for discount in discounts if not discount.is_global]
+    selected = (personal or discounts)[:1]
     current = amount_kopecks
     applied = []
-    for discount in discounts:
+    for discount in selected:
         before = current
         current, saved = apply_discount(current, discount)
         if saved:
             applied.append((discount, saved))
-        if current <= 0:
-            break
     return max(0, current), applied
 
 def apply_discount(amount_kopecks: int, discount: Discount | None):
