@@ -78,6 +78,12 @@ def get_profile_keyboard(user, club_id: int, club_settings: dict, is_authorized:
         ))
 
     # 2. Дополнительные данные атлетов
+    if is_staff_mode:
+        builder.row(types.InlineKeyboardButton(
+            text="🌐 Открыть клиентский кабинет",
+            web_app=WebAppInfo(url=f"{base_url}/webapp/client-cabinet?club_id={club_id}&client_mode=1")
+        ))
+
     if missing_birthdays and missing_birthdays > 0:
         birthday_label = f"📅 Атлеты без ДР ({missing_birthdays}) — заполнить"
         builder.row(types.InlineKeyboardButton(text=birthday_label, callback_data="edit_birthday"))
