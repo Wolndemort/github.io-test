@@ -208,7 +208,7 @@ def _broadcast_disciplines(club: Club, students: list[Student] | None = None) ->
 
 
 @router.get("/webapp/admin-broadcast", response_class=HTMLResponse)
-async def admin_broadcast_page(request: Request, club_id: int = Query(...), student_ids: str = Query(default=""), init_data: str | None = Query(None), session: AsyncSession = Depends(get_session)):
+async def admin_broadcast_page(request: Request, club_id: int = Query(...), student_ids: str = Query(default=""), discount_id: int | None = Query(default=None), init_data: str | None = Query(None), session: AsyncSession = Depends(get_session)):
     club = await session.get(Club, club_id)
     if not init_data:
         return telegram_init_gate('/webapp/admin-broadcast', club_id, 'Откройте рассылку из Telegram')
@@ -219,7 +219,7 @@ async def admin_broadcast_page(request: Request, club_id: int = Query(...), stud
     except ValueError:
         requested_ids = []
     valid_ids = set((await session.scalars(select(Student.id).where(Student.club_id == club_id, Student.id.in_(requested_ids)))).all()) if requested_ids else set()
-    return templates.TemplateResponse("admin_broadcast.html", {"request": request, "club": club, "club_id": club_id, "discounts": discounts, "prefill_student_ids": sorted(valid_ids)})
+    return templates.TemplateResponse("admin_broadcast.html", {"request": request, "club": club, "club_id": club_id, "discounts": discounts, "prefill_student_ids": sorted(valid_ids), "prefill_discount_id": discount_id})
 
 
 @router.get("/webapp/admin-broadcast/students")
@@ -316,25 +316,31 @@ async def admin_broadcast_send(
             if not broadcast_discount or broadcast_discount.club_id != club_id or not broadcast_discount.is_active:
                 raise HTTPException(400, "Выбранная скидка недоступна")
             today = reporting_periods()["local_now"].date()
-            parent_ids = {int(student.parent_id) for student in students if student.parent_id}
-            for parent_id in parent_ids:
-                sibling_ids = (await session.scalars(select(Student.id).where(Student.club_id == club_id, Student.parent_id == parent_id))).all()
-                existing_discount_ids = set((await session.scalars(select(DiscountAssignment.discount_id).join(Discount, Discount.id == DiscountAssignment.discount_id).where(
-                    DiscountAssignment.club_id == club_id, Discount.is_active.is_(True),
-                    (Discount.ends_at.is_(None) | (Discount.ends_at >= today)),
-                    or_(DiscountAssignment.user_id == parent_id, DiscountAssignment.student_id.in_(sibling_ids)),
-                ))).all())
-                if broadcast_discount.id not in existing_discount_ids and len(existing_discount_ids) >= 3:
-                    raise HTTPException(409, "У одного родителя может быть не более 3 разных скидок")
-            for student in students:
-                exists = await session.scalar(select(DiscountAssignment.id).where(
-                    DiscountAssignment.discount_id == broadcast_discount.id,
-                    DiscountAssignment.club_id == club_id,
-                    or_(DiscountAssignment.student_id == student.id, (DiscountAssignment.user_id == student.parent_id) if student.parent_id else False),
-                ))
-                if not exists:
-                    session.add(DiscountAssignment(club_id=club_id, discount_id=broadcast_discount.id, student_id=student.id))
-            await session.commit()
+            # A club-wide discount is already available to every eligible
+            # client; a broadcast must only inform recipients, never create
+            # hundreds of redundant personal assignments.
+            if broadcast_discount.is_global:
+                discount_id = None
+            else:
+                parent_ids = {int(student.parent_id) for student in students if student.parent_id}
+                for parent_id in parent_ids:
+                    sibling_ids = (await session.scalars(select(Student.id).where(Student.club_id == club_id, Student.parent_id == parent_id))).all()
+                    existing_discount_ids = set((await session.scalars(select(DiscountAssignment.discount_id).join(Discount, Discount.id == DiscountAssignment.discount_id).where(
+                        DiscountAssignment.club_id == club_id, Discount.is_active.is_(True),
+                        (Discount.ends_at.is_(None) | (Discount.ends_at >= today)),
+                        or_(DiscountAssignment.user_id == parent_id, DiscountAssignment.student_id.in_(sibling_ids)),
+                    ))).all())
+                    if broadcast_discount.id not in existing_discount_ids and len(existing_discount_ids) >= 3:
+                        raise HTTPException(409, "У одного родителя может быть не более 3 разных скидок")
+                for student in students:
+                    exists = await session.scalar(select(DiscountAssignment.id).where(
+                        DiscountAssignment.discount_id == broadcast_discount.id,
+                        DiscountAssignment.club_id == club_id,
+                        or_(DiscountAssignment.student_id == student.id, (DiscountAssignment.user_id == student.parent_id) if student.parent_id else False),
+                    ))
+                    if not exists:
+                        session.add(DiscountAssignment(club_id=club_id, discount_id=broadcast_discount.id, student_id=student.id))
+                await session.commit()
         bot = Bot(club.bot_token)
         delivered = 0
         failed = 0
@@ -1254,7 +1260,7 @@ async def change_admin_discount(payload: DiscountChangePayload, session: AsyncSe
         raise HTTPException(404, "Клуб не найден")
     tg_user = await verify_webapp_staff(club, payload.init_data, session, "cash_sale")
     operation_key = str(payload.idempotency_key or "").strip()[:120]
-    if payload.action in {"add", "delete", "assign", "unassign", "bulk_assign"}:
+    if payload.action in {"add", "delete", "assign", "unassign", "bulk_assign", "toggle"}:
         if len(operation_key) < 16:
             raise HTTPException(400, "Нужен idempotency_key для операции со скидкой")
         if not await claim_once(f"discount:operation:{club.id}:{int(tg_user['id'])}:{operation_key}", ttl=15 * 60):
@@ -1271,6 +1277,11 @@ async def change_admin_discount(payload: DiscountChangePayload, session: AsyncSe
         if assigned:
             raise HTTPException(409, "Нельзя удалить скидку: она привязана к клиентам")
         await session.delete(discount)
+    elif payload.action == "toggle":
+        discount = await session.get(Discount, payload.index, with_for_update=True) if payload.index else None
+        if not discount or discount.club_id != club.id:
+            raise HTTPException(400, "Скидка не найдена")
+        discount.is_active = not bool(discount.is_active)
     elif payload.action == "add":
         raw = payload.discount or {}
         kind = "fixed" if str(raw.get("kind", "percent")).lower() == "fixed" else "percent"
@@ -1302,7 +1313,7 @@ async def change_admin_discount(payload: DiscountChangePayload, session: AsyncSe
             if idx < 0 or idx >= len(tariffs):
                 raise HTTPException(400, "Выбранный тариф больше не существует")
             normalized_refs.append(tariff_ref(discipline, idx, tariffs[idx]))
-        session.add(Discount(club_id=club.id, name=str(raw.get("name", "")).strip()[:120] or "Без названия", kind=kind, value=int(round(value * 100)) if kind == "fixed" else int(round(value)), scope=scope, comment=str(raw.get("comment", "")).strip()[:500], starts_at=starts_at, ends_at=ends_at, tariff_refs=normalized_refs))
+        session.add(Discount(club_id=club.id, name=str(raw.get("name", "")).strip()[:120] or "Без названия", kind=kind, value=int(round(value * 100)) if kind == "fixed" else int(round(value)), scope=scope, comment=str(raw.get("comment", "")).strip()[:500], starts_at=starts_at, ends_at=ends_at, tariff_refs=normalized_refs, is_global=bool(raw.get("is_global", False))))
     elif payload.action == "bulk_assign":
         discount = await session.get(Discount, payload.index)
         selected_ids = list(dict.fromkeys(int(value) for value in (payload.student_ids or [])))
@@ -1373,6 +1384,17 @@ async def change_admin_discount(payload: DiscountChangePayload, session: AsyncSe
     else:
         raise HTTPException(400, "Неизвестное действие")
     await session.commit()
+    if payload.action == "toggle" and club.bot_token and club.owner_id:
+        bot = Bot(club.bot_token)
+        try:
+            state = "включена" if discount.is_active else "выключена"
+            await telegram_call(lambda: bot.send_message(club.owner_id, f"🏷️ Скидка «{escape(discount.name)}» {state}.", parse_mode="HTML"))
+            notifications_sent += 1
+        except Exception as exc:
+            logger.warning(f"Не удалось отправить push о переключении скидки club={club.id}: {exc}")
+            notifications_failed += 1
+        finally:
+            await bot.session.close()
     if payload.action in {"assign", "unassign", "bulk_assign"} and club.bot_token and (assignment_changed or changed_students):
         bot = None
         try:

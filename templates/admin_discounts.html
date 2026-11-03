@@ -60,6 +60,28 @@ document.addEventListener('DOMContentLoaded',()=>{const search=document.getEleme
 </script>
 <script>
 document.addEventListener('DOMContentLoaded',()=>{
+  const meta={{ discounts|map(attribute='id')|list|tojson }};
+  const add=document.getElementById('addDiscount');
+  if(add){
+    const label=document.createElement('label'); label.className='muted'; label.innerHTML='<input id="discountGlobal" type="checkbox" style="width:auto"> Клубная скидка — действует для всех подходящих клиентов';
+    add.before(label);
+    add.onclick=()=>{const refs=[...document.querySelectorAll('.tariffRef:checked')].map(x=>JSON.parse(x.dataset.ref));change('add',null,{name:$('discountName').value,kind:$('discountKind').value,value:$('discountValue').value,scope:$('discountScope').value,starts_at:$('discountStarts').value,ends_at:$('discountEnds').value,comment:$('discountComment').value,tariff_refs:refs,is_global:document.getElementById('discountGlobal').checked});};
+  }
+  document.querySelectorAll('[data-del]').forEach((button,index)=>{
+    const id=Number(button.dataset.del), row=button.parentElement;
+    const active={{ discounts|map(attribute='is_active')|list|tojson }}[index];
+    const global={{ discounts|map(attribute='is_global')|list|tojson }}[index];
+    const state=document.createElement('span'); state.className='muted'; state.textContent=active?' · ВКЛ':' · ВЫКЛ';
+    button.before(state);
+    const toggle=document.createElement('button'); toggle.type='button'; toggle.textContent=active?'Выключить':'Включить'; toggle.onclick=()=>change('toggle',id);
+    const broadcast=document.createElement('button'); broadcast.type='button'; broadcast.textContent='В рассылку'; broadcast.onclick=()=>{location.href=`/webapp/admin-broadcast?club_id=${cid}&discount_id=${id}&init_data=${encodeURIComponent(tg.initData)}`};
+    button.before(toggle,broadcast);
+    const kind=document.createElement('small'); kind.className='muted'; kind.textContent=global?' · Клубная':' · Персональная'; row.insertBefore(kind,row.firstChild);
+  });
+});
+</script>
+<script>
+document.addEventListener('DOMContentLoaded',()=>{
   const options={{ tariff_options|tojson }};
   const old=document.getElementById('tariffOptions');
   if(!old)return;

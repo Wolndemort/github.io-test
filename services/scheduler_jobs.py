@@ -99,6 +99,33 @@ async def send_discount_reminders():
     """Notify clients and responsible club staff about discount lifecycle."""
     today = reporting_periods()["local_now"].date()
     async with AsyncSessionLocal() as session:
+        global_rows = (await session.execute(
+            select(Discount, Club).join(Club, Club.id == Discount.club_id).where(
+                Discount.is_global.is_(True), Discount.is_active.is_(True)
+            )
+        )).all()
+        for discount, club in global_rows:
+            settings = club.club_settings if isinstance(club.club_settings, dict) else {}
+            if not settings.get("features", {}).get("discount_reminders", True) or not club.owner_id:
+                continue
+            bot = bots_dict.get(club.bot_token)
+            if not bot:
+                continue
+            value = f"{discount.value}%" if discount.kind == "percent" else f"{discount.value / 100:g} ₽"
+            if discount.starts_at and discount.starts_at == today:
+                key = f"notify:club-discount-start:{club.id}:{discount.id}:{discount.starts_at}"
+                if await _notification_once(key, ttl=90 * 86400):
+                    try:
+                        await bot.send_message(club.owner_id, f"🏷️ <b>Клубная скидка началась</b>\n\n{escape(discount.name)} — <b>{value}</b>. Действует до: <code>{discount.ends_at.strftime('%d.%m.%Y') if discount.ends_at else 'без срока'}</code>.", parse_mode="HTML")
+                    except Exception:
+                        await _notification_forget(key)
+            if discount.ends_at and discount.ends_at < today:
+                key = f"notify:club-discount-expired:{club.id}:{discount.id}:{discount.ends_at}"
+                if await _notification_once(key, ttl=90 * 86400):
+                    try:
+                        await bot.send_message(club.owner_id, f"🏷️ <b>Клубная скидка закончилась</b>\n\n{escape(discount.name)} — {value}. Срок истёк: <code>{discount.ends_at.strftime('%d.%m.%Y')}</code>.", parse_mode="HTML")
+                    except Exception:
+                        await _notification_forget(key)
         rows = (await session.execute(select(Discount, DiscountAssignment, Club, User, Student).join(DiscountAssignment, DiscountAssignment.discount_id == Discount.id).join(Club, Club.id == Discount.club_id).outerjoin(User, User.user_id == DiscountAssignment.user_id).outerjoin(Student, Student.id == DiscountAssignment.student_id).where(Discount.is_active.is_(True)))).all()
         for discount, assignment, club, user, student in rows:
             settings = club.club_settings if isinstance(club.club_settings, dict) else {}

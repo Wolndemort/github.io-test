@@ -34,30 +34,32 @@ def filter_tariff_discounts(discounts, discipline: str, tariff_idx: int, tariff:
 async def active_discount(session: AsyncSession, club_id: int, user_id: int | None, scope: str, student_id: int | None = None, tariff: tuple[str, int, dict] | None = None):
     today = date.today()
     assignees = [x for x in ((DiscountAssignment.user_id == user_id) if user_id is not None else None, (DiscountAssignment.student_id == student_id) if student_id is not None else None) if x is not None]
-    discounts = list((await session.scalars(select(Discount).join(DiscountAssignment, DiscountAssignment.discount_id == Discount.id).where(
-        Discount.club_id == club_id, DiscountAssignment.club_id == club_id,
+    recipient_filter = or_(Discount.is_global.is_(True), or_(*assignees)) if assignees else Discount.is_global.is_(True)
+    discounts = list((await session.scalars(select(Discount).outerjoin(DiscountAssignment, (DiscountAssignment.discount_id == Discount.id) & (DiscountAssignment.club_id == club_id)).where(
+        Discount.club_id == club_id,
         Discount.is_active.is_(True),
-        or_(*assignees) if assignees else false(),
+        recipient_filter,
         Discount.scope.in_([scope, "all"]),
         (Discount.starts_at.is_(None) | (Discount.starts_at <= today)),
         (Discount.ends_at.is_(None) | (Discount.ends_at >= today)),
-    ).order_by(Discount.id.desc()))).all())
+    ).distinct().order_by(Discount.id.desc()))).all())
     if tariff:
         discounts = filter_tariff_discounts(discounts, *tariff)
     return discounts[0] if discounts else None
 
 async def active_discounts(session: AsyncSession, club_id: int, user_id: int | None, scope: str, student_id: int | None = None, ids: list[int] | None = None, tariff: tuple[str, int, dict] | None = None):
     assignees = [x for x in ((DiscountAssignment.user_id == user_id) if user_id is not None else None, (DiscountAssignment.student_id == student_id) if student_id is not None else None) if x is not None]
-    query = select(Discount).join(DiscountAssignment, DiscountAssignment.discount_id == Discount.id).where(
-        Discount.club_id == club_id, DiscountAssignment.club_id == club_id, Discount.is_active.is_(True),
+    recipient_filter = or_(Discount.is_global.is_(True), or_(*assignees)) if assignees else Discount.is_global.is_(True)
+    query = select(Discount).outerjoin(DiscountAssignment, (DiscountAssignment.discount_id == Discount.id) & (DiscountAssignment.club_id == club_id)).where(
+        Discount.club_id == club_id, Discount.is_active.is_(True),
         Discount.scope.in_([scope, "all"]),
-        or_(*assignees) if assignees else false(),
+        recipient_filter,
         (Discount.starts_at.is_(None) | (Discount.starts_at <= date.today())),
         (Discount.ends_at.is_(None) | (Discount.ends_at >= date.today())),
     )
     if ids:
         query = query.where(Discount.id.in_(ids))
-    discounts = list((await session.scalars(query.order_by(Discount.priority.asc(), Discount.kind.desc(), Discount.id.asc()))).all())
+    discounts = list((await session.scalars(query.distinct().order_by(Discount.priority.asc(), Discount.kind.desc(), Discount.id.asc()))).all())
     if tariff:
         discounts = filter_tariff_discounts(discounts, *tariff)
     return discounts
