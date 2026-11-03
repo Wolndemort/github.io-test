@@ -36,3 +36,15 @@ def test_discount_schema_and_checkout_paths_are_tariff_scoped():
     assert "tariffDiscipline" in page
     assert "tariffChoice" in page
     assert "tariff_options|tojson" in page
+
+
+def test_multiple_tariffs_and_selective_discount_assignment_are_wired():
+    from pathlib import Path
+    root = Path(__file__).parents[1]
+    page = (root / "templates/admin_discounts.html").read_text(encoding="utf-8")
+    views = (root / "admin_module/webapp_views.py").read_text(encoding="utf-8")
+    assert "const refs=new Map()" in page
+    assert "hidden.className='tariffRef'" in page
+    assert "student_ids:[...selected]" in page
+    assert "Student.id.in_(selected_ids)" in views
+    assert "for target_student in target_students" in views
