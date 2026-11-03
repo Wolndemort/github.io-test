@@ -1318,7 +1318,7 @@ async def change_admin_discount(payload: DiscountChangePayload, session: AsyncSe
         raise HTTPException(404, "Клуб не найден")
     tg_user = await verify_webapp_staff(club, payload.init_data, session, "cash_sale")
     operation_key = str(payload.idempotency_key or "").strip()[:120]
-    if payload.action in {"add", "delete", "assign", "unassign", "bulk_assign", "toggle"}:
+    if payload.action in {"add", "update", "delete", "assign", "unassign", "bulk_assign", "toggle"}:
         if len(operation_key) < 16:
             raise HTTPException(400, "Нужен idempotency_key для операции со скидкой")
         if not await claim_once(f"discount:operation:{club.id}:{int(tg_user['id'])}:{operation_key}", ttl=15 * 60):
@@ -1340,6 +1340,49 @@ async def change_admin_discount(payload: DiscountChangePayload, session: AsyncSe
         if not discount or discount.club_id != club.id:
             raise HTTPException(400, "Скидка не найдена")
         discount.is_active = not bool(discount.is_active)
+    elif payload.action == "update":
+        discount = await session.get(Discount, payload.index, with_for_update=True) if payload.index else None
+        if not discount or discount.club_id != club.id:
+            raise HTTPException(400, "Скидка не найдена")
+        raw = payload.discount or {}
+        kind = "fixed" if str(raw.get("kind", discount.kind)).lower() == "fixed" else "percent"
+        try:
+            value = float(raw.get("value", discount.value / 100 if kind == "fixed" else discount.value))
+        except (TypeError, ValueError):
+            raise HTTPException(400, "Некорректное значение скидки")
+        if value <= 0 or (kind == "percent" and value > 100):
+            raise HTTPException(400, "Скидка должна быть больше нуля, процент — не больше 100")
+        scope = str(raw.get("scope", discount.scope))
+        if scope not in {"subscriptions", "products", "all"}:
+            raise HTTPException(400, "Некорректная область применения")
+        def parse_update_day(key, fallback):
+            text = str(raw.get(key, "")).strip()
+            return date.fromisoformat(text) if text else fallback
+        starts_at = parse_update_day("starts_at", None)
+        ends_at = parse_update_day("ends_at", None)
+        if starts_at and ends_at and ends_at < starts_at:
+            raise HTTPException(400, "Дата окончания не может быть раньше даты начала")
+        tariff_refs = raw.get("tariff_refs") or []
+        if tariff_refs and scope != "subscriptions":
+            raise HTTPException(400, "Ограничение по тарифам доступно только для скидок на абонементы")
+        config_tariffs = (club.club_settings or {}).get("disciplines", {}) or {}
+        normalized_refs = []
+        for ref in tariff_refs:
+            discipline = str(ref.get("discipline", ""))
+            idx = int(ref.get("tariff_idx", -1))
+            tariffs = (config_tariffs.get(discipline) or {}).get("tariffs", [])
+            if idx < 0 or idx >= len(tariffs):
+                raise HTTPException(400, "Выбранный тариф больше не существует")
+            normalized_refs.append(tariff_ref(discipline, idx, tariffs[idx]))
+        discount.name = str(raw.get("name", discount.name)).strip()[:120] or "Без названия"
+        discount.kind = kind
+        discount.value = int(round(value * 100)) if kind == "fixed" else int(round(value))
+        discount.scope = scope
+        discount.comment = str(raw.get("comment", discount.comment or "")).strip()[:500]
+        discount.starts_at = starts_at
+        discount.ends_at = ends_at
+        discount.tariff_refs = normalized_refs
+        discount.is_global = bool(raw.get("is_global", discount.is_global))
     elif payload.action == "add":
         raw = payload.discount or {}
         kind = "fixed" if str(raw.get("kind", "percent")).lower() == "fixed" else "percent"

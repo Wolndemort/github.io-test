@@ -141,3 +141,18 @@ def test_bot_tariff_menu_shows_discount_and_returns_to_discipline():
     assert 'callback_data=f"section_{sport_type}"' in buttons
     assert "_tariff_discount_map" in payments
     assert "window.change=async function" in page
+
+
+def test_discount_edit_flow_updates_rules_without_touching_order_snapshots():
+    from pathlib import Path
+    root = Path(__file__).parents[1]
+    views = (root / "admin_module/webapp_views.py").read_text(encoding="utf-8")
+    page = (root / "templates/admin_discounts.html").read_text(encoding="utf-8")
+    db = (root / "database/db.py").read_text(encoding="utf-8")
+    assert 'payload.action == "update"' in views
+    assert 'discount.name = str(raw.get("name", discount.name))' in views
+    assert 'discount.tariff_refs = normalized_refs' in views
+    assert 'data-edit' in page
+    assert "Сохранить изменения" in page
+    assert "Отменить редактирование" in page
+    assert "original_amount_kopecks" in db and "discount_name" in db

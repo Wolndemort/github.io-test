@@ -60,6 +60,31 @@ document.addEventListener('DOMContentLoaded',()=>{const search=document.getEleme
 </script>
 <script>
 document.addEventListener('DOMContentLoaded',()=>{
+  const data={ {% for d in discounts %}"{{d.id}}":{name:{{d.name|tojson}},kind:{{d.kind|tojson}},value:{{d.value}},scope:{{d.scope|tojson}},starts_at:{{(d.starts_at.isoformat() if d.starts_at else '')|tojson}},ends_at:{{(d.ends_at.isoformat() if d.ends_at else '')|tojson}},comment:{{(d.comment or '')|tojson}},is_global:{{'true' if d.is_global else 'false'}},tariff_refs:{{(d.tariff_refs or [])|tojson}}},{% endfor %} };
+  let editingId=null;
+  document.querySelectorAll('[data-del]').forEach((del,index)=>{
+    const id=del.dataset.del, edit=document.createElement('button'); edit.type='button'; edit.textContent='Изменить'; edit.dataset.edit=id; del.before(edit);
+    edit.onclick=()=>{
+      const d=data[id]; if(!d)return; editingId=Number(id);
+      $('discountName').value=d.name; $('discountKind').value=d.kind; $('discountValue').value=d.kind==='fixed'?(Number(d.value)/100):d.value; $('discountScope').value=d.scope; $('discountStarts').value=d.starts_at; $('discountEnds').value=d.ends_at; $('discountComment').value=d.comment;
+      const global=document.getElementById('discountGlobal'); if(global)global.checked=!!d.is_global;
+      const noFilters=document.getElementById('noTariffFilters');
+      if(noFilters){noFilters.checked=!d.tariff_refs.length;noFilters.dispatchEvent(new Event('change'));}
+      if(d.tariff_refs.length){const discipline=document.getElementById('tariffDiscipline');if(discipline){discipline.value='__all__';discipline.dispatchEvent(new Event('change'));setTimeout(()=>d.tariff_refs.forEach(ref=>{const box=document.querySelector(`#tariffCheckboxes [data-key="${ref.discipline}:${ref.tariff_idx}"]`);if(box&&!box.checked)box.click()}),0)}}
+      const save=document.getElementById('addDiscount');if(save)save.textContent='Сохранить изменения';window.scrollTo({top:0,behavior:'smooth'});
+    };
+  });
+  setTimeout(()=>{
+    const save=document.getElementById('addDiscount');if(!save)return;
+    const cancel=document.createElement('button');cancel.type='button';cancel.textContent='Отменить редактирование';cancel.hidden=true;save.after(cancel);
+    document.querySelectorAll('[data-edit]').forEach(b=>b.addEventListener('click',()=>{cancel.hidden=false}));
+    cancel.onclick=()=>location.reload();
+    const original=save.onclick;save.onclick=()=>{if(!editingId)return original?.();const refs=[...document.querySelectorAll('.tariffRef:checked')].map(x=>JSON.parse(x.dataset.ref));change('update',editingId,{name:$('discountName').value,kind:$('discountKind').value,value:$('discountValue').value,scope:$('discountScope').value,starts_at:$('discountStarts').value,ends_at:$('discountEnds').value,comment:$('discountComment').value,tariff_refs:refs,is_global:!!document.getElementById('discountGlobal')?.checked});};
+  },0);
+});
+</script>
+<script>
+document.addEventListener('DOMContentLoaded',()=>{
   const originalChange=window.change;
   if(!originalChange)return;
   window.change=async function(action,index,discount,user_id=null,student_id=null){
