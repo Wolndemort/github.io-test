@@ -48,3 +48,15 @@ def test_multiple_tariffs_and_selective_discount_assignment_are_wired():
     assert "student_ids:[...selected]" in page
     assert "Student.id.in_(selected_ids)" in views
     assert "for target_student in target_students" in views
+
+
+def test_side_bot_and_staff_preview_use_the_same_discounted_subscription_flow():
+    from pathlib import Path
+    root = Path(__file__).parents[1]
+    payments = (root / "handlers/payments.py").read_text(encoding="utf-8")
+    cabinet = (root / "admin_module/webapp_client_cabinet.py").read_text(encoding="utf-8")
+    assert "async def _subscription_price" in payments
+    assert "tariff_idx=tariff_idx" in payments
+    assert "discount_amount=discount_amount_kopecks / 100" in payments
+    assert "staff_mode = await _is_staff_webapp_user(db, club, user_id)" in cabinet
+    assert "staff_preview" in cabinet

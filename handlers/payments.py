@@ -29,6 +29,17 @@ from services.age_rules import tariff_age_matches
 router = Router()
 
 
+async def _subscription_price(session: AsyncSession, club: Club, user_id: int, student_id: int | None, sport_type: str, tariff_idx: int, tariff: dict):
+    """Return the current price after the tariff-scoped discount check."""
+    original = int(round(float(tariff.get("price", 0) or 0) * 100))
+    discount = await active_discount(
+        session, club.id, user_id, "subscriptions", student_id,
+        tariff=(sport_type, tariff_idx, tariff),
+    )
+    amount, saved = apply_discount(original, discount)
+    return original, amount, saved, discount
+
+
 @router.message(PaymentStates.waiting_for_freeze_days)
 async def receive_paid_freeze_days(message: types.Message, state: FSMContext):
     try:
@@ -181,6 +192,7 @@ async def process_kids_limit(
         callback: types.CallbackQuery,
         state: FSMContext,
         session: AsyncSession,
+        club: Club,
         club_settings: dict
 ):
     parts = callback.data.split('_')
@@ -259,16 +271,24 @@ async def process_kids_limit(
     # ЕСЛИ РЕБЕНОК ПРОШЕЛ ПРОВЕРКУ — ВЫПОЛНЯЕТСЯ ТВОЙ СТАНДАРТНЫЙ КОД ОПЛАТЫ
     # =========================================================================
     await state.update_data(sport_type=sport_type)
-    price = selected_tariff.get('price')
+    original_price_kopecks, discounted_price_kopecks, discount_amount_kopecks, applied_discount = await _subscription_price(
+        session, club, callback.from_user.id, student_id, sport_type, tariff_idx, selected_tariff
+    )
+    price = discounted_price_kopecks / 100
     days = selected_tariff.get('days', 30)
     count = selected_tariff.get('count', 0)
     display_name = discipline_cfg.get('name', 'Секция')
     label = f"Безлимит на {days} дней" if count == 999 else f"{count} зан. / {days} дн."
     await state.update_data(
         student_id=student_id or callback.from_user.id,
+        tariff_idx=tariff_idx,
         lesson_count=count,
         days_to_add=days,
         price=price,
+        original_price=original_price_kopecks / 100,
+        discount_id=applied_discount.id if applied_discount else None,
+        discount_name=applied_discount.name if applied_discount else None,
+        discount_amount=discount_amount_kopecks / 100,
         discipline_name=display_name,
         tariff_label=label
     )

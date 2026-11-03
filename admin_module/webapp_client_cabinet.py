@@ -972,10 +972,14 @@ async def webapp_buy_subscription_page(request: Request, club_id: int, init_data
     tg_user = verify_telegram_data(init_data, club.bot_token)
     if not tg_user:
         raise HTTPException(status_code=403, detail="Доступ запрещен")
-    user = await _ensure_webapp_user_linked(db, int(tg_user.get("id", 0)), club_id)
-    if not user:
+    user_id = int(tg_user.get("id", 0))
+    staff_mode = await _is_staff_webapp_user(db, club, user_id)
+    user = await _ensure_webapp_user_linked(db, user_id, club_id)
+    if not user and not staff_mode:
         return await webapp_auth_help_page(request=request, club_id=club_id, init_data=init_data, db=db)
     students = (await db.execute(
+        select(Student).where(Student.club_id == club_id).order_by(Student.name)
+    )).scalars().all() if staff_mode else (await db.execute(
         select(Student).outerjoin(StudentParent, StudentParent.student_id == Student.id).where(
             Student.club_id == club_id,
             or_(Student.parent_id == user.user_id, StudentParent.parent_id == user.user_id),
@@ -985,10 +989,10 @@ async def webapp_buy_subscription_page(request: Request, club_id: int, init_data
     disciplines = {code: cfg for code, cfg in (settings.get("disciplines", {}) or {}).items() if isinstance(cfg, dict) and cfg.get("active", True)}
     payment_modes = payment_availability(settings)
     payment_info = get_payment_info_text(settings)
-    discounts_by_student = {s.id: [{"kind": d.kind, "value": d.value, "name": d.name, "tariff_refs": d.tariff_refs or []} for d in await active_discounts(db, club_id, user.user_id, "subscriptions", student_id=s.id)] for s in students}
+    discounts_by_student = {s.id: [{"kind": d.kind, "value": d.value, "name": d.name, "tariff_refs": d.tariff_refs or []} for d in await active_discounts(db, club_id, user_id, "subscriptions", student_id=s.id)] for s in students}
     advance_by_student = {s.id: {**advance_debt_snapshot(s), "warning": advance_purchase_warning(s, settings)} for s in students}
     birthday_by_student = {str(s.id): (s.birthday.isoformat() if s.birthday else "") for s in students}
-    return templates.TemplateResponse("webapp_buy_subscription.html", {"request": request, "club": club, "club_id": club_id, "students": students, "birthday_by_student": birthday_by_student, "disciplines": disciplines, "discounts_by_student": discounts_by_student, "advance_by_student": advance_by_student, "payment_modes": payment_modes, "sbp_enabled": payment_modes["sbp"], "online_enabled": payment_modes["online"], "payment_info": payment_info})
+    return templates.TemplateResponse("webapp_buy_subscription.html", {"request": request, "club": club, "club_id": club_id, "students": students, "birthday_by_student": birthday_by_student, "disciplines": disciplines, "discounts_by_student": discounts_by_student, "advance_by_student": advance_by_student, "payment_modes": payment_modes, "sbp_enabled": payment_modes["sbp"], "online_enabled": payment_modes["online"], "payment_info": payment_info, "staff_preview": staff_mode})
 
 
 @router.post("/webapp/client-cabinet/buy-subscription")
@@ -1008,7 +1012,7 @@ async def webapp_buy_subscription_submit(payload: WebAppBuySubscriptionPayload, 
         StudentParent.student_id == payload.student_id,
         StudentParent.parent_id == user_id,
     ))
-    if not student or student.club_id != payload.club_id or (student.parent_id != user_id and not linked_parent):
+    if not student or student.club_id != payload.club_id or (not staff_mode and student.parent_id != user_id and not linked_parent):
         raise HTTPException(status_code=403, detail="Атлет не найден")
     discipline_cfg = (club.club_settings or {}).get("disciplines", {}).get(payload.sport_type)
     if not discipline_cfg or not discipline_cfg.get("active", True):

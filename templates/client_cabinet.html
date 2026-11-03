@@ -158,6 +158,7 @@
             {% endif %}
             {% if is_staff_mode %}
             {% if turnstile_enabled %}<a class="btn dark mono-action dark" href="/webapp/staff-pass?club_id={{ club_id }}&user_id={{ user_id }}">Открыть турникет</a>{% endif %}
+            {% if '*' in staff_permissions or 'cash_sale' in staff_permissions %}<a class="btn soft mono-action" href="/webapp/client-cabinet/buy-subscription?club_id={{ club_id }}">💳 Клиентская покупка абонемента</a>{% endif %}
             <div class="staff-tools-title">Рабочие разделы</div>
             {# Камеры временно скрыты до отдельного включения функции. #}
             {% if '*' in staff_permissions or 'settings_manage' in staff_permissions %}<a class="btn soft mono-action" href="/webapp/admin-work-schedule?club_id={{ club_id }}">🕑 График работы клуба</a>{% endif %}
