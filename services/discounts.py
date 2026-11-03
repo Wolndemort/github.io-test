@@ -21,7 +21,7 @@ def discount_applies_to_tariff(discount: Discount, discipline: str, tariff_idx: 
     return any(
         str(ref.get("discipline")) == current["discipline"]
         and int(ref.get("tariff_idx", -1)) == current["tariff_idx"]
-        and str(ref.get("price", "")) == current["price"]
+        and int(round(float(ref.get("price", 0) or 0) * 100)) == int(round(float(current["price"] or 0) * 100))
         and int(ref.get("count", 0) or 0) == current["count"]
         and int(ref.get("days", 30) or 30) == current["days"]
         for ref in refs

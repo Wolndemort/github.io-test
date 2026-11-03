@@ -1245,7 +1245,7 @@ async def admin_cash_subscription(payload: WebAppCashSubscriptionPayload, db: As
     automatic = await active_discounts(db, club.id, student.parent_id, "subscriptions", student_id=student.id, tariff=(discipline, payload.tariff_idx, tariff))
     selected_discount_ids = list(dict.fromkeys([d.id for d in automatic] + selected_discount_ids))
     manual_discounts = list((await db.scalars(select(Discount).where(Discount.club_id == club.id, Discount.id.in_(selected_discount_ids), Discount.is_active.is_(True), Discount.scope.in_(["subscriptions", "all"])).order_by(Discount.priority, Discount.id))).all()) if selected_discount_ids else []
-    manual_discounts = [d for d in manual_discounts if not d.tariff_refs or any(str(r.get("discipline")) == discipline and int(r.get("tariff_idx", -1)) == payload.tariff_idx and str(r.get("price", "")) == str(tariff.get("price", "")) and int(r.get("count", 0) or 0) == count and int(r.get("days", 30) or 30) == days for r in (d.tariff_refs or []))]
+        manual_discounts = [d for d in manual_discounts if not d.tariff_refs or any(str(r.get("discipline")) == discipline and int(r.get("tariff_idx", -1)) == payload.tariff_idx and int(round(float(r.get("price", 0) or 0) * 100)) == int(round(float(tariff.get("price", 0) or 0) * 100)) and int(r.get("count", 0) or 0) == count and int(r.get("days", 30) or 30) == days for r in (d.tariff_refs or []))]
     if selected_discount_ids and len(manual_discounts) != len(selected_discount_ids):
         raise HTTPException(status_code=400, detail="Некорректная скидка для абонемента")
     price, applied_discounts = apply_discounts(price, manual_discounts)
