@@ -24,6 +24,7 @@ from fastapi import Request
 from fastapi.responses import JSONResponse, RedirectResponse
 from datetime import datetime
 from aiogram import Dispatcher, types
+from aiogram.exceptions import TelegramBadRequest
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import FastAPI
 from loguru import logger
@@ -305,7 +306,16 @@ async def handle_telegram_webhook(token: str, request: Request):
     update = types.Update(**update_data)
 
     # Прокидываем апдейт напрямую в диспетчер aiogram
-    await dp.feed_update(bot, update)
+    try:
+        await dp.feed_update(bot, update)
+    except TelegramBadRequest as exc:
+        # Telegram may deliver a click from an old inline message after the
+        # callback query's short response window has expired.  This is not a
+        # bot outage; acknowledge the webhook instead of returning HTTP 500.
+        if "query is too old" in str(exc).lower() or "query id is invalid" in str(exc).lower():
+            logger.warning("Ignored expired Telegram callback query for bot=%s", token[:15])
+            return {"status": "ok", "ignored": "expired_callback"}
+        raise
     return {"status": "ok"}
 
 
