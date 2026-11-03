@@ -552,7 +552,17 @@ async def universal_price_handler(callback: types.CallbackQuery, club_settings: 
     # 1. Обработка безлимита
     if discipline.get("type") == "unlimited":
         price = discipline.get('price', 'Не указана')
-        price_text += f"• Безлимит — {price}₽"
+        line = f"• Безлимит — {price}₽"
+        try:
+            tariff = {"price": price, "count": 999, "days": int(discipline.get("days", 30) or 30)}
+            discount = await active_discount(session, club.id, callback.from_user.id, "subscriptions", tariff=(code, 0, tariff))
+            discounted_kopecks, saved = apply_discount(int(round(float(price) * 100)), discount)
+            if discount and saved:
+                value = f"{discount.value}%" if discount.kind == "percent" else f"{discount.value / 100:g} ₽"
+                line += f" → <b>{discounted_kopecks / 100:g}₽</b> (скидка {value})"
+        except (TypeError, ValueError):
+            pass
+        price_text += line
 
     # 2. Обработка тарифов по занятиям
     else:
