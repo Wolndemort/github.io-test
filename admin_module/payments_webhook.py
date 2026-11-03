@@ -258,7 +258,7 @@ async def yookassa_webhook(request: Request, session: AsyncSession = Depends(get
         if order.type.startswith("FREEZE"):
             abon_result = await purchase_student_freeze(order.student_id, order.club_id, order.days_to_add, session)
         else:
-            abon_result = await add_abon(student_id=order.student_id, lessons_count=order.lesson_count, session=session, club_id=order.club_id, club_settings=club_settings, days_to_add=order.days_to_add, discipline=order.discipline)
+            abon_result = await add_abon(student_id=order.student_id, lessons_count=order.lesson_count, session=session, club_id=order.club_id, club_settings=club_settings, days_to_add=order.days_to_add, discipline=order.discipline, payment_order=order)
             settlement_notice = advance_settlement_notice(getattr(student_before, "_advance_settlement", None), abon_result[0] if abon_result else None)
         await session.commit()
         audit_event("yookassa_webhook_confirmed", club_id=order.club_id, order_id=order.id, student_id=order.student_id, amount_kopecks=order.amount_kopecks, order_type=order.type)

@@ -1261,11 +1261,12 @@ async def admin_cash_subscription(payload: WebAppCashSubscriptionPayload, db: As
         raise HTTPException(status_code=400, detail=age_error)
     payment_order = PaymentOrder(id=order_id, user_id=student.parent_id or int(tg_user.get("id", 0)), student_id=student.id, club_id=club.id, discipline=discipline, amount_kopecks=price, original_amount_kopecks=original_price, discount_id=manual_discount.id if manual_discount else None, discount_name=manual_discount.name if manual_discount else None, discount_kind=manual_discount.kind if manual_discount else None, discount_value=manual_discount.value if manual_discount else None, discount_amount_kopecks=discount_amount or None, status="CONFIRMED", type="CASH_SUBSCRIPTION", provider_payment_id=f"CASH:{order_id}", lesson_count=count, days_to_add=days)
     debt_warning = advance_purchase_warning(student, settings, html=True)
-    abon_result = await add_abon(student.id, count, db, club.id, settings, days_to_add=days, discipline=discipline)
+    db.add(payment_order)
+    await db.flush()
+    abon_result = await add_abon(student.id, count, db, club.id, settings, days_to_add=days, discipline=discipline, payment_order=payment_order)
     if not abon_result:
         raise HTTPException(status_code=409, detail="Не удалось применить абонемент")
     settlement_notice = advance_settlement_notice(getattr(student, "_advance_settlement", None), abon_result[0])
-    db.add(payment_order)
     try:
         await db.commit()
     except IntegrityError:

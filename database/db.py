@@ -315,6 +315,11 @@ class PaymentOrder(Base):
 
     lesson_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     days_to_add: Mapped[int] = mapped_column(Integer, default=30, server_default="30")
+    # Subscription entitlement lifecycle.  ACTIVE is kept for historical orders;
+    # RESERVED orders are paid but start only after the current entitlement.
+    activation_status: Mapped[str] = mapped_column(String(20), default="ACTIVE", server_default="ACTIVE", index=True)
+    scheduled_start: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True, index=True)
+    parent_order_id: Mapped[Optional[str]] = mapped_column(String(50), nullable=True, index=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, server_default="now()")
 
@@ -664,7 +669,8 @@ async def add_abon(
         club_id: int,
         club_settings: dict,
         days_to_add: int = None,
-        discipline: str = None  # 🌟 КРИТИЧЕСКИЙ ФИКС: Добавили аргумент дисциплины
+        discipline: str = None,  # 🌟 КРИТИЧЕСКИЙ ФИКС: Добавили аргумент дисциплины
+        payment_order=None,
 ):
     """
     Универсальная функция зачисления абонемента (SaaS).
@@ -703,6 +709,44 @@ async def add_abon(
 
         current_expire = student.expire_date
         subscription_continues = bool(current_expire and current_expire > now)
+
+        # A paid unlimited renewal must not silently convert the remaining
+        # finite period into free unlimited access. Keep the payment confirmed,
+        # but put the entitlement into the reserve queue.
+        if payment_order is not None and int(lessons_count or 0) == 999 and subscription_continues:
+            from services.subscription_reserves import decide_purchase
+            queued_result = await session.execute(
+                select(PaymentOrder.scheduled_start, PaymentOrder.days_to_add)
+                .where(
+                    PaymentOrder.student_id == student.id,
+                    PaymentOrder.club_id == club_id,
+                    PaymentOrder.discipline == (discipline or student.discipline),
+                    PaymentOrder.activation_status == "RESERVED",
+                    PaymentOrder.status.in_(("CONFIRMED", "SUCCEEDED", "PAID")),
+                )
+                .order_by(PaymentOrder.scheduled_start.asc())
+            )
+            queued = [(row[0], row[1]) for row in queued_result.all() if row[0]]
+            decision = decide_purchase(
+                current_expire=current_expire,
+                current_balance=int(student.balance_lessons or 0),
+                new_lessons=lessons_count,
+                order_id=str(payment_order.id),
+                queued=queued,
+                today=now.date(),
+                days_to_add=days_to_add,
+            )
+            if decision.status == "RESERVED":
+                payment_order.activation_status = "RESERVED"
+                payment_order.scheduled_start = datetime.combine(decision.scheduled_start, datetime.min.time())
+                # The queue is ordered by scheduled_start; the reserve's
+                # predecessor is informational and is resolved by date.
+                payment_order.parent_order_id = None
+                student._subscription_reserved = True
+                student._subscription_reserve_start = decision.scheduled_start
+                await session.commit()
+                return current_expire.strftime('%d.%m.%Y'), student.parent_id
+
         settlement = settle_advance_debt(student, days_to_add, lessons_count, club_settings)
         # Notification handlers read this in the same SQLAlchemy session after
         # the transaction succeeds; it is never persisted as a model field.

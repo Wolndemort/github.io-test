@@ -37,7 +37,7 @@ from handlers import start, user_option, buttons, payments, admin_option, super_
 from handlers.surveys import router as surveys_router
 from handlers.buttons import get_profile_keyboard
 from services.bot_registry import bots_dict, register_existing_bots, close_all_bots
-from services.scheduler_jobs import saas_daily_morning_check, check_abon_mailing, send_onboarding_reminders, send_daily_report_to_admins, send_backup_to_admin, send_work_schedule_notice, send_stock_reminder_notice, send_advance_debt_morning_notice, expire_student_freezes, send_discount_reminders
+from services.scheduler_jobs import saas_daily_morning_check, check_abon_mailing, send_onboarding_reminders, send_daily_report_to_admins, send_backup_to_admin, send_work_schedule_notice, send_stock_reminder_notice, send_advance_debt_morning_notice, expire_student_freezes, send_discount_reminders, activate_subscription_reserves
 from services.surveys import send_scheduled_surveys
 from services.scheduler_jobs import send_club_subscription_expiry_reminders
 from services.saas_billing import process_saas_auto_renewals
@@ -182,6 +182,7 @@ async def lifespan(app: FastAPI):
     #scheduler.add_job(saas_recurrent_payments_job, 'cron', hour=3, minute=0, args=[AsyncSessionLocal])
     scheduler.add_job(auto_close_sessions_job, 'interval', minutes=1, id="auto_close_sessions", replace_existing=True, coalesce=True, max_instances=1, misfire_grace_time=60)
     scheduler.add_job(expire_student_freezes, 'interval', minutes=5, id="expire_student_freezes", replace_existing=True, coalesce=True, max_instances=1, misfire_grace_time=300)
+    scheduler.add_job(activate_subscription_reserves, 'interval', minutes=1, id="activate_subscription_reserves", replace_existing=True, coalesce=True, max_instances=1, misfire_grace_time=60)
     scheduler.add_job(process_saas_auto_renewals, 'interval', hours=1, id="saas_auto_renewals", replace_existing=True, coalesce=True, max_instances=1, misfire_grace_time=300)
     # Ночной блок (23:00) — Полный бэкап всей базы данных тебе в личку
     scheduler.add_job(send_backup_to_admin, 'cron', hour=23, minute=0, id="daily_database_backup", replace_existing=True, coalesce=True, max_instances=1, misfire_grace_time=3600)

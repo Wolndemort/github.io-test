@@ -609,6 +609,16 @@ async def get_client_cabinet_page(request: Request, club_id: int, init_data: str
             ).distinct().order_by(Student.name)
         )).scalars().all()
     summary_source = summary_students if is_staff_mode else students
+    reserved_orders = []
+    if students and not is_staff_mode:
+        reserved_orders = (await db.execute(
+            select(PaymentOrder).where(
+                PaymentOrder.club_id == club_id,
+                PaymentOrder.student_id.in_([student.id for student in students]),
+                PaymentOrder.status.in_(("CONFIRMED", "SUCCEEDED", "PAID")),
+                PaymentOrder.activation_status == "RESERVED",
+            ).order_by(PaymentOrder.scheduled_start.asc(), PaymentOrder.created_at.asc())
+        )).scalars().all()
     active_students = sum(1 for s in summary_source if is_subscription_active(s))
     frozen_students = sum(1 for s in summary_source if s.is_frozen)
     expired_students = sum(1 for s in summary_source if not s.is_frozen and (not s.expire_date or s.expire_date <= datetime.now()))
@@ -629,6 +639,7 @@ async def get_client_cabinet_page(request: Request, club_id: int, init_data: str
             "students": students,
             "user_name": (user.full_name if user else None) or tg_user.get("first_name", ""),
             "profile_discount": profile_discount,
+            "reserved_orders": reserved_orders,
             "legal_enabled": legal_documents_enabled(settings),
             "privacy_enabled": legal_document_enabled(settings, "privacy"),
             "offer_enabled": legal_document_enabled(settings, "offer"),
@@ -650,6 +661,31 @@ async def get_client_cabinet_page(request: Request, club_id: int, init_data: str
             "freeze_price_per_day": settings.get("limits", {}).get("freeze_price_per_day", 0),
         },
     )
+
+
+@router.post("/webapp/client-cabinet/reserve-upgrade")
+async def upgrade_reserved_subscription(payload: dict, db: AsyncSession = Depends(get_session)):
+    """Activate a paid unlimited reserve immediately without extending its term."""
+    club_id = int(payload.get("club_id") or 0)
+    order_id = str(payload.get("order_id") or "")
+    init_data = str(payload.get("init_data") or "")
+    club = await db.get(Club, club_id)
+    tg_user = verify_telegram_data(init_data, club.bot_token) if club and club.bot_token else None
+    if not tg_user or not order_id:
+        raise HTTPException(status_code=403, detail="Доступ запрещён")
+    order = await db.get(PaymentOrder, order_id, with_for_update=True)
+    if not order or order.club_id != club_id or order.activation_status != "RESERVED" or order.lesson_count != 999:
+        raise HTTPException(status_code=404, detail="Резервный безлимит не найден")
+    student = await db.get(Student, order.student_id, with_for_update=True)
+    parent_ids = await get_student_parent_ids(student.id, db) if student else []
+    if not student or int(tg_user.get("id", 0)) not in parent_ids:
+        raise HTTPException(status_code=403, detail="Нет доступа к атлету")
+    student.balance_lessons = 999
+    order.activation_status = "ACTIVE"
+    order.scheduled_start = None
+    await db.commit()
+    audit_event("subscription_reserve_upgraded", club_id=club_id, user_id=int(tg_user["id"]), student_id=student.id, order_id=order.id)
+    return {"ok": True, "message": "Безлимит активирован до текущей даты окончания абонемента."}
 
 
 @router.get("/webapp/client-cabinet/create-student", response_class=HTMLResponse)
@@ -1120,6 +1156,7 @@ async def webapp_buy_subscription_submit(payload: WebAppBuySubscriptionPayload, 
                 club_settings=club.club_settings or {},
                 days_to_add=days,
                 discipline=payload.sport_type,
+                payment_order=order,
             )
             if abon_result:
                 new_expire, _ = abon_result

@@ -139,6 +139,14 @@ async def universal_profile_handler(
 
     is_auth = bool(students)
     profile_discount = await active_discount(session, club.id, user_id, "subscriptions")
+    reserved_orders = (await session.execute(
+        select(PaymentOrder).where(
+            PaymentOrder.club_id == club.id,
+            PaymentOrder.student_id.in_([s.id for s in students]) if students else False,
+            PaymentOrder.status.in_(("CONFIRMED", "SUCCEEDED", "PAID")),
+            PaymentOrder.activation_status == "RESERVED",
+        ).order_by(PaymentOrder.scheduled_start.asc(), PaymentOrder.created_at.asc())
+    )).scalars().all() if students else []
     missing_birthdays = sum(1 for s in students if not s.birthday)
     audit_event(
         "bot_profile_opened",
@@ -220,6 +228,12 @@ async def universal_profile_handler(
                 lessons_info = "⛔ <b>Занятий нет</b>"
 
             status_text += f"\n👤 <b>{s.name}</b>: {status}\n  • {lessons_info}"
+        if reserved_orders:
+            status_text += "\n\n📦 <b>Резервные абонементы:</b>"
+            for order in reserved_orders:
+                kind = "безлимит" if order.lesson_count == 999 else f"{order.lesson_count} занятий"
+                start = order.scheduled_start.strftime('%d.%m.%Y') if order.scheduled_start else "после текущего"
+                status_text += f"\n• {kind} — начнёт действовать с <b>{start}</b>"
 
     # Telegram ограничивает текст сообщения 4096 символами. Второй родитель
     # может добавить много связанных карточек, поэтому не даём профилю
@@ -243,6 +257,7 @@ async def universal_profile_handler(
         missing_birthdays=missing_birthdays if is_auth else 0,
         profile_mode="staff" if await is_staff_or_owner(session, club, user_id) else "client",
         discount_active=bool(profile_discount),
+        reserved_orders=reserved_orders,
     )
     # Переносим event.answer() в самое начало блока отправки,
     # чтобы кнопка отжималась моментально в 100% случаев, предотвращая зависание UI

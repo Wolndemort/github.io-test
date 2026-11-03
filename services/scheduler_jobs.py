@@ -29,6 +29,7 @@ from database.db import (
     get_daily_stats,
     get_expire_students_grouped,
     get_student_parent_ids,
+    add_abon,
 )
 from handlers.buttons import get_profile_keyboard
 from admin_module.utils import is_staff_or_owner
@@ -39,6 +40,63 @@ from services.audit import audit_event
 from services.advance_visits import advance_config
 
 MOSCOW_TZ = ZoneInfo("Europe/Moscow")
+
+
+async def activate_subscription_reserves() -> None:
+    """Activate paid subscription reserves in order and notify both sides."""
+    today = datetime.now(MOSCOW_TZ).date()
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(PaymentOrder).where(
+                PaymentOrder.status.in_(("CONFIRMED", "SUCCEEDED", "PAID")),
+                PaymentOrder.activation_status == "RESERVED",
+                PaymentOrder.scheduled_start <= datetime.combine(today, datetime.min.time()),
+                PaymentOrder.student_id.is_not(None),
+            ).order_by(PaymentOrder.scheduled_start.asc(), PaymentOrder.created_at.asc()).with_for_update()
+        )
+        orders = result.scalars().all()
+        for order in orders:
+            student = await session.get(Student, order.student_id, with_for_update=True)
+            club = await session.get(Club, order.club_id)
+            if not student or not club:
+                continue
+            # A previous reserve may still be active; leave this one queued.
+            if student.expire_date and student.expire_date.date() >= today:
+                order.scheduled_start = datetime.combine(student.expire_date.date() + timedelta(days=1), datetime.min.time())
+                continue
+            activated = await add_abon(
+                student_id=student.id,
+                lessons_count=order.lesson_count,
+                session=session,
+                club_id=club.id,
+                club_settings=club.club_settings or {},
+                days_to_add=order.days_to_add,
+                discipline=order.discipline,
+            )
+            if not activated:
+                continue
+            order.activation_status = "ACTIVE"
+            order.scheduled_start = None
+            await session.commit()
+            bot = bots_dict.get(club.bot_token)
+            if not bot:
+                continue
+            text = (
+                f"🎉 <b>Резервный абонемент активирован</b>\n\n"
+                f"Атлет: <b>{escape(student.name)}</b>\n"
+                f"Тариф: <b>{'Безлимит' if order.lesson_count == 999 else f'{order.lesson_count} занятий'}</b>\n"
+                f"Действует до: <b>{activated[0]}</b>"
+            )
+            for recipient in await get_student_parent_ids(student.id, session):
+                try:
+                    await bot.send_message(int(recipient), text, parse_mode="HTML")
+                except Exception as exc:
+                    logger.warning("reserve activation notification failed: %s", exc)
+            if club.owner_id:
+                try:
+                    await bot.send_message(int(club.owner_id), "📢 " + text, parse_mode="HTML")
+                except Exception as exc:
+                    logger.warning("reserve activation admin notification failed: %s", exc)
 
 
 def _club_subscription_days_left(expire_at: datetime, now: datetime | None = None) -> int:

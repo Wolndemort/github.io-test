@@ -490,6 +490,7 @@ async def process_one_click_payment(callback: types.CallbackQuery, state: FSMCon
             club_id=club_id,
             club_settings=club.club_settings,
             days_to_add=data['days_to_add'],
+            payment_order=new_order,
             discipline=sport_type  # <--- ТЕПЕРЬ ДИСЦИПЛИНА ЗАПИШЕТСЯ КОРРЕКТНО!
         )
         settled_student = await session.get(Student, data['student_id'])
@@ -808,7 +809,7 @@ async def process_official_card_payment(
                     abon_result = await add_abon(
                         student_id=student_id, lessons_count=lesson_count, session=session,
                         club_id=club_id, club_settings=club.club_settings,
-                        days_to_add=days_to_add, discipline=sport_type)
+                        days_to_add=days_to_add, discipline=sport_type, payment_order=new_order)
                 settlement_notice = advance_settlement_notice(
                     getattr(await session.get(Student, student_id), "_advance_settlement", None),
                     abon_result[0] if abon_result else None,
@@ -1045,33 +1046,30 @@ async def admin_confirm_payment(
     # 4. ЛОГИКА ЗАЧИСЛЕНИЯ абонемента в СУБД (Передаем дисциплину!)
     # Чтобы логика add_abon не ломалась, мы передаем target_discipline внутрь.
     # Убедитесь, что ваша функция add_abon принимает аргумент discipline!
+    cash_order = PaymentOrder(
+        id=f"CASH_SUB_{uuid.uuid4().hex[:16].upper()}",
+        user_id=int(student.parent_id) if getattr(student, "parent_id", None) else None,
+        student_id=student_id, club_id=club.id, amount_kopecks=amount_kopecks,
+        original_amount_kopecks=original_amount_kopecks,
+        discount_id=discount.id if discount else None,
+        discount_name=discount.name if discount else None,
+        discount_kind=discount.kind if discount else None,
+        discount_value=discount.value if discount else None,
+        discount_amount_kopecks=discount_amount_kopecks or None,
+        lesson_count=count, days_to_add=days_to_add, status="CONFIRMED",
+        type="CASH", discipline=target_discipline,
+        provider_payment_id=f"CASH_SUB_{uuid.uuid4().hex[:16].upper()}",
+    )
+    session.add(cash_order)
+    await session.flush()
     result = (await purchase_student_freeze(student_id, club.id, days_to_add, session)
               if is_paid_freeze else await add_abon(
                   student_id=student_id, lessons_count=count, session=session,
                   club_id=club.id, club_settings=club_settings,
-                  days_to_add=days_to_add, discipline=target_discipline))
+                  days_to_add=days_to_add, discipline=target_discipline, payment_order=cash_order))
 
     if result:
         new_expire, parent_id = result
-        session.add(PaymentOrder(
-            id=f"CASH_SUB_{uuid.uuid4().hex[:16].upper()}",
-            user_id=int(parent_id) if parent_id else None,
-            student_id=student_id,
-            club_id=club.id,
-            amount_kopecks=amount_kopecks,
-            original_amount_kopecks=original_amount_kopecks,
-            discount_id=discount.id if discount else None,
-            discount_name=discount.name if discount else None,
-            discount_kind=discount.kind if discount else None,
-            discount_value=discount.value if discount else None,
-            discount_amount_kopecks=discount_amount_kopecks or None,
-            lesson_count=count,
-            days_to_add=days_to_add,
-            status="CONFIRMED",
-            type="CASH",
-            discipline=target_discipline,
-            provider_payment_id=f"CASH_SUB_{uuid.uuid4().hex[:16].upper()}",
-        ))
         await session.commit()
 
         # Красивый статус для админского экрана

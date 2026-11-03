@@ -98,6 +98,7 @@
     </div>
 
     {% if not is_staff_mode %}
+    {% if reserved_orders %}<div class="card mono-card reserve-card"><div class="section-title mono-kicker"><div class="name">📦 Зарезервированные абонементы</div><span>оплачены</span></div>{% for order in reserved_orders %}<div class="student"><div><b>{{ 'Безлимит' if order.lesson_count == 999 else order.lesson_count ~ ' занятий' }}</b><br><span class="muted">Начнёт действовать с {{ order.scheduled_start.strftime('%d.%m.%Y') if order.scheduled_start else 'после текущего' }}</span></div>{% if order.lesson_count == 999 %}<button type="button" class="mono-action dark reserve-upgrade" data-order-id="{{ order.id }}">⚡ Апгрейд сейчас</button>{% endif %}</div>{% endfor %}</div>{% endif %}
     {% if profile_discount %}<div class="card mono-card" style="border:2px solid #e0ad00;background:#fff3a6;color:#171717;box-shadow:0 0 18px rgba(245,190,0,.35);font-size:17px;"><div style="font-size:22px;font-weight:900;color:#9b111e;">🎉 ВАМ ДОСТУПНА СКИДКА! 🎉</div><div style="font-size:19px;font-weight:900;margin-top:6px;">🏷️ {{ profile_discount.name }}</div><div style="font-size:20px;font-weight:900;color:#9b111e;margin-top:4px;">💥 {{ (profile_discount.value / 100) if profile_discount.kind == 'fixed' else profile_discount.value }}{% if profile_discount.kind == 'percent' %}%{% else %} ₽{% endif %}</div><div style="font-weight:800;margin-top:4px;">Действует на: {{ profile_discount.scope }}</div>{% if profile_discount.ends_at %}<div style="font-weight:900;margin-top:4px;">⏳ До: <span class="discount-countdown" data-until="{{ profile_discount.ends_at.isoformat() }}T23:59:59">—</span></div>{% endif %}</div>{% endif %}
     <div class="card mono-card">
         <div class="section-title mono-kicker"><div class="name">Профили атлетов</div><span>детализация</span></div>
@@ -279,6 +280,17 @@ document.querySelectorAll('.birthday-form').forEach(form => form.addEventListene
     link.textContent = '🎉 Купить со скидкой';
     discountCard.appendChild(link);
 })();
+</script>
+<script>
+document.querySelectorAll('.reserve-upgrade').forEach(button => button.addEventListener('click', async () => {
+    if (!confirm('Активировать безлимит сейчас? Срок текущего абонемента не увеличится.')) return;
+    button.disabled = true;
+    const tgData = window.Telegram?.WebApp?.initData || new URLSearchParams(location.search).get('init_data') || '';
+    const response = await fetch('/webapp/client-cabinet/reserve-upgrade', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({init_data:tgData, club_id:{{ club_id }}, order_id:button.dataset.orderId})});
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) { alert(data.detail || 'Не удалось активировать апгрейд'); button.disabled = false; return; }
+    alert(data.message || 'Безлимит активирован'); location.reload();
+}));
 </script>
 </body>
 </html>
