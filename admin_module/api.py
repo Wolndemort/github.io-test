@@ -29,7 +29,7 @@ from services.order_notifications import (
     resolve_user_label,
 )
 from services.payment_requisites import get_payment_info_text, build_payment_instruction_text
-from services.discounts import active_discount, active_discounts, apply_discount, apply_discounts
+from services.discounts import active_discount, active_discounts, apply_discount, apply_discounts, discount_ids
 from services.advance_visits import advance_purchase_warning, advance_debt_snapshot, advance_settlement_notice
 from services.availability import payment_availability
 import hmac
@@ -1242,12 +1242,14 @@ async def admin_cash_subscription(payload: WebAppCashSubscriptionPayload, db: As
     price = int(tariff.get("price", 0) or 0) * 100
     original_price = price
     selected_discount_ids = list(dict.fromkeys(payload.discount_ids or ([payload.discount_id] if payload.discount_id else [])))
-    automatic = await active_discounts(db, club.id, student.parent_id, "subscriptions", student_id=student.id, tariff=(discipline, payload.tariff_idx, tariff))
-    selected_discount_ids = list(dict.fromkeys([d.id for d in automatic] + selected_discount_ids))
-    manual_discounts = list((await db.scalars(select(Discount).where(Discount.club_id == club.id, Discount.id.in_(selected_discount_ids), Discount.is_active.is_(True), Discount.scope.in_(["subscriptions", "all"])).order_by(Discount.priority, Discount.id))).all()) if selected_discount_ids else []
-    manual_discounts = [d for d in manual_discounts if not d.tariff_refs or any(str(r.get("discipline")) == discipline and int(r.get("tariff_idx", -1)) == payload.tariff_idx and int(round(float(r.get("price", 0) or 0) * 100)) == int(round(float(tariff.get("price", 0) or 0) * 100)) and int(r.get("count", 0) or 0) == count and int(r.get("days", 30) or 30) == days for r in (d.tariff_refs or []))]
-    if selected_discount_ids and len(manual_discounts) != len(selected_discount_ids):
+    tariff_key = (discipline, payload.tariff_idx, tariff)
+    automatic = await active_discounts(db, club.id, student.parent_id, "subscriptions", student_id=student.id, tariff=tariff_key)
+    requested = list(dict.fromkeys(selected_discount_ids))
+    requested_discounts = await active_discounts(db, club.id, student.parent_id, "subscriptions", student_id=student.id, ids=requested, tariff=tariff_key) if requested else []
+    if requested and len(discount_ids(requested_discounts)) != len(requested):
         raise HTTPException(status_code=400, detail="Некорректная скидка для абонемента")
+    by_id = {d.id: d for d in automatic + requested_discounts}
+    manual_discounts = sorted(by_id.values(), key=lambda d: (d.priority, d.id))
     price, applied_discounts = apply_discounts(price, manual_discounts)
     manual_discount = applied_discounts[0][0] if applied_discounts else None
     discount_amount = original_price - price

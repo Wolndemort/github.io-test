@@ -31,6 +31,10 @@ def discount_applies_to_tariff(discount: Discount, discipline: str, tariff_idx: 
 def filter_tariff_discounts(discounts, discipline: str, tariff_idx: int, tariff: dict):
     return [d for d in discounts if discount_applies_to_tariff(d, discipline, tariff_idx, tariff)]
 
+
+def discount_ids(discounts) -> set[int]:
+    return {int(d.id) for d in discounts}
+
 async def active_discount(session: AsyncSession, club_id: int, user_id: int | None, scope: str, student_id: int | None = None, tariff: tuple[str, int, dict] | None = None):
     today = date.today()
     assignees = [x for x in ((DiscountAssignment.user_id == user_id) if user_id is not None else None, (DiscountAssignment.student_id == student_id) if student_id is not None else None) if x is not None]
