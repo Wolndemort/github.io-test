@@ -48,4 +48,6 @@ document.getElementById('checkout').onclick=async()=>{
   }
 };
 draw();
+let cartPreview={};const rawDraw=draw;async function refreshCartPreview(){const current=read();if(!current.length){cartPreview={};return}try{const r=await fetch(`/webapp/cart/preview?club_id={{club_id}}&init_data=${encodeURIComponent(tg.initData)}&items=${encodeURIComponent(JSON.stringify(current))}`),d=await r.json();if(!r.ok)return;cartPreview=Object.fromEntries((d.lines||[]).map(x=>[x.index,x]));rawDraw()}catch(e){console.warn('cart preview unavailable',e)}}draw=()=>{rawDraw();refreshCartPreview()};draw();
+const previewRefresh=refreshCartPreview;refreshCartPreview=async()=>{await previewRefresh();const cards=[...cartEl.children];let total=0;Object.values(cartPreview).forEach(line=>{const card=cards[line.index];if(!card)return;total+=line.unit_total*line.quantity;[...card.childNodes].filter(n=>n.nodeType===3&&n.textContent.includes('₽ ×')).forEach(n=>{n.textContent=`${(line.unit_total/100).toFixed(2)} ₽ × ${line.quantity}`});});if(Object.keys(cartPreview).length)document.getElementById('total').textContent='Итого: '+(total/100).toFixed(2)+' ₽';};draw=()=>{rawDraw();refreshCartPreview()};draw();
 </script></html>

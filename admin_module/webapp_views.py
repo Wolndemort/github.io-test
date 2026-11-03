@@ -195,6 +195,64 @@ async def client_cart(request: Request, club_id: int = Query(...), init_data: st
     payment_info = get_payment_info_text(club.club_settings or {})
     return templates.TemplateResponse("cart.html", {"request": request, "club": club, "club_id": club_id, "products": product_data, "payment_modes": payment_modes, "sbp_enabled": payment_modes["sbp"], "online_enabled": payment_modes["online"], "payment_info": payment_info})
 
+
+@router.get("/webapp/cart/preview")
+async def client_cart_preview(club_id: int, init_data: str, items: str, session: AsyncSession = Depends(get_session)):
+    """Return the same scoped discount calculation used by final cart checkout."""
+    club = await session.get(Club, club_id)
+    tg_user = verify_telegram_data(init_data, club.bot_token) if club and club.bot_token else None
+    if not tg_user:
+        raise HTTPException(403, "Доступ запрещён")
+    try:
+        raw_items = json.loads(items)
+        if not isinstance(raw_items, list) or len(raw_items) > 100:
+            raise ValueError
+    except (TypeError, ValueError, json.JSONDecodeError):
+        raise HTTPException(400, "Некорректная корзина")
+    buyer_user_id = int(tg_user["id"])
+    lines = []
+    original_total = 0
+    total = 0
+    settings = club.club_settings or {}
+    for index, raw in enumerate(raw_items):
+        if not isinstance(raw, dict):
+            continue
+        quantity = max(1, min(100, int(raw.get("quantity", 1) or 1)))
+        item_type = str(raw.get("item_type", ""))
+        unit_original = 0
+        unit_total = 0
+        if item_type == "product":
+            product = await session.get(ClubProduct, int(raw.get("product_id", 0)))
+            if not product or product.club_id != club_id or not product.is_active:
+                continue
+            unit_original = int(product.price_kopecks)
+            discounts = await active_discounts(session, club.id, buyer_user_id, "products")
+            unit_total, _ = apply_discounts(unit_original, discounts)
+        elif item_type == "subscription":
+            student = await session.get(Student, int(raw.get("student_id", 0)))
+            cfg = (settings.get("disciplines", {}) or {}).get(str(raw.get("sport_type", "")), {})
+            tariffs = cfg.get("tariffs", []) if isinstance(cfg, dict) else []
+            tariff_idx = int(raw.get("tariff_idx", -1))
+            if not student or student.club_id != club_id or tariff_idx < 0 or tariff_idx >= len(tariffs):
+                continue
+            tariff = tariffs[tariff_idx]
+            unit_original = int(round(float(tariff.get("price", 0) or 0) * 100))
+            discounts = await active_discounts(session, club.id, buyer_user_id, "subscriptions", student.id, tariff=(str(raw.get("sport_type")), tariff_idx, tariff))
+            unit_total, _ = apply_discounts(unit_original, discounts)
+        elif item_type == "freeze":
+            student = await session.get(Student, int(raw.get("student_id", 0)))
+            if not student or student.club_id != club_id:
+                continue
+            unit_original = int(round(float((settings.get("limits", {}) or {}).get("freeze_price_per_day", 0) or 0) * 100))
+            discounts = await active_discounts(session, club.id, buyer_user_id, "freeze", student.id)
+            unit_total, _ = apply_discounts(unit_original, discounts)
+        else:
+            continue
+        original_total += unit_original * quantity
+        total += unit_total * quantity
+        lines.append({"index": index, "unit_original": unit_original, "unit_total": unit_total, "quantity": quantity})
+    return {"lines": lines, "original_total": original_total, "total": total}
+
 def _broadcast_disciplines(club: Club, students: list[Student] | None = None) -> list[dict]:
     settings = club.club_settings if isinstance(club.club_settings, dict) else {}
     configured = settings.get("disciplines", {}) if isinstance(settings.get("disciplines", {}), dict) else {}

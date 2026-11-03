@@ -91,3 +91,40 @@ def test_global_broadcast_does_not_create_personal_assignments_and_has_lifecycle
     assert "notify:club-discount-start" in scheduler
     assert "notify:club-discount-expired" in scheduler
     assert "discount_id" in broadcast
+
+
+def test_all_discount_display_and_staff_checkout_paths_are_wired():
+    from pathlib import Path
+    root = Path(__file__).parents[1]
+    bot = (root / "handlers/user_option.py").read_text(encoding="utf-8")
+    cabinet = (root / "admin_module/webapp_client_cabinet.py").read_text(encoding="utf-8")
+    web = (root / "templates/webapp_buy_subscription.html").read_text(encoding="utf-8")
+    payments = (root / "handlers/payments.py").read_text(encoding="utf-8")
+    assert "Вам доступна скидка" in bot
+    assert 'active_discount(session, club.id, callback.from_user.id, "subscriptions", tariff=(code, idx, t))' in bot
+    assert "staff_mode = await _is_staff_webapp_user(db, club, user_id)" in cabinet
+    assert "if not user and not staff_mode" in cabinet
+    assert "Number(r.price)===Number(t.price)" in web
+    assert "discount_note" in payments
+
+
+def test_discount_audit_covers_every_price_and_notification_surface():
+    from pathlib import Path
+    root = Path(__file__).parents[1]
+    api = (root / "admin_module/api.py").read_text(encoding="utf-8")
+    views = (root / "admin_module/webapp_views.py").read_text(encoding="utf-8")
+    cabinet = (root / "admin_module/webapp_client_cabinet.py").read_text(encoding="utf-8")
+    cash = (root / "templates/admin_cash_subscription.html").read_text(encoding="utf-8")
+    cart = (root / "templates/cart.html").read_text(encoding="utf-8")
+    product = (root / "templates/admin_product_sale.html").read_text(encoding="utf-8")
+    jobs = (root / "services/scheduler_jobs.py").read_text(encoding="utf-8")
+    assert 'active_discounts(db, club.id, student.parent_id, "subscriptions"' in api
+    assert 'active_discounts(session, club.id, int(tg_user["id"]), "subscriptions"' in api
+    assert 'active_discounts(session, club.id, buyer_user_id, "products"' in views
+    assert 'active_discount(db, club.id, user_id, "subscriptions", student.id' in cabinet
+    assert "discountData" in cash and "скидки применены" in cash
+    assert "webapp/cart/checkout" in cart
+    assert "/webapp/cart/preview" in views
+    assert "refreshCartPreview" in cart
+    assert "discount_ids" in product
+    assert "notify:club-discount-start" in jobs and "notify:club-discount-expired" in jobs
