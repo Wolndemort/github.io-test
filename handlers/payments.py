@@ -277,6 +277,14 @@ async def process_kids_limit(
     price = discounted_price_kopecks / 100
     days = selected_tariff.get('days', 30)
     count = selected_tariff.get('count', 0)
+    discount_note = ""
+    if applied_discount:
+        discount_note = (
+            f"\n\n🏷️ Скидка: <b>{applied_discount.name}</b>"
+            f"\nБыло: <s>{original_price_kopecks / 100:g} ₽</s>"
+            f" · Экономия: {discount_amount_kopecks / 100:g} ₽"
+            f"\nИтого к оплате: <b>{price:g} ₽</b>"
+        )
     display_name = discipline_cfg.get('name', 'Секция')
     label = f"Безлимит на {days} дней" if count == 999 else f"{count} зан. / {days} дн."
     await state.update_data(
@@ -341,6 +349,7 @@ async def process_kids_limit(
         f"Условия: <b>{label} — {price}₽</b>\n\n"
         f"Пожалуйста, выберите способ оплаты:"
     )
+    text = text + discount_note
 
     try:
         await callback.message.edit_text(text=text, reply_markup=kb, parse_mode="HTML")
