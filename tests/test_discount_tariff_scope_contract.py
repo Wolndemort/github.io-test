@@ -36,6 +36,9 @@ def test_discount_schema_and_checkout_paths_are_tariff_scoped():
     assert "tariffDiscipline" in page
     assert "tariffChoice" in page
     assert "tariff_options|tojson" in page
+    assert "noTariffFilters" in page
+    assert "__all__" in page
+    assert "addAllUnlimited" in page
 
 
 def test_multiple_tariffs_and_selective_discount_assignment_are_wired():
