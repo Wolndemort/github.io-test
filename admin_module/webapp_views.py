@@ -1213,6 +1213,21 @@ async def webapp_admin_discounts_page(request: Request, club_id: int = Query(...
             "starts_at": discount.starts_at.strftime("%d.%m.%Y") if discount.starts_at else None,
             "ends_at": discount.ends_at.strftime("%d.%m.%Y") if discount.ends_at else None,
         })
+    discount_target_labels = {}
+    discipline_configs = ((club.club_settings or {}).get("disciplines", {}) or {}) if club else {}
+    for discount in discounts:
+        refs = discount.tariff_refs or []
+        if not refs:
+            discount_target_labels[discount.id] = "Без фильтров · вся область скидки"
+            continue
+        labels = []
+        for ref in refs:
+            cfg = discipline_configs.get(str(ref.get("discipline")), {}) or {}
+            discipline_name = cfg.get("name", ref.get("discipline", "Дисциплина"))
+            count = int(ref.get("count", 0) or 0)
+            tariff_name = "Безлимит" if count == 999 else f"{count} зан."
+            labels.append(f"{discipline_name}: {tariff_name} / {int(ref.get('days', 30) or 30)} дн.")
+        discount_target_labels[discount.id] = " · ".join(labels)
     tariff_options = []
     for discipline, cfg in ((club.club_settings or {}).get("disciplines", {}) or {}).items():
         if not isinstance(cfg, dict) or not cfg.get("active", True):
@@ -1229,7 +1244,7 @@ async def webapp_admin_discounts_page(request: Request, club_id: int = Query(...
                 "price": tariff.get("price", 0),
                 "unlimited": int(tariff.get("count", 0) or 0) == 999,
             })
-    return templates.TemplateResponse("admin_discounts.html", {"request": request, "club": club, "club_id": club_id, "discounts": discounts, "assigned_discounts": assigned_discounts, "tariff_options": tariff_options})
+    return templates.TemplateResponse("admin_discounts.html", {"request": request, "club": club, "club_id": club_id, "discounts": discounts, "assigned_discounts": assigned_discounts, "tariff_options": tariff_options, "discount_target_labels": discount_target_labels})
 
 @router.post("/webapp/admin-discounts/change")
 async def change_admin_discount(payload: DiscountChangePayload, session: AsyncSession = Depends(get_session)):
