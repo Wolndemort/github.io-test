@@ -189,7 +189,11 @@ async def universal_profile_handler(
                 target_text = "подходящие абонементы"
             status_text += f"\n\n🟨🟨🟨🟨🟨\n🎉 <b>ВАМ ДОСТУПНА СКИДКА!</b> 🎉\n🏷️ <b>{escape(profile_discount.name)}</b>\n💥 <b>РАЗМЕР СКИДКИ: {discount_value}</b>\n📌 <b>ДЕЙСТВУЕТ НА:</b> {escape(target_text)}"
             if profile_discount.ends_at:
-                status_text += f"\n⏳ <b>ДЕЙСТВУЕТ ДО: {profile_discount.ends_at.strftime('%d.%m.%Y')}</b>\n🟨🟨🟨🟨🟨"
+                expires_at = datetime.combine(profile_discount.ends_at, datetime.min.time()).replace(hour=23, minute=59, second=59)
+                remaining = max(0, int((expires_at - datetime.now()).total_seconds()))
+                remaining_days, remainder = divmod(remaining, 86400)
+                remaining_hours = remainder // 3600
+                status_text += f"\n⏳ <b>ДЕЙСТВУЕТ ДО: {profile_discount.ends_at.strftime('%d.%m.%Y')}</b>\n⌛ <b>ОСТАЛОСЬ: {remaining_days} дн. {remaining_hours:02d} ч.</b>\n🟨🟨🟨🟨🟨"
         for s in students:
             is_frozen_val = int(getattr(s, 'is_frozen', 0) or 0)
 
@@ -238,6 +242,7 @@ async def universal_profile_handler(
         is_authorized=is_auth,
         missing_birthdays=missing_birthdays if is_auth else 0,
         profile_mode="staff" if await is_staff_or_owner(session, club, user_id) else "client",
+        discount_active=bool(profile_discount),
     )
     # Переносим event.answer() в самое начало блока отправки,
     # чтобы кнопка отжималась моментально в 100% случаев, предотвращая зависание UI

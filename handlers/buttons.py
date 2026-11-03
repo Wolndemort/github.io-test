@@ -9,7 +9,7 @@ from services.availability import turnstile_enabled
 router = Router()
 
 
-def get_profile_keyboard(user, club_id: int, club_settings: dict, is_authorized: bool = False, missing_birthdays: int = 0, profile_mode: str = "client"):
+def get_profile_keyboard(user, club_id: int, club_settings: dict, is_authorized: bool = False, missing_birthdays: int = 0, profile_mode: str = "client", discount_active: bool = False):
     """
     Передаем объект user (модель User из БД), чтобы динамически подставлять
     его club_id и user_id в ссылку WebApp.
@@ -60,6 +60,11 @@ def get_profile_keyboard(user, club_id: int, club_settings: dict, is_authorized:
             types.InlineKeyboardButton(text="🧾 История", callback_data="payment_history"),
             types.InlineKeyboardButton(text="💳 Абонемент", callback_data="choose_section"),
         )
+        if discount_active:
+            builder.row(types.InlineKeyboardButton(
+                text="🎉 Купить со скидкой",
+                web_app=WebAppInfo(url=f"{base_url}/webapp/client-cabinet/buy-subscription?club_id={club_id}")
+            ))
 
     if not is_staff_mode:
         builder.row(types.InlineKeyboardButton(

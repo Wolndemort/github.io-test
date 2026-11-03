@@ -264,5 +264,6 @@ document.querySelectorAll('.birthday-form').forEach(form => form.addEventListene
     location.reload();
 }));
 </script>
+<script>document.querySelectorAll('.discount-countdown').forEach(el=>{const card=el.closest('.card');if(card&&!card.querySelector('[data-discount-buy]')){const a=document.createElement('a');a.dataset.discountBuy='1';a.className='mono-action dark';a.style='display:block;text-align:center;margin-top:12px;text-decoration:none';a.href='/webapp/client-cabinet/buy-subscription?club_id={{ club_id }}';a.textContent='🎉 Купить со скидкой';card.appendChild(a)}});</script>
 </body>
 </html>
