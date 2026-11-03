@@ -338,6 +338,9 @@ async def process_kids_limit(
     inline_keyboard.append([
         types.InlineKeyboardButton(text="↩️ Перевод на карту (вручную)", callback_data="pay_method_sbp")
     ])
+    inline_keyboard.append([
+        types.InlineKeyboardButton(text="↩️ К тарифам", callback_data="back_to_tariffs")
+    ])
 
     online_enabled = payment_availability(club_settings)["online"]
     if not online_enabled:
@@ -358,6 +361,22 @@ async def process_kids_limit(
         logger.error(f"❌ Ошибка отправки текста оплаты: {edit_error}")
         # Если edit_text отвалился (например, текст совпадает), принудительно отжимаем часики!
         await callback.answer("Ошибка вывода меню оплаты", show_alert=True)
+
+
+@router.callback_query(F.data == "back_to_tariffs")
+async def back_to_tariffs(callback: types.CallbackQuery, state: FSMContext, club_settings: dict):
+    data = await state.get_data()
+    sport_type = data.get("sport_type")
+    discipline_cfg = (club_settings.get("disciplines", {}) or {}).get(sport_type, {}) if sport_type else {}
+    if not sport_type or not discipline_cfg or not discipline_cfg.get("active", True):
+        return await callback.answer("Направление больше недоступно. Выберите его заново.", show_alert=True)
+    await callback.message.edit_text(
+        f"🥋 Секция: <b>{discipline_cfg.get('name', 'Спорт')}</b>\n\n"
+        "Выберите тарифный план:",
+        reply_markup=get_pay_options_kb(discipline_cfg, sport_type),
+        parse_mode="HTML",
+    )
+    await callback.answer()
 
 
 @router.callback_query(F.data == 'pay_one_click')
