@@ -1,0 +1,13 @@
+from pathlib import Path
+
+
+ROOT = Path(__file__).parents[1]
+
+
+def test_tariff_update_treats_zero_max_age_as_unbounded_and_has_readable_error():
+    source = (ROOT / "admin_module/webapp_views.py").read_text(encoding="utf-8")
+    page = (ROOT / "templates/admin_tariffs.html").read_text(encoding="utf-8")
+    assert 't.get("max_age") not in (None, "", 0, "0")' in source
+    assert "Проверьте цену, срок, количество занятий и возрастные ограничения тарифа" in source
+    assert 'button[data-save]' in page
+    assert 'data-save="${i}"' in page
