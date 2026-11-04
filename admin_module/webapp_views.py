@@ -388,8 +388,8 @@ async def admin_broadcast_send(
                         (Discount.ends_at.is_(None) | (Discount.ends_at >= today)),
                         or_(DiscountAssignment.user_id == parent_id, DiscountAssignment.student_id.in_(sibling_ids)),
                     ))).all())
-                    if broadcast_discount.id not in existing_discount_ids and len(existing_discount_ids) >= 3:
-                        raise HTTPException(409, "У одного родителя может быть не более 3 разных скидок")
+                    if broadcast_discount.id not in existing_discount_ids and len(existing_discount_ids) >= 2:
+                        raise HTTPException(409, "У одного родителя может быть не более 2 разных скидок")
                 for student in students:
                     exists = await session.scalar(select(DiscountAssignment.id).where(
                         DiscountAssignment.discount_id == broadcast_discount.id,
@@ -1434,8 +1434,8 @@ async def change_admin_discount(payload: DiscountChangePayload, session: AsyncSe
                 (Discount.ends_at.is_(None) | (Discount.ends_at >= today)),
                 or_(DiscountAssignment.user_id == parent_id, DiscountAssignment.student_id.in_(sibling_ids)),
             ))).all())
-            if discount.id not in existing_discount_ids and len(existing_discount_ids) >= 3:
-                raise HTTPException(409, "У одного родителя может быть не более 3 разных скидок")
+            if discount.id not in existing_discount_ids and len(existing_discount_ids) >= 2:
+                raise HTTPException(409, "У одного родителя может быть не более 2 разных скидок")
         for target_student in target_students:
             exists = await session.scalar(select(DiscountAssignment.id).where(
                 DiscountAssignment.discount_id == discount.id,
@@ -1463,8 +1463,8 @@ async def change_admin_discount(payload: DiscountChangePayload, session: AsyncSe
             if payload.user_id:
                 today = reporting_periods()["local_now"].date()
                 existing_discount_ids = set((await session.scalars(select(DiscountAssignment.discount_id).join(Discount, Discount.id == DiscountAssignment.discount_id).where(DiscountAssignment.club_id == club.id, DiscountAssignment.user_id == payload.user_id, Discount.is_active.is_(True), (Discount.ends_at.is_(None) | (Discount.ends_at >= today))))).all())
-                if discount.id not in existing_discount_ids and len(existing_discount_ids) >= 3:
-                    raise HTTPException(409, "У одного родителя может быть не более 3 разных скидок")
+                if discount.id not in existing_discount_ids and len(existing_discount_ids) >= 2:
+                    raise HTTPException(409, "У одного родителя может быть не более 2 разных скидок")
             elif payload.student_id:
                 target_parent_id = getattr(target_student, "parent_id", None)
                 if target_parent_id:
@@ -1475,8 +1475,8 @@ async def change_admin_discount(payload: DiscountChangePayload, session: AsyncSe
                         (Discount.ends_at.is_(None) | (Discount.ends_at >= today)),
                         or_(DiscountAssignment.user_id == target_parent_id, DiscountAssignment.student_id.in_(sibling_ids)),
                     ))).all())
-                    if discount.id not in existing_discount_ids and len(existing_discount_ids) >= 3:
-                        raise HTTPException(409, "У одного родителя может быть не более 3 разных скидок")
+                    if discount.id not in existing_discount_ids and len(existing_discount_ids) >= 2:
+                        raise HTTPException(409, "У одного родителя может быть не более 2 разных скидок")
             session.add(DiscountAssignment(club_id=club.id, discount_id=discount.id, user_id=payload.user_id, student_id=payload.student_id))
             assignment_changed = True
         elif payload.action == "unassign" and assignment:

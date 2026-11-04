@@ -1,10 +1,29 @@
 from types import SimpleNamespace
 
-from services.discounts import discount_applies_to_tariff, tariff_ref
+from services.discounts import apply_discounts, discount_applies_to_tariff, preferred_discounts, tariff_ref
 
 
 def _discount(refs):
     return SimpleNamespace(tariff_refs=refs)
+
+
+def test_club_discount_has_priority_and_discounts_do_not_stack():
+    personal = SimpleNamespace(id=1, is_global=False, priority=1, kind="percent", value=50)
+    club = SimpleNamespace(id=2, is_global=True, priority=100, kind="percent", value=20)
+
+    assert preferred_discounts([personal, club]) == [club]
+    price, applied = apply_discounts(10000, [personal, club])
+    assert price == 8000
+    assert [discount for discount, _ in applied] == [club]
+
+
+def test_two_personal_discounts_choose_only_the_highest_priority():
+    first = SimpleNamespace(id=1, is_global=False, priority=10, kind="fixed", value=1000)
+    second = SimpleNamespace(id=2, is_global=False, priority=20, kind="fixed", value=5000)
+
+    price, applied = apply_discounts(10000, [second, first])
+    assert price == 9000
+    assert [discount for discount, _ in applied] == [first]
 
 
 def test_tariff_discount_matches_only_the_creation_snapshot():

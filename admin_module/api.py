@@ -1201,7 +1201,7 @@ async def admin_cash_subscription_page(request: Request, club_id: int = Query(..
         debt = advance_debt_snapshot(student)
         item.update(advance_debt_days=debt["days"], advance_debt_lessons=debt["lessons"], advance_warning=advance_purchase_warning(student, settings))
     discounts = (await db.execute(select(Discount).where(Discount.club_id == club_id, Discount.is_active.is_(True)).order_by(Discount.name))).scalars().all()
-    discount_data = [{"id": d.id, "name": d.name, "kind": d.kind, "value": d.value} for d in discounts]
+    discount_data = [{"id": d.id, "name": d.name, "kind": d.kind, "value": d.value, "is_global": bool(d.is_global), "priority": d.priority, "tariff_refs": d.tariff_refs or []} for d in discounts]
     user_id = int(tg_user.get("id", 0))
     birthday_edit_allowed = user_id == int(club.owner_id or 0) or user_id in {int(value) for value in SUPER_ADMIN_IDS}
     if not birthday_edit_allowed:
