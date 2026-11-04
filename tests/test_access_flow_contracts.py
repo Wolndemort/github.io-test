@@ -127,6 +127,19 @@ def test_client_subscription_requires_birthday_and_updates_it_inline():
     assert "Сначала укажите дату рождения атлета." in page
 
 
+def test_parent_can_edit_student_name_and_birthday_with_linked_student_guard():
+    source = (ROOT / "admin_module/webapp_client_cabinet.py").read_text(encoding="utf-8")
+    page = (ROOT / "templates/client_cabinet.html").read_text(encoding="utf-8")
+    schemas = (ROOT / "admin_module/schemas.py").read_text(encoding="utf-8")
+    assert '@router.post("/webapp/client-cabinet/student/profile")' in source
+    assert "StudentParent.parent_id == user_id" in source
+    assert "student.name = name" in source
+    assert "student.birthday = birthday" in source
+    assert "class WebAppStudentProfilePayload" in schemas
+    assert "student-profile-form" in page
+    assert "fetch('/webapp/client-cabinet/student/profile'" in page
+
+
 def test_client_face_id_flow_collects_missing_birthday_inline_without_redirect():
     source = (ROOT / "admin_module/webapp_client_cabinet.py").read_text(encoding="utf-8")
     page = (ROOT / "templates/biometric_pass.html").read_text(encoding="utf-8")

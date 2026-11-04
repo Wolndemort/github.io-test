@@ -44,6 +44,10 @@
         .bottom-bar .btn.soft { background: #f7f7f7; border-color: #111; color: #111; }
         .bottom-bar .btn.dark { background: #111; color: #fff; border-color: #111; }
         .student-actions { display: grid; gap: 8px; margin-top: 10px; }
+        .student-profile-form { display: grid; grid-template-columns: 1.4fr 1fr auto; gap: 8px; align-items: end; margin-top: 10px; padding: 10px; border: 1px solid #ddd; border-radius: 12px; background: #fafafa; }
+        .student-profile-form label { color: #555; font-size: 12px; font-weight: 700; }
+        .student-profile-form input { width: 100%; box-sizing: border-box; padding: 10px; border: 1px solid #bbb; border-radius: 10px; background: #fff; color: #111; }
+        .student-profile-form button { padding: 10px 12px; border: 1px solid #111; border-radius: 10px; background: #111; color: #fff; font-weight: 700; }
         .birthday-warning { margin-top: 10px; padding: 10px; border: 1px solid #e5c76b; border-radius: 12px; background: #fff8df; color: #765500; }
         .birthday-form { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: end; margin-top: 8px; }
         .birthday-form label { color: #765500; font-size: 12px; }
@@ -143,6 +147,11 @@
                 <a class="btn dark mono-action dark" href="/webapp/client-cabinet/buy-freeze?club_id={{ club_id }}&student_id={{ student.id }}">Купить заморозку</a>
                 {% endif %}
             </div>
+            <form class="student-profile-form" data-student-id="{{ student.id }}">
+                <label>Имя ребёнка<input name="name" value="{{ student.name }}" maxlength="120" required></label>
+                <label>Дата рождения<input name="birthday" type="date" value="{{ student.birthday.isoformat() if student.birthday else '' }}" max="{{ now.strftime('%Y-%m-%d') }}" required></label>
+                <button type="submit">Сохранить данные</button>
+            </form>
             {% endfor %}
         {% else %}
             <p class="muted">Пока нет привязанных атлетов.</p>
@@ -262,6 +271,21 @@ document.querySelectorAll('.birthday-form').forEach(form => form.addEventListene
     });
     const data = await response.json().catch(() => ({}));
     if (!response.ok) { alert(data.detail || 'Не удалось сохранить дату рождения'); button.disabled = false; return; }
+    location.reload();
+}));
+</script>
+<script>
+document.querySelectorAll('.student-profile-form').forEach(form => form.addEventListener('submit', async event => {
+    event.preventDefault();
+    const button = form.querySelector('button');
+    button.disabled = true;
+    const tgData = window.Telegram?.WebApp?.initData || new URLSearchParams(location.search).get('init_data') || '';
+    const response = await fetch('/webapp/client-cabinet/student/profile', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({init_data: tgData, club_id: {{ club_id }}, student_id: Number(form.dataset.studentId), name: form.name.value, birthday: form.birthday.value})
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) { alert(data.detail || 'Не удалось сохранить данные атлета'); button.disabled = false; return; }
     location.reload();
 }));
 </script>

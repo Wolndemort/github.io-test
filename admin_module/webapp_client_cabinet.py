@@ -17,6 +17,7 @@ from admin_module.schemas import (
     WebAppBindPhonePayload,
     WebAppCreateStudentPayload,
     WebAppStudentBirthdayPayload,
+    WebAppStudentProfilePayload,
     WebAppBuySubscriptionPayload,
     AdminFreezePayload,
 )
@@ -114,6 +115,20 @@ def _tariff_age_error(student: Student, tariff: dict, discipline_name: str) -> s
         f"На тариф секции <b>{escape(discipline_name)}</b> принимаются атлеты <b>{age_range}</b>.\n"
         f"Сейчас атлету <b>{escape(student.name)}</b> исполнилось <b>{age} лет</b>."
     )
+
+
+def _tariff_age_error(student: Student, tariff: dict, discipline_name: str) -> str | None:
+    """Return a plain-text age error for browser alerts."""
+    min_age = max(0, int(tariff.get("min_age", 0) or 0))
+    raw_max_age = tariff.get("max_age")
+    max_age = None if raw_max_age in (None, "") else max(min_age, int(raw_max_age))
+    age = _student_age(student)
+    if age is None:
+        return "⚠️ Укажите дату рождения атлета перед покупкой абонемента."
+    if tariff_age_matches(student.birthday, date.today(), tariff):
+        return None
+    age_range = f"от {min_age} лет" if max_age is None else f"от {min_age} до {max_age} лет"
+    return f"⚠️ Доступ ограничен по возрасту!\n\nНа тариф секции «{discipline_name}» принимаются атлеты {age_range}.\nСейчас атлету «{student.name}» исполнилось {age} лет."
 
 
 def _manual_review_keyboard(order_id: str) -> InlineKeyboardMarkup:
@@ -900,6 +915,50 @@ async def update_client_student_birthday(payload: WebAppStudentBirthdayPayload, 
     await db.commit()
     audit_event("client_birthday_updated", club_id=club.id, actor_user_id=user_id, action="update", object_type="student", object_id=student.id)
     return {"ok": True, "birthday": birthday.isoformat()}
+
+
+@router.post("/webapp/client-cabinet/student/profile")
+async def update_client_student_profile(payload: WebAppStudentProfilePayload, db: AsyncSession = Depends(get_session)):
+    club = await db.get(Club, payload.club_id)
+    if not club or not club.bot_token:
+        raise HTTPException(status_code=404, detail="Клуб не найден")
+    tg_user = verify_telegram_data(payload.init_data, club.bot_token)
+    if not tg_user:
+        raise HTTPException(status_code=403, detail="Доступ запрещён")
+    user_id = int(tg_user.get("id", 0))
+    student = await db.get(Student, payload.student_id, with_for_update=True)
+    linked = await db.scalar(select(StudentParent.student_id).where(
+        StudentParent.student_id == payload.student_id,
+        StudentParent.parent_id == user_id,
+    ))
+    if not student or student.club_id != payload.club_id or (student.parent_id != user_id and not linked):
+        raise HTTPException(status_code=403, detail="Атлет недоступен")
+    name = str(payload.name or "").strip()
+    if not name or len(name) > 120:
+        raise HTTPException(status_code=400, detail="Укажите имя атлета")
+    try:
+        birthday = parse_user_date(payload.birthday)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="Укажите корректную дату рождения")
+    if birthday is None or birthday > date.today() or birthday.year < 1900:
+        raise HTTPException(status_code=400, detail="Укажите корректную дату рождения")
+    old_name, old_birthday = student.name, student.birthday
+    student.name = name
+    student.birthday = birthday
+    await db.commit()
+    audit_event(
+        "client_student_profile_updated",
+        club_id=club.id,
+        actor_user_id=user_id,
+        action="update",
+        object_type="student",
+        object_id=student.id,
+        old_name=old_name,
+        new_name=name,
+        old_birthday=old_birthday.isoformat() if old_birthday else None,
+        new_birthday=birthday.isoformat(),
+    )
+    return {"ok": True, "student": {"id": student.id, "name": student.name, "birthday": birthday.isoformat()}}
 
 
 @router.get("/webapp/client-cabinet/student", response_class=HTMLResponse)
