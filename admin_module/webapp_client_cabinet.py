@@ -1025,7 +1025,7 @@ async def webapp_buy_subscription_page(request: Request, club_id: int, init_data
     disciplines = {code: cfg for code, cfg in (settings.get("disciplines", {}) or {}).items() if isinstance(cfg, dict) and cfg.get("active", True)}
     payment_modes = payment_availability(settings)
     payment_info = get_payment_info_text(settings)
-    discounts_by_student = {s.id: [{"kind": d.kind, "value": d.value, "name": d.name, "tariff_refs": d.tariff_refs or []} for d in await active_discounts(db, club_id, user_id, "subscriptions", student_id=s.id)] for s in students}
+    discounts_by_student = {s.id: [{"kind": d.kind, "value": d.value, "name": d.name, "is_global": bool(d.is_global), "priority": d.priority, "tariff_refs": d.tariff_refs or []} for d in await active_discounts(db, club_id, user_id, "subscriptions", student_id=s.id)] for s in students}
     advance_by_student = {s.id: {**advance_debt_snapshot(s), "warning": advance_purchase_warning(s, settings)} for s in students}
     birthday_by_student = {str(s.id): (s.birthday.isoformat() if s.birthday else "") for s in students}
     return templates.TemplateResponse("webapp_buy_subscription.html", {"request": request, "club": club, "club_id": club_id, "students": students, "birthday_by_student": birthday_by_student, "disciplines": disciplines, "discounts_by_student": discounts_by_student, "advance_by_student": advance_by_student, "payment_modes": payment_modes, "sbp_enabled": payment_modes["sbp"], "online_enabled": payment_modes["online"], "payment_info": payment_info, "staff_preview": staff_mode})

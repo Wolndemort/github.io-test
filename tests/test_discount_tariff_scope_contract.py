@@ -34,6 +34,17 @@ def test_discount_assignment_limit_is_two_in_every_assignment_path():
     assert "не более 3" not in views
 
 
+def test_cash_and_client_previews_use_the_same_percent_formula_and_single_discount():
+    from pathlib import Path
+
+    root = Path(__file__).parents[1]
+    cash = (root / "templates/admin_cash_subscription.html").read_text(encoding="utf-8")
+    cabinet = (root / "templates/webapp_buy_subscription.html").read_text(encoding="utf-8")
+    assert "100-Number(d.value))/100" in cash
+    assert "100-Number(d.value))/100" in cabinet
+    assert ".slice(0,1)" in cash and ".slice(0,1)" in cabinet
+
+
 def test_tariff_discount_matches_only_the_creation_snapshot():
     tariff = {"price": 6000, "count": 999, "days": 30}
     refs = [tariff_ref("boxing", 1, tariff)]
