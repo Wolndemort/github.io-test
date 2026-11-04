@@ -26,6 +26,14 @@ def test_two_personal_discounts_choose_only_the_highest_priority():
     assert [discount for discount, _ in applied] == [first]
 
 
+def test_discount_assignment_limit_is_two_in_every_assignment_path():
+    from pathlib import Path
+
+    views = (Path(__file__).parents[1] / "admin_module/webapp_views.py").read_text(encoding="utf-8")
+    assert views.count("len(existing_discount_ids) >= 2") == 4
+    assert "не более 3" not in views
+
+
 def test_tariff_discount_matches_only_the_creation_snapshot():
     tariff = {"price": 6000, "count": 999, "days": 30}
     refs = [tariff_ref("boxing", 1, tariff)]
