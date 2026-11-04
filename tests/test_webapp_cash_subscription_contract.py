@@ -19,6 +19,15 @@ def test_webapp_cash_subscription_is_separate_from_bot_and_uses_manager_permissi
     assert "до ${until}" in page or "Продано до" in page
 
 
+def test_cash_sale_supports_multi_select_and_shows_selected_athletes():
+    page = (ROOT / "templates/admin_cash_subscription.html").read_text(encoding="utf-8")
+    assert "selectedStudents" in page
+    assert "selected-chip" in page
+    assert "bulk_" in page
+    assert "Promise.all(selectedStudents.map" in page
+    assert "Вы оформляете абонемент" in page
+
+
 def test_cashier_does_not_have_cash_view_permission():
     permissions = (ROOT / "services/staff_permissions.py").read_text(encoding="utf-8")
     assert '"cashier": {"cash_sale", "products_view", "products_manage", "forecast_view"}' in permissions

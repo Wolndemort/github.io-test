@@ -14,7 +14,7 @@
     .student{display:block;width:100%;text-align:left;background:#fff;border:1px solid #ddd;border-radius:10px;padding:13px;margin-top:7px;font:inherit;cursor:pointer}
     .student{color:#111}.student:hover{border-color:#111}.form-grid{display:grid;gap:10px}.label{font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:#777;font-weight:800}
     .back{display:inline-block;color:#111;text-decoration:none;font-weight:700;margin-bottom:12px}.selected{font-size:20px;font-weight:800;margin-bottom:15px}
-    .discount{min-height:100px}.notice{padding:12px;border-radius:10px;background:#f1f1f1;font-size:13px}
+    .discount{min-height:100px}.notice{padding:12px;border-radius:10px;background:#f1f1f1;font-size:13px}.selected-list{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px}.selected-chip{display:inline-flex;align-items:center;gap:6px;padding:6px 9px;border-radius:999px;background:#111;color:#fff;font-size:13px}.student.is-selected{border-color:#111;background:#f0f0f0;box-shadow:0 0 0 2px #111 inset}
     @media(min-width:600px){.form-grid{grid-template-columns:1fr 1fr}.full{grid-column:1/-1}}
   </style>
 </head>
@@ -59,5 +59,27 @@ const saveBirthday=document.getElementById('saveBirthday');
 const salePickWithBirthday=pick;
 pick=function(id){salePickWithBirthday(id);const item=students.find(s=>s.id===id);if(!birthdayNotice||!item)return;birthdayNotice.hidden=Boolean(item.birthday);if(birthdayInput)birthdayInput.value=item.birthday||'';};
 if(saveBirthday)saveBirthday.onclick=async()=>{if(!selected||!birthdayInput.value)return birthdayStatus.textContent='Укажите дату рождения.';saveBirthday.disabled=true;birthdayStatus.textContent='Сохраняем…';try{const response=await fetch('/webapp/client-cabinet/student/birthday',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({init_data:init,club_id:{{ club_id }},student_id:selected.id,birthday:birthdayInput.value})});const data=await response.json().catch(()=>({}));if(!response.ok)throw new Error(data.detail||'Не удалось сохранить дату');selected.birthday=birthdayInput.value;const item=students.find(s=>s.id===selected.id);if(item)item.birthday=birthdayInput.value;birthdayNotice.hidden=true;birthdayStatus.textContent='Дата рождения сохранена.';}catch(error){birthdayStatus.textContent=error.message;}finally{saveBirthday.disabled=false;}};
+</script>
+<script>
+// Multi-select for cash sales: the server still receives one validated sale per athlete.
+let selectedStudents=[];
+const legacyPickForMulti=pick;
+const legacySubmitForMulti=submit;
+function renderSelectedStudents(){
+  selectedEl.innerHTML='<div class="label">Вы оформляете абонемент:</div><div class="selected-list">'+selectedStudents.map(s=>'<span class="selected-chip">'+String(s.name||'')+'</span>').join('')+'</div>';
+}
+function toggleStudent(id){
+  const item=students.find(s=>s.id===id); if(!item)return;
+  const index=selectedStudents.findIndex(s=>s.id===id);
+  if(index>=0) selectedStudents.splice(index,1); else selectedStudents.push(item);
+  if(selectedStudents.length){ legacyPickForMulti(selectedStudents[0].id); sale.hidden=false; }
+  else { selected=null; sale.hidden=true; }
+  renderSelectedStudents(); render();
+}
+pick=toggleStudent;
+render=function(){const q=search.value.trim().toLowerCase();list.innerHTML=students.filter(s=>String(s.name||'').toLowerCase().includes(q)).map(s=>{const b=document.createElement('button');b.className='student server-student'+(selectedStudents.some(x=>x.id===s.id)?' is-selected':'');b.type='button';b.setAttribute('onclick','pick('+s.id+')');b.innerHTML='<b>'+(selectedStudents.some(x=>x.id===s.id)?'✓':'○')+' '+String(s.name||'')+'</b><br><span class="muted">'+String(s.status_label||'')+' · '+String(s.discipline||'Без дисциплины')+(s.expire_date?' · до '+s.expire_date.slice(0,10):'')+'</span>';return b.outerHTML}).join('')||'<div class="muted" style="margin-top:12px">Атлеты не найдены</div>';};
+const multiSubmit=legacySubmitForMulti.cloneNode(true); legacySubmitForMulti.replaceWith(multiSubmit);
+multiSubmit.addEventListener('click',async()=>{if(!selectedStudents.length)return;multiSubmit.disabled=true;const ids=[...discount.selectedOptions].map(x=>Number(x.value)).filter(Boolean);const baseKey='bulk_'+Date.now();try{const results=await Promise.all(selectedStudents.map((student,index)=>fetch('/webapp/admin-cash-subscription',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({init_data:init,club_id:{{ club_id }},student_id:student.id,sport_type:discipline.value,tariff_idx:Number(tariff.value),discount_ids:ids,idempotency_key:baseKey+'_'+student.id+'_'+index})}).then(async response=>{const data=await response.json();if(!response.ok)throw new Error(student.name+': '+(data.detail||'Ошибка продажи'));return data})));alert('Продано абонементов: '+results.length);location.reload();}catch(error){alert(error.message);multiSubmit.disabled=false;}});
+render();
 </script>
 </body></html>
