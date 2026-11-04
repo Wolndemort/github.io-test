@@ -297,6 +297,20 @@ def _tariff_age_error(student: Student, tariff: dict, discipline_name: str) -> s
     )
 
 
+def _tariff_age_error(student: Student, tariff: dict, discipline_name: str) -> str | None:
+    """Return a plain-text error suitable for browser alerts."""
+    min_age = max(0, int(tariff.get("min_age", 0) or 0))
+    raw_max_age = tariff.get("max_age")
+    max_age = None if raw_max_age in (None, "") else max(min_age, int(raw_max_age))
+    age = _student_age(student)
+    if age is None:
+        return "⚠️ Укажите дату рождения атлета перед покупкой абонемента."
+    if tariff_age_matches(student.birthday, date.today(), tariff):
+        return None
+    age_range = f"от {min_age} лет" if max_age is None else f"от {min_age} до {max_age} лет"
+    return f"⚠️ Доступ ограничен по возрасту!\n\nНа тариф секции «{discipline_name}» принимаются атлеты {age_range}.\nСейчас атлету «{student.name}» исполнилось {age} лет."
+
+
 def _manual_review_keyboard(order_id: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="✅ Подтвердить", callback_data=f"manual_order_confirm_{order_id}"),

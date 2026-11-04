@@ -7,23 +7,23 @@ def _discount(refs):
     return SimpleNamespace(tariff_refs=refs)
 
 
-def test_club_discount_has_priority_and_discounts_do_not_stack():
+def test_larger_saving_wins_and_discounts_do_not_stack():
     personal = SimpleNamespace(id=1, is_global=False, priority=1, kind="percent", value=50)
     club = SimpleNamespace(id=2, is_global=True, priority=100, kind="percent", value=20)
 
-    assert preferred_discounts([personal, club]) == [club]
+    assert preferred_discounts([personal, club], 10000) == [personal]
     price, applied = apply_discounts(10000, [personal, club])
-    assert price == 8000
-    assert [discount for discount, _ in applied] == [club]
+    assert price == 5000
+    assert [discount for discount, _ in applied] == [personal]
 
 
-def test_two_personal_discounts_choose_only_the_highest_priority():
+def test_two_personal_discounts_choose_only_the_largest_saving():
     first = SimpleNamespace(id=1, is_global=False, priority=10, kind="fixed", value=1000)
     second = SimpleNamespace(id=2, is_global=False, priority=20, kind="fixed", value=5000)
 
     price, applied = apply_discounts(10000, [second, first])
-    assert price == 9000
-    assert [discount for discount, _ in applied] == [first]
+    assert price == 5000
+    assert [discount for discount, _ in applied] == [second]
 
 
 def test_discount_assignment_limit_is_two_in_every_assignment_path():
@@ -138,7 +138,7 @@ def test_all_discount_display_and_staff_checkout_paths_are_wired():
     cabinet = (root / "admin_module/webapp_client_cabinet.py").read_text(encoding="utf-8")
     web = (root / "templates/webapp_buy_subscription.html").read_text(encoding="utf-8")
     payments = (root / "handlers/payments.py").read_text(encoding="utf-8")
-    assert "Вам доступна скидка" in bot
+    assert "ВАМ ДОСТУПНА СКИДКА" in bot
     assert 'active_discount(session, club.id, callback.from_user.id, "subscriptions", tariff=(code, idx, t))' in bot
     assert "staff_mode = await _is_staff_webapp_user(db, club, user_id)" in cabinet
     assert "if not user and not staff_mode" in cabinet
