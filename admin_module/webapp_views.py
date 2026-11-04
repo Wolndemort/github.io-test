@@ -1721,6 +1721,12 @@ async def change_admin_tariff(payload: TariffChangePayload, request: Request, se
             tariffs[payload.index] = {"price": _as_float(tariff.get("price", 0)), "days": max(1, _as_int(tariff.get("days", 30), 30)), "count": 999 if block.get("type") == "unlimited" else max(0, _as_int(tariff.get("count", 0), 0)), "min_age": max(0, _as_int(tariff.get("min_age", 0), 0)), "max_age": _as_max_age(tariff.get("max_age")), "active": old_active}
     else:
         raise HTTPException(400, "??????????? ????????")
+    for tariff in tariffs:
+        tariff["price"] = _as_float(tariff.get("price", 0))
+        tariff["days"] = max(1, _as_int(tariff.get("days", 30), 30))
+        tariff["count"] = 999 if block.get("type") == "unlimited" else max(0, _as_int(tariff.get("count", 0), 0))
+        tariff["min_age"] = max(0, _as_int(tariff.get("min_age", 0), 0))
+        tariff["max_age"] = _as_max_age(tariff.get("max_age"))
     invalid_tariff = next((
         (index, tariff) for index, tariff in enumerate(tariffs)
         if _as_float(tariff.get("price", 0)) <= 0
@@ -1728,7 +1734,7 @@ async def change_admin_tariff(payload: TariffChangePayload, request: Request, se
         or _as_int(tariff.get("count", 0)) < 0
         or _as_int(tariff.get("min_age", 0)) < 0
         or _as_int(tariff.get("min_age", 0)) > 100
-        or (tariff.get("max_age") not in (None, "", 0, "0") and (
+        or (tariff.get("max_age") is not None and (
             _as_int(tariff.get("max_age", 0)) < _as_int(tariff.get("min_age", 0))
             or _as_int(tariff.get("max_age", 0)) > 100
         ))
