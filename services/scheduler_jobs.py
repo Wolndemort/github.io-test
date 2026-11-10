@@ -34,7 +34,7 @@ from database.db import (
 from handlers.buttons import get_profile_keyboard
 from admin_module.utils import is_staff_or_owner
 from services.order_notifications import notify_stock_reminders
-from services.analytics import calculate_admin_dashboard, calculate_daily_business_report, reporting_periods, is_subscription_active
+from services.analytics import calculate_admin_dashboard, calculate_daily_business_report, moscow_calendar_date, reporting_periods, is_subscription_active
 from services.bot_registry import bots_dict
 from services.audit import audit_event
 from services.advance_visits import advance_config
@@ -734,6 +734,10 @@ async def send_daily_report_to_admins():
                 visits, active_passes = await get_daily_stats(club_id=club.id, session=session)
                 student_res = await session.execute(select(Student).where(Student.club_id == club.id))
                 students = list(student_res.scalars().all())
+                new_registrations = sum(
+                    1 for student in students
+                    if moscow_calendar_date(getattr(student, "created_at", None)) == periods["local_now"].date()
+                )
                 visit_log_res = await session.execute(
                     select(VisitLog).where(
                         VisitLog.club_id == club.id,
@@ -823,6 +827,7 @@ async def send_daily_report_to_admins():
                 f"📉 <b>Расходы кассы:</b> <code>{sum((e.amount_kopecks or 0) for e in today_cash_expenses) / 100:.2f} ₽</code>\n"
                 f"⚖️ <b>Динамика ко вчера:</b> <code>{biz_metrics['revenue_diff_text']}</code>\n"
                 f"🥋 <b>Всего атлетов в базе:</b> <code>{biz_metrics['total_athletes']}</code>\n"
+                f"🆕 <b>Новые регистрации сегодня:</b> <code>{new_registrations}</code>\n"
                 f"👥 <b>Родителей с привязкой:</b> <code>{biz_metrics['total_parents']}</code>\n\n"
                 f"📈 <b>ОПЕРАТИВНЫЙ АНАЛИЗ ЗА ДЕНЬ:</b>\n"
                 f"🚶‍♂️ Посещений зала: <code>{visits}</code>\n"
