@@ -227,7 +227,6 @@ saveBtn.onclick=save;
 resetBtn.onclick=reset;
 createBtn.onclick=()=>{reset(); setFormExpanded(true); productForm.scrollIntoView({behavior:'smooth', block:'start'});};
 toggleFormBtn.onclick=()=>setFormExpanded(formBody.hidden);
-topBtn.onclick=scrollTopSmooth;
 scrollTopBtn.onclick=scrollTopSmooth;
 categoryFilter.onchange=()=>{try { localStorage.setItem(categoryStorageKey, categoryFilter.value); } catch (_) {} draw();};
 draw();
