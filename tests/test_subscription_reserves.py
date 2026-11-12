@@ -39,6 +39,7 @@ def test_expired_subscription_does_not_create_reserve():
         new_lessons=UNLIMITED, order_id="expired", today=date(2026, 11, 3),
     )
     assert decision.status == "ACTIVE"
+    assert decision.scheduled_start is None
 
 
 def test_exhausted_subscription_does_not_create_reserve_even_before_expiry():
@@ -48,7 +49,6 @@ def test_exhausted_subscription_does_not_create_reserve_even_before_expiry():
     )
     assert decision.status == "ACTIVE"
     assert decision.reason == "no_active_subscription"
-    assert decision.scheduled_start is None
 
 
 def test_queue_handles_many_purchases_without_overlap():
