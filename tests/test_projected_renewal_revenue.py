@@ -21,7 +21,7 @@ def test_projected_revenue_uses_recent_expired_and_due_students_and_popular_tari
     assert result["count"] == 2
     assert result["projected_revenue"] == 11000
     assert "boxing: 12 занятий" in result["tariff_name"]
-    assert result["price_source"] == "фактический средний чек всех подтверждённых абонементов"
+    assert result["price_source"] == "средняя выручка на уникального клиента"
     assert result["expected_revenue"] == result["projected_revenue"]
 
 
