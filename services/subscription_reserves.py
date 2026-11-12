@@ -72,7 +72,10 @@ def decide_purchase(
     """
     today = today or date.today()
     left = remaining_days(current_expire, today)
-    if left <= 0:
+    # A pass is finished as soon as either its term or its lesson balance is
+    # exhausted.  Do not hide a paid new pass behind the calendar end of an
+    # old pass that has no lessons left.
+    if left <= 0 or int(current_balance or 0) <= 0:
         return ReserveDecision("ACTIVE", None, None, False, "no_active_subscription")
     if int(new_lessons or 0) != UNLIMITED:
         return ReserveDecision("ACTIVE", None, None, False, "finite_plan_accumulates")

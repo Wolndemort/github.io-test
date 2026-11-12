@@ -708,7 +708,14 @@ async def add_abon(
             student.freeze_days_entitlement = 7
 
         current_expire = student.expire_date
-        subscription_continues = bool(current_expire and current_expire > now)
+        # A subscription ends on the first exhausted condition: date or
+        # lessons.  A future date with zero lessons must not delay a paid
+        # replacement/renewal until that date.
+        subscription_continues = bool(
+            current_expire
+            and current_expire > now
+            and int(student.balance_lessons or 0) > 0
+        )
 
         # A paid unlimited renewal must not silently convert the remaining
         # finite period into free unlimited access. Keep the payment confirmed,
