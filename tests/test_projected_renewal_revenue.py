@@ -13,7 +13,10 @@ def test_projected_revenue_uses_recent_expired_and_due_students_and_popular_tari
     ]
     visits = [SimpleNamespace(student_id=1, visited_at=datetime(2026, 8, 12)), SimpleNamespace(student_id=2, visited_at=datetime(2026, 8, 17))]
     settings = {"disciplines": {"boxing": {"tariffs": [{"name": "8 занятий", "count": 8, "days": 30, "price": 4000}, {"name": "12 занятий", "count": 12, "days": 30, "price": 5500}]}}}
-    payments = [SimpleNamespace(status="CONFIRMED", discipline="boxing", lesson_count=12, days_to_add=30, amount_kopecks=550000)] * 2
+    payments = [
+        SimpleNamespace(status="CONFIRMED", discipline="boxing", lesson_count=12, days_to_add=30, amount_kopecks=550000, student_id=1),
+        SimpleNamespace(status="CONFIRMED", discipline="boxing", lesson_count=12, days_to_add=30, amount_kopecks=550000, student_id=2),
+    ]
     result = calculate_projected_renewal_revenue(students, visits, payments, settings, "2026-08-05", "2026-09-05", now)
     assert result["count"] == 2
     assert result["projected_revenue"] == 11000
@@ -186,11 +189,11 @@ def test_average_check_includes_all_subscription_tariffs():
         {"count": 999, "days": 30, "price": 10000},
     ]}}}
     payments = [
-        SimpleNamespace(status="CONFIRMED", discipline="boxing", lesson_count=8, days_to_add=30, amount_kopecks=500000),
-        SimpleNamespace(status="CONFIRMED", discipline="boxing", lesson_count=999, days_to_add=30, amount_kopecks=1000000),
+        SimpleNamespace(status="CONFIRMED", discipline="boxing", lesson_count=8, days_to_add=30, amount_kopecks=500000, student_id=1),
+        SimpleNamespace(status="CONFIRMED", discipline="boxing", lesson_count=999, days_to_add=30, amount_kopecks=1000000, student_id=1),
     ]
     result = calculate_projected_renewal_revenue([student], [], payments, settings, "2026-08-01", "2026-08-31", now)
-    assert result["price"] == 7500
+    assert result["price"] == 15000
 
 
 def test_registration_forecast_uses_historical_weekday_average():

@@ -298,7 +298,8 @@ def calculate_projected_renewal_revenue(
     selected = result.get("tariffs_by_discipline", {})
     sales = {}
     purchase_counts = Counter()
-    all_subscription_amounts = []
+    subscription_revenue = 0
+    paying_client_ids = set()
     for payment in payment_rows:
         if str(getattr(payment, "status", "CONFIRMED")) != "CONFIRMED":
             continue
@@ -310,7 +311,10 @@ def calculate_projected_renewal_revenue(
         amount = int(getattr(payment, "amount_kopecks", 0) or 0)
         sales.setdefault(key, []).append(amount)
         if amount > 0:
-            all_subscription_amounts.append(amount)
+            subscription_revenue += amount
+            client_id = getattr(payment, "student_id", None) or getattr(payment, "user_id", None)
+            if client_id is not None:
+                paying_client_ids.add(("client", int(client_id)))
         if getattr(payment, "student_id", None) is not None:
             purchase_counts[int(payment.student_id)] += 1
     for item in cart_rows:
@@ -326,7 +330,10 @@ def calculate_projected_renewal_revenue(
         amount = _forecast_cart_unit_price(item)
         sales.setdefault(key, []).extend([amount] * quantity)
         if amount > 0:
-            all_subscription_amounts.extend([amount] * quantity)
+            subscription_revenue += amount * quantity
+            client_id = payload.get("student_id")
+            if client_id is not None:
+                paying_client_ids.add(("client", int(client_id)))
         if payload.get("student_id") is not None:
             purchase_counts[int(payload["student_id"])] += quantity
 
@@ -351,8 +358,8 @@ def calculate_projected_renewal_revenue(
         "historical_purchase_count": paying,
         "historical_repeat_count": repeat,
         "confidence": "высокая" if paying >= 30 else ("средняя" if paying >= 10 else "низкая"),
-        "price": round(sum(all_subscription_amounts) / len(all_subscription_amounts) / 100, 2) if all_subscription_amounts else (round(potential / len(candidates) / 100, 2) if candidates else 0),
-        "price_source": "фактический средний чек всех подтверждённых абонементов" if all_subscription_amounts else result.get("price_source"),
+        "price": round(subscription_revenue / len(paying_client_ids) / 100, 2) if paying_client_ids else (round(potential / len(candidates) / 100, 2) if candidates else 0),
+        "price_source": "средняя выручка на уникального клиента" if paying_client_ids else result.get("price_source"),
     })
     return result
 
