@@ -91,7 +91,7 @@ def test_discipline_tariff_is_selected_by_sales_count_not_highest_price():
     payments += [SimpleNamespace(status="CONFIRMED", discipline="bjj", lesson_count=12, days_to_add=30, amount_kopecks=700000)] * 19
     payments += [SimpleNamespace(status="CONFIRMED", discipline="bjj", lesson_count=999, days_to_add=30, amount_kopecks=1000000)] * 3
     result = calculate_projected_renewal_revenue([student], payments=payments, club_settings=settings, now=now, date_to="2026-09-01")
-    assert result["tariffs_by_discipline"]["bjj"] == {"name": "8 посещений", "price": 5000.0, "count": 8, "sales_count": 20}
+    assert result["tariffs_by_discipline"]["bjj"] == {"name": "8 посещений", "price": 5000.0, "count": 8, "days": 30, "sales_count": 20, "price_source": "фактическая средняя цена"}
     assert result["projected_revenue"] == 5000
 
 
@@ -167,6 +167,15 @@ def test_discounted_sales_count_towards_popular_tariff():
     ]
     result = calculate_projected_renewal_revenue([student], [], payments, settings, "2026-08-01", "2026-08-31", now)
     assert result["tariffs_by_discipline"]["boxing"]["sales_count"] == 2
+
+
+def test_discounted_cart_uses_realized_net_unit_price():
+    now = datetime(2026, 8, 18, 12)
+    student = SimpleNamespace(id=1, discipline="boxing", expire_date=datetime(2026, 8, 20), last_visit=now - timedelta(days=1))
+    settings = {"disciplines": {"boxing": {"tariffs": [{"count": 8, "days": 30, "price": 5000}]}}}
+    item = SimpleNamespace(item_type="subscription", quantity=1, unit_price_kopecks=500000, payload={"discipline": "boxing", "count": 8, "days": 30}, forecast_unit_price_kopecks=400000)
+    result = calculate_projected_renewal_revenue([student], [], [], settings, "2026-08-01", "2026-08-31", now, cart_items=[item])
+    assert result["price"] == 4000
 
 
 def test_registration_forecast_uses_historical_weekday_average():

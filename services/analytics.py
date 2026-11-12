@@ -146,6 +146,14 @@ def _payment_kopecks(payment: Any) -> int:
     return int(getattr(payment, "amount_kopecks", 0) or 0)
 
 
+def _forecast_cart_unit_price(item: Any) -> int:
+    """Use the net allocated cart price when the order had a discount."""
+    realized = getattr(item, "forecast_unit_price_kopecks", None)
+    if realized is not None:
+        return int(round(float(realized)))
+    return int(getattr(item, "unit_price_kopecks", 0) or 0)
+
+
 def calculate_revenue_periods(payments: Iterable[Any], now: datetime | None = None) -> dict[str, float]:
     """Calculate revenue from confirmed PaymentOrder and CartOrder objects."""
     periods = reporting_periods(now)
@@ -239,7 +247,7 @@ def _legacy_calculate_projected_renewal_revenue(
         key = (discipline, lesson_count, days_to_add)
         quantity = max(1, int(getattr(item, "quantity", 1) or 1))
         sales[key] = sales.get(key, 0) + quantity
-        sales_amounts[key] = sales_amounts.get(key, 0) + int(getattr(item, "unit_price_kopecks", 0) or 0) * quantity
+        sales_amounts[key] = sales_amounts.get(key, 0) + _forecast_cart_unit_price(item) * quantity
         if payload.get("student_id") is not None:
             student_purchase_counts[int(payload["student_id"])] += quantity
     selected_by_discipline = {}
@@ -257,7 +265,7 @@ def _legacy_calculate_projected_renewal_revenue(
         selected_sales_count[discipline] = sum(count for key, count in sales.items() if key[0] == discipline and key[1] == int(selected[2].get("count", 0) or 0) and key[2] == int(selected[2].get("days", 0) or 0))
     projected_kopecks = sum(selected_by_discipline.get(getattr(student, "discipline", None) or "boxing", (None, 0, {}, 0))[3] for student in candidates)
     source = "самый продаваемый подтверждённый тариф по каждому направлению" if sales and selected_by_discipline else "нет настроенного тарифа для направления"
-    tariffs_by_discipline = {discipline: {"name": item[2].get("name") or (f"{int(item[2].get('count', 0))} посещений" if int(item[2].get("count", 0) or 0) != 999 else "Безлимит"), "price": round(item[3] / 100, 2), "count": int(item[2].get("count", 0) or 0), "sales_count": selected_sales_count.get(discipline, 0)} for discipline, item in selected_by_discipline.items()}
+    tariffs_by_discipline = {discipline: {"name": item[2].get("name") or (f"{int(item[2].get('count', 0))} посещений" if int(item[2].get("count", 0) or 0) != 999 else "Безлимит"), "price": round(item[3] / 100, 2), "count": int(item[2].get("count", 0) or 0), "days": int(item[2].get("days", 0) or 0), "sales_count": selected_sales_count.get(discipline, 0)} for discipline, item in selected_by_discipline.items()}
     tariff_label = ", ".join(f"{discipline}: {data['name']} ({data['price']:.2f} ₽)" for discipline, data in tariffs_by_discipline.items()) or "Нет настроенного тарифа"
     average_price = projected_kopecks / len(candidates) if candidates else 0
     return {"count": len(candidates), "projected_revenue": round(projected_kopecks / 100, 2), "students": candidates, "tariff_name": tariff_label, "tariff_discipline": next(iter(selected_by_discipline.values()), (None,))[0] if selected_by_discipline else None, "price": round(average_price / 100, 2), "price_source": source, "tariffs_by_discipline": tariffs_by_discipline}
@@ -311,7 +319,7 @@ def calculate_projected_renewal_revenue(
             continue
         quantity = max(1, int(getattr(item, "quantity", 1) or 1))
         key = (payload.get("discipline"), count, days)
-        sales.setdefault(key, []).extend([int(getattr(item, "unit_price_kopecks", 0) or 0)] * quantity)
+        sales.setdefault(key, []).extend([_forecast_cart_unit_price(item)] * quantity)
         if payload.get("student_id") is not None:
             purchase_counts[int(payload["student_id"])] += quantity
 

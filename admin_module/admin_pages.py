@@ -280,6 +280,30 @@ async def get_forecast_page(request: Request, session: AsyncSession = Depends(ge
     cart_orders = list((await session.execute(select(CartOrder).where(CartOrder.club_id == club_id, CartOrder.status == "CONFIRMED"))).scalars().all())
     cart_items = list((await session.execute(select(CartItem).join(CartOrder, CartOrder.id == CartItem.cart_order_id).where(CartOrder.club_id == club_id, CartOrder.status == "CONFIRMED", CartItem.item_type == "subscription"))).scalars().all())
     cash_entries = list((await session.execute(select(CashEntry).where(CashEntry.club_id == club_id))).scalars().all())
+    # CartItem keeps the catalogue price. Allocate the actually paid order
+    # total back to each line so discounts are reflected in the forecast.
+    confirmed_cart_orders = {order.id: order for order in cart_orders}
+    all_cart_items = list((await session.execute(
+        select(CartItem).where(CartItem.cart_order_id.in_(list(confirmed_cart_orders)))
+    )).scalars().all()) if confirmed_cart_orders else []
+    all_items_by_order = {}
+    for item in all_cart_items:
+        all_items_by_order.setdefault(item.cart_order_id, []).append(item)
+    for order_id, order_items in all_items_by_order.items():
+        order = confirmed_cart_orders[order_id]
+        raw_total = sum(int(item.unit_price_kopecks or 0) * int(item.quantity or 1) for item in order_items)
+        allocated = 0
+        for index, item in enumerate(order_items):
+            raw_line = int(item.unit_price_kopecks or 0) * int(item.quantity or 1)
+            if index == len(order_items) - 1:
+                net_line = int(order.amount_kopecks or 0) - allocated
+            elif raw_total > 0:
+                net_line = int(int(order.amount_kopecks or 0) * raw_line / raw_total)
+            else:
+                net_line = 0
+            allocated += net_line
+            if item.item_type == "subscription":
+                item.forecast_unit_price_kopecks = net_line / max(1, int(item.quantity or 1))
     forecast = calculate_projected_renewal_revenue(students, visits, payments, club.club_settings if club else {}, start, finish, now, cart_items=cart_items)
     visit_map = {}
     for visit in visits:
