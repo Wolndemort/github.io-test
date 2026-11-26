@@ -468,6 +468,56 @@ async def admin_advance_visits_page(
     })
 
 
+@router.post("/webapp/admin-advance-visits/{student_id}/reset")
+async def reset_admin_advance_visit_debt(
+    student_id: int,
+    request: Request,
+    payload: dict,
+    session: AsyncSession = Depends(get_session),
+):
+    """Clear one athlete's advance debt without changing subscription balance."""
+    club_id = int(payload.get("club_id", 0) or 0)
+    init_data = str(payload.get("init_data") or "")
+    club = await session.get(Club, club_id)
+    tg_user = await verify_webapp_staff(club, init_data, session, "cash_sale")
+    if int(tg_user.get("id", 0)) != int(club.owner_id or 0) and int(tg_user.get("id", 0)) not in SUPER_ADMIN_IDS:
+        raise HTTPException(status_code=403, detail="Только владелец клуба может обнулять долг по авансовым посещениям")
+
+    student = (await session.execute(
+        select(Student).where(Student.id == student_id, Student.club_id == club_id).with_for_update()
+    )).scalar_one_or_none()
+    if not student:
+        raise HTTPException(status_code=404, detail="Атлет не найден")
+
+    previous = {
+        "days": max(0, int(student.advance_debt_days or 0)),
+        "lessons": max(0, int(student.advance_debt_lessons or 0)),
+    }
+    student.advance_debt_days = 0
+    student.advance_debt_lessons = 0
+    # Keep the visit history, but detach these visits from the current debt
+    # calculation so cancellation/reconciliation cannot recreate the cleared debt.
+    await session.execute(
+        update(VisitLog).where(
+            VisitLog.club_id == club_id,
+            VisitLog.student_id == student_id,
+            VisitLog.source == "advance",
+        ).values(source="advance_cleared")
+    )
+    await session.commit()
+    audit_event(
+        "advance_visit_debt_reset",
+        club_id=club_id,
+        action="update",
+        object_type="student",
+        object_id=student_id,
+        previous_debt_days=previous["days"],
+        previous_debt_lessons=previous["lessons"],
+        actor_id=int(tg_user.get("id", 0)),
+    )
+    return {"ok": True, "student_id": student_id, "previous": previous}
+
+
 @router.post("/webapp/admin-advance-visits/settings")
 async def save_admin_advance_visits(
     request: Request, payload: dict, session: AsyncSession = Depends(get_session),

@@ -107,7 +107,6 @@ if SENTRY_DSN and sentry_sdk is not None:
         dsn=SENTRY_DSN,
         environment=os.getenv("SENTRY_ENVIRONMENT", "production"),
         release=os.getenv("SENTRY_RELEASE"),
-        send_default_pii=False,
         traces_sample_rate=float(os.getenv("SENTRY_TRACES_SAMPLE_RATE", "0.0")),
         before_send=_scrub_sentry_event,
     )
