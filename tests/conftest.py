@@ -1,4 +1,9 @@
+import os
+
 import pytest
+
+
+os.environ.setdefault("SECRET_KEY", "test-secret-key")
 
 
 @pytest.fixture

@@ -291,7 +291,7 @@ async def admin_freeze_page(request: Request, club_id: int, init_data: str | Non
             frozen_students.append({"id": student.id, "name": student.name, "discipline": student.discipline, "frozen_days": days, "frozen_until": started + timedelta(days=days)})
         elif student.expire_date and student.expire_date.date() >= today:
             available_students.append(student)
-    return templates.TemplateResponse("admin_freeze.html", {"request": request, "club": club, "club_id": club_id, "students": students, "available_students": available_students, "frozen_students": frozen_students, "freeze_days": freeze_days, "today": today.isoformat()})
+    return templates.TemplateResponse("admin_freeze.html", {"request": request, "club": club, "club_id": club_id, "students": students, "available_students": available_students, "frozen_students": frozen_students, "freeze_days": freeze_days, "today": today})
 
 
 @router.post("/webapp/admin-freeze")

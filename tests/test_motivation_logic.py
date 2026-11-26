@@ -1,9 +1,11 @@
 import os
+from pathlib import Path
 from services.age_rules import age_matches, age_on, tariff_age_matches
 from services.schedule_utils import normalize_schedule_block
 from services.motivation_schedule import motivation_bonus, nearest_lesson_for_visit, occurrence_ended, remember_schedule_change, schedule_versions, visit_matches_lesson
 
 os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
+ROOT = Path(__file__).parents[1]
 
 from admin_module.webapp_views import (  # noqa: E402
     _attendee_count,
@@ -13,6 +15,7 @@ from admin_module.webapp_views import (  # noqa: E402
     _parse_motivation_time,
     _scheduled_rate,
 )
+from services.motivation_engine import rule_rate_kopecks  # noqa: E402
 from datetime import date, datetime, timezone
 from types import SimpleNamespace
 
@@ -81,6 +84,11 @@ def test_visit_window_accepts_a_fifteen_minute_late_entry_by_default():
     assert visit_matches_lesson(datetime(2026, 9, 3, 15, 15), lesson) is True  # 18:15 MSK
 
 
+def test_accrual_waits_until_late_entry_window_closes():
+    source = (ROOT / "services" / "motivation_engine.py").read_text(encoding="utf-8")
+    assert "lesson_duration(lesson) + late_minutes" in source
+
+
 def test_schedule_history_uses_old_snapshot_before_change_and_new_after_change():
     settings = {
         "disciplines": {"boxing": {"schedule": {"mon": [{"time": "19:00", "coach_staff_id": 8} ]}}},
@@ -135,6 +143,12 @@ def test_bonus_is_fixed_per_completed_lesson_and_not_per_student():
     assert motivation_bonus(rate, 2) == 2500
     assert motivation_bonus(rate, 100) == 2500
     assert _motivation_bonus(rate, 2) == 2500
+
+
+def test_rule_rate_supports_fixed_and_per_student_modes():
+    assert rule_rate_kopecks({"rate_kopecks": 50000}, 5) == 50000
+    assert rule_rate_kopecks({"rate_kopecks": 10000, "rate_mode": "student"}, 5) == 50000
+    assert rule_rate_kopecks({"rate_kopecks": 10000, "per_student": True}, 5) == 50000
 
 
 def test_motivation_uses_moscow_calendar_date_for_utc_timestamp():

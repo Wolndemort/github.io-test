@@ -285,11 +285,18 @@ async def admin_broadcast_students(
     club_id: int,
     q: str = Query(default="", max_length=120),
     discipline: str = Query(default="all", max_length=50),
+    absence_days: int = Query(default=0, ge=0, le=3650),
     init_data: str = Query(default=""),
     session: AsyncSession = Depends(get_session),
 ):
     club = await session.get(Club, club_id)
     await verify_webapp_staff(club, init_data, session, "broadcast")
+    if str(discipline).startswith("__absence_"):
+        try:
+            absence_days = max(1, min(3650, int(str(discipline).removeprefix("__absence_"))))
+        except ValueError:
+            absence_days = 0
+        discipline = "all"
     filters = [Student.club_id == club_id]
     needle = q.strip()
     if needle:
@@ -302,6 +309,14 @@ async def admin_broadcast_students(
         ))
     if discipline and discipline != "all":
         filters.append(Student.discipline == discipline)
+    if absence_days:
+        latest_visit = (
+            select(func.max(VisitLog.visited_at))
+            .where(VisitLog.club_id == club_id, VisitLog.student_id == Student.id, (VisitLog.source.is_(None) | (VisitLog.source != "repeat")))
+            .correlate(Student)
+            .scalar_subquery()
+        )
+        filters.append(or_(latest_visit.is_(None), latest_visit < reporting_periods()["now"] - timedelta(days=absence_days)))
     students = list((await session.scalars(
         select(Student).outerjoin(User, User.user_id == Student.parent_id)
         .where(*filters).order_by(Student.name).limit(500)
@@ -317,7 +332,13 @@ async def admin_broadcast_students(
             "phone": student.parent_phone or student.parent_phone_secondary or "",
             "active_subscription": is_subscription_active(student),
         })
-    return {"students": rows, "disciplines": _broadcast_disciplines(club, students), "total": len(rows)}
+    disciplines = _broadcast_disciplines(club, students)
+    disciplines.extend([
+        {"code": "__absence_14", "name": "Не был 14 дней", "active": True},
+        {"code": "__absence_30", "name": "Не был 30 дней", "active": True},
+        {"code": "__absence_60", "name": "Не был 60 дней", "active": True},
+    ])
+    return {"students": rows, "disciplines": disciplines, "total": len(rows), "absence_days": absence_days}
 
 
 @router.post("/webapp/admin-broadcast/send")
@@ -1858,7 +1879,8 @@ async def save_admin_motivation_rules(payload: dict, session: AsyncSession = Dep
     for raw in payload.get("rules", []) or []:
         minimum = int(raw.get("min_students", 0)); maximum = int(raw.get("max_students", 0)); rate = int(raw.get("rate_kopecks", 0))
         if minimum < 1 or maximum < minimum or rate < 0: raise HTTPException(400, "Некорректный диапазон или ставка")
-        rules.append({"min_students": minimum, "max_students": maximum, "rate_kopecks": rate})
+        rate_mode = "student" if bool(raw.get("per_student")) or str(raw.get("rate_mode", "")).lower() in {"student", "per_student"} else "lesson"
+        rules.append({"min_students": minimum, "max_students": maximum, "rate_kopecks": rate, "rate_mode": rate_mode})
     rules.sort(key=lambda item: item["min_students"])
     lessons[index] = dict(lessons[index]); lessons[index]["motivation_rules"] = rules; block["schedule"] = dict(block.get("schedule", {})); block["schedule"][day] = lessons
     settings["disciplines"] = dict(settings.get("disciplines", {})); settings["disciplines"][discipline] = block; club.club_settings = settings
@@ -1881,7 +1903,7 @@ async def staff_motivation_page(request: Request, club_id: int = Query(...), dat
         raise HTTPException(403, "Раздел доступен только сотрудникам")
     today = datetime.now(_MOTIVATION_TZ).date()
     try:
-        start = date.fromisoformat(date_from) if date_from else today.replace(day=1)
+        start = date.fromisoformat(date_from) if date_from else (today if is_admin else today.replace(day=1))
         end = date.fromisoformat(date_to) if date_to else today
     except ValueError:
         raise HTTPException(400, "Диапазон дат должен быть в формате ГГГГ-ММ-ДД")
@@ -1891,8 +1913,17 @@ async def staff_motivation_page(request: Request, club_id: int = Query(...), dat
     rows = list((await session.execute(rows_query)).scalars().all())
     if not is_admin:
         rows = [row for row in rows if staff.id in (row.staff_ids or [])]
-    total = sum(int(row.rate_kopecks or 0) for row in rows)
-    return templates.TemplateResponse("staff_motivation.html", {"request": request, "club_id": club_id, "rows": rows, "total": total, "is_admin": is_admin, "date_from": start.isoformat(), "date_to": end.isoformat()})
+    total = sum(int(row.rate_kopecks or 0) * (len(row.staff_ids or []) if is_admin else 1) for row in rows)
+    staff_by_id = {int(row.id): row for row in (await session.execute(select(ClubStaff).where(ClubStaff.club_id == club_id))).scalars().all()}
+    coach_totals = {}
+    coach_counts = {}
+    for row in rows:
+        for staff_id in (row.staff_ids or []):
+            staff_id = int(staff_id)
+            coach_totals[staff_id] = coach_totals.get(staff_id, 0) + int(row.rate_kopecks or 0)
+            coach_counts[staff_id] = coach_counts.get(staff_id, 0) + 1
+    coach_summary = [{"name": staff_by_id.get(staff_id).full_name if staff_by_id.get(staff_id) else f"Тренер #{staff_id}", "count": coach_counts[staff_id], "total": coach_totals[staff_id]} for staff_id in sorted(coach_totals, key=lambda value: (staff_by_id.get(value).full_name if staff_by_id.get(value) else str(value)))]
+    return templates.TemplateResponse("staff_motivation.html", {"request": request, "club_id": club_id, "rows": rows, "total": total, "is_admin": is_admin, "coach_summary": coach_summary, "date_from": start.isoformat(), "date_to": end.isoformat()})
     staff = (await session.execute(select(ClubStaff).where(ClubStaff.club_id == club_id).order_by(ClubStaff.full_name))).scalars().all()
     now_local = datetime.now(_MOTIVATION_TZ)
     today = now_local.date()

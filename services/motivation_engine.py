@@ -29,6 +29,15 @@ def _rules_for(lesson: dict, student_count: int) -> dict | None:
     return None
 
 
+def rule_rate_kopecks(rule: dict, student_count: int) -> int:
+    """Return one coach's payout for a matched lesson rule."""
+    base = max(0, int(rule.get("rate_kopecks", 0) or 0))
+    mode = str(rule.get("rate_mode", "lesson") or "lesson").lower()
+    if rule.get("per_student"):
+        mode = "student"
+    return base * max(0, int(student_count or 0)) if mode in {"student", "per_student"} else base
+
+
 async def accrue_finished_lessons(now: datetime | None = None) -> int:
     """Accrue only completed scheduled lessons from unique gate visits."""
     now_local = (now or datetime.now(MOSCOW)).astimezone(MOSCOW)
@@ -63,7 +72,10 @@ async def accrue_finished_lessons(now: datetime | None = None) -> int:
                     assignments[visit.id] = lesson
             for lesson in lessons:
                 started = lesson_start(lesson)
-                if now_local < started + timedelta(minutes=lesson_duration(lesson)) or not lesson["staff_ids"]:
+                # The attendance matcher accepts late arrivals. Wait until
+                # that grace window closes before fixing the student count;
+                # otherwise a valid late check-in could be omitted forever.
+                if now_local < started + timedelta(minutes=lesson_duration(lesson) + late_minutes) or not lesson["staff_ids"]:
                     continue
                 time_text = lesson["time"]
                 occurrence_key = f"{club.id}:{today.isoformat()}:{lesson['discipline']}:{lesson['index']}:{time_text}"
@@ -77,7 +89,7 @@ async def accrue_finished_lessons(now: datetime | None = None) -> int:
                     club_id=club.id, discipline=lesson["discipline"], occurrence_key=occurrence_key,
                     occurrence_date=today, start_time=time_text, student_count=len(student_ids),
                     rule_min_students=int(rule["min_students"]), rule_max_students=int(rule["max_students"]),
-                    rate_kopecks=int(rule["rate_kopecks"]), staff_ids=lesson["staff_ids"],
+                    rate_kopecks=rule_rate_kopecks(rule, len(student_ids)), staff_ids=lesson["staff_ids"],
                 )
                 session.add(accrual)
                 staff_rows = (await session.execute(select(ClubStaff).where(ClubStaff.club_id == club.id, ClubStaff.id.in_(lesson["staff_ids"])))).scalars().all()

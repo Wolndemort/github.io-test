@@ -677,10 +677,14 @@ async def admin_sales_page(
         operation_category = "freeze" if str(order.type).startswith("FREEZE") else "subscription"
         operation_method = _order_payment_method(order)
         operation_discipline = order.discipline or ""
+        payer_label = await resolve_user_label(session, order.user_id, empty_label="Плательщик")
+        student = await session.get(Student, order.student_id) if order.student_id else None
+        buyer_label = f"Кто купил: {payer_label}"
+        buyer_label += f" · Для кого: {escape(student.name)}" if student else " · Для кого: не указано"
         operations.append({"id": order.id, "created_at": order.created_at, "amount": order.amount_kopecks or 0,
                            "method": operation_method, "category": operation_category, "discipline": operation_discipline, "source": "payment",
                            "title": _money_operation_category_label(operation_category), "status": order.status,
-                           "buyer_label": await resolve_user_label(session, order.user_id, empty_label="Плательщик")})
+                           "buyer_label": buyer_label})
     for order in cart_orders:
         order_items = items_by_order.get(order.id, [])
         raw_total = sum((item.unit_price_kopecks or 0) * (item.quantity or 1) for item in order_items)
@@ -703,7 +707,7 @@ async def admin_sales_page(
             operations.append({"id": order.id, "created_at": order.created_at, "amount": operation_amount,
                                "method": operation_method, "category": operation_category, "discipline": operation_discipline, "source": "cart",
                                "title": item.title, "status": order.status,
-                               "buyer_label": await resolve_user_label(session, order.user_id, empty_label="Плательщик")})
+                               "buyer_label": f"Кто купил: {await resolve_user_label(session, order.user_id, empty_label='Плательщик')} · Для кого: покупатель"})
     selected_weekday = int(weekday) if str(weekday or "").strip().isdigit() else None
     selected_discipline = str(discipline or "").strip().casefold()
     operations = [item for item in operations
@@ -1259,7 +1263,21 @@ async def admin_cash_subscription(payload: WebAppCashSubscriptionPayload, db: As
     tariff_key = (discipline, payload.tariff_idx, tariff)
     automatic = await active_discounts(db, club.id, student.parent_id, "subscriptions", student_id=student.id, tariff=tariff_key)
     requested = list(dict.fromkeys(selected_discount_ids))
-    requested_discounts = await active_discounts(db, club.id, student.parent_id, "subscriptions", student_id=student.id, ids=requested, tariff=tariff_key) if requested else []
+    # Cash staff explicitly select a discount from the club's discount list;
+    # assignment is required for automatic client discounts, not for this
+    # authorized manual sale flow.  Keep the same scope/date/tariff guards.
+    requested_discounts = []
+    if requested:
+        requested_discounts = list((await db.scalars(
+            select(Discount).where(
+                Discount.club_id == club.id,
+                Discount.id.in_(requested),
+                Discount.is_active.is_(True),
+                Discount.scope.in_(["subscriptions", "all"]),
+                (Discount.starts_at.is_(None) | (Discount.starts_at <= date.today())),
+                (Discount.ends_at.is_(None) | (Discount.ends_at >= date.today())),
+            )
+        )).all())
     if requested and len(discount_ids(requested_discounts)) != len(requested):
         raise HTTPException(status_code=400, detail="Некорректная скидка для абонемента")
     by_id = {d.id: d for d in automatic + requested_discounts}
@@ -1518,6 +1536,8 @@ async def get_revenue_stats(
         init_data: str | None = Query(default=None),
         date_from: str | None = Query(default=None),
         date_to: str | None = Query(default=None),
+        visits_top_from: str | None = Query(default=None),
+        visits_top_to: str | None = Query(default=None),
 ):
     club_id = get_club_id_from_host(request)
 
@@ -1551,12 +1571,12 @@ async def get_revenue_stats(
     start_filter = moscow_date_boundary(date_from) if date_from else month_start
     end_filter = moscow_date_boundary(date_to) + timedelta(days=1) if date_to else None
 
-    payment_query = select(PaymentOrder.amount_kopecks, PaymentOrder.created_at, PaymentOrder.provider_payment_id, PaymentOrder.type).where(
+    payment_query = select(PaymentOrder.amount_kopecks, PaymentOrder.created_at).where(
         PaymentOrder.club_id == club_id,
         PaymentOrder.status == "CONFIRMED",
         PaymentOrder.created_at >= start_filter,
     )
-    cart_query = select(CartOrder.amount_kopecks, CartOrder.created_at, CartOrder.provider_payment_id).where(
+    cart_query = select(CartOrder.amount_kopecks, CartOrder.created_at).where(
         CartOrder.club_id == club_id,
         CartOrder.status == "CONFIRMED",
         CartOrder.created_at >= start_filter,
@@ -1621,6 +1641,26 @@ async def get_revenue_stats(
         select(Student).where(Student.club_id == club_id)
     )
     students = students_res.scalars().all()
+
+    top_visits_start = date.fromisoformat(visits_top_from) if visits_top_from else periods["local_now"].date() - timedelta(days=29)
+    top_visits_end = date.fromisoformat(visits_top_to) if visits_top_to else periods["local_now"].date()
+    if top_visits_end < top_visits_start or (top_visits_end - top_visits_start).days > 366:
+        raise HTTPException(400, "Недопустимый период топа посещений")
+    top_visits = (await session.execute(
+        select(Student.name, func.count(VisitLog.id))
+        .join(VisitLog, VisitLog.student_id == Student.id)
+        .where(
+            Student.club_id == club_id,
+            VisitLog.club_id == club_id,
+            VisitLog.visited_at >= moscow_date_boundary(top_visits_start),
+            VisitLog.visited_at < moscow_date_boundary(top_visits_end + timedelta(days=1)),
+            (VisitLog.source.is_(None) | (VisitLog.source != "repeat")),
+        )
+        .group_by(Student.id, Student.name)
+        .order_by(func.count(VisitLog.id).desc(), Student.name)
+        .limit(10)
+    )).all()
+    top_visitors = [{"name": name, "visits": int(count or 0)} for name, count in top_visits]
 
     if not students:
         # Если в клубе пусто — отдаем флаг empty, как просит HTML
@@ -1752,6 +1792,9 @@ async def get_revenue_stats(
             "inactive_students": inactive_students,
             "top_students": top_students,
             "top_products": top_products,
+            "top_visitors": top_visitors,
+            "top_visits_from": top_visits_start.isoformat(),
+            "top_visits_to": top_visits_end.isoformat(),
 
             # Финансы (на случай, если захочешь вывести их туда же)
             "revenue_today": round(revenue_today, 2),

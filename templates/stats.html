@@ -169,6 +169,19 @@
         </div>
     </div>
 
+    <div class="card mono-card">
+        <details class="athlete-dropdown">
+            <summary><span class="label">🏆 Топ-10 по посещениям</span></summary>
+            <form method="get" action="/revenue" class="grid" style="grid-template-columns:1fr 1fr auto;gap:8px;align-items:end;margin:12px 0;">
+                <input type="hidden" name="club_id" value="{{ club_id }}"><input type="hidden" name="init_data" value="{{ request.query_params.get('init_data','') }}">
+                <input type="hidden" name="date_from" value="{{ filters.date_from if filters is defined else '' }}"><input type="hidden" name="date_to" value="{{ filters.date_to if filters is defined else '' }}">
+                <label>С даты<input type="date" name="visits_top_from" value="{{ top_visits_from }}"></label><label>По дату<input type="date" name="visits_top_to" value="{{ top_visits_to }}"></label><button type="submit">Показать</button>
+            </form>
+            <div class="muted-note">{{ top_visits_from }} — {{ top_visits_to }}</div>
+            <div class="scroll-box">{% for visitor in top_visitors %}<div class="list-item"><span>{{ loop.index }}. {{ visitor.name }}</span><b>{{ visitor.visits }} посещ.</b></div>{% else %}<div class="empty-note">За выбранный период посещений нет</div>{% endfor %}</div>
+        </details>
+    </div>
+
     <!-- Популярность дисциплин -->
     <div class="card mono-card">
         <div class="label">🥋 Популярность направлений</div>

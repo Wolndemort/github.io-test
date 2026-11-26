@@ -16,6 +16,7 @@ from services.analytics import build_expiry_series, build_registration_series, b
 from services.schedule_utils import normalize_schedule_block
 from services.audit import audit_event
 from services.delivery import telegram_call
+from services.visit_cancellation import restore_cancelled_visit_balance
 
 
 def _forecast_date_range(date_from: str | None, date_to: str | None, default_start: date, default_finish: date) -> tuple[str, str, date, date]:
@@ -149,6 +150,12 @@ async def cancel_active_visit(
     for log in deleted_logs:
         await session.delete(log)
 
+    # A paid check-in is accounted for when the session is closed.  If an
+    # administrator cancels that active session, the reserved lesson must be
+    # returned immediately.  Advance visits are debt entries and are handled
+    # separately below.
+    restore_cancelled_visit_balance(student, deleted_logs)
+
     previous_visit = await session.scalar(
         select(VisitLog.visited_at)
         .where(
@@ -268,8 +275,11 @@ async def get_forecast_page(request: Request, session: AsyncSession = Depends(ge
     start, finish, start_date, finish_date = _forecast_date_range(
         date_from, date_to, local_today - timedelta(days=30), local_today + timedelta(days=30)
     )
+    # Revenue metrics use a rolling 31-calendar-day window by default:
+    # today plus the previous 30 days. The revenue filter controls both the
+    # revenue chart and the average revenue card.
     revenue_start, revenue_finish, revenue_start_date, revenue_finish_date = _forecast_date_range(
-        revenue_from, revenue_to, start_date, finish_date
+        revenue_from, revenue_to, local_today - timedelta(days=30), local_today
     )
     visits_start, visits_finish, visits_start_date, visits_finish_date = _forecast_date_range(
         visits_from, visits_to, start_date, finish_date
@@ -304,7 +314,22 @@ async def get_forecast_page(request: Request, session: AsyncSession = Depends(ge
             allocated += net_line
             if item.item_type == "subscription":
                 item.forecast_unit_price_kopecks = net_line / max(1, int(item.quantity or 1))
-    forecast = calculate_projected_renewal_revenue(students, visits, payments, club.club_settings if club else {}, start, finish, now, cart_items=cart_items)
+            # CartItem has no timestamp of its own; period metrics use the
+            # parent order's sale timestamp.
+            item.forecast_created_at = order.created_at
+
+    revenue_start_boundary = moscow_date_boundary(revenue_start_date)
+    revenue_end_boundary = moscow_date_boundary(revenue_finish_date + timedelta(days=1))
+
+    def in_revenue_period(value):
+        return value is not None and revenue_start_boundary <= value < revenue_end_boundary
+
+    period_payments = [payment for payment in payments if in_revenue_period(getattr(payment, "created_at", None))]
+    period_cart_items = [item for item in cart_items if in_revenue_period(getattr(item, "forecast_created_at", None))]
+    forecast = calculate_projected_renewal_revenue(
+        students, visits, period_payments, club.club_settings if club else {},
+        start, finish, now, cart_items=period_cart_items
+    )
     visit_map = {}
     for visit in visits:
         if visit.student_id not in visit_map or visit.visited_at > visit_map[visit.student_id]: visit_map[visit.student_id] = visit.visited_at

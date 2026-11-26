@@ -73,6 +73,12 @@ def test_checkout_uses_the_shared_discount_service():
     assert "apply_discount" in checkout
     assert "original_amount_kopecks" in checkout
 
+
+def test_cash_subscription_manual_discount_is_not_assignment_only():
+    api = (ROOT / "admin_module/api.py").read_text(encoding="utf-8")
+    assert 'Discount.scope.in_(["subscriptions", "all"])' in api
+    assert "requested_discounts = list((await db.scalars(" in api
+
 def test_discount_application_is_scoped_and_order_keeps_snapshot_fields():
     service = (ROOT / "services/discounts.py").read_text(encoding="utf-8")
     db = (ROOT / "database/db.py").read_text(encoding="utf-8")

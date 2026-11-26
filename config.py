@@ -2,7 +2,9 @@ import os
 from dotenv import load_dotenv
 
 load_dotenv()
-db_file = os.getenv('DATABASE_URL', 'sqlite:///database/users.db')
+db_file = os.getenv('DATABASE_URL', 'sqlite+aiosqlite:///database/users.db')
+if db_file.startswith('sqlite:///'):
+    db_file = 'sqlite+aiosqlite:///' + db_file.removeprefix('sqlite:///')
 BOT_TOKEN = os.getenv('BOT_TOKEN')
 admin_id_str = os.getenv('ADMIN_IDS', '')
 ADMIN_IDS = [int(i.strip()) for i in admin_id_str.split(',') if i.strip()]
