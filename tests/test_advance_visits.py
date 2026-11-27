@@ -168,5 +168,6 @@ async def test_gate_rejects_when_advance_lesson_limit_is_reached():
     db = db_for(item)
     result = await process_athlete_gate_pass(1, db, settings(lessons=7), expected_club_id=10)
     assert result["success"] is False
-    assert "Р›РёРјРёС‚" in result["message"]
+    assert "Лимит авансовых посещений исчерпан" in result["message"]
+    assert "обнулите его" in result["message"]
     db.commit.assert_not_awaited()

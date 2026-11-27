@@ -161,6 +161,15 @@ async def process_athlete_gate_pass(
             else:
                 message = "❌ Занятия на балансе закончились"
             return {"success": False, "message": message}
+        if not advance["allowed"] and not advance.get("limit_exceeded"):
+            return {
+                "success": False,
+                "message": (
+                    f"Лимит авансовых посещений исчерпан. Долг: {advance['debt_days']} дн. / "
+                    f"{advance['debt_lessons']} зан. Сначала погасите долг покупкой абонемента "
+                    "или обнулите его в разделе «Аванс посещений»."
+                ),
+            }
         if not advance["allowed"]:
             if advance.get("limit_exceeded"):
                 current_days = advance.get("current_debt_days", advance["debt_days"])
