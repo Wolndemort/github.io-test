@@ -140,6 +140,11 @@ async def process_athlete_gate_pass(
 
     # 5. ПРОВЕРКА СРОКА ДЕЙСТВИЯ И БАЛАНСА
     first_advance_at = await _first_advance_visit(db, student)
+    # A manual admin debt reset clears the accounting counters and marks old
+    # advance rows as historical. Do not let those rows keep the old debt-age
+    # window alive for the next advance visit.
+    if not int(getattr(student, "advance_debt_days", 0) or 0) and not int(getattr(student, "advance_debt_lessons", 0) or 0):
+        first_advance_at = None
     advance = advance_preview(
         student,
         now_naive,
@@ -166,8 +171,8 @@ async def process_athlete_gate_pass(
                 "success": False,
                 "message": (
                     f"Лимит авансовых посещений исчерпан. Долг: {advance['debt_days']} дн. / "
-                    f"{advance['debt_lessons']} зан. Сначала погасите долг покупкой абонемента "
-                    "или обнулите его в разделе «Аванс посещений»."
+                    f"{advance['debt_lessons']} зан. Сначала погасите долг покупкой абонемента. "
+                    "Если нужна корректировка — обратитесь к администратору."
                 ),
             }
         if not advance["allowed"]:

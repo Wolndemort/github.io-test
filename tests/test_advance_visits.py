@@ -153,6 +153,18 @@ async def test_gate_allows_zero_balance_before_expiry_when_advance_is_enabled():
 
 
 @pytest.mark.asyncio
+async def test_admin_reset_does_not_leave_historical_advance_rows_blocking_next_visit():
+    item = student(expire_date=datetime.now() + timedelta(days=1))
+    db = db_for(item)
+    old_advance = datetime.now() - timedelta(days=30)
+    db.scalar = AsyncMock(side_effect=[old_advance, old_advance])
+    result = await process_athlete_gate_pass(1, db, settings(days=10, lessons=5), expected_club_id=10)
+    assert result["success"] is True
+    assert result["is_advance_visit"] is True
+    assert item.advance_debt_lessons == 1
+
+
+@pytest.mark.asyncio
 async def test_gate_rejects_zero_balance_when_advance_is_disabled():
     item = student(expire_date=datetime.now() + timedelta(days=1), balance_lessons=0)
     db = db_for(item)
@@ -169,5 +181,5 @@ async def test_gate_rejects_when_advance_lesson_limit_is_reached():
     result = await process_athlete_gate_pass(1, db, settings(lessons=7), expected_club_id=10)
     assert result["success"] is False
     assert "Лимит авансовых посещений исчерпан" in result["message"]
-    assert "обнулите его" in result["message"]
+    assert "обратитесь к администратору" in result["message"]
     db.commit.assert_not_awaited()
